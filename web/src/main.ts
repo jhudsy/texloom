@@ -17,6 +17,7 @@ import { SyncTex } from './synctex'
 import { ProjectIndex } from './latex'
 import { autoSave, createHistoryPanel } from './history'
 import { referenceDialog } from './references'
+import { applyTemplate, chooseTemplate, importDialog, TEMPLATES } from './templates'
 import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from './navigate'
 import { createReviewPanel, reviewExtension, type ReviewPanel } from './review'
 import './style.css'
@@ -50,10 +51,15 @@ function landing() {
     h('label', {}, 'Name', nameIn),
     h('div', { class: 'row' },
       h('button', { class: 'primary', onclick: async () => {
+        const template = await chooseTemplate()
+        if (!template) return
         const where = await chooseNewProject()
         if (!where) return
         const k = Keys.generate()
-        if (where === 'relay') try { localStorage.setItem(`texloom.newRelay.${k.project}`, '1') } catch {}
+        try {
+          if (where === 'relay') localStorage.setItem(`texloom.newRelay.${k.project}`, '1')
+          localStorage.setItem(`texloom.newTemplate.${k.project}`, template)
+        } catch {}
         location.hash = k.fragment()
       } }, 'New project'),
       linkIn,
@@ -125,15 +131,19 @@ async function openProject(keys: Keys) {
       r.setStorage('relay') // chosen at creation: no server copy
     }
   } catch {}
+  // a brand-new project: fill it from the chosen template (or open Import)
+  let template: string | null = null
+  try { template = localStorage.getItem(`texloom.newTemplate.${keys.project}`); localStorage.removeItem(`texloom.newTemplate.${keys.project}`) } catch {}
   if (writable && r.files.size === 0 && r.bin.size === 0 && !r.meta.get('seeded')) {
-    setTimeout(() => { // brand-new project: give it a starter file
-      if (r.files.size || r.bin.size) return
-      r.doc.transact(() => {
-        r.files.set('main.tex', new Y.Text('\\documentclass{article}\n\\title{Untitled}\n\\begin{document}\n\\maketitle\n\nHello, world.\n\n\\end{document}\n'))
-        r.meta.set('main', 'main.tex'); r.meta.set('seeded', true)
-        if (!r.meta.get('createdBy')) r.meta.set('createdBy', me.name)
-      })
-    }, 1500)
+    const seed = () => {
+      if (r.files.size || r.bin.size || r.meta.get('seeded')) return
+      if (template === 'import') { importDialog(r, { fresh: true, onDone: () => tree.open(mainFile(r) ?? '') }); return }
+      const t = TEMPLATES.find((x) => x.id === template) ?? TEMPLATES[0]
+      applyTemplate(r, t, me.name)
+      tree.open(t.main)
+    }
+    // a project we just created is empty for sure; one opened from a link may still be arriving
+    setTimeout(seed, template ? 0 : 1500)
   }
 
   // ---- components ----
@@ -146,6 +156,7 @@ async function openProject(keys: Keys) {
     problems: (file) => output.problems().filter((p) => p.file === file),
     review: (file) => reviewExtension(r, file, (id) => { openReview(); review()?.focus(id) }),
     addReference: (seed, insert) => referenceDialog(r, index, insert, seed),
+    spell: () => ({ on: device.spell, lang: String(r.meta.get('lang') ?? '') }),
     onReview: (kind) => { if (writable) { openReview(); review()?.add(kind) } },
   })
   const tree = createFileTree(r, writable, (p) => {
@@ -153,7 +164,8 @@ async function openProject(keys: Keys) {
     r.awareness.setLocalStateField('file', p) // so collaborators can jump to where you are
   })
 
-  // "+ Reference": add from a DOI/arXiv id and cite it at the cursor
+  // "Import" (zip / arXiv) and "+ Reference" (DOI / arXiv): in the file tools
+  if (writable) tree.el.querySelector('.tools')?.append(h('button', { title: 'Import files from a .zip (e.g. Overleaf) or an arXiv paper', onclick: () => importDialog(r) }, 'Import'))
   if (writable) tree.el.querySelector('.tools')?.append(h('button', {
     title: 'Add a bibliography entry from a DOI or arXiv id',
     onclick: () => referenceDialog(r, index, (key) => {
@@ -342,7 +354,9 @@ async function openProject(keys: Keys) {
     r.setSyncMode(d.sync)
     syncBtn.hidden = d.sync !== 'manual'
     output.compileBtn.hidden = d.compile === 'none'
+    editor.refreshSpell()
   }
+  r.meta.observe((e) => { if (e.keysChanged.has('lang')) editor.refreshSpell() })
 
   async function downloadZip() {
     zipBtn.setAttribute('disabled', '')

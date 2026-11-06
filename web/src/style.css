@@ -299,3 +299,6 @@ aside .tab { padding: 4px 8px; }
 .outline .lvl0 { font-weight: 600; }
 .refdlg { width: min(560px, 92vw); }
 .bibpreview { background: var(--panel); padding: 8px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; max-height: 40vh; overflow: auto; }
+.tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.tgrid .choice { text-align: left; }
+.importdlg .row input { flex: 1; min-width: 0; }

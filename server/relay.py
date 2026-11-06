@@ -637,7 +637,7 @@ async def headers(request: web.Request, handler):
 
 
 def make_app(db: Path, static: Path | None, tex: Path | None = None,
-             limits: Limits | None = None, codes: CodeBook | None = None) -> web.Application:
+             limits: Limits | None = None, codes: CodeBook | None = None, arxiv: bool = True) -> web.Application:
     relay = Relay(Store(db), limits, codes)
     app = web.Application(middlewares=[headers], client_max_size=MAX_BLOB + 1024)
     app.router.add_get("/ws/{project}", relay.ws_handler)
@@ -646,6 +646,9 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
     app.router.add_route("OPTIONS", "/blob/{project}/{id}", lambda r: web.Response())
     app.router.add_get("/api/info", relay.info)
     app.router.add_post("/api/code", relay.check_code)
+    if arxiv:  # importing a paper's source (arXiv has no CORS, so the relay fetches it)
+        from .arxiv import ArxivFetcher
+        app.router.add_get("/api/arxiv/{id}", ArxivFetcher().handle)
     if tex and (tex / "busytex").is_dir():  # WebAssembly TeX Live for in-browser compiles
         app.router.add_static("/core", tex)
     if static and static.is_dir():
@@ -672,6 +675,7 @@ def main() -> None:
     p.add_argument("--add-code", metavar="LABEL", help="create a creation code with this label, print it, exit")
     p.add_argument("--allowance", default="1G", help="allowance for --add-code: 0, a size, or unlimited (default 1G)")
     p.add_argument("--list-codes", action="store_true", help="list codes, allowances and usage, then exit")
+    p.add_argument("--no-arxiv", action="store_true", help="disable importing arXiv sources through this server")
     a = p.parse_args()
     codes = CodeBook(a.codes_file)
     if a.add_code is not None or a.list_codes:
@@ -695,7 +699,7 @@ def main() -> None:
     log.info("limits: total %s, keep %s free, %s per project; %s",
              fmt_size(limits.max_bytes), fmt_size(limits.min_free), fmt_size(limits.project_max),
              f"allowances from {a.codes_file}" if codes.path else "no codes file: every project may be stored")
-    web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes), host=a.host, port=a.port)
+    web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv), host=a.host, port=a.port)
 
 
 if __name__ == "__main__":

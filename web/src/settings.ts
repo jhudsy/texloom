@@ -4,9 +4,9 @@ import { engineCached, clearEngineCache } from './compile'
 import { h, dialog } from './dom'
 
 export type CompileWhere = 'browser' | 'local' | 'none'
-export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean }
+export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean; spell: boolean }
 
-const DEFAULTS: Device = { sync: 'live', compile: 'browser', autoCompile: false, setup: false }
+const DEFAULTS: Device = { sync: 'live', compile: 'browser', autoCompile: false, setup: false, spell: true }
 
 export const prefs = {
   get name(): string { return localStorage.getItem('texloom.name') || '' },
@@ -21,8 +21,8 @@ export const prefs = {
   saveDevice(project: string, d: Device) {
     localStorage.setItem(`texloom.device.${project}`, JSON.stringify(d))
     // New projects default to the choices made most recently.
-    const { sync, compile, autoCompile } = d
-    localStorage.setItem('texloom.device', JSON.stringify({ sync, compile, autoCompile }))
+    const { sync, compile, autoCompile, spell } = d
+    localStorage.setItem('texloom.device', JSON.stringify({ sync, compile, autoCompile, spell }))
   },
 }
 
@@ -102,6 +102,8 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       h('span', {}, 'Main file'), sel('main', texFiles.map((p) => [p, p]), detectedMain),
       h('span', {}, 'Engine'), sel('engine', [['pdflatex', 'pdfLaTeX'], ['xelatex', 'XeLaTeX'], ['lualatex', 'LuaLaTeX']], 'pdflatex'),
       h('span', {}, 'Bibliography'), sel('bib', [['auto', 'Detect automatically'], ['bibtex', 'BibTeX'], ['biber', 'Biber'], ['none', 'None']], 'auto'),
+      h('span', {}, 'Spelling'), sel('lang', [['', 'Browser’s language'], ['en-GB', 'English (UK)'], ['en-US', 'English (US)'], ['de', 'German'], ['fr', 'French'],
+        ['es', 'Spanish'], ['it', 'Italian'], ['nl', 'Dutch'], ['pt', 'Portuguese'], ['sv', 'Swedish'], ['pl', 'Polish']], ''),
     ),
     h('h4', {}, 'Server storage'),
     radios('storage', r.storage, [
@@ -128,6 +130,10 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     h('label', { class: 'check' },
       h('input', { type: 'checkbox', 'aria-label': 'Recompile automatically', checked: d.autoCompile, onchange: (e: any) => { d.autoCompile = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
       'Recompile automatically after I stop typing'),
+    h('h5', {}, 'Editing'),
+    h('label', { class: 'check' },
+      h('input', { type: 'checkbox', 'aria-label': 'Check spelling', checked: d.spell, onchange: (e: any) => { d.spell = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
+      'Check spelling (uses the browser’s dictionary; LaTeX commands, maths and labels are skipped)'),
     h('div', { class: 'row' },
       h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, 'Creation code…'),
       h('span', { class: 'muted small' }, 'Needed only to store new projects on servers that ask for one.')),

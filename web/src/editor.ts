@@ -12,6 +12,7 @@ import type { Replica } from './replica'
 import { h, saveFile } from './dom'
 import { latexSupport, type AddReference, type ProjectIndex } from './latex'
 import { imageDropExtension } from './pasteimage'
+import { spellcheck } from './spell'
 import { PdfView } from './pdfview'
 import { lineAuthors } from './history'
 import type { Problem } from './latexlog'
@@ -31,6 +32,7 @@ export interface EditorPane {
   context(): { file: string; selection: string; fromLine: number; toLine: number } | null
   selection(): { file: string; from: number; to: number; text: string } | null
   reveal(from: number, to: number): void
+  refreshSpell(): void
 }
 
 export interface EditorHooks {
@@ -40,6 +42,7 @@ export interface EditorHooks {
   review: (file: string) => Extension // comment/suggestion highlights
   onReview: (kind: 'comment' | 'suggestion') => void // ⌘⌥M / ⌘⌥E
   addReference: AddReference // from \cite{ completion
+  spell: () => { on: boolean; lang: string }
 }
 
 export function createEditorPane(r: Replica, writable: boolean, index: ProjectIndex, hooks: EditorHooks): EditorPane {
@@ -48,6 +51,8 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
   let current: string | null = null
   const dark = matchMedia('(prefers-color-scheme: dark)').matches
   const authorsSlot = new Compartment()
+  const spellSlot = new Compartment()
+  const spellExt = () => { const sp = hooks.spell(); return spellcheck(sp.on, sp.lang, !!current && /\.(tex|ltx)$/i.test(current)) }
   let authorsOn = false
 
   // "Who wrote this": a gutter with the author of most of each line.
@@ -106,6 +111,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             yCollab(yt, r.awareness, { undoManager: new Y.UndoManager(yt) }),
             latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []), addReference: writable ? hooks.addReference : undefined }),
             imageDropExtension(r, writable),
+            spellSlot.of(spellExt()),
             authorsSlot.of(authorsOn ? authorsExtension(yt) : []),
             hooks.review(path),
             Prec.high(keymap.of([
@@ -185,5 +191,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     view.focus()
   }
 
-  return { el, open, context, selection, reveal, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { if (view) forceLinting(view) } }
+  const refreshSpell = () => { if (view) view.dispatch({ effects: spellSlot.reconfigure(spellExt()) }) }
+
+  return { el, open, context, selection, reveal, refreshSpell, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { if (view) forceLinting(view) } }
 }

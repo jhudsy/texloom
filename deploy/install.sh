@@ -170,6 +170,14 @@ server {
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
     }
+    # importing an arXiv paper's source: the relay fetches it (rate-limited there too)
+    location /api/arxiv/ {
+        limit_req zone=texloom_code burst=3 nodelay;
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 120s;
+    }
     location /api/ {
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
