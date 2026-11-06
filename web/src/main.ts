@@ -16,6 +16,7 @@ import { pdfjs } from './pdfview'
 import { SyncTex } from './synctex'
 import { ProjectIndex } from './latex'
 import { autoSave, createHistoryPanel } from './history'
+import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from './navigate'
 import { createReviewPanel, reviewExtension, type ReviewPanel } from './review'
 import './style.css'
 
@@ -183,6 +184,7 @@ async function openProject(keys: Keys) {
   }
   let reviewPanel: ReviewPanel | null = null
   const review = () => reviewPanel
+  const revealAt = (file: string, from: number, to: number) => { tree.open(file); setTimeout(() => editor.reveal(from, to), 0) }
   const openReview = () => { if (layout.rightHidden) layout.showRight(); showTab('review') }
   const makers: Partial<Record<Tab, () => HTMLElement>> = {
     ai: () => createAssistantPanel({
@@ -191,7 +193,7 @@ async function openProject(keys: Keys) {
     }),
     review: () => (reviewPanel = createReviewPanel({
       replica: r, writable, userName: () => me.name, selection: () => editor.selection(),
-      reveal: (file, from, to) => { tree.open(file); setTimeout(() => editor.reveal(from, to), 0) },
+      reveal: revealAt,
     })).el,
     history: () => createHistoryPanel({
       replica: r, writable, userName: () => me.name,
@@ -219,6 +221,30 @@ async function openProject(keys: Keys) {
     }
     if (!panes[t].firstChild && makers[t]) panes[t].append(makers[t]!())
     try { localStorage.setItem('texloom.tab', t) } catch {}
+  }
+
+  // left-hand tabs: files, search across files, outline with word count
+  type LeftTab = 'files' | 'search' | 'outline'
+  const search = createSearchPanel(r, writable, revealAt)
+  const outlinePanel = createOutlinePanel(r, revealAt, () => {
+    const s = editor.selection()
+    return s && s.to > s.from ? countWords(blankNonProse(s.text)) : null
+  })
+  const leftPanes: Record<LeftTab, HTMLElement> = {
+    files: h('div', { class: 'lpane' }, tree.el),
+    search: h('div', { class: 'lpane', hidden: true }, search.el),
+    outline: h('div', { class: 'lpane', hidden: true }, outlinePanel.el),
+  }
+  const leftBtns: Record<LeftTab, HTMLButtonElement> = {
+    files: h('button', { class: 'tab active', onclick: () => showLeft('files') }, 'Files'),
+    search: h('button', { class: 'tab', title: 'Search all files (⌘⇧F / Ctrl+Shift+F)', onclick: () => showLeft('search') }, 'Search'),
+    outline: h('button', { class: 'tab', title: 'Sections and word count', onclick: () => showLeft('outline') }, 'Outline'),
+  }
+  function showLeft(t: LeftTab) {
+    for (const k of Object.keys(leftPanes) as LeftTab[]) { leftPanes[k].hidden = k !== t; leftBtns[k].classList.toggle('active', k === t) }
+    if (t === 'outline') outlinePanel.refresh()
+    if (t === 'search') search.focus()
+    try { localStorage.setItem('texloom.ltab', t) } catch {}
   }
 
   // ---- header ----
@@ -253,7 +279,7 @@ async function openProject(keys: Keys) {
     mainEl,
   )
   mainEl.append(
-    h('aside', {}, tree.el),
+    h('aside', {}, h('div', { class: 'tabs' }, leftBtns.files, leftBtns.search, leftBtns.outline), leftPanes.files, leftPanes.search, leftPanes.outline),
     splitL,
     editor.el,
     splitR,
@@ -268,11 +294,21 @@ async function openProject(keys: Keys) {
     leftBtn.setAttribute('aria-pressed', String(!layout.leftHidden))
     rightBtn.setAttribute('aria-pressed', String(!layout.rightHidden))
   }
+  const savedLeft = localStorage.getItem('texloom.ltab') as LeftTab | null
+  if (savedLeft === 'outline') showLeft('outline')
   const savedTab = localStorage.getItem('texloom.tab') as Tab | null
   if (savedTab && savedTab in panes && savedTab !== 'pdf') showTab(savedTab)
 
   // ⌘S / Ctrl+S compiles from anywhere (the editor handles it itself when focused)
   document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+      e.preventDefault()
+      if (layout.leftHidden) layout.toggleLeft()
+      showLeft('search')
+      const sel = editor.selection()
+      if (sel && sel.to > sel.from && !sel.text.includes('\n')) search.focus(sel.text)
+      return
+    }
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
       e.preventDefault()
       output.compile()
