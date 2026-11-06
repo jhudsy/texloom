@@ -72,5 +72,13 @@ class Keys:
             raise PermissionError("read-only link: cannot sign")
         return Ed25519PrivateKey.from_private_bytes(self.seed).sign(msg)
 
+    @property
+    def code(self) -> str:
+        """Short project code shown in the web app, e.g. "K7P2-QX4M" (must match projects.ts)."""
+        alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+        n = int.from_bytes(b64d(self.project)[:5], "big")  # 40 bits -> 8 characters
+        s = "".join(alphabet[(n >> (35 - 5 * i)) & 31] for i in range(8))
+        return f"{s[:4]}-{s[4:]}"
+
     def blob_id(self, plaintext: bytes) -> str:
         return hmac.new(self.key, plaintext, hashlib.sha256).hexdigest()[:32]

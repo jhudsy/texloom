@@ -6,7 +6,8 @@ import { stex } from '@codemirror/legacy-modes/mode/stex'
 import { yCollab } from 'y-codemirror.next'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { Keys } from './crypto'
-import { Replica, forgetLocalCopy } from './replica'
+import { Replica } from './replica'
+import { projects, projectCode, latexTitle, whenOpened } from './projects'
 import { compileInBrowser, browserCompileAvailable, type Progress } from './compile'
 import { prefs, setupDialog, settingsDialog, type Device } from './settings'
 import { PdfView } from './pdfview'
@@ -27,22 +28,9 @@ const server = location.origin
 const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#469990', '#9a6324']
 
 // ---- per-browser settings & recent projects ---------------------------------
-type Recent = { project: string; fragment: string; name: string; at: number; writable: boolean }
 const store = {
   get name(): string { return prefs.name },
   set name(v: string) { prefs.name = v },
-  get recent(): Recent[] { try { return JSON.parse(localStorage.getItem('texloom.recent') || '[]') } catch { return [] } },
-  async forget(project: string) {
-    await forgetLocalCopy(project)
-    localStorage.setItem('texloom.recent', JSON.stringify(store.recent.filter((x) => x.project !== project)))
-    localStorage.removeItem(`texloom.device.${project}`)
-  },
-  remember(r: Recent) {
-    const list = store.recent.filter((x) => x.project !== r.project || (x.writable && !r.writable))
-    if (!list.some((x) => x.project === r.project)) list.unshift(r)
-    else Object.assign(list.find((x) => x.project === r.project)!, { name: r.name, at: r.at })
-    localStorage.setItem('texloom.recent', JSON.stringify(list.slice(0, 50)))
-  },
 }
 
 window.addEventListener('hashchange', () => location.reload())
@@ -65,18 +53,44 @@ function landing() {
       linkIn,
       h('button', { onclick: () => { const i = linkIn.value.indexOf('#'); if (i >= 0) location.hash = linkIn.value.slice(i) } }, 'Open'),
     ),
-    h('h2', {}, 'Recent projects'),
-    store.recent.length
-      ? h('ul', { class: 'recent' }, ...store.recent.map((r) =>
-          h('li', {}, h('button', { class: 'forget', title: 'Remove from this browser', 'aria-label': `Remove ${r.name || 'project'} from this browser`,
-              onclick: async () => {
-                if (!confirm(`Remove “${r.name || r.project.slice(0, 8)}” from this browser?\n\nOnly this browser’s copy is deleted. Unsynced changes made here would be lost. Collaborators, folder copies and the server’s copy are not affected.`)) return
-                await store.forget(r.project); location.reload()
-              } }, '✕'),
-            h('a', { href: '#' + r.fragment }, r.name || r.project.slice(0, 8)),
-            h('span', { class: 'muted' }, ` ${r.writable ? 'edit' : 'read-only'} · ${new Date(r.at).toLocaleString()}`))))
-      : h('p', { class: 'muted' }, 'None yet.'),
+    h('h2', {}, 'Your projects', h('small', { class: 'muted' }, ' — opened in this browser')),
+    projectList(),
   )
+}
+
+function projectList(): HTMLElement {
+  const list = projects.list()
+  if (!list.length) return h('p', { class: 'muted' }, 'None yet. Projects you create or open from a link appear here.')
+  const shown = (r: { nick?: string; name: string }) => r.nick || r.name || 'Untitled project'
+  const dupes = new Set(list.map(shown).filter((n, i, all) => all.indexOf(n) !== i))
+  return h('ul', { class: 'recent' }, ...list.map((r) => {
+    const label = shown(r)
+    const details: string[] = []
+    if (r.nick && r.name) details.push(`shared name “${r.name}”`)
+    if (r.docTitle && r.docTitle !== label && r.docTitle !== r.name) details.push(`title “${r.docTitle}”`)
+    if (r.createdBy) details.push(`started by ${r.createdBy}`)
+    if (r.people?.length) details.push(`with ${r.people.slice(0, 4).join(', ')}${r.people.length > 4 ? ` +${r.people.length - 4}` : ''}`)
+    if (r.files) details.push(`${r.files} file${r.files === 1 ? '' : 's'}`)
+    details.push(`opened ${whenOpened(r.at)}`)
+    return h('li', { class: dupes.has(label) ? 'dupe' : '' },
+      h('div', { class: 'top' },
+        h('a', { href: '#' + r.fragment, class: 'pname' }, label),
+        h('code', { class: 'pcode', title: 'Project code: the start of this project’s unique ID. Two projects with the same name always have different codes.' }, projectCode(r.project)),
+        h('span', { class: `tag ${r.writable ? '' : 'ro'}` }, r.writable ? 'edit' : 'read-only'),
+        r.storage === 'relay' ? h('span', { class: 'tag', title: 'The server keeps no copy of this project' }, 'no server copy') : '',
+        h('span', { class: 'spacer' }),
+        h('button', { class: 'icon', title: 'Private label (only you see it)', 'aria-label': `Label ${label}`, onclick: () => {
+          const v = prompt(`Private label for “${r.name || 'this project'}” (${projectCode(r.project)}).\nOnly you see it, in this browser. Leave empty to use the shared name.`, r.nick ?? '')
+          if (v === null) return
+          projects.update(r.project, { nick: v.trim() || '' })
+          location.reload()
+        } }, '✎'),
+        h('button', { class: 'icon forget', title: 'Remove from this browser', 'aria-label': `Remove ${label} from this browser`, onclick: async () => {
+          if (!confirm(`Remove “${label}” (${projectCode(r.project)}) from this browser?\n\nOnly this browser’s copy is deleted. Unsynced changes made here would be lost. Collaborators, folder copies and the server’s copy are not affected.`)) return
+          await projects.forget(r.project); location.reload()
+        } }, '✕')),
+      h('div', { class: 'details muted' }, details.join(' · ')))
+  }))
 }
 
 // ---- project view -----------------------------------------------------------
@@ -101,6 +115,7 @@ async function openProject(keys: Keys) {
       r.doc.transact(() => {
         r.files.set('main.tex', new Y.Text('\\documentclass{article}\n\\title{Untitled}\n\\begin{document}\n\\maketitle\n\nHello, world.\n\n\\end{document}\n'))
         r.meta.set('main', 'main.tex'); r.meta.set('seeded', true)
+        if (!r.meta.get('createdBy')) r.meta.set('createdBy', me.name)
       })
     }, 1500)
   }
@@ -157,7 +172,7 @@ async function openProject(keys: Keys) {
       h('button', { title: 'Settings', onclick: () => settingsDialog(r, keys.link(server, writable), applyDevice, async () => {
         removing = true
         await r.close()
-        await store.forget(keys.project)
+        await projects.forget(keys.project)
         location.href = '/'
       }) }, '⚙'),
       compileBtn,
@@ -202,12 +217,35 @@ async function openProject(keys: Keys) {
       .map(([, s]) => h('span', { class: 'peer', style: `background:${s.user.color}`, title: s.user.name }, s.user.name.slice(0, 2))))
   }
   r.awareness.on('change', renderPeers)
+  r.awareness.on('change', () => {
+    if (removing) return
+    const names = [...r.awareness.getStates().entries()].filter(([id]) => id !== r.doc.clientID).map(([, st]) => st.user?.name as string)
+    projects.sawPeople(keys.project, names, me.name)
+  })
+  // keep the start page's summary (document title, file count) current
+  let summaryTimer: any
+  const summarize = () => {
+    clearTimeout(summaryTimer)
+    summaryTimer = setTimeout(() => {
+      if (removing) return
+      const main = mainFile()
+      projects.update(keys.project, {
+        docTitle: main ? latexTitle(r.files.get(main)!.toString()) : undefined,
+        files: r.files.size + r.bin.size,
+      })
+    }, 1500)
+  }
+  r.files.observeDeep(summarize); r.bin.observe(summarize); summarize()
 
   // ---- meta ----
   const renderMeta = () => {
     title.value = r.meta.get('name') || ''
     document.title = `${title.value} — texloom`
-    if (!removing) store.remember({ project: keys.project, fragment: keys.fragment(), name: title.value, at: Date.now(), writable })
+    if (!removing) projects.update(keys.project, {
+      fragment: keys.fragment(), writable, at: Date.now(), name: title.value,
+      createdBy: r.meta.get('createdBy'), storage: r.storage,
+    })
+    title.title = `Project name (shared with collaborators) · code ${projectCode(keys.project)}`
   }
   r.meta.observe(renderMeta); renderMeta()
 

@@ -28,7 +28,13 @@ opens a link, they're asked:
 - whether to sync live or manually.
 
 The start page lists the projects you've opened **in that browser**, with ✕ to remove
-one. Removing deletes only that browser's copy: collaborators keep theirs, a folder
+one. Each entry shows a short **project code** (the same one `texloom links` prints), so
+two projects with the same name can always be told apart. It also shows:
+- the document's `\title`;
+- who started it and who else you've seen in it;
+- whether you have edit or read-only access.
+
+✎ gives a project a private label that only you see. Removing deletes only that browser's copy: collaborators keep theirs, a folder
 copy is just a folder, and the server's encrypted copy is deleted only by choosing
 "Don't store anything on the server" in the project's settings. The list is kept
 per browser and the server can't read or recover links, so keep important links

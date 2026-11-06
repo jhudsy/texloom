@@ -51,6 +51,7 @@ def save(d: Path, link: str) -> None:
 
 
 def print_links(keys: Keys, server: str) -> None:
+    print(f"Project code:   {keys.code}")
     if keys.writable:
         print(f"Edit link:      {keys.link(server, write=True)}")
     print(f"Read-only link: {keys.link(server, write=False)}")
