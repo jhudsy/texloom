@@ -14,6 +14,7 @@ import { createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
 import { ProjectIndex } from './latex'
+import { autoSave, createHistoryPanel } from './history'
 import './style.css'
 
 const APP = 'TeXLoom'
@@ -111,6 +112,8 @@ async function openProject(keys: Keys) {
   }
   const me = { name: prefs.name || `anon-${r.doc.clientID % 1000}`, color: COLORS[r.doc.clientID % COLORS.length] }
   r.awareness.setLocalStateField('user', { ...me, colorLight: me.color + '33' })
+  if (writable && r.clients.get(String(r.doc.clientID)) !== me.name) r.clients.set(String(r.doc.clientID), me.name) // for "who wrote this"
+  autoSave(r, () => me.name)
   if (writable && !r.meta.get('name')) r.meta.set('name', 'Untitled project')
   try {
     if (writable && localStorage.getItem(`texloom.newRelay.${keys.project}`)) {
@@ -134,22 +137,35 @@ async function openProject(keys: Keys) {
   const output = createOutput(r, writable, () => device, () => me.name)
   const editor = createEditorPane(r, writable, index, () => output.compile())
   const tree = createFileTree(r, writable, (p) => editor.open(p))
-  let assistantMounted = false
-  const pdfPane = output.pane
-  const aiPane = h('div', { class: 'pane', hidden: true })
-  const pdfTab = h('button', { class: 'tab active', onclick: () => showTab(false) }, 'PDF')
-  const aiTab = h('button', { class: 'tab', onclick: () => showTab(true) }, 'Assistant')
-  function showTab(ai: boolean) {
-    pdfPane.hidden = ai; aiPane.hidden = !ai
-    pdfTab.classList.toggle('active', !ai); aiTab.classList.toggle('active', ai)
-    try { localStorage.setItem('texloom.tab', ai ? 'ai' : 'pdf') } catch {}
-    if (ai && !assistantMounted) {
-      assistantMounted = true
-      aiPane.append(createAssistantPanel({
-        replica: r, writable, editorContext: editor.context,
-        compile: () => output.compile(false), lastLog: output.lastLog, userName: () => me.name,
-      }))
+  // right-hand panel tabs; panels other than the PDF are created on first use
+  type Tab = 'pdf' | 'ai' | 'history'
+  const panes: Record<Tab, HTMLElement> = {
+    pdf: output.pane,
+    ai: h('div', { class: 'pane', hidden: true }),
+    history: h('div', { class: 'pane', hidden: true }),
+  }
+  const makers: Partial<Record<Tab, () => HTMLElement>> = {
+    ai: () => createAssistantPanel({
+      replica: r, writable, editorContext: editor.context,
+      compile: () => output.compile(false), lastLog: output.lastLog, userName: () => me.name,
+    }),
+    history: () => createHistoryPanel({
+      replica: r, writable, userName: () => me.name,
+      showAuthors: (on) => editor.showAuthors(on), openFile: (p) => tree.open(p),
+    }),
+  }
+  const tabBtns = {
+    pdf: h('button', { class: 'tab active', onclick: () => showTab('pdf') }, 'PDF'),
+    ai: h('button', { class: 'tab', onclick: () => showTab('ai') }, 'Assistant'),
+    history: h('button', { class: 'tab', onclick: () => showTab('history') }, 'History'),
+  }
+  function showTab(t: Tab) {
+    for (const k of Object.keys(panes) as Tab[]) {
+      panes[k].hidden = k !== t
+      tabBtns[k].classList.toggle('active', k === t)
     }
+    if (!panes[t].firstChild && makers[t]) panes[t].append(makers[t]!())
+    try { localStorage.setItem('texloom.tab', t) } catch {}
   }
 
   // ---- header ----
@@ -188,7 +204,7 @@ async function openProject(keys: Keys) {
     splitL,
     editor.el,
     splitR,
-    h('section', { class: 'right' }, h('div', { class: 'tabs' }, pdfTab, aiTab), pdfPane, aiPane),
+    h('section', { class: 'right' }, h('div', { class: 'tabs' }, tabBtns.pdf, tabBtns.ai, tabBtns.history), panes.pdf, panes.ai, panes.history),
   )
   const layout = setupLayout(mainEl, splitL, splitR)
   layout.onChange = () => {
@@ -199,7 +215,8 @@ async function openProject(keys: Keys) {
     leftBtn.setAttribute('aria-pressed', String(!layout.leftHidden))
     rightBtn.setAttribute('aria-pressed', String(!layout.rightHidden))
   }
-  if (localStorage.getItem('texloom.tab') === 'ai') showTab(true)
+  const savedTab = localStorage.getItem('texloom.tab') as Tab | null
+  if (savedTab && savedTab in panes && savedTab !== 'pdf') showTab(savedTab)
 
   // ⌘S / Ctrl+S compiles from anywhere (the editor handles it itself when focused)
   document.addEventListener('keydown', (e) => {

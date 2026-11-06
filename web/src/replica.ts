@@ -69,10 +69,15 @@ export type SyncMode = 'live' | 'manual'
 export type StorageMode = 'server' | 'relay'
 
 export class Replica {
-  readonly doc = new Y.Doc()
+  // gc off: deleted text is kept, so past versions can be reconstructed (History)
+  readonly doc = new Y.Doc({ gc: false })
   readonly files = this.doc.getMap<Y.Text>('files')
   readonly bin = this.doc.getMap<{ h: string; size: number }>('bin')
   readonly dirs = this.doc.getMap<boolean>('dirs') // explicit (possibly empty) folders
+  readonly versions = this.doc.getArray<any>('versions') // saved versions: {at, by, label, auto, snap}
+  readonly clients = this.doc.getMap<string>('clients') // Yjs client id -> display name (for "who wrote this")
+  /** Called after every change made on this device (not ones received from others). */
+  readonly localChange: (() => void)[] = []
   readonly meta = this.doc.getMap<any>('meta')
   readonly out = this.doc.getMap<any>('out')
   readonly awareness = new awarenessProtocol.Awareness(this.doc)
@@ -111,6 +116,7 @@ export class Replica {
     this.doc.on('update', (update: Uint8Array, origin: unknown) => {
       if (origin === REMOTE || origin === this.persistence) return
       if (!this.keys.writable) return
+      for (const fn of this.localChange) fn()
       const id = crypto.randomUUID()
       this.pending++
       this.onStatus()

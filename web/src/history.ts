@@ -1,0 +1,223 @@
+// History: automatic and named versions (Yjs snapshots), viewing a past version,
+// comparing with now, restoring files, and who wrote which line.
+import * as Y from 'yjs'
+import type { Replica } from './replica'
+import { h } from './dom'
+import { diffLines, diffStats, setText, type Op } from './diff'
+
+export interface Version { at: number; by: string; label?: string; auto?: boolean; snap: Uint8Array }
+
+const AUTO_IDLE = 2 * 60_000 // auto-save after this long without local edits
+const MAX_AUTO = 300
+
+export function saveVersion(r: Replica, by: string, label?: string, auto = false) {
+  const snap = Y.encodeSnapshot(Y.snapshot(r.doc))
+  r.doc.transact(() => {
+    r.versions.push([{ at: Date.now(), by, ...(label ? { label } : {}), ...(auto ? { auto: true } : {}), snap }])
+    // keep the newest automatic versions; named ones are kept forever
+    let excess = r.versions.toArray().filter((v) => v?.auto).length - MAX_AUTO
+    for (let i = 0; i < r.versions.length && excess > 0;) {
+      if (r.versions.get(i)?.auto) { r.versions.delete(i, 1); excess-- } else i++
+    }
+  })
+}
+
+/** Save an automatic version after a pause in local editing, and when leaving the page. */
+export function autoSave(r: Replica, by: () => string) {
+  if (!r.keys.writable) return
+  let dirty = false, last = 0
+  r.localChange.push(() => { dirty = true; last = Date.now() })
+  const flush = () => { if (dirty) { dirty = false; saveVersion(r, by(), undefined, true) } }
+  setInterval(() => { if (dirty && Date.now() - last > AUTO_IDLE) flush() }, 30_000)
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush() })
+}
+
+/** The project as it was at a version (a read-only Y.Doc). */
+export function docAt(r: Replica, v: Version): Y.Doc {
+  return Y.createDocFromSnapshot(r.doc, Y.decodeSnapshot(v.snap))
+}
+
+type Snap = { files: Map<string, string>; bin: Map<string, { h: string; size: number }> }
+function contents(d: Y.Doc): Snap {
+  const files = new Map<string, string>(), bin = new Map<string, { h: string; size: number }>()
+  d.getMap<Y.Text>('files').forEach((t, p) => files.set(p, t.toString()))
+  d.getMap<{ h: string; size: number }>('bin').forEach((b, p) => bin.set(p, b))
+  return { files, bin }
+}
+
+// ---------------------------------------------------------------------------
+// Who wrote this: the author of most characters on each line.
+// ---------------------------------------------------------------------------
+export function lineAuthors(yt: Y.Text): number[] {
+  const owners: number[] = [] // per character
+  let item = (yt as any)._start as Y.Item | null
+  while (item) {
+    if (!item.deleted && item.content instanceof Y.ContentString) {
+      const n = item.length
+      for (let i = 0; i < n; i++) owners.push(item.id.client)
+    }
+    item = item.right
+  }
+  const text = yt.toString()
+  const out: number[] = []
+  let start = 0
+  for (const line of text.split('\n')) {
+    const counts = new Map<number, number>()
+    for (let i = start; i < start + line.length; i++) counts.set(owners[i], (counts.get(owners[i]) ?? 0) + 1)
+    let best = -1, bestN = -1 // -1: empty line, nobody to credit
+    for (const [c, n] of counts) if (n > bestN) { best = c; bestN = n }
+    out.push(best)
+    start += line.length + 1
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Panel
+// ---------------------------------------------------------------------------
+export interface HistoryHost {
+  replica: Replica
+  writable: boolean
+  userName: () => string
+  showAuthors: (on: boolean) => void
+  openFile: (path: string) => void
+}
+
+const when = (t: number) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+
+export function createHistoryPanel(host: HistoryHost): HTMLElement {
+  const r = host.replica
+  const list = h('ul', { class: 'versions' })
+  const detail = h('div', { class: 'version-detail' })
+  const authorsChk = h('input', { type: 'checkbox', 'aria-label': 'Show who wrote each line', onchange: (e: any) => host.showAuthors(e.target.checked) })
+  let selected: Version | null = null
+  let filter: 'all' | 'named' = 'all'
+
+  const filterSel = h('select', { 'aria-label': 'Which versions', onchange: (e: any) => { filter = e.target.value; render() } },
+    h('option', { value: 'all' }, 'All versions'), h('option', { value: 'named' }, 'Named only'))
+
+  const panel = h('div', { class: 'history' },
+    h('div', { class: 'ai-bar' },
+      host.writable ? h('button', { class: 'primary', onclick: () => {
+        const label = prompt('Name this version (e.g. “Submitted to journal”):')?.trim()
+        if (label) saveVersion(r, host.userName(), label.slice(0, 120))
+      } }, 'Save version…') : null,
+      filterSel,
+      h('span', { class: 'spacer' }),
+      h('label', { class: 'check small' }, authorsChk, 'Who wrote this')),
+    h('div', { class: 'history-body' }, list, detail))
+
+  function render() {
+    const all = r.versions.toArray().filter((v) => v && v.snap) as Version[]
+    const shown = all.filter((v) => filter === 'all' || v.label).sort((a, b) => b.at - a.at)
+    if (!shown.length) {
+      list.replaceChildren(h('li', { class: 'muted small' },
+        all.length ? 'No named versions yet.' : 'No versions yet. Versions are saved automatically a couple of minutes after you stop editing; use “Save version…” to name one.'))
+      return
+    }
+    list.replaceChildren(...shown.map((v) => h('li', {
+      class: `${v === selected ? 'active' : ''} ${v.label ? 'named' : ''}`,
+      onclick: () => { selected = v; render(); showVersion(v) },
+    },
+      h('div', { class: 'vlabel' }, v.label ? `★ ${v.label}` : 'Auto-saved'),
+      h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`))))
+  }
+
+  function showVersion(v: Version) {
+    let past: Snap
+    try { past = contents(docAt(r, v)) } catch (e) {
+      detail.replaceChildren(h('p', { class: 'err' }, `This version can’t be reconstructed (${e}). It predates full history.`))
+      return
+    }
+    const now = contents(r.doc)
+    const paths = [...new Set([...past.files.keys(), ...past.bin.keys(), ...now.files.keys(), ...now.bin.keys()])].sort()
+    const rows: HTMLElement[] = []
+    for (const p of paths) {
+      const a = past.files.get(p), b = now.files.get(p)
+      const ab = past.bin.get(p), bb = now.bin.get(p)
+      let status = '', stats = ''
+      if (a !== undefined && b !== undefined) {
+        if (a === b) continue
+        const d = diffStats(diffLines(a, b)); status = 'changed'; stats = `+${d.added} −${d.removed}`
+      } else if ((a !== undefined || ab) && b === undefined && !bb) status = 'deleted since'
+      else if (a === undefined && !ab && (b !== undefined || bb)) status = 'added since'
+      else if (ab && bb) { if (ab.h === bb.h) continue; status = 'changed (file)' }
+      else status = 'changed type'
+      rows.push(h('li', { onclick: () => showFile(v, p, past, now) },
+        h('span', { class: 'path' }, p), h('span', { class: `vstat ${status.split(' ')[0]}` }, `${status} ${stats}`)))
+    }
+    detail.replaceChildren(
+      h('div', { class: 'vhead' },
+        h('div', {}, h('b', {}, v.label ?? 'Auto-saved'), h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`)),
+        host.writable ? h('button', { onclick: () => restoreAll(past) }, 'Restore all files…') : null),
+      rows.length ? h('p', { class: 'muted small' }, 'Changed since this version (click a file to compare):') : h('p', { class: 'muted small' }, 'Nothing has changed since this version.'),
+      h('ul', { class: 'vfiles' }, ...rows))
+  }
+
+  function showFile(v: Version, path: string, past: Snap, now: Snap) {
+    const a = past.files.get(path), b = now.files.get(path)
+    const back = h('button', { onclick: () => showVersion(v) }, '← Files')
+    const restore = host.writable && (a !== undefined || past.bin.has(path))
+      ? h('button', { class: 'primary', onclick: () => restoreFile(path, past) }, 'Restore this file') : null
+    const body = a !== undefined || b !== undefined
+      ? fullDiff(diffLines(a ?? '', b ?? ''))
+      : h('p', { class: 'muted' }, 'Binary file: compare by opening it.')
+    detail.replaceChildren(
+      h('div', { class: 'vhead' }, back, h('span', { class: 'path' }, path), restore),
+      h('p', { class: 'muted small' }, `Red: in the version from ${when(v.at)} · Green: now`),
+      body)
+  }
+
+  function restoreFile(path: string, past: Snap) {
+    if (!confirm(`Restore ${path} to this version? The current text is replaced (and stays in history).`)) return
+    r.doc.transact(() => {
+      const old = past.files.get(path)
+      if (old !== undefined) {
+        r.bin.delete(path)
+        const yt = r.files.get(path)
+        if (yt) setText(yt, old); else r.files.set(path, new Y.Text(old))
+      } else {
+        const b = past.bin.get(path)!
+        r.files.delete(path); r.bin.set(path, b)
+      }
+    })
+    host.openFile(path)
+  }
+
+  function restoreAll(past: Snap) {
+    if (!confirm('Restore every file to this version? Files added since are removed. Everything stays in history.')) return
+    r.doc.transact(() => {
+      for (const p of [...r.files.keys()]) if (!past.files.has(p)) r.files.delete(p)
+      for (const p of [...r.bin.keys()]) if (!past.bin.has(p)) r.bin.delete(p)
+      past.files.forEach((text, p) => { const yt = r.files.get(p); if (yt) setText(yt, text); else r.files.set(p, new Y.Text(text)) })
+      past.bin.forEach((b, p) => { if (r.bin.get(p)?.h !== b.h) r.bin.set(p, b) })
+    })
+    saveVersion(r, host.userName(), `Restored version from ${when(selected?.at ?? Date.now())}`)
+  }
+
+  r.versions.observe(render)
+  render()
+  return panel
+}
+
+/** Diff with long unchanged runs collapsed. */
+function fullDiff(ops: Op[]): HTMLElement {
+  const rows: HTMLElement[] = []
+  const C = 3
+  const line = (cls: string, n: number | string, t: string) =>
+    rows.push(h('div', { class: `dl ${cls}` }, h('span', { class: 'ln' }, String(n)), t || ' '))
+  for (let i = 0; i < ops.length; i++) {
+    const o = ops[i]
+    if (o.type !== 'eq') { line(o.type === 'del' ? 'del' : 'add', (o.type === 'del' ? o.a : o.b) + 1, o.text); continue }
+    let j = i
+    while (j < ops.length && ops[j].type === 'eq') j++
+    const run = j - i
+    if (run > 2 * C + 1) {
+      for (let k = i; k < i + (i === 0 ? 0 : C); k++) line('ctx', ops[k].b + 1, ops[k].text)
+      rows.push(h('div', { class: 'dl skip' }, `… ${run - (i === 0 ? C : 2 * C) + (j === ops.length ? C : 0)} unchanged lines`))
+      for (let k = j - (j === ops.length ? 0 : C); k < j; k++) line('ctx', ops[k].b + 1, ops[k].text)
+    } else for (let k = i; k < j; k++) line('ctx', ops[k].b + 1, ops[k].text)
+    i = j - 1
+  }
+  return h('div', { class: 'diff full' }, ...rows)
+}

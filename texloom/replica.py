@@ -36,10 +36,11 @@ class Replica:
         self.server = server.rstrip("/")
         self.create_code = create_code  # needed only to store a *new* project on some servers
         self._warned: set[str] = set()
-        self.doc = Doc()
+        self.doc = Doc(skip_gc=True)  # keep deleted text so past versions can be reconstructed
         self.files: Map = self.doc.get("files", type=Map)
         self.bin: Map = self.doc.get("bin", type=Map)
         self.dirs: Map = self.doc.get("dirs", type=Map)
+        self.clients: Map = self.doc.get("clients", type=Map)  # client id -> name (who wrote what)
         self.meta: Map = self.doc.get("meta", type=Map)
         self.out: Map = self.doc.get("out", type=Map)
         self.since = 0

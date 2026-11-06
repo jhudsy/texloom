@@ -80,6 +80,10 @@ async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool = 
 
     async def after_connect() -> None:  # retry anything that couldn't be fetched offline
         await replica.synced.wait()
+        cid = str(replica.doc.client_id)
+        name = cfg.get("name") or f"folder copy on {platform.node().split('.')[0]}"
+        if keys.writable and replica.clients.get(cid) != name:  # for "who wrote this"
+            replica.local_change(lambda: replica.clients.__setitem__(cid, name))
         async with replica.lock:
             await fs.write_out()
     asyncio.create_task(after_connect())
