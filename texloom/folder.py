@@ -438,13 +438,15 @@ class FolderSync:
         try:
             pdf_id = await self.r.put_blob(pdf.read_bytes()) if pdf.exists() else None
             log_id = await self.r.put_blob(log_text)
+            stx = build / f"{stem}.synctex.gz"
+            stx_id = await self.r.put_blob(stx.read_bytes()) if stx.exists() and pdf.exists() else None
         except Exception as e:  # noqa: BLE001
             log.warning("could not upload output: %s", e)
             return
         def publish():
             self.r.out["latest"] = {
                 "pdf": pdf_id, "log": log_id, "ok": ok, "by": self.opts["label"],
-                "at": time.time(), "main": main,
+                "at": time.time(), "main": main, **({"synctex": stx_id} if stx_id else {}),
             }
         self.r.local_change(publish)
 

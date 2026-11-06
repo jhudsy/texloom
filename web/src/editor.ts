@@ -13,6 +13,8 @@ import { h, saveFile } from './dom'
 import { latexSupport, type ProjectIndex } from './latex'
 import { PdfView } from './pdfview'
 import { lineAuthors } from './history'
+import type { Problem } from './latexlog'
+import { forceLinting } from '@codemirror/lint'
 
 export interface EditorPane {
   el: HTMLElement
@@ -20,10 +22,19 @@ export interface EditorPane {
   showAuthors(on: boolean): void
   goto(line: number, col?: number): void
   view(): EditorView | null
+  current(): string | null
+  relint(): void
+  gotoOffset(pos: number): void
   context(): { file: string; selection: string; fromLine: number; toLine: number } | null
 }
 
-export function createEditorPane(r: Replica, writable: boolean, index: ProjectIndex, onCompile: () => void): EditorPane {
+export interface EditorHooks {
+  onCompile: () => void
+  onSync: () => void // show the current line in the PDF
+  problems: (file: string) => Problem[] // last compile's problems for a file
+}
+
+export function createEditorPane(r: Replica, writable: boolean, index: ProjectIndex, hooks: EditorHooks): EditorPane {
   const el = h('div', { class: 'editor' })
   let view: EditorView | null = null
   let current: string | null = null
@@ -85,7 +96,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             EditorView.lineWrapping,
             dark ? oneDark : [],
             yCollab(yt, r.awareness, { undoManager: new Y.UndoManager(yt) }),
-            latexSupport(index, { onCompile }),
+            latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []) }),
             authorsSlot.of(authorsOn ? authorsExtension(yt) : []),
             EditorState.readOnly.of(!writable),
             EditorView.editable.of(writable),
@@ -139,5 +150,12 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     view.focus()
   }
 
-  return { el, open, context, showAuthors, goto, view: () => view }
+  function gotoOffset(pos: number) {
+    if (!view) return
+    const p = Math.max(0, Math.min(view.state.doc.length, pos))
+    view.dispatch({ selection: { anchor: p }, effects: EditorView.scrollIntoView(p, { y: 'center' }) })
+    view.focus()
+  }
+
+  return { el, open, context, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { if (view) forceLinting(view) } }
 }

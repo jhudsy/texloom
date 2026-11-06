@@ -5,7 +5,9 @@ import type { Device } from './settings'
 import { h, saveFile, verticalResizer } from './dom'
 import { PdfView } from './pdfview'
 import { compileInBrowser, browserCompileAvailable, type Progress } from './compile'
-import { fileBase, mainFile } from './projectfiles'
+import { allFiles, fileBase, mainFile } from './projectfiles'
+import { parseLog, type Problem } from './latexlog'
+import { SyncTex } from './synctex'
 
 export type CompileOut = { ok: boolean; log: string } | null
 
@@ -15,15 +17,32 @@ export interface Output {
   compile(interactive?: boolean): Promise<CompileOut>
   lastLog(): string
   pdfView: PdfView
+  problems(): Problem[]
+  onProblems: (() => void)[]
+  showInPdf(file: string, line: number): boolean
+  /** Set by the host: called by the ⇥ button to show the editor's current line. */
+  syncRequest: (() => void) | null
 }
 
-export function createOutput(r: Replica, writable: boolean, device: () => Device, userName: () => string): Output {
+export function createOutput(r: Replica, writable: boolean, device: () => Device, userName: () => string,
+  goto: (file: string, line: number) => void): Output {
   const pdfView = new PdfView()
   const info = h('div', { class: 'pdfinfo muted' }, 'No PDF yet.')
   const progress = h('div', { class: 'progress', hidden: true }, h('div', { class: 'bar' }), h('span', {}))
-  const logPre = h('pre', { class: 'log' })
+  const logPre = h('pre', { class: 'log', hidden: true })
+  const problemList = h('ul', { class: 'problems' })
   const logSplit = h('div', { class: 'hsplit' })
-  const logBox = h('div', { class: 'logbox' }, logSplit, logPre)
+  const probTab = h('button', { class: 'ltab on', onclick: () => showLogView(false) }, 'Problems')
+  const rawTab = h('button', { class: 'ltab', onclick: () => showLogView(true) }, 'Raw log')
+  const logBox = h('div', { class: 'logbox' }, logSplit, h('div', { class: 'ltabs' }, probTab, rawTab), problemList, logPre)
+  const showLogView = (raw: boolean) => {
+    logPre.hidden = !raw; problemList.hidden = raw
+    probTab.classList.toggle('on', !raw); rawTab.classList.toggle('on', raw)
+  }
+  let problems: Problem[] = []
+  const onProblems: (() => void)[] = []
+  let synctex: SyncTex | null = null
+  let synctexBytes: Uint8Array | null = null
   let lastPdf: Uint8Array | null = null
   let pdfError: string | null = null
   let lastLog = ''
@@ -38,14 +57,45 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const logBtn = h('button', { title: 'Show/hide the compile log', onclick: () => setLogOpen(!!logBox.hidden) }, 'Log')
   const dlBtn = h('button', { title: 'Download the PDF', disabled: true, onclick: () => lastPdf && saveFile(`${fileBase(r)}.pdf`, lastPdf, 'application/pdf') }, '⤓ PDF')
   const compileBtn = h('button', { class: 'primary', title: 'Compile (⌘S / Ctrl+S)', onclick: () => compile() }, 'Compile')
+  const summary = h('button', { class: 'psummary', title: 'Show problems', hidden: true, onclick: () => { setLogOpen(true); showLogView(false) } })
 
   const pane = h('div', { class: 'pane output' },
-    h('div', { class: 'pdfbar' }, info, h('span', { class: 'spacer' }), dlBtn, logBtn),
+    h('div', { class: 'pdfbar' }, info, summary, h('span', { class: 'spacer' }), dlBtn, logBtn),
     progress, pdfView.el, logBox)
   verticalResizer(logSplit, logBox, 'texloom.logHeight', 60, 180)
   setLogOpen(localStorage.getItem(LOG_KEY) === '1')
 
-  function show(pdf: Uint8Array | null, log: string, text: string, ok: boolean) {
+  // double-click in the PDF: jump to the source line
+  pdfView.onPick = async (page, x, y) => {
+    const st = await syncTex()
+    const hit = st?.toSource(page, x, y)
+    if (hit) goto(hit.file, hit.line)
+  }
+  async function syncTex(): Promise<SyncTex | null> {
+    if (!synctex && synctexBytes) synctex = await SyncTex.load(synctexBytes, allFiles(r)).catch(() => null)
+    return synctex
+  }
+
+  function renderProblems() {
+    const n = { error: 0, warning: 0, box: 0 }
+    for (const p of problems) n[p.severity]++
+    const parts = [n.error && `✗ ${n.error} error${n.error > 1 ? 's' : ''}`, n.warning && `⚠ ${n.warning} warning${n.warning > 1 ? 's' : ''}`, n.box && `${n.box} bad box${n.box > 1 ? 'es' : ''}`].filter(Boolean)
+    summary.hidden = !parts.length
+    summary.textContent = parts.join(' · ')
+    summary.classList.toggle('has-errors', n.error > 0)
+    problemList.replaceChildren(...(problems.length ? problems.map((p) => h('li', {
+      class: `${p.severity} ${p.file ? 'clickable' : ''}`,
+      title: p.file ? 'Go to this line' : '',
+      onclick: () => { if (p.file) goto(p.file, p.line ?? 1) },
+    }, h('span', { class: 'sev' }, p.severity === 'error' ? '✗' : p.severity === 'warning' ? '⚠' : '▭'),
+      h('span', { class: 'msg' }, p.message),
+      p.file ? h('span', { class: 'loc' }, `${p.file}${p.line ? `:${p.line}` : ''}`) : null))
+      : [h('li', { class: 'muted' }, lastLog ? 'No errors or warnings.' : 'No compile log yet.')]))
+    for (const fn of onProblems) fn()
+  }
+
+  function show(pdf: Uint8Array | null, log: string, text: string, ok: boolean, stx?: Uint8Array | null) {
+    if (stx !== undefined) { synctexBytes = stx; synctex = null }
     if (pdf) {
       lastPdf = pdf
       pdfError = null
@@ -55,7 +105,9 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     logPre.textContent = log
     lastLog = log
     info.textContent = pdfError ?? text
-    if (!ok) setLogOpen(true)
+    problems = parseLog(log, allFiles(r))
+    renderProblems()
+    if (!ok) { setLogOpen(true); showLogView(false) }
   }
 
   // collaborators' (or the folder helper's) latest published output
@@ -63,8 +115,12 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     const o = r.out.get('latest')
     if (!o) return
     const dec = new TextDecoder()
-    const [pdf, log] = await Promise.all([o.pdf ? r.getBlob(o.pdf) : null, o.log ? r.getBlob(o.log).then((b) => dec.decode(b)) : ''])
-    show(pdf, log, `${o.ok ? '✓' : '✗ errors'} · ${o.by} · ${new Date(o.at * 1000).toLocaleTimeString()}`, !!o.ok)
+    const [pdf, log, stx] = await Promise.all([
+      o.pdf ? r.getBlob(o.pdf) : null,
+      o.log ? r.getBlob(o.log).then((b) => dec.decode(b)) : '',
+      o.synctex ? r.getBlob(o.synctex).catch(() => null) : null,
+    ])
+    show(pdf, log, `${o.ok ? '✓' : '✗ errors'} · ${o.by} · ${new Date(o.at * 1000).toLocaleTimeString()}`, !!o.ok, stx)
   }
   r.out.observe(() => renderLatest().catch(console.error))
   renderLatest().catch(console.error)
@@ -103,10 +159,11 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       const res = await compileInBrowser(await r.snapshotFiles(), main,
         { engine: r.meta.get('engine') || 'pdflatex', bib: r.meta.get('bib') || 'auto' }, (p) => showProgress(p))
       const secs = ((performance.now() - t0) / 1000).toFixed(1)
-      show(res.pdf, res.log, `${res.pdf ? '✓' : '✗ errors'} · in browser · ${secs}s`, !!res.pdf)
+      show(res.pdf, res.log, `${res.pdf ? '✓' : '✗ errors'} · in browser · ${secs}s`, !!res.pdf, res.synctex)
       if (writable && res.pdf) { // publish so collaborators see it without compiling
-        const [pdfId, logId] = await Promise.all([r.putBlob(res.pdf), r.putBlob(new TextEncoder().encode(res.log))])
-        r.out.set('latest', { pdf: pdfId, log: logId, ok: true, by: `${userName()} (browser)`, at: Date.now() / 1000, main })
+        const [pdfId, logId, stxId] = await Promise.all([r.putBlob(res.pdf), r.putBlob(new TextEncoder().encode(res.log)),
+          res.synctex ? r.putBlob(res.synctex) : null])
+        r.out.set('latest', { pdf: pdfId, log: logId, ...(stxId ? { synctex: stxId } : {}), ok: true, by: `${userName()} (browser)`, at: Date.now() / 1000, main })
       }
       return { ok: !!res.pdf, log: res.log }
     } catch (e) {
@@ -147,5 +204,20 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     autoTimer = setTimeout(() => { if (!compileBtn.hasAttribute('disabled')) compile() }, 2500)
   })
 
-  return { pane, compileBtn, compile, lastLog: () => lastLog, pdfView }
+  function showInPdf(file: string, line: number): boolean {
+    if (!synctexBytes) return false
+    syncTex().then((st) => {
+      const at = st?.toPdf(file, line)
+      if (at) pdfView.highlight(at.page, at.x, at.y, at.w, at.h)
+      else info.textContent = 'That line isn’t in the PDF (yet): compile first?'
+    })
+    return true
+  }
+  const out: Output = {
+    pane, compileBtn, compile, lastLog: () => lastLog, pdfView, problems: () => problems, onProblems, showInPdf, syncRequest: null,
+  }
+  const syncBtn = h('button', { title: 'Show the editor’s line in the PDF (⌘⌥→ / Ctrl+Alt+→). Double-click the PDF to go back to the source.', onclick: () => out.syncRequest?.() }, '⇥')
+  dlBtn.before(syncBtn)
+  renderProblems()
+  return out
 }

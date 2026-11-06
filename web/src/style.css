@@ -47,7 +47,8 @@ header { display: flex; align-items: center; gap: 10px; padding: 6px 12px; borde
 .status.connecting::before { color: var(--warn); }
 .status.offline::before { color: var(--err); }
 .peers { display: flex; gap: 3px; }
-.peer { width: 24px; height: 24px; border-radius: 50%; color: #fff; font-size: 11px; display: grid; place-items: center; text-transform: uppercase; }
+.peer { width: 24px; height: 24px; border-radius: 50%; color: #fff; font-size: 11px; display: grid; place-items: center; text-transform: uppercase; padding: 0; border: 2px solid transparent; cursor: pointer; }
+.peer:hover, .peer:focus-visible { border-color: var(--fg); }
 
 main { flex: 1; display: grid; min-height: 0; }
 aside { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
@@ -227,3 +228,23 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 .vstat.deleted { color: var(--err); } .vstat.added { color: var(--ok); }
 .diff.full { max-height: none; border: 1px solid var(--line); border-radius: 6px; }
 .cm-authors .author { display: block; font-size: 10px; padding: 0 6px 0 4px; border-left: 3px solid; color: var(--muted); white-space: nowrap; max-width: 9em; overflow: hidden; text-overflow: ellipsis; }
+
+/* problems & synctex */
+.ltabs { display: flex; gap: 2px; padding: 3px 6px 0; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
+.ltab { border: none; background: transparent; color: var(--muted); font-size: 12px; padding: 2px 8px; border-radius: 4px 4px 0 0; }
+.ltab.on { color: var(--fg); background: var(--bg); }
+.problems { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 0; font-size: 12px; background: var(--bg); }
+.problems[hidden] { display: none; }
+.problems li { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
+.problems li.clickable { cursor: pointer; }
+.problems li.clickable:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.problems .sev { flex: none; width: 1em; }
+.problems .error .sev { color: var(--err); } .problems .warning .sev { color: var(--warn); } .problems .box .sev { color: var(--muted); }
+.problems .msg { flex: 1; overflow-wrap: anywhere; }
+.problems .loc { flex: none; color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.log[hidden] { display: none; }
+.psummary { font-size: 12px; padding: 1px 8px; border-radius: 999px; color: var(--warn); }
+.psummary.has-errors { color: var(--err); border-color: color-mix(in srgb, var(--err) 50%, var(--line)); }
+.pdf .page { position: relative; flex: none; }
+.pdf-mark { position: absolute; background: color-mix(in srgb, #ffd400 45%, transparent); outline: 2px solid #e6b800; border-radius: 3px; pointer-events: none; animation: pdfmark 2.5s ease-out forwards; }
+@keyframes pdfmark { 0%, 70% { opacity: 1 } 100% { opacity: 0 } }

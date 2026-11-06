@@ -13,6 +13,7 @@ import { createFileTree } from './filetree'
 import { createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
+import { SyncTex } from './synctex'
 import { ProjectIndex } from './latex'
 import { autoSave, createHistoryPanel } from './history'
 import './style.css'
@@ -134,9 +135,41 @@ async function openProject(keys: Keys) {
 
   // ---- components ----
   const index = new ProjectIndex(r)
-  const output = createOutput(r, writable, () => device, () => me.name)
-  const editor = createEditorPane(r, writable, index, () => output.compile())
-  const tree = createFileTree(r, writable, (p) => editor.open(p))
+  const gotoSource = (file: string, line: number) => { tree.open(file); setTimeout(() => editor.goto(line), 0) }
+  const output = createOutput(r, writable, () => device, () => me.name, gotoSource)
+  const editor = createEditorPane(r, writable, index, {
+    onCompile: () => output.compile(),
+    onSync: () => syncToPdf(),
+    problems: (file) => output.problems().filter((p) => p.file === file),
+  })
+  const tree = createFileTree(r, writable, (p) => {
+    editor.open(p)
+    r.awareness.setLocalStateField('file', p) // so collaborators can jump to where you are
+  })
+
+  /** Jump to a collaborator: open their file at their cursor. */
+  function jumpTo(clientId: number) {
+    const st = r.awareness.getStates().get(clientId)
+    const file = typeof st?.file === 'string' ? st.file : null
+    if (!file || !r.files.has(file)) return
+    tree.open(file)
+    const head = st?.cursor?.head
+    if (head) {
+      try {
+        const abs = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(head), r.doc)
+        if (abs && abs.type === r.files.get(file)) { setTimeout(() => editor.gotoOffset(abs.index), 0); return }
+      } catch {}
+    }
+  }
+  function syncToPdf() {
+    const c = editor.context(), v = editor.view()
+    if (!c?.file || !v) return
+    if (layout.rightHidden) layout.showRight()
+    showTab('pdf')
+    if (!output.showInPdf(c.file, v.state.doc.lineAt(v.state.selection.main.head).number)) alert('Compile first: the PDF has no SyncTeX data yet.')
+  }
+  output.syncRequest = syncToPdf
+  output.onProblems.push(() => editor.relint())
   // right-hand panel tabs; panels other than the PDF are created on first use
   type Tab = 'pdf' | 'ai' | 'history'
   const panes: Record<Tab, HTMLElement> = {
@@ -280,8 +313,12 @@ async function openProject(keys: Keys) {
 
   r.awareness.on('change', () => {
     const others = [...r.awareness.getStates().entries()].filter(([id, s]) => id !== r.doc.clientID && s.user)
-    peers.replaceChildren(...others.map(([, s]) =>
-      h('span', { class: 'peer', style: `background:${/^#[0-9a-f]{6}$/i.test(s.user.color) ? s.user.color : '#888'}`, title: String(s.user.name).slice(0, 64) }, String(s.user.name).slice(0, 2))))
+    peers.replaceChildren(...others.map(([id, s]) => {
+      const name = String(s.user.name).slice(0, 64)
+      const where = typeof s.file === 'string' ? ` · ${String(s.file).slice(0, 100)}` : ''
+      return h('button', { class: 'peer', style: `background:${/^#[0-9a-f]{6}$/i.test(s.user.color) ? s.user.color : '#888'}`,
+        title: `${name}${where} — click to go to where they are`, 'aria-label': `Go to ${name}`, onclick: () => jumpTo(id) }, name.slice(0, 2))
+    }))
     if (!removing) projects.sawPeople(keys.project, others.map(([, s]) => String(s.user.name)), me.name)
   })
 
@@ -309,7 +346,7 @@ async function openProject(keys: Keys) {
   r.meta.observe(renderMeta); renderMeta()
 
   // debugging handle, only when enabled with localStorage['texloom.debug'] = '1'
-  try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs } } catch {}
+  try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor } } catch {}
 }
 
 function share(keys: Keys) {

@@ -64,7 +64,7 @@ export async function compileInBrowser(
   main: string,
   opts: { engine?: string; bib?: string } = {},
   onProgress?: (p: Progress) => void,
-): Promise<{ pdf: Uint8Array | null; log: string }> {
+): Promise<{ pdf: Uint8Array | null; log: string; synctex: Uint8Array | null }> {
   progressCb = onProgress
   try {
     const r = await getRunner()
@@ -86,7 +86,7 @@ export async function compileInBrowser(
       main, bibtex, biber, makeindex, true, 'silent',
       DRIVERS[(opts.engine ?? 'pdflatex') as keyof typeof DRIVERS] ?? DRIVERS.pdflatex,
     )
-    return { pdf: res.success && res.pdf ? res.pdf : null, log: res.log }
+    return { pdf: res.success && res.pdf ? res.pdf : null, log: res.log, synctex: res.synctex ?? null }
   } finally {
     progressCb = undefined
   }

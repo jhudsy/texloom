@@ -6,6 +6,7 @@ import { linter, type Diagnostic } from '@codemirror/lint'
 import { EditorSelection, Prec, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import type { Replica } from './replica'
+import type { Problem } from './latexlog'
 import { IMAGE_RE } from './projectfiles'
 
 // ---------------------------------------------------------------------------
@@ -296,11 +297,19 @@ function wrapWith(cmd: string) {
 // ---------------------------------------------------------------------------
 // Warnings for references that don't resolve.
 // ---------------------------------------------------------------------------
-function referenceLinter(index: ProjectIndex) {
+function referenceLinter(index: ProjectIndex, compileProblems: () => Problem[]) {
   return linter((view) => {
     const idx = index.get()
     const text = view.state.doc.toString()
     const out: Diagnostic[] = []
+    // problems from the last compile, for this file
+    const doc = view.state.doc
+    for (const p of compileProblems()) {
+      if (!p.line || p.line > doc.lines) continue
+      const l = doc.line(p.line)
+      out.push({ from: l.from, to: Math.max(l.from, l.to), severity: p.severity === 'error' ? 'error' : p.severity === 'warning' ? 'warning' : 'info',
+        message: `${p.severity === 'box' ? 'Layout' : 'Compile'}: ${p.message}`, source: 'LaTeX' })
+    }
     const keys = new Set(idx.bib.map((b) => b.key))
     const labels = new Set(idx.labels.map((l) => l.key))
     for (const m of text.matchAll(/\\([A-Za-z]+\*?)(?:\[[^\]]*\])*\{([^{}]*)\}/g)) {
@@ -342,15 +351,16 @@ function isCommented(text: string, pos: number): boolean {
 
 // ---------------------------------------------------------------------------
 /** All LaTeX editing support. `onCompile` runs on Mod-S. */
-export function latexSupport(index: ProjectIndex, opts: { onCompile: () => void }): Extension {
+export function latexSupport(index: ProjectIndex, opts: { onCompile: () => void; onSync: () => void; problems: () => Problem[] }): Extension {
   return [
     autocompletion({ override: [completionSource(index)], activateOnTyping: true, icons: false }),
     Prec.highest(keymap.of([
       { key: 'Mod-s', run: () => { opts.onCompile(); return true }, preventDefault: true },
+      { key: 'Mod-Alt-ArrowRight', run: () => { opts.onSync(); return true }, preventDefault: true },
       { key: 'Mod-b', run: wrapWith('textbf'), preventDefault: true },
       { key: 'Mod-i', run: wrapWith('textit'), preventDefault: true },
     ])),
     Prec.high(autoEnd),
-    referenceLinter(index),
+    referenceLinter(index, opts.problems),
   ]
 }

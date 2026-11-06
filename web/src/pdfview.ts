@@ -8,6 +8,9 @@ export { pdfjs }
 
 export class PdfView {
   readonly el: HTMLDivElement
+  /** Double-click on a page: page number (1-based) and position in PDF points from the top-left. */
+  onPick: ((page: number, x: number, y: number) => void) | null = null
+  private pages: { wrap: HTMLDivElement; scale: number }[] = []
   private gen = 0
   private last: Uint8Array | null = null
   private renderedWidth = 0
@@ -22,6 +25,26 @@ export class PdfView {
       clearTimeout(t)
       t = setTimeout(() => { if (this.last) this.show(this.last).catch(() => {}) }, 250)
     }).observe(this.el)
+    this.el.addEventListener('dblclick', (e) => {
+      const wrap = (e.target as HTMLElement).closest('.page') as HTMLDivElement | null
+      const i = this.pages.findIndex((p) => p.wrap === wrap)
+      if (i < 0 || !this.onPick) return
+      const rect = wrap!.getBoundingClientRect()
+      const s = this.pages[i].scale
+      this.onPick(i + 1, (e.clientX - rect.left) / s, (e.clientY - rect.top) / s)
+    })
+  }
+
+  /** Briefly highlight a box (PDF points from the page's top-left) and scroll it into view. */
+  highlight(page: number, x: number, y: number, w: number, h: number) {
+    const p = this.pages[page - 1]
+    if (!p) return
+    const mark = document.createElement('div')
+    mark.className = 'pdf-mark'
+    Object.assign(mark.style, { left: `${(x - 2) * p.scale}px`, top: `${(y - 2) * p.scale}px`, width: `${(w + 4) * p.scale}px`, height: `${(h + 4) * p.scale}px` })
+    p.wrap.append(mark)
+    mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setTimeout(() => mark.remove(), 2500)
   }
 
   async show(data: Uint8Array) {
@@ -34,6 +57,7 @@ export class PdfView {
     this.renderedWidth = this.el.clientWidth
     const width = this.el.clientWidth - 24
     const pages = document.createDocumentFragment()
+    const info: { wrap: HTMLDivElement; scale: number }[] = []
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i)
       const base = page.getViewport({ scale: 1 })
@@ -46,8 +70,13 @@ export class PdfView {
       canvas.style.height = `${Math.floor(vp.height)}px`
       await page.render({ canvas, viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined }).promise
       if (gen !== this.gen) return
-      pages.append(canvas)
+      const wrap = document.createElement('div')
+      wrap.className = 'page'
+      wrap.append(canvas)
+      pages.append(wrap)
+      info.push({ wrap, scale: vp.width / base.width })
     }
+    this.pages = info
     this.el.replaceChildren(pages)
     this.el.scrollTop = scrollFrac * this.el.scrollHeight
   }
