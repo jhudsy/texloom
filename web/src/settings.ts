@@ -75,7 +75,7 @@ export async function setupDialog(r: Replica, link: string): Promise<Device> {
       h('label', { class: 'field' }, 'Your name', nameIn),
       h('h4', {}, 'Where do the files live?'),
       radios('where', 'browser', [
-        ['browser', 'Only in this browser', 'Works offline. Nothing to install. Remove it any time from ⚙ Settings or the start page.'],
+        ['browser', 'Only in this browser', 'Works offline. Nothing to install. Note: clearing this browser’s data deletes this copy; keep the link so it can be reopened from the server’s copy.'],
         ['folder', 'In this browser and in a folder on this computer', 'For editing with other tools or agents, and compiling with your own TeX. The folder is a separate copy: delete it like any folder.'],
       ], (v) => (folderBox.hidden = v !== 'folder')),
       folderBox,
@@ -147,6 +147,9 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     h('label', { class: 'check' },
       h('input', { type: 'checkbox', 'aria-label': 'Recompile automatically', checked: d.autoCompile, onchange: (e: any) => { d.autoCompile = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
       'Recompile automatically after I stop typing'),
+    h('div', { class: 'row' },
+      h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, 'Creation code…'),
+      h('span', { class: 'muted small' }, 'Needed only to store new projects on servers that ask for one.')),
     h('details', {}, h('summary', {}, 'Keep a copy in a folder on this computer'), folderHelp(r, link)),
     h('h4', {}, 'Remove'),
     h('p', { class: 'muted small' },

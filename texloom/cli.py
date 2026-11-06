@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -41,12 +42,14 @@ DEFAULT_CONFIG = {
     "latexmk_args": [],        # extra arguments, e.g. ["-pdfxe"]
     "shell_escape": False,     # allow \write18 (minted etc.). Runs code from collaborators!
     "label": "",               # how your compiles are labelled for others
+    "create_code": "",         # creation code, if the server requires one for new projects
 }
 
 
-def save(d: Path, link: str) -> None:
+def save(d: Path, link: str, create_code: str = "") -> None:
     (d / STATE).mkdir(parents=True, exist_ok=True)
-    config_path(d).write_text(json.dumps({"link": link, **DEFAULT_CONFIG}, indent=2))
+    config_path(d).write_text(json.dumps({"link": link, **DEFAULT_CONFIG, "create_code": create_code}, indent=2))
+    config_path(d).chmod(0o600)  # contains the project keys
     (d / STATE / ".gitignore").write_text("*\n")
 
 
@@ -61,7 +64,8 @@ def print_links(keys: Keys, server: str) -> None:
 async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool = False) -> None:
     cfg = {**DEFAULT_CONFIG, **load_config(d)}
     keys, server = load(d)
-    replica = Replica(d / STATE, keys, server)
+    code = cfg["create_code"] or os.environ.get("TEXLOOM_CODE", "")
+    replica = Replica(d / STATE, keys, server, code or None)
     import platform
     opts = {"engine": cfg["engine"], "latexmk_args": cfg["latexmk_args"],
             "shell_escape": cfg["shell_escape"] or shell_escape,
@@ -98,6 +102,8 @@ def main() -> None:
     p.add_argument("dir", type=Path)
     p.add_argument("--server", required=True)
     p.add_argument("--name")
+    p.add_argument("--code", default=os.environ.get("TEXLOOM_CODE", ""),
+                   help="creation code, if the server requires one to store new projects")
     p = sub.add_parser("clone", help="check out a project from a link")
     p.add_argument("link")
     p.add_argument("dir", type=Path)
@@ -123,8 +129,8 @@ def main() -> None:
         if config_path(a.dir).exists():
             sys.exit(f"{a.dir} is already a texloom project")
         keys = Keys.generate()
-        save(a.dir, keys.link(a.server))
-        r = Replica(a.dir / STATE, keys, a.server)
+        save(a.dir, keys.link(a.server), a.code)
+        r = Replica(a.dir / STATE, keys, a.server, a.code or None)
         r.local_change(lambda: r.meta.__setitem__("name", a.name or a.dir.resolve().name))
         r.save()
         asyncio.run(run(a.dir, False, once=True))

@@ -179,3 +179,13 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 .recent .icon:hover { color: var(--fg); }
 .recent .forget:hover { color: var(--err); }
 .landing h2 small { font-weight: normal; }
+
+/* storage warnings */
+.risk { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 6px 12px; font-size: 13px;
+  background: color-mix(in srgb, var(--warn) 16%, var(--bg)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.risk[hidden] { display: none; }
+.risk .actions { display: flex; gap: 6px; flex: none; }
+.status.warn::before { color: var(--warn); }
+.status.warn { color: var(--warn); }
+.recent .tag.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+.radio.choice { text-align: left; width: 100%; font: inherit; color: inherit; }

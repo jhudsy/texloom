@@ -27,10 +27,12 @@ COMPACT_AFTER = 300  # log entries before a writer uploads a snapshot
 
 
 class Replica:
-    def __init__(self, state_dir: Path, keys: Keys, server: str):
+    def __init__(self, state_dir: Path, keys: Keys, server: str, create_code: str | None = None):
         self.dir = state_dir
         self.keys = keys
         self.server = server.rstrip("/")
+        self.create_code = create_code  # needed only to store a *new* project on some servers
+        self._warned: set[str] = set()
         self.doc = Doc()
         self.files: Map = self.doc.get("files", type=Map)
         self.bin: Map = self.doc.get("bin", type=Map)
@@ -190,11 +192,16 @@ class Replica:
             bid = marker.name
             data = self.keys.encrypt((self.dir / "blobs" / bid).read_bytes())
             sig = self.keys.sign(f"blob:{bid}:".encode() + data)
+            headers = {"X-Sig": b64e(sig)}
+            if self.create_code:
+                headers["X-Create-Code"] = self.create_code
             try:
                 async with self.http.put(
-                    f"{self.server}/blob/{self.keys.project}/{bid}", data=data,
-                    headers={"X-Sig": b64e(sig)},
+                    f"{self.server}/blob/{self.keys.project}/{bid}", data=data, headers=headers,
                 ) as r:
+                    if r.status in (403, 413, 507):
+                        self._storage_warning((await r.json(content_type=None) or {}).get("code", str(r.status)))
+                        return
                     r.raise_for_status()
                 marker.unlink()
             except aiohttp.ClientError as e:
@@ -296,6 +303,18 @@ class Replica:
         self.pending_mode = mode
         self.save()
 
+    def _storage_warning(self, code: str) -> None:
+        if code in self._warned:
+            return
+        self._warned.add(code)
+        log.warning({
+            "needs-code": "NOT SAVED ON SERVER: this server needs a creation code to store new projects. "
+                          "Add \"create_code\" to .texloom/config.json (or set TEXLOOM_CODE) and restart. "
+                          "Changes still reach collaborators who are online.",
+            "project-full": "NOT SAVED ON SERVER: this project has reached the server's size limit.",
+            "server-full": "NOT SAVED ON SERVER: the server is out of space; changes are kept here and retried.",
+        }.get(code, f"not saved on server: {code}"))
+
     # --- connection loop -------------------------------------------------------
     async def run(self) -> None:
         ws_url = self.server.replace("http", "ws", 1) + f"/ws/{self.keys.project}"
@@ -309,7 +328,10 @@ class Replica:
                         backoff = 1
                         log.info("connected to %s", self.server)
                         self.connected.set()
-                        await ws.send_json({"t": "hello", "since": self.since})
+                        hello = {"t": "hello", "since": self.since}
+                        if self.create_code:
+                            hello["code"] = self.create_code
+                        await ws.send_json(hello)
                         async for msg in ws:
                             if msg.type != aiohttp.WSMsgType.TEXT:
                                 continue
@@ -352,4 +374,7 @@ class Replica:
             self.outbox.pop(m.get("id"), None)
             self.save()
         elif t == "err":
-            log.warning("server: %s", m.get("m"))
+            if m.get("code") in ("needs-code", "project-full", "server-full"):
+                self._storage_warning(m["code"])  # kept in the outbox; retried on reconnect
+            else:
+                log.warning("server: %s", m.get("m"))

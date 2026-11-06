@@ -27,6 +27,12 @@ opens a link, they're asked:
 - how to compile: in the browser, with their own TeX, or not at all;
 - whether to sync live or manually.
 
+**If you work only in the browser, your copy lives in the browser's storage.** Clearing
+the site's data (or history and site data) deletes it, and Safari may delete a site's
+data after about 7 days without a visit. A project stored on the server can be
+reopened from its link. One that isn't (marked **not on server**, with a warning in the
+editor) survives only on devices, so keep a folder copy.
+
 The start page lists the projects you've opened **in that browser**, with ✕ to remove
 one. Each entry shows a short **project code** (the same one `texloom links` prints), so
 two projects with the same name can always be told apart. It also shows:
@@ -69,6 +75,38 @@ browsers only allow the encryption the editor relies on over secure connections.
 | **Tailscale Funnel** | Tailscale on the server | `tailscale funnel 8787` gives `https://<machine>.<tailnet>.ts.net`, also with no open ports |
 
 To keep it running, there's a systemd unit in [deploy/texloom.service](deploy/texloom.service).
+
+### Storage limits and creation codes
+
+The server can't see what it stores, and making a project needs no account, so it
+protects itself by size, and optionally by who may *create* stored projects:
+
+| option | default | effect |
+|---|---|---|
+| `--max-bytes` | `2G` | total texloom may store |
+| `--min-free` | `2G` | stop storing when the disk's free space drops below this (protects other sites on the machine) |
+| `--project-max-bytes` | `200M` | cap per project |
+| `--codes-file FILE` | off | storing a **new** project needs a creation code from this file |
+
+A refused change is never lost:
+- it still reaches everyone online at that moment;
+- the sender keeps it and retries later;
+- the editor shows a warning that the project isn't saved on the server.
+
+With creation codes, opening and editing projects shared with you still needs only the
+link. A code is needed once per browser, and only to make the server store a project it
+doesn't already have. Without a code, people can still create projects with no server
+copy.
+
+```bash
+texloom-server --codes-file /etc/texloom/codes.txt --add-code alice   # prints a new code
+texloom-server --codes-file /etc/texloom/codes.txt --list-codes --db /var/lib/texloom/texloom.db
+```
+
+The file is plain text, `code  label` per line. Delete a line to revoke a code (projects
+already created stay stored). It's re-read automatically. The folder helper takes a
+code with `texloom new … --code`, the `create_code` entry in `.texloom/config.json`, or
+`TEXLOOM_CODE`.
 
 **Ubuntu/Debian with nginx** (e.g. alongside other sites): [deploy/install.sh](deploy/install.sh)
 builds locally, copies the code over SSH and sets up a `texloom` user, a sandboxed

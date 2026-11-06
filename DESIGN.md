@@ -120,6 +120,20 @@ command only when its user *changes* the setting, queuing it if offline; it neve
 "corrects" the server on connect, so a stale replica can't undo someone else's
 switch. Switching back to `server` re-uploads a full snapshot and all blobs.
 
+**Storage safeguards.** The server can't inspect content, and project ids are free to
+mint, so it limits by size and, optionally, by who may create stored projects.
+- **Usage:** it keeps byte counts per project (log + blobs) and overall, and checks free
+  disk space before each write.
+- **Refusals:** a write that would exceed `--project-max-bytes`, `--max-bytes` or
+  `--min-free` is refused with `err {code: "project-full" | "server-full"}`. Under
+  `--codes-file`, the first write to an unregistered project needs a valid creation code,
+  sent in `hello` or the `X-Create-Code` header; otherwise it gets `needs-code`.
+- **No lost work:** a refused `up` is still broadcast live but not acked, so it stays in the
+  sender's outbox and is retried. Clients show a "not saved on server" warning.
+- **Registration:** registered projects need no code afterwards. Projects stored before
+  this feature are grandfathered in.
+- **Rate limits:** nginx limits code checks (6/min per IP), uploads and connections.
+
 **Manual sync (per device):** the replica doesn't keep a connection open. Local edits
 build up in the outbox; **Sync now** connects, runs the same catch-up, flushes the
 outbox, waits briefly for peers' replies and disconnects. `texloom sync <dir>` is the

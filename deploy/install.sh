@@ -62,6 +62,13 @@ if [ "$(cat tex-assets/.version 2>/dev/null)" != "$BUSYTEX_VERSION" ]; then
   rm -rf tex-assets && mv tex-assets.new tex-assets
 fi
 
+# creation codes: storing a new project needs one (see README); print the first one
+install -d -o root -g texloom -m 750 /etc/texloom
+if [ ! -s /etc/texloom/codes.txt ]; then
+  echo "    first creation code: $(.venv/bin/texloom-server --codes-file /etc/texloom/codes.txt --db /var/lib/texloom/texloom.db --add-code owner)"
+fi
+chown root:texloom /etc/texloom/codes.txt && chmod 640 /etc/texloom/codes.txt
+
 # systemd service
 cat > /etc/systemd/system/texloom.service <<UNIT
 [Unit]
@@ -72,7 +79,7 @@ Wants=network-online.target
 [Service]
 User=texloom
 WorkingDirectory=/opt/texloom
-ExecStart=/opt/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static /opt/texloom/web/dist --tex-assets /opt/texloom/tex-assets
+ExecStart=/opt/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static /opt/texloom/web/dist --tex-assets /opt/texloom/tex-assets --codes-file /etc/texloom/codes.txt --max-bytes 2G --min-free 2G --project-max-bytes 200M
 Restart=on-failure
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -92,6 +99,12 @@ systemctl restart texloom
 SITE=/etc/nginx/sites-available/$DOMAIN
 if [ ! -f "$SITE" ]; then
   cat > "$SITE" <<NGINX
+# Rate limits (http context; names prefixed to avoid clashing with other sites)
+limit_req_zone \$binary_remote_addr zone=texloom_code:1m rate=6r/m;
+map \$request_method \$texloom_put_key { PUT \$binary_remote_addr; default ""; }
+limit_req_zone \$texloom_put_key zone=texloom_upload:10m rate=10r/s;
+limit_conn_zone \$binary_remote_addr zone=texloom_ws:10m;
+
 server {
     listen 80;
     listen [::]:80;
@@ -103,6 +116,7 @@ server {
 
     # encrypted sync (WebSocket); connections are long-lived
     location /ws/ {
+        limit_conn texloom_ws 30;
         proxy_pass http://127.0.0.1:8787;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -113,11 +127,23 @@ server {
     }
     # encrypted file blobs (images, PDFs)
     location /blob/ {
+        limit_req zone=texloom_upload burst=40;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
         client_max_body_size 75m;
         proxy_request_buffering off;
     }
+    # server info and creation-code checks
+    location = /api/code {
+        limit_req zone=texloom_code burst=5 nodelay;
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host \$host;
+    }
+    location /api/ {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host \$host;
+    }
+
     # in-browser TeX engine and packages: big, immutable per version
     location /core/ {
         alias /opt/texloom/tex-assets/;

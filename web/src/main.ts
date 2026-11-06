@@ -13,6 +13,7 @@ import { prefs, setupDialog, settingsDialog, type Device } from './settings'
 import { PdfView } from './pdfview'
 import { createAssistantPanel } from './assistant/panel'
 import { setupLayout } from './layout'
+import { chooseNewProject, riskBanner, SAFARI_NOTE } from './storagenotice'
 import './style.css'
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T
@@ -50,11 +51,20 @@ function landing() {
     h('p', { class: 'sub' }, 'Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.'),
     h('label', {}, 'Name', nameIn),
     h('div', { class: 'row' },
-      h('button', { class: 'primary', onclick: () => { location.hash = Keys.generate().fragment() } }, 'New project'),
+      h('button', { class: 'primary', onclick: async () => {
+        const where = await chooseNewProject()
+        if (!where) return
+        const k = Keys.generate()
+        if (where === 'relay') try { localStorage.setItem(`texloom.newRelay.${k.project}`, '1') } catch {}
+        location.hash = k.fragment()
+      } }, 'New project'),
       linkIn,
       h('button', { onclick: () => { const i = linkIn.value.indexOf('#'); if (i >= 0) location.hash = linkIn.value.slice(i) } }, 'Open'),
     ),
     h('h2', {}, 'Your projects', h('small', { class: 'muted' }, ' — opened in this browser')),
+    h('p', { class: 'muted small' },
+      `These are kept in this browser. Clearing this site’s data (or the browser’s history and site data) deletes them here.${SAFARI_NOTE} ` +
+      'Keep the links somewhere safe: a project stored on the server can always be reopened from its link. Projects marked “not on server” exist only on devices.'),
     projectList(),
   )
 }
@@ -78,7 +88,7 @@ function projectList(): HTMLElement {
         h('a', { href: '#' + r.fragment, class: 'pname' }, label),
         h('code', { class: 'pcode', title: 'Project code: the start of this project’s unique ID. Two projects with the same name always have different codes.' }, projectCode(r.project)),
         h('span', { class: `tag ${r.writable ? '' : 'ro'}` }, r.writable ? 'edit' : 'read-only'),
-        r.storage === 'relay' ? h('span', { class: 'tag', title: 'The server keeps no copy of this project' }, 'no server copy') : '',
+        r.atRisk || r.storage === 'relay' ? h('span', { class: 'tag warn', title: 'The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.' }, 'not on server') : '',
         h('span', { class: 'spacer' }),
         h('button', { class: 'icon', title: 'Private label (only you see it)', 'aria-label': `Label ${label}`, onclick: () => {
           const v = prompt(`Private label for “${r.name || 'this project'}” (${projectCode(r.project)}).\nOnly you see it, in this browser. Leave empty to use the shared name.`, r.nick ?? '')
@@ -109,6 +119,12 @@ async function openProject(keys: Keys) {
   const me = { name: store.name || `anon-${r.doc.clientID % 1000}`, color: COLORS[r.doc.clientID % COLORS.length] }
   r.awareness.setLocalStateField('user', { ...me, colorLight: me.color + '33' })
   if (writable && !r.meta.get('name')) r.meta.set('name', 'Untitled project')
+  try {
+    if (writable && localStorage.getItem(`texloom.newRelay.${keys.project}`)) {
+      localStorage.removeItem(`texloom.newRelay.${keys.project}`)
+      r.setStorage('relay') // chosen at creation: no server copy
+    }
+  } catch {}
   if (writable && r.files.size === 0 && r.bin.size === 0 && !r.meta.get('seeded')) {
     // brand-new project: give it a starter file
     setTimeout(() => {
@@ -168,6 +184,7 @@ async function openProject(keys: Keys) {
   const splitL = h('div', { class: 'split' })
   const splitR = h('div', { class: 'split' })
   const mainEl = h('main', {})
+  const risk = riskBanner(r, writable, () => openSettings())
   app.append(
     h('header', {},
       leftBtn,
@@ -176,17 +193,21 @@ async function openProject(keys: Keys) {
       h('span', { class: 'spacer' }), peers, status,
       syncBtn,
       h('button', { onclick: () => share(keys) }, 'Share'),
-      h('button', { title: 'Settings', onclick: () => settingsDialog(r, keys.link(server, writable), applyDevice, async () => {
+      h('button', { title: 'Settings', onclick: () => openSettings() }, '⚙'),
+      compileBtn,
+      rightBtn,
+    ),
+    risk.el,
+    mainEl,
+  )
+  function openSettings() {
+    settingsDialog(r, keys.link(server, writable), applyDevice, async () => {
         removing = true
         await r.close()
         await projects.forget(keys.project)
         location.href = '/'
-      }) }, '⚙'),
-      compileBtn,
-      rightBtn,
-    ),
-    mainEl,
-  )
+    })
+  }
   mainEl.append(
       h('aside', {},
         h('div', { class: 'tools' },
@@ -229,8 +250,18 @@ async function openProject(keys: Keys) {
       : r.status === 'paused' ? `manual sync${unsent}`
       : `offline${unsent} (changes kept locally)`
     status.title = r.storage === 'relay' ? 'The server keeps no copy: changes reach collaborators only while you are both online.' : 'Changes are stored encrypted on the server.'
+    if (r.storeProblem && r.storage !== 'relay' && r.status === 'online') {
+      status.textContent = 'not saved on server'
+      status.className = 'status warn'
+      status.title = 'Changes reach collaborators who are online, and stay in this browser, but the server isn’t storing them. See the warning above.'
+    }
+    risk.render()
+    const atRisk = !!r.storeProblem || r.storage === 'relay'
+    if (!removing && atRisk !== lastRisk) { lastRisk = atRisk; projects.update(keys.project, { atRisk }) }
   }
+  let lastRisk: boolean | null = null
   r.onStatus = renderStatus; renderStatus()
+  r.meta.observe(() => renderStatus()) // storage mode can change from Settings or a collaborator
   applyDevice(device)
   const renderPeers = () => {
     peers.replaceChildren(...[...r.awareness.getStates().entries()].filter(([id, s]) => id !== r.doc.clientID && s.user)

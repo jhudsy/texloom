@@ -53,6 +53,16 @@ export async function forgetLocalCopy(project: string): Promise<void> {
   await Promise.all([del(`texloom-${project}`), del(`texloom-doc-${project}`)])
 }
 
+/** Creation code for storing new projects on this server (if it requires one). */
+export const creationCode = {
+  get(): string { try { return localStorage.getItem('texloom.code') || '' } catch { return '' } },
+  set(v: string) { try { localStorage.setItem('texloom.code', v) } catch {} },
+}
+
+/** Why the server isn't storing this project's changes (they still reach people online). */
+export type StoreProblem = 'needs-code' | 'project-full' | 'server-full' | null
+export interface StoreInfo { registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number }
+
 export type Status = 'offline' | 'connecting' | 'online' | 'paused'
 export type SyncMode = 'live' | 'manual'
 export type StorageMode = 'server' | 'relay'
@@ -68,6 +78,8 @@ export class Replica {
   pending = 0 // local updates not yet acknowledged
   peers = 0 // other connections to this project right now
   serverMode: StorageMode = 'server'
+  storeProblem: StoreProblem = null
+  storeInfo: StoreInfo | null = null
   onStatus: () => void = () => {}
   onCompileAck: (info: { by: string }) => void = () => {}
 
@@ -147,7 +159,8 @@ export class Replica {
     this.ws = ws
     ws.onopen = () => {
       this.backoff = 1000
-      ws.send(JSON.stringify({ t: 'hello', since: this.since }))
+      const code = creationCode.get()
+      ws.send(JSON.stringify({ t: 'hello', since: this.since, ...(code ? { code } : {}) }))
     }
     ws.onmessage = (ev) => this.handle(JSON.parse(ev.data)).catch((e) => console.error(e))
     ws.onclose = () => {
@@ -164,6 +177,8 @@ export class Replica {
       case 'log':
         this.serverMode = m.mode
         this.peers = m.peers ?? 0
+        this.storeInfo = m.store ?? null
+        if (this.storeInfo?.registered && this.storeProblem === 'needs-code') this.storeProblem = null
         await this.apply(m.entries)
         this.since = Math.max(this.since, m.head)
         for (const q of this.seen) if (q <= this.since) this.seen.delete(q)
@@ -184,6 +199,7 @@ export class Replica {
         break
       case 'ack': {
         if (m.q) this.markSeen(m.q)
+        if (m.q && this.storeProblem) { this.storeProblem = null; this.onStatus() }
         for (const id of this.inflight.get(m.id) ?? []) await idbDel(this.db, 'outbox', id)
         this.inflight.delete(m.id)
         this.pending = (await idbKeys(this.db, 'outbox')).length
@@ -202,11 +218,32 @@ export class Replica {
         break
       case 'mode':
         this.serverMode = m.m
+        if (m.m === 'relay') this.storeProblem = null // not storing is the point
         this.onStatus()
         break
       case 'err':
-        console.warn('server:', m.m)
+        if (m.code === 'needs-code' || m.code === 'project-full' || m.code === 'server-full') {
+          // Not stored, but already relayed to anyone online. Keep it in the outbox; retry later.
+          if (m.id) this.inflight.delete(m.id)
+          this.storeProblem = m.code
+          this.scheduleRetry()
+          this.onStatus()
+        } else console.warn('server:', m.m)
     }
+  }
+
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private scheduleRetry() {
+    if (this.retryTimer || this.storeProblem === 'needs-code') return // a code only helps once entered
+    this.retryTimer = setTimeout(() => { this.retryTimer = null; if (this.status === 'online') this.flushOutbox() }, 5 * 60_000)
+  }
+
+  /** Reconnect (e.g. after entering a creation code) so the server re-evaluates storing. */
+  retryStore() {
+    this.storeProblem = null
+    this.onStatus()
+    if (this.syncMode === 'manual') { this.syncNow(); return }
+    ;(this.ws as WebSocket | null)?.close() // onclose reconnects; hello carries the new code
   }
 
   private markSeen(q: number) {
@@ -316,6 +353,7 @@ export class Replica {
     const ts = Math.floor(Date.now() / 1000)
     this.ws.send(JSON.stringify({ t: 'mode', m: mode, ts, s: b64e(this.keys.sign(`mode:${mode}:${ts}`, new Uint8Array())) }))
     this.serverMode = mode
+    if (mode === 'relay') this.storeProblem = null
     await idbDel(this.db, 'kv', 'pendingMode')
     if (mode === 'server') {
       // Give the server a complete copy again: full state plus every blob we hold.
@@ -350,9 +388,15 @@ export class Replica {
     for (const id of (await idbKeys(this.db, 'pending')) as string[]) {
       const plain = await idbGet<Uint8Array>(this.db, 'blobs', id)
       const d = await this.keys.encrypt(plain)
+      const code = creationCode.get()
       const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
-        method: 'PUT', body: d as BodyInit, headers: { 'X-Sig': b64e(this.keys.sign(`blob:${id}:`, d)) },
+        method: 'PUT', body: d as BodyInit,
+        headers: { 'X-Sig': b64e(this.keys.sign(`blob:${id}:`, d)), ...(code ? { 'X-Create-Code': code } : {}) },
       }).catch(() => null)
+      if (r && [403, 413, 507].includes(r.status)) {
+        const why = (await r.json().catch(() => ({}))).code
+        if (why) { this.storeProblem = why; this.scheduleRetry(); this.onStatus() }
+      }
       if (!r?.ok) return
       await idbDel(this.db, 'pending', id)
     }

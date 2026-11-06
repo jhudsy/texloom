@@ -15,6 +15,7 @@ export interface Recent {
   createdBy?: string
   files?: number
   storage?: 'server' | 'relay'
+  atRisk?: boolean // no server copy as far as this browser knows
 }
 
 const KEY = 'texloom.recent'
