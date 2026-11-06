@@ -302,3 +302,7 @@ aside .tab { padding: 4px 8px; }
 .tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
 .tgrid .choice { text-align: left; }
 .importdlg .row input { flex: 1; min-width: 0; }
+.members { list-style: none; padding: 0; margin: 6px 0; }
+.members li { display: flex; align-items: baseline; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.members li.revoked .mname { text-decoration: line-through; color: var(--muted); }
+.share .row input { flex: 1; min-width: 0; }

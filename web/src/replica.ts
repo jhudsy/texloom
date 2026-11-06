@@ -9,7 +9,7 @@
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as awarenessProtocol from 'y-protocols/awareness'
-import { Keys, b64d, b64e } from './crypto'
+import { Keys, b64d, b64e, revokeMsg, signer } from './crypto'
 
 const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
@@ -75,6 +75,9 @@ export class Replica {
   readonly bin = this.doc.getMap<{ h: string; size: number }>('bin')
   readonly dirs = this.doc.getMap<boolean>('dirs') // explicit (possibly empty) folders
   readonly versions = this.doc.getArray<any>('versions') // saved versions: {at, by, label, auto, snap}
+  readonly members = this.doc.getMap<any>('members') // personal links: public key -> {name, at, by, revoked?}
+  /** This personal link was revoked by the owner. */
+  withdrawn = false
   readonly clients = this.doc.getMap<string>('clients') // Yjs client id -> display name (for "who wrote this")
   readonly review = this.doc.getMap<Y.Map<any>>('review') // comments and suggested changes (review.ts)
   /** Called after every change made on this device (not ones received from others). */
@@ -187,6 +190,7 @@ export class Replica {
         this.serverMode = m.mode
         this.peers = m.peers ?? 0
         this.storeInfo = m.store ?? null
+        this.learnRevoked(m.rv ?? [])
         if (this.storeInfo?.registered && this.storeProblem === 'needs-code') this.storeProblem = null
         await this.apply(m.entries)
         this.since = Math.max(this.since, m.head)
@@ -224,6 +228,9 @@ export class Replica {
       }
       case 'p2p':
         await this.onP2p(m)
+        break
+      case 'rv':
+        this.learnRevoked([m])
         break
       case 'mode':
         this.serverMode = m.m
@@ -328,7 +335,7 @@ export class Replica {
         break
       }
       case 'upd':
-        if (!m.s || !this.keys.verify('p2p:', data, b64d(m.s))) { console.warn('unsigned p2p update ignored'); return }
+        if (!m.s || !this.keys.verify('p2p:', data, b64d(m.s), true)) { console.warn('unsigned p2p update ignored'); return }
         Y.applyUpdate(this.doc, b64d(p.u), REMOTE)
         break
       case 'breq': {
@@ -357,6 +364,28 @@ export class Replica {
   }
 
   // ---- storage mode -----------------------------------------------------------
+  /** Personal links the owner revoked (each signed by the owner). */
+  private learnRevoked(items: { p: string; s: string }[]) {
+    for (const it of items) {
+      try {
+        if (typeof it.p !== 'string' || !(signer(this.keys.project, revokeMsg(it.p), b64d(it.s)) as any)?.owner) continue
+        this.keys.revoked.add(it.p)
+        if (it.p === this.keys.memberPub && !this.withdrawn) {
+          this.withdrawn = true
+          try { localStorage.setItem(`texloom.withdrawn.${this.keys.project}`, '1') } catch {}
+          this.onStatus()
+        }
+      } catch {}
+    }
+  }
+
+  /** Owner only: withdraw a personal edit link. */
+  revoke(pub: string): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
+    this.ws.send(JSON.stringify({ t: 'revoke', p: pub, s: this.keys.revocation(pub) }))
+    return true
+  }
+
   private async sendMode(mode: StorageMode) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
     const ts = Math.floor(Date.now() / 1000)

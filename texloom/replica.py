@@ -17,11 +17,10 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 import aiohttp
-from cryptography.exceptions import InvalidSignature, InvalidTag
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.exceptions import InvalidTag
 from pycrdt import Doc, Map, merge_updates
 
-from .crypto import Keys, b64d, b64e
+from .crypto import Keys, b64d, b64e, revoke_msg, signer
 
 log = logging.getLogger("texloom")
 
@@ -57,7 +56,6 @@ class Replica:
         self.lock = asyncio.Lock()  # serialises remote applies with local folder ingests
         self.connected = asyncio.Event()
         self.synced = asyncio.Event()  # first catch-up complete
-        self._pub = Ed25519PublicKey.from_public_bytes(b64d(keys.project))
         self.load()
 
     @property
@@ -124,12 +122,20 @@ class Replica:
         await self._send_update(uid, merged)
 
     # --- remote changes ------------------------------------------------------
-    def _verify(self, prefix: bytes, data: bytes, sig: bytes) -> bool:
-        try:
-            self._pub.verify(sig, prefix + data)
-            return True
-        except InvalidSignature:
-            return False
+    def _verify(self, prefix: bytes, data: bytes, sig: bytes, fresh: bool = False) -> bool:
+        return self.keys.verify(prefix + data, sig, fresh)
+
+    def _revoked(self, items: list) -> None:
+        """Personal keys the owner revoked (each signed by the owner)."""
+        for it in items or []:
+            try:
+                pub, sig = str(it["p"]), b64d(str(it["s"]))
+                if signer(self.keys.project, revoke_msg(pub), sig) == "owner":
+                    if pub == self.keys.member_pub and pub not in self.keys.revoked:
+                        log.warning("the owner has revoked this personal edit link: your changes are no longer accepted")
+                    self.keys.revoked.add(pub)
+            except (KeyError, ValueError, TypeError):
+                continue
 
     async def _apply_entries(self, entries: list[dict]) -> None:
         if not entries:
@@ -264,7 +270,7 @@ class Replica:
             if k == "sv1":
                 await self.p2p({"k": "sv2", "sv": b64e(self.doc.get_state())}, frm)
         elif k == "upd":
-            if "s" not in m or not self._verify(b"p2p:", data, b64d(m["s"])):
+            if "s" not in m or not self._verify(b"p2p:", data, b64d(m["s"]), fresh=True):
                 log.warning("ignoring unsigned peer update")
                 return
             async with self.lock:
@@ -366,6 +372,7 @@ class Replica:
         t = m.get("t")
         if t == "log":
             self.server_mode = m.get("mode", "server")
+            self._revoked(m.get("rv", []))
             await self._apply_entries(m["entries"])
             if self.keys.writable and self.pending_mode:  # setting changed while offline
                 await self.send_mode(self.pending_mode)
@@ -386,6 +393,8 @@ class Replica:
             await self._on_p2p(m)
         elif t == "mode":
             self.server_mode = m["m"]
+        elif t == "rv":
+            self._revoked([m])
         elif t == "ack":
             if m["q"]:
                 self._mark_seen(m["q"])

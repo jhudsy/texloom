@@ -48,8 +48,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from texloom.crypto import revoke_msg, signer
 
 log = logging.getLogger("texloom.relay")
 
@@ -62,7 +62,7 @@ MAX_SNAPSHOT = 48 * MiB
 MAX_BLOB = 50 * MiB
 MAX_FRAME = 72 * MiB  # p2p frames may carry (base64) blobs
 FRAME_LIMITS = {"hello": 4 * KiB, "aw": 64 * KiB, "mode": 4 * KiB, "up": MAX_UPDATE * 4 // 3 + KiB,
-                "snap": MAX_SNAPSHOT * 4 // 3 + KiB, "p2p": MAX_FRAME}
+                "snap": MAX_SNAPSHOT * 4 // 3 + KiB, "p2p": MAX_FRAME, "revoke": 4 * KiB}
 RATE_WINDOW, RATE_MSGS, RATE_BYTES = 10.0, 600, 160 * MiB  # per connection
 MAX_CONNECTIONS = 2000
 MODE_SKEW = 600  # seconds a signed mode-change command stays valid
@@ -78,12 +78,10 @@ def b64e(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 
 
-def verify(project: str, msg: bytes, sig: bytes) -> bool:
-    try:
-        Ed25519PublicKey.from_public_bytes(b64d(project)).verify(sig, msg)
-        return True
-    except (InvalidSignature, ValueError):
-        return False
+def verify(project: str, msg: bytes, sig: bytes, revoked: set[str] | frozenset = frozenset()) -> bool:
+    """Signed by the project's owner key, or by a personal key the owner granted and hasn't revoked."""
+    who = signer(project, msg, sig)
+    return who is not None and who not in revoked
 
 
 def parse_size(v: str) -> float:
@@ -204,6 +202,7 @@ class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path)
+        self._revoked: dict[str, dict[str, bytes]] = {}
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(
             """
@@ -215,6 +214,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS blob (
               project TEXT NOT NULL, id TEXT NOT NULL, data BLOB NOT NULL,
               PRIMARY KEY (project, id));
+            CREATE TABLE IF NOT EXISTS revoked (
+              project TEXT NOT NULL, pub TEXT NOT NULL, sig BLOB NOT NULL, at REAL NOT NULL,
+              PRIMARY KEY (project, pub));
             CREATE TABLE IF NOT EXISTS projects (
               project TEXT PRIMARY KEY, created REAL NOT NULL, label TEXT NOT NULL DEFAULT '');
             """
@@ -319,6 +321,21 @@ class Store:
         return self.db.execute("SELECT COUNT(*) FROM log WHERE project=?", (project,)).fetchone()[0]
 
     # --- storage mode & blobs ---------------------------------------------------
+    def revoked(self, project: str) -> dict[str, bytes]:
+        """Personal keys the owner revoked: pub -> owner's signature."""
+        if project not in self._revoked:
+            self._revoked[project] = dict(self.db.execute(
+                "SELECT pub, sig FROM revoked WHERE project=?", (project,)).fetchall())
+            if len(self._revoked) > 10000:
+                self._revoked.pop(next(iter(self._revoked)))
+        return self._revoked[project]
+
+    def revoke(self, project: str, pub: str, sig: bytes) -> None:
+        with self.db:
+            self.db.execute("INSERT OR IGNORE INTO revoked(project, pub, sig, at) VALUES (?,?,?,?)",
+                            (project, pub, sig, time.time()))
+        self._revoked.pop(project, None)
+
     def relay_only(self, project: str) -> bool:
         row = self.db.execute("SELECT relay FROM mode WHERE project=?", (project,)).fetchone()
         return bool(row and row[0])
@@ -479,12 +496,13 @@ class Relay:
                 {"t": "log", "entries": entries, "head": self.store.head(project),
                  "count": self.store.count(project), "you": conn.id,
                  "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
-                 "store": self.store_status(project, conn)})
+                 "store": self.store_status(project, conn),
+                 "rv": [{"p": p, "s": b64e(sig)} for p, sig in self.store.revoked(project).items()]})
         elif t == "up":
             d, s = field(msg, "d", str), field(msg, "s", str)
             data, sig = b64d(d), b64d(s)
-            if len(data) > MAX_UPDATE or not verify(project, b"upd:" + data, sig):
-                await ws.send_json({"t": "err", "m": "rejected update (bad signature?)"})
+            if len(data) > MAX_UPDATE or not verify(project, b"upd:" + data, sig, set(self.store.revoked(project))):
+                await ws.send_json({"t": "err", "m": "rejected update (bad signature, or this personal link was revoked)"})
                 return
             if relay_only:  # pass it on, but keep nothing
                 await ws.send_json({"t": "ack", "q": 0, "id": msg.get("id")})
@@ -512,7 +530,7 @@ class Relay:
             if not (self.store.last_snapshot(project) < upto <= self.store.head(project)) or len(data) > MAX_SNAPSHOT:
                 await ws.send_json({"t": "err", "m": "rejected snapshot"})
                 return
-            if not verify(project, f"snap:{upto}:".encode() + data, sig):
+            if not verify(project, f"snap:{upto}:".encode() + data, sig, set(self.store.revoked(project))):
                 await ws.send_json({"t": "err", "m": "rejected snapshot"})
                 return
             if self.may_store(project, self.store.snapshot_delta(project, upto, len(data) + len(sig)), conn.code):
@@ -538,13 +556,21 @@ class Relay:
         elif t == "mode":
             mode, ts, sig = field(msg, "m", str), field(msg, "ts", int), b64d(field(msg, "s", str))
             if mode not in ("server", "relay") or abs(time.time() - ts) > MODE_SKEW or not verify(
-                project, f"mode:{mode}:{ts}".encode(), sig
+                project, f"mode:{mode}:{ts}".encode(), sig, set(self.store.revoked(project))
             ):
                 await ws.send_json({"t": "err", "m": "rejected mode change"})
                 return
             self.store.set_mode(project, mode == "relay")
             log.info("project %s… storage mode -> %s", project[:8], mode)
             await self.broadcast(project, {"t": "mode", "m": mode})
+        elif t == "revoke":  # the owner withdraws a personal edit link
+            pub, sig = field(msg, "p", str), b64d(field(msg, "s", str))
+            if len(pub) > 64 or signer(project, revoke_msg(pub), sig) != "owner":
+                await ws.send_json({"t": "err", "m": "rejected revocation"})
+                return
+            self.store.revoke(project, pub, sig)
+            log.info("project %s…: revoked a personal link", project[:8])
+            await self.broadcast(project, {"t": "rv", "p": pub, "s": b64e(sig)})  # including the owner
         else:
             raise BadMessage(f"unknown type {t!r}")
 
@@ -558,7 +584,7 @@ class Relay:
             sig = b64d(request.headers.get("X-Sig", ""))
         except (ValueError, binascii.Error):
             raise web.HTTPForbidden(text="bad signature")
-        if len(data) > MAX_BLOB or not verify(project, f"blob:{bid}:".encode() + data, sig):
+        if len(data) > MAX_BLOB or not verify(project, f"blob:{bid}:".encode() + data, sig, set(self.store.revoked(project))):
             raise web.HTTPForbidden(text="bad signature")
         if self.store.relay_only(project):
             raise web.HTTPConflict(text="project is relay-only: blobs are exchanged peer to peer")

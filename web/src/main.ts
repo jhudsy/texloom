@@ -17,6 +17,7 @@ import { SyncTex } from './synctex'
 import { ProjectIndex } from './latex'
 import { autoSave, createHistoryPanel } from './history'
 import { referenceDialog } from './references'
+import { shareDialog } from './sharing'
 import { applyTemplate, chooseTemplate, importDialog, TEMPLATES } from './templates'
 import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from './navigate'
 import { createReviewPanel, reviewExtension, type ReviewPanel } from './review'
@@ -110,6 +111,10 @@ function projectList(): HTMLElement {
 
 // ---- project view -----------------------------------------------------------------
 async function openProject(keys: Keys) {
+  // a personal link the owner revoked opens read-only
+  try {
+    if (keys.member && localStorage.getItem(`texloom.withdrawn.${keys.project}`)) keys = new Keys(keys.project, keys.key, null)
+  } catch {}
   let device: Device = prefs.device(keys.project)
   const r = new Replica(keys, server, device.sync)
   await r.open()
@@ -293,7 +298,7 @@ async function openProject(keys: Keys) {
       h('span', { class: 'spacer' }), peers, status,
       syncBtn,
       zipBtn,
-      h('button', { onclick: () => share(keys) }, 'Share'),
+      h('button', { onclick: () => shareDialog(r, server, me.name) }, 'Share'),
       h('button', { title: 'Settings', onclick: () => openSettings() }, '⚙'),
       output.compileBtn,
       rightBtn,
@@ -388,7 +393,25 @@ async function openProject(keys: Keys) {
     const atRisk = !!r.storeProblem || r.storage === 'relay'
     if (!removing && atRisk !== lastRisk) { lastRisk = atRisk; projects.update(keys.project, { atRisk }) }
   }
-  r.onStatus = renderStatus; renderStatus()
+  let toldWithdrawn = false
+  const movedNote = h('div', { class: 'risk', role: 'status', hidden: true })
+  const renderMoved = () => {
+    const at = r.meta.get('movedAt')
+    movedNote.hidden = !at
+    if (at) movedNote.replaceChildren(h('span', {}, h('b', {}, '⚠ '),
+      `The owner moved this project to new keys on ${new Date(at).toLocaleDateString()}. This copy no longer receives their changes: ask them for the new link.`))
+  }
+  risk.el.after(movedNote)
+  r.meta.observe(renderMoved); renderMoved()
+  r.onStatus = () => {
+    renderStatus()
+    if (r.withdrawn && !toldWithdrawn) {
+      toldWithdrawn = true
+      alert('The owner has revoked your edit link. The project will reopen read-only.')
+      location.reload()
+    }
+  }
+  renderStatus()
   r.meta.observe(() => renderStatus()) // storage mode can change from Settings or a collaborator
   applyDevice(device)
 
@@ -430,19 +453,3 @@ async function openProject(keys: Keys) {
   try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor } } catch {}
 }
 
-function share(keys: Keys) {
-  const dlg = h('dialog', { class: 'share' },
-    h('h3', {}, 'Share this project'),
-    ...(keys.writable ? [h('label', {}, 'Edit link — anyone with it can edit'), copyRow(keys.link(server, true))] : []),
-    h('label', {}, 'Read-only link'), copyRow(keys.link(server, false)),
-    h('p', { class: 'muted' }, 'Keys stay in the part after “#”, which is never sent to the server. To revoke access, create a new project.'),
-    h('button', { onclick: () => dlg.close() }, 'Close'),
-  )
-  document.body.append(dlg)
-  dlg.addEventListener('close', () => dlg.remove())
-  dlg.showModal()
-}
-function copyRow(text: string) {
-  const inp = h('input', { value: text, readonly: true, onfocus: (e: any) => e.target.select() })
-  return h('div', { class: 'row' }, inp, h('button', { onclick: (e: any) => { navigator.clipboard.writeText(text); e.target.textContent = 'Copied' } }, 'Copy'))
-}
