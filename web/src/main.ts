@@ -12,6 +12,7 @@ import { compileInBrowser, browserCompileAvailable, type Progress } from './comp
 import { prefs, setupDialog, settingsDialog, type Device } from './settings'
 import { PdfView } from './pdfview'
 import { createAssistantPanel } from './assistant/panel'
+import { setupLayout } from './layout'
 import './style.css'
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T
@@ -162,8 +163,14 @@ async function openProject(keys: Keys) {
   }
   const uploadIn = h('input', { type: 'file', multiple: true, hidden: true, onchange: (e: any) => upload([...e.target.files]) }) as HTMLInputElement
 
+  const leftBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleLeft() }, '☰')
+  const rightBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleRight() }, '▥')
+  const splitL = h('div', { class: 'split' })
+  const splitR = h('div', { class: 'split' })
+  const mainEl = h('main', {})
   app.append(
     h('header', {},
+      leftBtn,
       h('a', { href: '/', class: 'brand', onclick: (e: Event) => { e.preventDefault(); location.href = '/' } }, 'texloom'),
       title, writable ? '' : h('span', { class: 'badge' }, 'read-only'),
       h('span', { class: 'spacer' }), peers, status,
@@ -176,8 +183,11 @@ async function openProject(keys: Keys) {
         location.href = '/'
       }) }, '⚙'),
       compileBtn,
+      rightBtn,
     ),
-    h('main', {},
+    mainEl,
+  )
+  mainEl.append(
       h('aside', {},
         h('div', { class: 'tools' },
           writable ? h('button', { title: 'New file', onclick: () => newFile() }, '+ File') : '',
@@ -187,12 +197,22 @@ async function openProject(keys: Keys) {
         fileList,
         h('div', { class: 'hint muted' }, writable ? 'Drop files here to upload. ★ = main file.' : ''),
       ),
+      splitL,
       editorHost,
+      splitR,
       h('section', { class: 'right' },
         h('div', { class: 'tabs' }, pdfTab, aiTab),
         pdfPane, aiPane),
-    ),
   )
+  const layout = setupLayout(mainEl, splitL, splitR)
+  layout.onChange = () => {
+    leftBtn.title = layout.leftHidden ? 'Show the file list' : 'Hide the file list'
+    rightBtn.title = layout.rightHidden ? 'Show the PDF and assistant' : 'Hide the PDF and assistant'
+    leftBtn.classList.toggle('off', layout.leftHidden)
+    rightBtn.classList.toggle('off', layout.rightHidden)
+    leftBtn.setAttribute('aria-pressed', String(!layout.leftHidden))
+    rightBtn.setAttribute('aria-pressed', String(!layout.rightHidden))
+  }
 
   // drag & drop upload
   app.addEventListener('dragover', (e) => e.preventDefault())
