@@ -31,26 +31,79 @@ export async function clearEngineCache() {
   const { clearAllPackageCache } = await import('texlyre-busytex')
   await clearAllPackageCache()
   runner?.then((r) => r.terminate()).catch(() => {})
-  runner = null
+  runner = null; runnerLevel = null
 }
 
 let progressCb: ((p: Progress) => void) | undefined
 
-async function getRunner(): Promise<BusyTexRunner> {
+// The TeX bundles are nested: basic ⊂ recommended ⊂ extra, and each carries its own file
+// index (ls-R). Loaded together, whichever finishes last hides the other's extra files
+// (e.g. nicefrac.sty "not found" although extra was loaded). So a runner gets basic plus at
+// most ONE of recommended/extra: recommended when it has every package and class the
+// project asks for, otherwise extra (a superset). Busytex itself would enable both
+// whenever any package is unresolved, which is nearly every real document.
+type Level = 'recommended' | 'extra'
+let runnerLevel: Level | null = null
+
+async function bundles(): Promise<{ basic: boolean; recommended: boolean; extra: boolean }> {
+  const [basic, recommended, extra] = await Promise.all(['basic', 'recommended', 'extra'].map((p) => hasAsset(`${BASE}/texlive-${p}.js`)))
+  return { basic, recommended, extra }
+}
+
+let recommendedNames: Promise<Set<string> | null> | null = null
+/** File names (e.g. booktabs.sty, beamer.cls) in the recommended bundle, from its file list. */
+function recommendedFiles(): Promise<Set<string> | null> {
+  return (recommendedNames ??= fetch(`${BASE}/texlive-recommended.txt`)
+    .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
+    .then((t) => new Set(t.split('\n').map((l) => l.slice(l.lastIndexOf('/') + 1).trim()).filter((n) => /\.(sty|cls|bst|bbx|cbx|lbx|def|cfg|fd|clo|tex)$/.test(n))))
+    .catch(() => { recommendedNames = null; return null }))
+}
+
+/** Files the project asks TeX for by name (packages, classes, bibliography styles, Beamer themes). */
+export function requestedFiles(files: Map<string, string | Uint8Array>): string[] {
+  const out = new Set<string>()
+  const add = (list: string, ext: string) => {
+    for (const n of list.split(',')) { const t = n.trim(); if (/^[\w.@+-]+$/.test(t)) out.add(t.endsWith(ext) ? t : t + ext) }
+  }
+  for (const [path, v] of files) {
+    if (typeof v !== 'string' || !/\.(tex|sty|cls|ltx)$/i.test(path)) continue
+    const src = v.replace(/(^|[^\\])%.*$/gm, '$1')
+    for (const m of src.matchAll(/\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\]\s*)?\{([^}]*)\}/g)) add(m[1], '.sty')
+    for (const m of src.matchAll(/\\(?:documentclass|LoadClass)\s*(?:\[[^\]]*\]\s*)?\{([^}]*)\}/g)) add(m[1], '.cls')
+    for (const m of src.matchAll(/\\bibliographystyle\s*\{([^}]*)\}/g)) add(m[1], '.bst')
+    for (const m of src.matchAll(/\\use(|color|font|inner|outer)theme\s*(?:\[[^\]]*\]\s*)?\{([^}]*)\}/g)) add(`beamer${m[1]}theme${m[2].trim()}`, '.sty')
+  }
+  const local = new Set([...files.keys()].map((p) => p.slice(p.lastIndexOf('/') + 1)))
+  return [...out].filter((n) => !local.has(n))
+}
+
+/** The one optional bundle this project needs. */
+async function levelFor(files: Map<string, string | Uint8Array>): Promise<Level | null> {
+  const have = await bundles()
+  if (!have.extra) return have.recommended ? 'recommended' : null
+  if (!have.recommended || runnerLevel === 'extra') return 'extra' // extra covers everything recommended has
+  const names = await recommendedFiles()
+  return names && requestedFiles(files).every((n) => names.has(n)) ? 'recommended' : 'extra'
+}
+
+async function getRunner(level: Level | null): Promise<BusyTexRunner> {
+  if (runner && runnerLevel === 'recommended' && level === 'extra') { // need the bigger bundle: start over
+    runner.then((r) => r.terminate()).catch(() => {})
+    runner = null
+  }
   return (runner ??= (async () => {
     const { BusyTexRunner } = await import('texlyre-busytex')
-    const pkgs = ['texlive-basic', 'texlive-recommended', 'texlive-extra']
-    const present = await Promise.all(pkgs.map((p) => hasAsset(`${BASE}/${p}.js`)))
-    const have = pkgs.filter((_, i) => present[i]).map((p) => `${BASE}/${p}.js`)
+    const have = await bundles()
+    runnerLevel = level
     const r = new BusyTexRunner({
       busytexBasePath: BASE,
-      preloadDataPackages: have.slice(0, 1), // basic: loaded up front
-      catalogDataPackages: have.slice(1), // recommended/extra: fetched only if a document needs them
+      preloadDataPackages: have.basic ? [`${BASE}/texlive-basic.js`] : [], // loaded up front
+      catalogDataPackages: level ? [`${BASE}/texlive-${level}.js`] : [], // fetched only if a document needs it
       onDownloadProgress: (p) => progressCb?.({ phase: 'download', ...p }),
     })
     await r.initialize(true)
     return r
-  })().catch((e) => { runner = null; throw e }))
+  })().catch((e) => { runner = null; runnerLevel = null; throw e }))
 }
 
 const DRIVERS = {
@@ -67,7 +120,7 @@ export async function compileInBrowser(
 ): Promise<{ pdf: Uint8Array | null; log: string; synctex: Uint8Array | null }> {
   progressCb = onProgress
   try {
-    const r = await getRunner()
+    const r = await getRunner(await levelFor(files))
     onProgress?.({ phase: 'compile' })
     const all = [...files.values()].filter((v): v is string => typeof v === 'string').join('\n')
     let biber = false, bibtex = false
