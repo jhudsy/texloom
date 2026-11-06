@@ -76,6 +76,7 @@ export class Replica {
   readonly dirs = this.doc.getMap<boolean>('dirs') // explicit (possibly empty) folders
   readonly versions = this.doc.getArray<any>('versions') // saved versions: {at, by, label, auto, snap}
   readonly clients = this.doc.getMap<string>('clients') // Yjs client id -> display name (for "who wrote this")
+  readonly review = this.doc.getMap<Y.Map<any>>('review') // comments and suggested changes (review.ts)
   /** Called after every change made on this device (not ones received from others). */
   readonly localChange: (() => void)[] = []
   readonly meta = this.doc.getMap<any>('meta')

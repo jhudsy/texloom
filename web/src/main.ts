@@ -16,6 +16,7 @@ import { pdfjs } from './pdfview'
 import { SyncTex } from './synctex'
 import { ProjectIndex } from './latex'
 import { autoSave, createHistoryPanel } from './history'
+import { createReviewPanel, reviewExtension, type ReviewPanel } from './review'
 import './style.css'
 
 const APP = 'TeXLoom'
@@ -141,6 +142,8 @@ async function openProject(keys: Keys) {
     onCompile: () => output.compile(),
     onSync: () => syncToPdf(),
     problems: (file) => output.problems().filter((p) => p.file === file),
+    review: (file) => reviewExtension(r, file, (id) => { openReview(); review()?.focus(id) }),
+    onReview: (kind) => { if (writable) { openReview(); review()?.add(kind) } },
   })
   const tree = createFileTree(r, writable, (p) => {
     editor.open(p)
@@ -171,17 +174,25 @@ async function openProject(keys: Keys) {
   output.syncRequest = syncToPdf
   output.onProblems.push(() => editor.relint())
   // right-hand panel tabs; panels other than the PDF are created on first use
-  type Tab = 'pdf' | 'ai' | 'history'
+  type Tab = 'pdf' | 'ai' | 'review' | 'history'
   const panes: Record<Tab, HTMLElement> = {
     pdf: output.pane,
     ai: h('div', { class: 'pane', hidden: true }),
+    review: h('div', { class: 'pane', hidden: true }),
     history: h('div', { class: 'pane', hidden: true }),
   }
+  let reviewPanel: ReviewPanel | null = null
+  const review = () => reviewPanel
+  const openReview = () => { if (layout.rightHidden) layout.showRight(); showTab('review') }
   const makers: Partial<Record<Tab, () => HTMLElement>> = {
     ai: () => createAssistantPanel({
       replica: r, writable, editorContext: editor.context,
       compile: () => output.compile(false), lastLog: output.lastLog, userName: () => me.name,
     }),
+    review: () => (reviewPanel = createReviewPanel({
+      replica: r, writable, userName: () => me.name, selection: () => editor.selection(),
+      reveal: (file, from, to) => { tree.open(file); setTimeout(() => editor.reveal(from, to), 0) },
+    })).el,
     history: () => createHistoryPanel({
       replica: r, writable, userName: () => me.name,
       showAuthors: (on) => editor.showAuthors(on), openFile: (p) => tree.open(p),
@@ -190,8 +201,17 @@ async function openProject(keys: Keys) {
   const tabBtns = {
     pdf: h('button', { class: 'tab active', onclick: () => showTab('pdf') }, 'PDF'),
     ai: h('button', { class: 'tab', onclick: () => showTab('ai') }, 'Assistant'),
+    review: h('button', { class: 'tab', title: 'Comments and suggested changes', onclick: () => showTab('review') }, 'Review'),
     history: h('button', { class: 'tab', onclick: () => showTab('history') }, 'History'),
   }
+  // the Review tab shows how many comments and suggestions are open
+  const countOpen = () => {
+    let n = 0
+    r.review.forEach((m) => { if (m instanceof Y.Map && !m.get('resolved')) n++ })
+    tabBtns.review.textContent = n ? `Review (${n})` : 'Review'
+  }
+  r.review.observeDeep(countOpen)
+  setTimeout(countOpen, 0)
   function showTab(t: Tab) {
     for (const k of Object.keys(panes) as Tab[]) {
       panes[k].hidden = k !== t
@@ -237,7 +257,7 @@ async function openProject(keys: Keys) {
     splitL,
     editor.el,
     splitR,
-    h('section', { class: 'right' }, h('div', { class: 'tabs' }, tabBtns.pdf, tabBtns.ai, tabBtns.history), panes.pdf, panes.ai, panes.history),
+    h('section', { class: 'right' }, h('div', { class: 'tabs' }, tabBtns.pdf, tabBtns.ai, tabBtns.review, tabBtns.history), panes.pdf, panes.ai, panes.review, panes.history),
   )
   const layout = setupLayout(mainEl, splitL, splitR)
   layout.onChange = () => {

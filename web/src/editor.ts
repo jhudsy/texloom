@@ -15,6 +15,8 @@ import { PdfView } from './pdfview'
 import { lineAuthors } from './history'
 import type { Problem } from './latexlog'
 import { forceLinting } from '@codemirror/lint'
+import { keymap } from '@codemirror/view'
+import { Prec, type Extension } from '@codemirror/state'
 
 export interface EditorPane {
   el: HTMLElement
@@ -26,12 +28,16 @@ export interface EditorPane {
   relint(): void
   gotoOffset(pos: number): void
   context(): { file: string; selection: string; fromLine: number; toLine: number } | null
+  selection(): { file: string; from: number; to: number; text: string } | null
+  reveal(from: number, to: number): void
 }
 
 export interface EditorHooks {
   onCompile: () => void
   onSync: () => void // show the current line in the PDF
   problems: (file: string) => Problem[] // last compile's problems for a file
+  review: (file: string) => Extension // comment/suggestion highlights
+  onReview: (kind: 'comment' | 'suggestion') => void // ⌘⌥M / ⌘⌥E
 }
 
 export function createEditorPane(r: Replica, writable: boolean, index: ProjectIndex, hooks: EditorHooks): EditorPane {
@@ -98,6 +104,11 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             yCollab(yt, r.awareness, { undoManager: new Y.UndoManager(yt) }),
             latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []) }),
             authorsSlot.of(authorsOn ? authorsExtension(yt) : []),
+            hooks.review(path),
+            Prec.high(keymap.of([
+              { key: 'Mod-Alt-m', run: () => { hooks.onReview('comment'); return true } },
+              { key: 'Mod-Alt-e', run: () => { hooks.onReview('suggestion'); return true } },
+            ])),
             EditorState.readOnly.of(!writable),
             EditorView.editable.of(writable),
           ],
@@ -157,5 +168,19 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     view.focus()
   }
 
-  return { el, open, context, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { if (view) forceLinting(view) } }
+  function selection() {
+    if (!current || !view) return null
+    const sel = view.state.selection.main
+    return { file: current, from: sel.from, to: sel.to, text: view.state.doc.sliceString(sel.from, sel.to) }
+  }
+
+  function reveal(from: number, to: number) {
+    if (!view) return
+    const n = view.state.doc.length
+    const a = Math.max(0, Math.min(from, n)), b = Math.max(a, Math.min(to, n))
+    view.dispatch({ selection: { anchor: a, head: b }, effects: EditorView.scrollIntoView(a, { y: 'center' }) })
+    view.focus()
+  }
+
+  return { el, open, context, selection, reveal, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { if (view) forceLinting(view) } }
 }

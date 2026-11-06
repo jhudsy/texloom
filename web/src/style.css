@@ -142,8 +142,8 @@ select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-
 details { margin-top: 12px; }
 
 /* right-hand tabs */
-.right .tabs { display: flex; gap: 2px; padding: 4px 6px 0; border-bottom: 1px solid var(--line); background: var(--panel); }
-.right .tab { border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; background: transparent; color: var(--muted); padding: 4px 12px; }
+.right .tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; padding: 4px 6px 0; border-bottom: 1px solid var(--line); background: var(--panel); }
+.right .tab { border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; background: transparent; color: var(--muted); padding: 4px 10px; white-space: nowrap; flex-shrink: 0; }
 .right .tab.active { background: var(--bg); color: var(--fg); border-color: var(--line); margin-bottom: -1px; }
 .right .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .right .pane[hidden] { display: none; }
@@ -248,3 +248,25 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 .pdf .page { position: relative; flex: none; }
 .pdf-mark { position: absolute; background: color-mix(in srgb, #ffd400 45%, transparent); outline: 2px solid #e6b800; border-radius: 3px; pointer-events: none; animation: pdfmark 2.5s ease-out forwards; }
 @keyframes pdfmark { 0%, 70% { opacity: 1 } 100% { opacity: 0 } }
+
+/* comments and suggested changes */
+.cm-comment { background: rgba(255, 200, 0, .28); border-bottom: 2px solid rgba(230, 160, 0, .8); cursor: pointer; }
+.cm-suggest-del { text-decoration: line-through; text-decoration-color: #c0392b; background: rgba(192, 57, 43, .12); cursor: pointer; }
+.cm-suggest-ins { color: #1e7e34; background: rgba(40, 167, 69, .15); border-radius: 2px; padding: 0 2px; cursor: pointer; text-decoration: underline; }
+.review { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.review-list { overflow: auto; flex: 1; padding: 6px; }
+.rcard { border: 1px solid var(--line); border-left: 3px solid #e6a000; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
+.rcard.suggestion { border-left-color: #28a745; }
+.rcard.resolved { opacity: .6; }
+.rcard.focused { box-shadow: 0 0 0 2px var(--accent); }
+.rhead { cursor: pointer; display: flex; gap: 4px; align-items: baseline; flex-wrap: wrap; }
+.rloc { font-family: ui-monospace, monospace; font-size: 12px; }
+.rquote { border-left: 2px solid var(--line); padding-left: 6px; margin: 4px 0; color: var(--muted); white-space: pre-wrap; max-height: 4.5em; overflow: hidden; }
+.rtext, .rreply { white-space: pre-wrap; margin: 4px 0; }
+.rreply { padding-left: 10px; border-left: 2px solid var(--line); }
+.rsuggest { margin: 4px 0; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
+.rsuggest del { color: #c0392b; } .rsuggest ins { color: #1e7e34; }
+.ractions { display: flex; gap: 4px; margin-top: 4px; align-items: center; }
+.ractions input { flex: 1; min-width: 0; }
+.review .ai-bar { flex-wrap: wrap; }
+.review .ai-bar button, .review .ai-bar label { white-space: nowrap; }
