@@ -5,6 +5,7 @@ import { autocompletion, snippetCompletion, type Completion, type CompletionCont
 import { linter, type Diagnostic } from '@codemirror/lint'
 import { EditorSelection, Prec, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
+import { parseId } from './references'
 import type { Replica } from './replica'
 import type { Problem } from './latexlog'
 import { IMAGE_RE } from './projectfiles'
@@ -152,7 +153,9 @@ const REF_CMDS = /^(ref|eqref|autoref|[cC]ref|pageref|nameref|vref|Vref|cpageref
 // ---------------------------------------------------------------------------
 // Completion
 // ---------------------------------------------------------------------------
-function completionSource(index: ProjectIndex) {
+export type AddReference = (seed: string, insert: (key: string) => void) => void
+
+function completionSource(index: ProjectIndex, addReference?: AddReference) {
   const envOptions: Completion[] = ENVS.map((e) => snippetCompletion(envSnippet(e), { label: `\\begin{${e[0]}}`, detail: e[2] || 'environment', type: 'keyword', boost: 2 }))
   const cmdOptions: Completion[] = COMMANDS.map(([label, tpl, info]) => snippetCompletion(tpl, { label, detail: info, type: 'function' }))
 
@@ -189,7 +192,13 @@ function completionSource(index: ProjectIndex) {
       if (cmd === 'includegraphics')
         return list(idx.images.map((p) => ({ label: p, type: 'variable', detail: 'image' })))
       if (CITE_CMDS.test(cmd)) {
-        return list(idx.bib.map((b) => ({ label: b.key, type: 'constant', detail: b.title ? truncate(b.title, 60) : b.type, info: b.title ? `${b.title} (${b.file})` : b.file })))
+        const fetchRef = (seed: string, label: string): Completion => ({ label, type: 'text', boost: -50, apply: (view, _c, f, t) => {
+          addReference!(seed, (key) => view.dispatch({ changes: { from: f, to: t, insert: key + close }, selection: { anchor: f + key.length }, userEvent: 'input.complete' }))
+        } })
+        // typing a DOI or arXiv id offers to fetch it
+        if (addReference && parseId(word)) return { from, to: ctx.pos, filter: false, options: [fetchRef(word, `Fetch reference for ${word}`)] }
+        const res = list(idx.bib.map((b) => ({ label: b.key, type: 'constant', detail: b.title ? truncate(b.title, 60) : b.type, info: b.title ? `${b.title} (${b.file})` : b.file })))
+        return addReference && !word ? { ...res, options: [...res.options, fetchRef('', '+ Add from DOI / arXiv…')] } : res
       }
       if (REF_CMDS.test(cmd))
         return list(idx.labels.map((l) => ({ label: l.key, type: 'property', detail: `${l.file}:${l.line}` })))
@@ -351,9 +360,9 @@ function isCommented(text: string, pos: number): boolean {
 
 // ---------------------------------------------------------------------------
 /** All LaTeX editing support. `onCompile` runs on Mod-S. */
-export function latexSupport(index: ProjectIndex, opts: { onCompile: () => void; onSync: () => void; problems: () => Problem[] }): Extension {
+export function latexSupport(index: ProjectIndex, opts: { onCompile: () => void; onSync: () => void; problems: () => Problem[]; addReference?: AddReference }): Extension {
   return [
-    autocompletion({ override: [completionSource(index)], activateOnTyping: true, icons: false }),
+    autocompletion({ override: [completionSource(index, opts.addReference)], activateOnTyping: true, icons: false }),
     Prec.highest(keymap.of([
       { key: 'Mod-s', run: () => { opts.onCompile(); return true }, preventDefault: true },
       { key: 'Mod-Alt-ArrowRight', run: () => { opts.onSync(); return true }, preventDefault: true },

@@ -16,6 +16,7 @@ import { pdfjs } from './pdfview'
 import { SyncTex } from './synctex'
 import { ProjectIndex } from './latex'
 import { autoSave, createHistoryPanel } from './history'
+import { referenceDialog } from './references'
 import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from './navigate'
 import { createReviewPanel, reviewExtension, type ReviewPanel } from './review'
 import './style.css'
@@ -144,12 +145,22 @@ async function openProject(keys: Keys) {
     onSync: () => syncToPdf(),
     problems: (file) => output.problems().filter((p) => p.file === file),
     review: (file) => reviewExtension(r, file, (id) => { openReview(); review()?.focus(id) }),
+    addReference: (seed, insert) => referenceDialog(r, index, insert, seed),
     onReview: (kind) => { if (writable) { openReview(); review()?.add(kind) } },
   })
   const tree = createFileTree(r, writable, (p) => {
     editor.open(p)
     r.awareness.setLocalStateField('file', p) // so collaborators can jump to where you are
   })
+
+  // "+ Reference": add from a DOI/arXiv id and cite it at the cursor
+  if (writable) tree.el.querySelector('.tools')?.append(h('button', {
+    title: 'Add a bibliography entry from a DOI or arXiv id',
+    onclick: () => referenceDialog(r, index, (key) => {
+      const v = editor.view(), f = editor.current()
+      if (v && f?.endsWith('.tex')) v.dispatch(v.state.replaceSelection(`\\cite{${key}}`))
+    }),
+  }, '+ Reference'))
 
   /** Jump to a collaborator: open their file at their cursor. */
   function jumpTo(clientId: number) {

@@ -297,3 +297,5 @@ aside .tab { padding: 4px 8px; }
 .outline li { display: flex; gap: 6px; padding: 3px 8px; cursor: pointer; align-items: baseline; }
 .outline .otitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .outline .lvl0 { font-weight: 600; }
+.refdlg { width: min(560px, 92vw); }
+.bibpreview { background: var(--panel); padding: 8px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; max-height: 40vh; overflow: auto; }

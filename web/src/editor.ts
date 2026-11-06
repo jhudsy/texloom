@@ -10,7 +10,8 @@ import { yCollab } from 'y-codemirror.next'
 import { oneDark } from '@codemirror/theme-one-dark'
 import type { Replica } from './replica'
 import { h, saveFile } from './dom'
-import { latexSupport, type ProjectIndex } from './latex'
+import { latexSupport, type AddReference, type ProjectIndex } from './latex'
+import { imageDropExtension } from './pasteimage'
 import { PdfView } from './pdfview'
 import { lineAuthors } from './history'
 import type { Problem } from './latexlog'
@@ -38,6 +39,7 @@ export interface EditorHooks {
   problems: (file: string) => Problem[] // last compile's problems for a file
   review: (file: string) => Extension // comment/suggestion highlights
   onReview: (kind: 'comment' | 'suggestion') => void // ⌘⌥M / ⌘⌥E
+  addReference: AddReference // from \cite{ completion
 }
 
 export function createEditorPane(r: Replica, writable: boolean, index: ProjectIndex, hooks: EditorHooks): EditorPane {
@@ -102,7 +104,8 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             EditorView.lineWrapping,
             dark ? oneDark : [],
             yCollab(yt, r.awareness, { undoManager: new Y.UndoManager(yt) }),
-            latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []) }),
+            latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []), addReference: writable ? hooks.addReference : undefined }),
+            imageDropExtension(r, writable),
             authorsSlot.of(authorsOn ? authorsExtension(yt) : []),
             hooks.review(path),
             Prec.high(keymap.of([
