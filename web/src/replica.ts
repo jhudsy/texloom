@@ -41,6 +41,18 @@ const idbKeys = (db: IDBDatabase, s: Store) => tx<IDBValidKey[]>(db, s, 'readonl
 const enc = new TextEncoder(), dec = new TextDecoder()
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Delete this browser's copy of a project (document, outbox, cached files).
+ *  Other people's copies, folder copies and the server's copy are not affected. */
+export async function forgetLocalCopy(project: string): Promise<void> {
+  const del = (name: string) => new Promise<void>((res, rej) => {
+    const r = indexedDB.deleteDatabase(name)
+    r.onsuccess = () => res()
+    r.onerror = () => rej(r.error)
+    r.onblocked = () => res() // another tab still has it open; deleted once that tab closes
+  })
+  await Promise.all([del(`texloom-${project}`), del(`texloom-doc-${project}`)])
+}
+
 export type Status = 'offline' | 'connecting' | 'online' | 'paused'
 export type SyncMode = 'live' | 'manual'
 export type StorageMode = 'server' | 'relay'
@@ -99,11 +111,12 @@ export class Replica {
     else { this.status = 'paused'; this.onStatus() }
   }
 
-  close() {
+  async close() {
     this.closed = true
     awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], 'close')
     this.ws?.close()
-    this.persistence.destroy()
+    await this.persistence.destroy()
+    this.db?.close()
   }
 
   // ---- live vs manual sync ---------------------------------------------------

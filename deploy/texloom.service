@@ -1,0 +1,18 @@
+# systemd unit for the texloom relay server.
+# Install: sudo cp deploy/texloom.service /etc/systemd/system/ && sudo systemctl enable --now texloom
+[Unit]
+Description=texloom relay server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=texloom
+WorkingDirectory=/opt/texloom
+ExecStart=/opt/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/texloom
+
+[Install]
+WantedBy=multi-user.target

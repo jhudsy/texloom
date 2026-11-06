@@ -75,8 +75,8 @@ export async function setupDialog(r: Replica, link: string): Promise<Device> {
       h('label', { class: 'field' }, 'Your name', nameIn),
       h('h4', {}, 'Where do the files live?'),
       radios('where', 'browser', [
-        ['browser', 'In this browser', 'Works offline. Nothing to install.'],
-        ['folder', 'Also in a folder on this computer', 'For editing with other tools or agents, and compiling with your own TeX.'],
+        ['browser', 'Only in this browser', 'Works offline. Nothing to install. Remove it any time from ⚙ Settings or the start page.'],
+        ['folder', 'In this browser and in a folder on this computer', 'For editing with other tools or agents, and compiling with your own TeX. The folder is a separate copy: delete it like any folder.'],
       ], (v) => (folderBox.hidden = v !== 'folder')),
       folderBox,
       h('h4', {}, 'Compiling'),
@@ -102,10 +102,13 @@ export async function setupDialog(r: Replica, link: string): Promise<Device> {
 }
 
 /** Project (shared) + device (local) settings. */
-export async function settingsDialog(r: Replica, link: string, onDevice: (d: Device) => void) {
+export async function settingsDialog(r: Replica, link: string, onDevice: (d: Device) => void, onRemove: () => Promise<void>) {
   const d = prefs.device(r.keys.project)
   const w = r.keys.writable
   const texFiles = [...r.files.keys()].filter((p) => p.endsWith('.tex')).sort()
+  // Same rule the compiler uses when no main file is set: main.tex first, then any file with \documentclass.
+  const detectedMain = [...texFiles].sort((a, b) => Number(b === 'main.tex') - Number(a === 'main.tex'))
+    .find((p) => r.files.get(p)!.toString().includes('\\documentclass')) ?? texFiles[0] ?? ''
   const sel = (key: string, options: [string, string][], def: string) =>
     h('select', { disabled: !w, onchange: (e: any) => r.meta.set(key, e.target.value) },
       ...options.map(([v, l]) => h('option', { value: v, ...(String(r.meta.get(key) ?? def) === v ? { selected: true } : {}) }, l)))
@@ -115,7 +118,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     h('h3', {}, 'Settings'),
     h('h4', {}, 'Project', h('small', { class: 'muted' }, w ? ' — shared with all collaborators' : ' — read-only')),
     h('div', { class: 'grid' },
-      h('span', {}, 'Main file'), sel('main', texFiles.map((p) => [p, p]), texFiles[0] ?? ''),
+      h('span', {}, 'Main file'), sel('main', texFiles.map((p) => [p, p]), detectedMain),
       h('span', {}, 'Engine'), sel('engine', [['pdflatex', 'pdfLaTeX'], ['xelatex', 'XeLaTeX'], ['lualatex', 'LuaLaTeX']], 'pdflatex'),
       h('span', {}, 'Bibliography'), sel('bib', [['auto', 'Detect automatically'], ['bibtex', 'BibTeX'], ['biber', 'Biber'], ['none', 'None']], 'auto'),
     ),
@@ -142,9 +145,20 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       ['none', 'Don’t compile here'],
     ], (v) => { d.compile = v; prefs.saveDevice(r.keys.project, d); onDevice(d) }),
     h('label', { class: 'check' },
-      h('input', { type: 'checkbox', checked: d.autoCompile, onchange: (e: any) => { d.autoCompile = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
+      h('input', { type: 'checkbox', 'aria-label': 'Recompile automatically', checked: d.autoCompile, onchange: (e: any) => { d.autoCompile = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
       'Recompile automatically after I stop typing'),
     h('details', {}, h('summary', {}, 'Keep a copy in a folder on this computer'), folderHelp(r, link)),
+    h('h4', {}, 'Remove'),
+    h('p', { class: 'muted small' },
+      'Removing deletes this browser’s copy only. Collaborators keep theirs, folder copies stay until you delete the folder, and the server’s encrypted copy stays unless you choose “Don’t store anything on the server” above.'),
+    h('div', { class: 'row' }, h('button', { class: 'danger', onclick: async () => {
+      const warn: string[] = []
+      if (r.pending) warn.push(`${r.pending} change(s) from this browser haven’t reached the server or anyone else yet and will be lost.`)
+      if (r.storage === 'relay') warn.push('The server keeps no copy of this project: if nobody else has one, it will be gone for good.')
+      if (!confirm(['Remove this project from this browser?', ...warn].join('\n\n'))) return
+      dlg.close()
+      await onRemove()
+    } }, 'Remove from this browser')),
     h('div', { class: 'row end' }, cacheBtn, h('button', { class: 'primary', onclick: () => dlg.close() }, 'Done')),
   )
 }

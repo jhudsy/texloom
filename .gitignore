@@ -16,3 +16,4 @@ web/dist/
 tex-assets/
 .claude/
 .DS_Store
+deploy/.requirements.txt

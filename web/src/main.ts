@@ -6,10 +6,11 @@ import { stex } from '@codemirror/legacy-modes/mode/stex'
 import { yCollab } from 'y-codemirror.next'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { Keys } from './crypto'
-import { Replica } from './replica'
+import { Replica, forgetLocalCopy } from './replica'
 import { compileInBrowser, browserCompileAvailable, type Progress } from './compile'
 import { prefs, setupDialog, settingsDialog, type Device } from './settings'
 import { PdfView } from './pdfview'
+import { createAssistantPanel } from './assistant/panel'
 import './style.css'
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T
@@ -31,6 +32,11 @@ const store = {
   get name(): string { return prefs.name },
   set name(v: string) { prefs.name = v },
   get recent(): Recent[] { try { return JSON.parse(localStorage.getItem('texloom.recent') || '[]') } catch { return [] } },
+  async forget(project: string) {
+    await forgetLocalCopy(project)
+    localStorage.setItem('texloom.recent', JSON.stringify(store.recent.filter((x) => x.project !== project)))
+    localStorage.removeItem(`texloom.device.${project}`)
+  },
   remember(r: Recent) {
     const list = store.recent.filter((x) => x.project !== r.project || (x.writable && !r.writable))
     if (!list.some((x) => x.project === r.project)) list.unshift(r)
@@ -62,7 +68,12 @@ function landing() {
     h('h2', {}, 'Recent projects'),
     store.recent.length
       ? h('ul', { class: 'recent' }, ...store.recent.map((r) =>
-          h('li', {}, h('a', { href: '#' + r.fragment }, r.name || r.project.slice(0, 8)),
+          h('li', {}, h('button', { class: 'forget', title: 'Remove from this browser', 'aria-label': `Remove ${r.name || 'project'} from this browser`,
+              onclick: async () => {
+                if (!confirm(`Remove “${r.name || r.project.slice(0, 8)}” from this browser?\n\nOnly this browser’s copy is deleted. Unsynced changes made here would be lost. Collaborators, folder copies and the server’s copy are not affected.`)) return
+                await store.forget(r.project); location.reload()
+              } }, '✕'),
+            h('a', { href: '#' + r.fragment }, r.name || r.project.slice(0, 8)),
             h('span', { class: 'muted' }, ` ${r.writable ? 'edit' : 'read-only'} · ${new Date(r.at).toLocaleString()}`))))
       : h('p', { class: 'muted' }, 'None yet.'),
   )
@@ -74,6 +85,7 @@ async function openProject(keys: Keys) {
   const r = new Replica(keys, server, device.sync)
   await r.open()
   const writable = keys.writable
+  let removing = false // set while deleting, so the page doesn't re-save it to "recent"
   if (!device.setup) {
     if (r.syncMode === 'live') await new Promise((res) => setTimeout(res, 800)) // fetch the name first
     device = await setupDialog(r, keys.link(server, writable))
@@ -104,6 +116,27 @@ async function openProject(keys: Keys) {
   const pdfInfo = h('div', { class: 'pdfinfo muted' }, 'No PDF yet.')
   const logPre = h('pre', { class: 'log', hidden: true })
   const compileBtn = h('button', { class: 'primary', onclick: () => doCompile() }, 'Compile')
+  const pdfPane = h('div', { class: 'pane' })
+  const aiPane = h('div', { class: 'pane', hidden: true })
+  const showTab = (ai: boolean) => {
+    pdfPane.hidden = ai; aiPane.hidden = !ai
+    pdfTab.classList.toggle('active', !ai); aiTab.classList.toggle('active', ai)
+    try { localStorage.setItem('texloom.tab', ai ? 'ai' : 'pdf') } catch {}
+    if (ai && !aiPane.firstChild) aiPane.append(createAssistantPanel({
+      replica: r, writable,
+      editorContext: () => {
+        if (!current || !view) return current ? { file: current, selection: '', fromLine: 0, toLine: 0 } : null
+        const sel = view.state.selection.main
+        const doc = view.state.doc
+        return { file: current, selection: doc.sliceString(sel.from, sel.to), fromLine: doc.lineAt(sel.from).number, toLine: doc.lineAt(sel.to).number }
+      },
+      compile: () => doCompile(false),
+      lastLog: () => lastLog,
+      userName: () => me.name,
+    }))
+  }
+  const pdfTab = h('button', { class: 'tab active', onclick: () => showTab(false) }, 'PDF')
+  const aiTab = h('button', { class: 'tab', onclick: () => showTab(true) }, 'Assistant')
   const syncBtn = h('button', { onclick: async () => { syncBtn.setAttribute('disabled', ''); await r.syncNow(); syncBtn.removeAttribute('disabled') } }, 'Sync now')
   const progress = h('div', { class: 'progress', hidden: true }, h('div', { class: 'bar' }), h('span', {}))
   const applyDevice = (d: Device) => {
@@ -121,7 +154,12 @@ async function openProject(keys: Keys) {
       h('span', { class: 'spacer' }), peers, status,
       syncBtn,
       h('button', { onclick: () => share(keys) }, 'Share'),
-      h('button', { title: 'Settings', onclick: () => settingsDialog(r, keys.link(server, writable), applyDevice) }, '⚙'),
+      h('button', { title: 'Settings', onclick: () => settingsDialog(r, keys.link(server, writable), applyDevice, async () => {
+        removing = true
+        await r.close()
+        await store.forget(keys.project)
+        location.href = '/'
+      }) }, '⚙'),
       compileBtn,
     ),
     h('main', {},
@@ -135,8 +173,9 @@ async function openProject(keys: Keys) {
         h('div', { class: 'hint muted' }, writable ? 'Drop files here to upload. ★ = main file.' : ''),
       ),
       editorHost,
-      h('section', { class: 'right' }, h('div', { class: 'pdfbar' }, pdfInfo,
-        h('button', { onclick: () => (logPre.hidden = !logPre.hidden) }, 'Log')), progress, logPre, pdfView.el),
+      h('section', { class: 'right' },
+        h('div', { class: 'tabs' }, pdfTab, aiTab),
+        pdfPane, aiPane),
     ),
   )
 
@@ -168,7 +207,7 @@ async function openProject(keys: Keys) {
   const renderMeta = () => {
     title.value = r.meta.get('name') || ''
     document.title = `${title.value} — texloom`
-    store.remember({ project: keys.project, fragment: keys.fragment(), name: title.value, at: Date.now(), writable })
+    if (!removing) store.remember({ project: keys.project, fragment: keys.fragment(), name: title.value, at: Date.now(), writable })
   }
   r.meta.observe(renderMeta); renderMeta()
 
@@ -278,9 +317,11 @@ async function openProject(keys: Keys) {
   }
 
   // ---- PDF output ----
+  let lastLog = ''
   const showPdf = (pdf: Uint8Array | null, log: string, info: string) => {
     if (pdf) pdfView.show(pdf).catch((e) => (pdfInfo.textContent = `PDF error: ${e}`))
     logPre.textContent = log
+    lastLog = log
     pdfInfo.textContent = info
   }
   const renderOut = async () => {
@@ -307,13 +348,18 @@ async function openProject(keys: Keys) {
     progress.classList.toggle('busy', p.phase === 'compile')
   }
 
-  async function doCompile() {
+  type CompileOut = { ok: boolean; log: string } | null
+  /** Compile per this device's setting. `interactive` = show alerts (button) vs return them (assistant). */
+  async function doCompile(interactive = true): Promise<CompileOut> {
+    const fail = (msg: string): CompileOut => { if (interactive) alert(msg); return { ok: false, log: msg } }
+    if (device.compile === 'none') return null
     const main = mainFile()
-    if (!main) return alert('No .tex file with \\documentclass found.')
-    if (device.compile === 'local') return compileLocally()
+    if (!main) return fail('No .tex file with \\documentclass found.')
+    if (device.compile === 'local') return compileLocally(fail)
     if (!(await browserCompileAvailable())) {
-      return alert('In-browser compilation is not installed on this server.\n\nChoose “Compile with my own TeX” in ⚙ Settings and run:\n  texloom run <folder> --compile')
+      return fail('In-browser compilation is not installed on this server.\n\nChoose “Compile with my own TeX” in ⚙ Settings and run:\n  texloom run <folder> --compile')
     }
+    if (compileBtn.hasAttribute('disabled')) return fail('A compile is already running; try again in a moment.')
     compileBtn.textContent = 'Compiling…'; compileBtn.setAttribute('disabled', '')
     showProgress({ phase: 'download', percent: 0 })
     try {
@@ -327,16 +373,17 @@ async function openProject(keys: Keys) {
         const [pdfId, logId] = await Promise.all([r.putBlob(res.pdf), r.putBlob(new TextEncoder().encode(res.log))])
         r.out.set('latest', { pdf: pdfId, log: logId, ok: true, by: `${me.name} (browser)`, at: Date.now() / 1000, main })
       }
+      return { ok: !!res.pdf, log: res.log }
     } catch (e) {
-      alert(`Compile failed: ${e}`)
+      return fail(`Compile failed: ${e}`)
     } finally {
       showProgress(null)
       compileBtn.textContent = 'Compile'; compileBtn.removeAttribute('disabled')
     }
   }
 
-  async function compileLocally() {
-    if (!(await r.requestCompile())) return alert('Not connected, so no local helper can be reached.')
+  async function compileLocally(fail: (m: string) => CompileOut): Promise<CompileOut> {
+    if (!(await r.requestCompile())) return fail('Not connected, so no local helper can be reached.')
     showProgress({ phase: 'compile' })
     const label = progress.lastChild as HTMLElement
     label.textContent = 'Asking your texloom helper to compile…'
@@ -348,14 +395,21 @@ async function openProject(keys: Keys) {
       if (r.out.get('latest')?.at !== before) break
       if (i === 20 && !acked) {
         showProgress(null)
-        return alert('No texloom helper with --compile answered.\n\nOn a computer with TeX, run:\n  texloom run <folder> --compile')
+        return fail('No texloom helper with --compile answered.\n\nOn a computer with TeX, run:\n  texloom run <folder> --compile')
       }
     }
     showProgress(null)
+    const o = r.out.get('latest')
+    if (!o || o.at === before) return fail('The local helper did not finish compiling within 60 s.')
+    const log = o.log ? new TextDecoder().decode(await r.getBlob(o.log)) : ''
+    return { ok: !!o.ok, log }
   }
 
   // optional auto-compile after a pause in typing
   let autoTimer: any
+  pdfPane.append(h('div', { class: 'pdfbar' }, pdfInfo, h('button', { onclick: () => (logPre.hidden = !logPre.hidden) }, 'Log')), progress, logPre, pdfView.el)
+  if (localStorage.getItem('texloom.tab') === 'ai') showTab(true)
+
   r.files.observeDeep((_e, tr) => {
     if (!device.autoCompile || device.compile === 'none' || tr.origin !== null && typeof tr.origin === 'symbol') return
     clearTimeout(autoTimer)

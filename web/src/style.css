@@ -108,3 +108,53 @@ select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-
 .cmds pre { background: var(--panel); padding: 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
 .row.end { justify-content: flex-end; margin-top: 18px; }
 details { margin-top: 12px; }
+
+/* right-hand tabs */
+.right .tabs { display: flex; gap: 2px; padding: 4px 6px 0; border-bottom: 1px solid var(--line); background: var(--panel); }
+.right .tab { border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; background: transparent; color: var(--muted); padding: 4px 12px; }
+.right .tab.active { background: var(--bg); color: var(--fg); border-color: var(--line); margin-bottom: -1px; }
+.right .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.right .pane[hidden] { display: none; }
+
+/* assistant */
+.assistant { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ai-bar { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); align-items: center; }
+.ai-bar select { max-width: 44%; }
+.ai-bar .model { flex: 1; min-width: 0; }
+.ai-log { flex: 1; overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.ai-user { align-self: flex-end; max-width: 88%; background: color-mix(in srgb, var(--accent) 16%, transparent); padding: 6px 10px; border-radius: 10px 10px 2px 10px; white-space: pre-wrap; }
+.ai-turn { display: flex; flex-direction: column; gap: 6px; }
+.ai-text { line-height: 1.5; overflow-wrap: anywhere; }
+.ai-text pre, .ai-think pre { background: var(--panel); padding: 8px; border-radius: 6px; overflow: auto; font-size: 12px; white-space: pre-wrap; }
+.ai-text code { background: var(--panel); padding: 0 4px; border-radius: 4px; font-size: 12px; }
+.ai-think summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.ai-think pre { color: var(--muted); max-height: 240px; margin: 4px 0 0; }
+.ai-tool { font-size: 12px; color: var(--muted); padding: 2px 8px; border-left: 2px solid var(--line); }
+.ai-tool.ok { border-color: var(--ok); }
+.ai-tool.err { border-color: var(--err); }
+.ai-tool.pending { border-color: var(--warn); }
+.ai-note, .ai-warn, .ai-err { font-size: 12px; padding: 6px 8px; border-radius: 6px; background: var(--panel); color: var(--muted); }
+.ai-warn { color: var(--warn); }
+.ai-err { color: var(--err); }
+.ai-review { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.ai-review .title { padding: 6px 8px; font-weight: 600; font-size: 12px; background: var(--panel); }
+.ai-review .row.end { padding: 6px 8px; margin: 0; }
+.ai-review.accepted { border-color: var(--ok); }
+.ai-review.rejected { border-color: var(--err); opacity: .7; }
+.diff { font: 12px/1.45 ui-monospace, "SF Mono", Menlo, monospace; max-height: 320px; overflow: auto; }
+.dl { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 8px 0 0; display: flex; }
+.dl .ln { width: 3.5em; flex: none; text-align: right; padding-right: 8px; color: var(--muted); user-select: none; }
+.dl.del { background: color-mix(in srgb, var(--err) 14%, transparent); }
+.dl.add { background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.dl.skip { color: var(--muted); font-style: italic; padding-left: 8px; }
+.ai-compose { border-top: 1px solid var(--line); padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+.ai-compose textarea { flex: 1; font: inherit; resize: vertical; min-height: 3em; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.ai-compose .row { align-items: flex-end; }
+.ctx { font-size: 11px; }
+.small { font-size: 12px; }
+.check.small { margin: 0; gap: 4px; }
+button.danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 50%, var(--line)); }
+button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent); }
+.recent li { display: flex; align-items: baseline; gap: 8px; }
+.recent .forget { border: none; background: transparent; color: var(--muted); padding: 0 4px; }
+.recent .forget:hover { color: var(--err); }

@@ -1,0 +1,9 @@
+# Caddy reverse proxy for texloom with automatic HTTPS (Let's Encrypt).
+# 1. Point a DNS name (e.g. texloom.example.org) at this machine.
+# 2. Make ports 80 and 443 reachable (router port-forward if it's at home).
+# 3. Replace the hostname below, then:  sudo caddy run --config /etc/caddy/Caddyfile
+# Caddy obtains and renews the certificate itself and passes WebSockets through.
+texloom.example.org {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8787
+}

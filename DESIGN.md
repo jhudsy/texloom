@@ -169,20 +169,42 @@ related-work section"`. Edits appear live in collaborators' browsers.
 
 Either way the PDF goes into the `out` map, so other peers just view it.
 
-## In-editor assistant (planned)
+## In-editor assistant
 
-A side panel that acts as another collaborator. Provider-agnostic:
+A chat panel (`web/src/assistant/`) that acts on the project like another collaborator.
 
-- **Adapters:** OpenAI-compatible Chat Completions (covers OpenAI, OpenRouter, Ollama,
-  LM Studio, vLLM, llama.cpp server) plus native Anthropic Messages. Each is configured
-  with a base URL, model and key, stored only in the user's browser.
-- **Tools given to the model:** `list_files`, `read_file`, `search`, `edit_file`
-  (find/replace on a Y.Text), `get_compile_log`, `compile`.
-- Edits are attributed to "assistant (model)" in history. An optional suggestion mode
-  shows changes as reviewable diffs before applying them.
-- CORS: Anthropic allows direct browser calls with an opt-in header. For a local LLM
-  you may need to allow the editor's origin (e.g. `OLLAMA_ORIGINS`). Alternatively the
-  local daemon can proxy requests.
+- **Adapters** (`llm.ts`), both streaming:
+  - **Anthropic:** the official `@anthropic-ai/sdk`, used from the browser
+    (`dangerouslyAllowBrowser`; the user's own key). Defaults to `claude-opus-5-5` with
+    adaptive thinking shown as summaries and an explicit `output_config.effort`. On
+    models that support it, `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`)
+    reruns a classifier-declined request on the recommended fallback model. Tools use
+    `eager_input_streaming`, and top-level `cache_control` caches the growing prefix
+    across the tool loop.
+  - **OpenAI-compatible:** `/v1/chat/completions` with `tools`, parsing the streamed
+    `tool_calls` and `reasoning`/`reasoning_content` deltas. Covers OpenAI, OpenRouter,
+    LM Studio, Ollama, vLLM, llama.cpp and LiteLLM.
+- **History:** each session keeps the provider-native message list and only appends
+  to it, so Claude's thinking blocks (with signatures) are echoed back unchanged. A
+  refused or truncated turn is never appended. After a mid-output fallback, blocks
+  before the last `fallback` marker that the next model can't continue from are
+  omitted. Switching provider or model starts a new conversation.
+- **Tools** (`tools.ts`): `list_files`, `read_file` (with line numbers), `search`,
+  `edit_file` (exact, unique match → one small Y.Text delete + insert), `write_file`
+  (common prefix/suffix trimmed), `delete_file`, `compile`, `get_compile_log` (errors
+  and warnings extracted). Read-only links get only the non-writing tools.
+  - Every input is validated with zod before running. Streamed and local-model inputs
+    can be truncated or malformed; failures go back to the model as error results.
+  - `edit_file` finds its target again *after* the user approves, because collaborators
+    may have typed in the meantime.
+- **Review and undo:** with "Ask before applying edits", each change waits as a diff card
+  (Apply / Reject). Assistant transactions use their own Yjs origin, tracked by a
+  `Y.UndoManager`; each request is one undo step ("Undo these changes"). Its edits
+  sync to collaborators like any local edit.
+- **Context:** the system prompt is static, so it caches. Each user message starts with
+  a `<context>` block: project, main file, open file and current selection.
+- **Keys** live in `localStorage` only; they never enter the Yjs document or pass
+  through the texloom server.
 
 ## History
 
