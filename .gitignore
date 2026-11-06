@@ -1,0 +1,18 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# texloom
+data/
+web/node_modules/
+web/dist/
+tex-assets/
+.claude/
+.DS_Store
