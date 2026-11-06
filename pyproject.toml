@@ -1,7 +1,9 @@
 [project]
 name = "texloom"
-version = "0.1.0"
-description = "Local-first collaborative LaTeX: relay server and folder-sync daemon"
+version = "0.2.0"
+description = "Local-first collaborative LaTeX: folder sync, MCP server for agents, and the relay server"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.14.5",

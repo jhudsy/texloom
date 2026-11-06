@@ -18,6 +18,7 @@ import { ProjectIndex } from './latex'
 import { autoSave, createHistoryPanel } from './history'
 import { referenceDialog } from './references'
 import { shareDialog } from './sharing'
+import { folderFiles, folderPermission, folderSyncSupported, pickFolder, rememberFolder, savedFolder, startFolderSync, type FolderSync } from './foldersync'
 import { applyTemplate, chooseTemplate, importDialog, TEMPLATES } from './templates'
 import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from './navigate'
 import { createReviewPanel, reviewExtension, type ReviewPanel } from './review'
@@ -275,6 +276,46 @@ async function openProject(keys: Keys) {
     try { localStorage.setItem('texloom.ltab', t) } catch {}
   }
 
+  // ---- folder sync from the browser (Chromium) ----
+  let folder: FolderSync | null = null
+  const folderBtn = h('button', { class: 'folder', hidden: true, onclick: () => folderMenu() })
+  const showFolder = () => {
+    folderBtn.hidden = !folder && !pendingFolder
+    folderBtn.textContent = folder ? `📁 ${folder.name}` : '📁 Reconnect folder'
+    folderBtn.title = folder ? `Synced with the folder “${folder.name}” while this tab is open. ${folder.status()}` : 'Click to allow syncing with your folder again.'
+  }
+  let pendingFolder: FileSystemDirectoryHandle | null = null
+  async function linkFolder(dir: FileSystemDirectoryHandle, fresh: boolean) {
+    if (fresh) {
+      const there = await folderFiles(dir)
+      const extra = there.filter((p) => !r.files.has(p) && !r.bin.has(p))
+      if (extra.length && !confirm(`“${dir.name}” has ${extra.length} file${extra.length === 1 ? '' : 's'} that aren’t in the project (e.g. ${extra.slice(0, 3).join(', ')}). They’ll be added to the project, and the project’s files written into the folder. Continue?`)) return
+    }
+    folder?.stop()
+    folder = await startFolderSync(r, dir)
+    folder.onChange = showFolder
+    pendingFolder = null
+    await rememberFolder(keys.project, dir)
+    showFolder()
+  }
+  async function folderMenu() {
+    if (!folder && pendingFolder) {
+      if ((await folderPermission(pendingFolder, true)) === 'granted') await linkFolder(pendingFolder, false)
+      return
+    }
+    if (folder && confirm(`Stop syncing with “${folder.name}”? The folder keeps its files.`)) {
+      folder.stop(); folder = null; await rememberFolder(keys.project, null); showFolder()
+    }
+  }
+  const chooseFolder = async () => { const d = await pickFolder(); if (d) await linkFolder(d, true) }
+  if (folderSyncSupported() && writable) {
+    savedFolder(keys.project).then(async (d) => {
+      if (!d) return
+      if ((await folderPermission(d, false)) === 'granted') await linkFolder(d, false)
+      else { pendingFolder = d; showFolder() }
+    }).catch(() => {})
+  }
+
   // ---- header ----
   const status = h('span', { class: 'status', role: 'status' })
   const peers = h('span', { class: 'peers' })
@@ -298,6 +339,7 @@ async function openProject(keys: Keys) {
       h('span', { class: 'spacer' }), peers, status,
       syncBtn,
       zipBtn,
+      folderBtn,
       h('button', { onclick: () => shareDialog(r, server, me.name) }, 'Share'),
       h('button', { title: 'Settings', onclick: () => openSettings() }, '⚙'),
       output.compileBtn,
@@ -347,7 +389,7 @@ async function openProject(keys: Keys) {
   app.addEventListener('drop', (e) => e.preventDefault())
 
   function openSettings() {
-    settingsDialog(r, keys.link(server, writable), applyDevice, async () => {
+    settingsDialog(r, keys.link(server, writable), applyDevice, folderSyncSupported() && writable ? chooseFolder : null, async () => {
       removing = true
       await r.close()
       await projects.forget(keys.project)
@@ -450,6 +492,6 @@ async function openProject(keys: Keys) {
   r.meta.observe(renderMeta); renderMeta()
 
   // debugging handle, only when enabled with localStorage['texloom.debug'] = '1'
-  try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor } } catch {}
+  try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor, startFolderSync } } catch {}
 }
 

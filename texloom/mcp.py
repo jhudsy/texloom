@@ -27,6 +27,7 @@ from pathlib import Path
 
 from pycrdt import Array, Assoc, Map, Text
 
+from . import __version__
 from .crypto import Keys, b64e
 from .folder import apply_text, safe_rel
 from .replica import Replica
@@ -427,7 +428,7 @@ class Server:
                 result = {
                     "protocolVersion": want if want in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "texloom", "version": "0.1.0"},
+                    "serverInfo": {"name": "texloom", "version": __version__},
                     "instructions": (
                         "This server edits a shared, live LaTeX project in TeXLoom. Collaborators see your edits and cursor "
                         f"as “{self.p.name}”. Read files before editing; when the user wants to review changes, use "

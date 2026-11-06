@@ -17,6 +17,7 @@ import os
 import sys
 from pathlib import Path
 
+from . import __version__
 from .crypto import Keys
 from .folder import STATE, FolderSync
 from .replica import Replica
@@ -104,6 +105,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog="texloom", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--version", action="version", version=f"texloom {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("new", help="share an existing folder as a new project")
     p.add_argument("dir", type=Path)

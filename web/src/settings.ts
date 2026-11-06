@@ -83,7 +83,7 @@ export async function setupDialog(r: Replica, link: string): Promise<Device> {
 }
 
 /** Project (shared) + device (local) settings. */
-export async function settingsDialog(r: Replica, link: string, onDevice: (d: Device) => void, onRemove: () => Promise<void>) {
+export async function settingsDialog(r: Replica, link: string, onDevice: (d: Device) => void, chooseFolder: (() => Promise<void>) | null, onRemove: () => Promise<void>) {
   const d = prefs.device(r.keys.project)
   const w = r.keys.writable
   const texFiles = [...r.files.keys()].filter((p) => p.endsWith('.tex')).sort()
@@ -137,7 +137,12 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     h('div', { class: 'row' },
       h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, 'Creation code…'),
       h('span', { class: 'muted small' }, 'Needed only to store new projects on servers that ask for one.')),
-    h('details', {}, h('summary', {}, 'Keep a copy in a folder on this computer'), folderHelp(r, link)),
+    h('details', {}, h('summary', {}, 'Keep a copy in a folder on this computer'),
+      chooseFolder ? h('div', {},
+        h('p', { class: 'muted small' }, 'This browser can sync a folder itself while this tab is open: nothing to install. Changes go both ways; files changed on both sides take the folder’s version (it stays in History).'),
+        h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => { dlg.close(); await chooseFolder() } }, 'Choose a folder…'))) : null,
+      chooseFolder ? h('p', { class: 'muted small' }, 'Or, to keep it in sync without a browser (and compile with your own TeX):') : null,
+      folderHelp(r, link)),
     h('h4', {}, 'Remove'),
     h('p', { class: 'muted small' },
       'Removing deletes this browser’s copy only. Collaborators keep theirs, folder copies stay until you delete the folder, and the server’s encrypted copy stays unless you choose “Don’t store anything on the server” above.'),
