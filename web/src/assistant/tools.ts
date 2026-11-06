@@ -6,6 +6,7 @@ import * as Y from 'yjs'
 import { z } from 'zod'
 import type { Replica } from '../replica'
 import { cleanPath } from '../projectfiles'
+import { addItem } from '../review'
 
 export const ASSISTANT = Symbol('assistant') // Yjs transaction origin for assistant edits
 
@@ -17,6 +18,7 @@ export interface ToolCtx {
   review: (c: Change) => Promise<boolean> // resolves true to apply
   compile: () => Promise<{ ok: boolean; log: string } | null>
   lastLog: () => string
+  agentName: string // how the assistant's comments and suggestions are signed
 }
 
 export interface ToolDef {
@@ -200,6 +202,38 @@ export const TOOLS: ToolDef[] = [
       if (!(await ctx.review({ path: p, before, after: null, summary: `Delete ${p}` }))) return 'The user rejected the deletion.'
       r.doc.transact(() => { r.files.delete(p); r.bin.delete(p) }, ASSISTANT)
       return `Deleted ${p}.`
+    },
+  },
+  {
+    name: 'suggest_edit',
+    description: 'Propose replacing old_string with new_string without changing the file: it shows as a tracked change in the editor and the Review tab, which the user (or a collaborator) accepts or rejects later. Use this when the user asks for suggestions, a review, or proofreading. old_string must match exactly and be unique. Optionally explain the change in comment.',
+    write: true,
+    schema: z.object({ path: z.string(), old_string: z.string().min(1), new_string: z.string(), comment: z.string().optional() }),
+    run: async ({ path, old_string, new_string, comment }, ctx) => {
+      const p = validPath(path)
+      const text = textOf(ctx.replica, p).toString()
+      const hits = occurrences(text, old_string)
+      if (hits.length !== 1) throw new ToolError(hits.length ? `old_string occurs ${hits.length} times in ${p}; add context to make it unique.` : `old_string not found in ${p}. Re-read the file.`)
+      const id = addItem(ctx.replica, 'suggestion', p, hits[0], hits[0] + old_string.length, new_string, ctx.agentName)
+      if (id && comment?.trim()) {
+        const replies = ctx.replica.review.get(id)?.get('replies')
+        if (replies instanceof Y.Array) replies.push([{ by: ctx.agentName, at: Date.now(), text: comment.trim().slice(0, 20000) }])
+      }
+      return `Suggested a change in ${p} (line ${text.slice(0, hits[0]).split('\n').length}). The file is unchanged until someone accepts it in the Review tab.`
+    },
+  },
+  {
+    name: 'add_comment',
+    description: 'Leave a comment on a passage, shown in the editor and the Review tab. quote must match the file exactly and be unique.',
+    write: true,
+    schema: z.object({ path: z.string(), quote: z.string().min(1), comment: z.string().min(1) }),
+    run: async ({ path, quote, comment }, ctx) => {
+      const p = validPath(path)
+      const text = textOf(ctx.replica, p).toString()
+      const hits = occurrences(text, quote)
+      if (hits.length !== 1) throw new ToolError(hits.length ? `quote occurs ${hits.length} times in ${p}; add context to make it unique.` : `quote not found in ${p}. Re-read the file.`)
+      addItem(ctx.replica, 'comment', p, hits[0], hits[0] + quote.length, comment, ctx.agentName)
+      return `Comment added on ${p} line ${text.slice(0, hits[0]).split('\n').length}.`
     },
   },
   {

@@ -4,6 +4,7 @@
   texloom clone <link> <dir>                      check a project out into a folder
   texloom run   <dir> [--compile]                 keep folder and project in sync
   texloom links <dir>                             print the edit / read-only links
+  texloom mcp   <dir|link> [--name NAME]          MCP server: an agent edits/comments as a collaborator
 """
 
 from __future__ import annotations
@@ -92,7 +93,7 @@ async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool = 
         await asyncio.sleep(3)  # let acks and peers' replies (relay-only projects) arrive
         conn.cancel()
         return
-    print(f"Syncing {d} ⇄ {server} ({'edit' if keys.writable else 'read-only'}). Ctrl-C to stop.")
+    print(f"Syncing {d.resolve()} ⇄ {server} ({'edit' if keys.writable else 'read-only'}). Ctrl-C to stop.")
     try:
         await asyncio.gather(conn, fs.watch())
     finally:
@@ -123,6 +124,9 @@ def main() -> None:
     p = sub.add_parser("storage", help="server storage: 'server' keeps an encrypted copy; 'relay' keeps nothing")
     p.add_argument("dir", type=Path)
     p.add_argument("mode", choices=["server", "relay"])
+    p = sub.add_parser("mcp", help="run an MCP server (stdio) so an agent can work on the project")
+    p.add_argument("target", help="a texloom folder, or a project link")
+    p.add_argument("--name", default="Claude (agent)", help="how the agent appears to collaborators")
     p = sub.add_parser("links", help="print share links")
     p.add_argument("dir", type=Path, nargs="?", default=Path("."))
     a = ap.parse_args()
@@ -162,6 +166,19 @@ def main() -> None:
         r.set_storage(a.mode)
         asyncio.run(run(a.dir, False, once=True))  # connecting aligns the server with the setting
         print(f"storage mode: {a.mode}")
+    elif a.cmd == "mcp":
+        from .mcp import serve
+        if "#" in a.target:
+            keys, server = Keys.from_link(a.target)
+            code = os.environ.get("TEXLOOM_CODE", "")
+        else:
+            d = Path(a.target)
+            keys, server = load(d)
+            code = load_config(d).get("create_code") or os.environ.get("TEXLOOM_CODE", "")
+        try:
+            asyncio.run(serve(keys, server, a.name[:64], code or None))
+        except KeyboardInterrupt:
+            pass
     elif a.cmd == "links":
         keys, server = load(a.dir)
         print_links(keys, server)
