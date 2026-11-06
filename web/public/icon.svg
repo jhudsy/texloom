@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#2f5d50"/>
+  <g fill="#ffffff" font-family="Georgia, 'Times New Roman', serif" font-weight="700">
+    <text x="78" y="300" font-size="200">T</text>
+    <text x="196" y="352" font-size="200">E</text>
+    <text x="318" y="300" font-size="200">X</text>
+  </g>
+  <path d="M96 392 H416" stroke="#9fd3c3" stroke-width="18" stroke-linecap="round" stroke-dasharray="2 34"/>
+</svg>

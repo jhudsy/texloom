@@ -14,6 +14,7 @@ export interface Output {
   compileBtn: HTMLButtonElement
   compile(interactive?: boolean): Promise<CompileOut>
   lastLog(): string
+  pdfView: PdfView
 }
 
 export function createOutput(r: Replica, writable: boolean, device: () => Device, userName: () => string): Output {
@@ -24,6 +25,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const logSplit = h('div', { class: 'hsplit' })
   const logBox = h('div', { class: 'logbox' }, logSplit, logPre)
   let lastPdf: Uint8Array | null = null
+  let pdfError: string | null = null
   let lastLog = ''
 
   const LOG_KEY = 'texloom.logOpen'
@@ -46,12 +48,13 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   function show(pdf: Uint8Array | null, log: string, text: string, ok: boolean) {
     if (pdf) {
       lastPdf = pdf
+      pdfError = null
       dlBtn.removeAttribute('disabled')
-      pdfView.show(pdf).catch((e) => (info.textContent = `PDF error: ${e}`))
+      pdfView.show(pdf).catch((e) => { console.error('PDF render failed', e); pdfError = `PDF error: ${e}`; info.textContent = pdfError })
     }
     logPre.textContent = log
     lastLog = log
-    info.textContent = text
+    info.textContent = pdfError ?? text
     if (!ok) setLogOpen(true)
   }
 
@@ -144,5 +147,5 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     autoTimer = setTimeout(() => { if (!compileBtn.hasAttribute('disabled')) compile() }, 2500)
   })
 
-  return { pane, compileBtn, compile, lastLog: () => lastLog }
+  return { pane, compileBtn, compile, lastLog: () => lastLog, pdfView }
 }

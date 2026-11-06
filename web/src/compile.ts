@@ -10,8 +10,14 @@ let available: Promise<boolean> | null = null
 
 export type Progress = { phase: 'download' | 'compile'; percent?: number; loaded?: number; total?: number }
 
+/** Does the server (or the offline cache) have this TeX asset? */
+async function hasAsset(path: string): Promise<boolean> {
+  try { if ('caches' in self && (await caches.match(path))) return true } catch {}
+  return fetch(path, { method: 'HEAD' }).then((r) => r.ok).catch(() => false)
+}
+
 export function browserCompileAvailable(): Promise<boolean> {
-  return (available ??= fetch(`${BASE}/busytex.wasm`, { method: 'HEAD' }).then((r) => r.ok).catch(() => false))
+  return (available ??= hasAsset(`${BASE}/busytex.wasm`))
 }
 
 export async function engineCached(): Promise<boolean> {
@@ -34,7 +40,7 @@ async function getRunner(): Promise<BusyTexRunner> {
   return (runner ??= (async () => {
     const { BusyTexRunner } = await import('texlyre-busytex')
     const pkgs = ['texlive-basic', 'texlive-recommended', 'texlive-extra']
-    const present = await Promise.all(pkgs.map((p) => fetch(`${BASE}/${p}.js`, { method: 'HEAD' }).then((r) => r.ok).catch(() => false)))
+    const present = await Promise.all(pkgs.map((p) => hasAsset(`${BASE}/${p}.js`)))
     const have = pkgs.filter((_, i) => present[i]).map((p) => `${BASE}/${p}.js`)
     const r = new BusyTexRunner({
       busytexBasePath: BASE,

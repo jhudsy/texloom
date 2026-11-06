@@ -12,6 +12,7 @@ import { fileBase, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
 import { createEditorPane } from './editor'
 import { createOutput } from './output'
+import { pdfjs } from './pdfview'
 import { ProjectIndex } from './latex'
 import './style.css'
 
@@ -19,6 +20,12 @@ const APP = 'TeXLoom'
 const server = location.origin
 const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#469990', '#9a6324']
 const brand = () => h('span', { class: 'logo', 'aria-label': APP }, 'T', h('span', { class: 'e' }, 'e'), 'XLoom')
+
+// Offline app: a service worker caches the app itself (projects already live in IndexedDB).
+const noSW = (() => { try { return localStorage.getItem('texloom.nosw') === '1' } catch { return false } })() // debugging switch
+if ('serviceWorker' in navigator && !noSW && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('service worker:', e))
+}
 
 window.addEventListener('hashchange', () => location.reload())
 const keys = (() => { try { return Keys.fromFragment(location.hash) } catch (e) { alert(e); return null } })()
@@ -285,7 +292,7 @@ async function openProject(keys: Keys) {
   r.meta.observe(renderMeta); renderMeta()
 
   // debugging handle, only when enabled with localStorage['texloom.debug'] = '1'
-  try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y } } catch {}
+  try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs } } catch {}
 }
 
 function share(keys: Keys) {
