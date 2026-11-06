@@ -6,18 +6,25 @@ server passes **end-to-end encrypted** changes between people and can be told to
 no copy at all. No accounts: you share a link. (The command-line tools are called
 `texloom`.)
 
-- Live editing with other people's cursors; offline edits merge automatically on reconnect.
+- Live editing with other people's cursors (click someone's avatar to jump to them);
+  offline edits merge automatically on reconnect. Installs as an offline-capable app.
 - Compile in the browser (TeX Live 2026 in WebAssembly), or with your own TeX installation.
+  Errors are listed with clickable locations; SyncTeX jumps between source and PDF.
+- History without git: automatic and named versions, compare with now, restore a file or
+  everything, and see who wrote each line.
+- Comments and suggested changes (tracked changes) that collaborators accept or reject.
 - Edit the project as an ordinary folder, so Claude Code, vim or VS Code can work on it
-  directly. Changes flow both ways, live.
-- Folders, images and other files; download the PDF or the whole project as a `.zip`.
-- LaTeX-aware editor:
-  - environments complete with their bodies;
-  - `\includegraphics`, `\cite`, `\ref` and `\input` suggest the project's files, bibliography keys and labels;
-  - missing ones are flagged.
-- Edit links and read-only links.
-- A built-in assistant that reads, edits and compiles the project, using Claude, any
-  OpenAI-compatible API, or a local model (LM Studio, Ollama).
+  directly; changes flow both ways, live. Chrome and Edge can sync a folder with nothing
+  installed.
+- Agents as collaborators: an MCP server (`texloom mcp`) lets Claude Code or any MCP
+  client read, edit, comment, suggest and compile, visible to everyone by name and cursor.
+  A built-in assistant does the same with Claude, any OpenAI-compatible API, or a local
+  model (LM Studio, Ollama).
+- LaTeX-aware editor: completion of environments, commands, files, citation keys and
+  labels; spell check that skips LaTeX; search and replace across files; an outline with
+  word counts; paste or drop images; add references from a DOI or arXiv id.
+- Start from templates, or import a `.zip` (e.g. from Overleaf) or an arXiv paper's source.
+- Read-only links, and personal edit links that can be revoked one by one.
 - The server is a single Python process with SQLite, small enough for a Raspberry Pi.
 
 See [DESIGN.md](DESIGN.md) for how it works.
@@ -64,6 +71,17 @@ The start page lists the projects you've opened **in that browser**:
 The server can't read or recover links, so keep important links somewhere safe; a
 password manager works well.
 
+### Sharing and revoking
+
+**Share** shows the links. Whoever created the project holds the **owner link**. From it
+they can make a **personal edit link** for each collaborator (by name), and later
+**revoke** one: the server and everyone's browsers then refuse that person's changes, and
+their app reopens read-only. A revoked person can still *read* new changes, because the
+link holds the encryption key. To shut them out completely, **Move to new keys**: the
+project (with history and comments) is copied into a new project with new keys, files
+are re-encrypted, the old server copy is deleted, and you send new links to the people
+who should keep access. The plain **read-only link** works as before.
+
 ### Editor
 
 | | |
@@ -75,7 +93,31 @@ password manager works well.
 | typing `\` | completes commands and environments; `\begin{table}`, `figure`, `itemize`, `align`, … come with their usual contents. **Tab** moves between the fields to fill in |
 | inside `\includegraphics{`, `\cite{`, `\ref{`, `\input{`, `\usepackage{` | suggests the project's images, bibliography keys (with titles), labels, files and common packages |
 
-Images, citation keys and labels that don't exist in the project are underlined.
+| **⌘⇧F** / **Ctrl+Shift+F** | search (and replace) across all files |
+| **⌘⌥M** / **Ctrl+Alt+M**, **⌘⌥E** / **Ctrl+Alt+E** | comment on the selection / suggest a change to it |
+| **⌘⌥→** / **Ctrl+Alt+→** | show the current line in the PDF (double-click the PDF to go back) |
+| paste or drop an image | adds it to `figs/` and inserts `\includegraphics` (a whole `figure` on an empty line) |
+| `\cite{` + a DOI or arXiv id | fetches the BibTeX entry and adds it to your `.bib` |
+
+Images, citation keys and labels that don't exist in the project are underlined, as are
+lines with compile errors. Spelling is checked with the browser's dictionary (language in
+Settings), skipping commands, maths, labels and the preamble.
+- **Left panel:** **Files**, **Search** (match case, whole words, regular expressions with
+  `$1`), and **Outline** (sections in document order through `\input`/`\include`, with
+  word counts; the total excludes maths and commands).
+- **Right panel:** **PDF**, **Assistant**, **Review** (comments and suggestions: reply,
+  resolve, accept, reject) and **History** (versions, compare, restore, "who wrote this").
+- **Problems:** after compiling, errors and warnings are listed under the PDF with their
+  file and line; click one to go there. **Raw log** shows the whole log.
+- **New projects** start from a template (article, paper with bibliography, Beamer, thesis
+  with chapters, letter) or an import: a `.zip` (Overleaf: Menu → Download → Source; a
+  GitHub "Download ZIP"; any zipped folder) or an arXiv paper's LaTeX source. **Import** in
+  the file list does the same for an existing project. From git: clone it and run
+  `texloom new` in the folder.
+- **+ Reference** adds a bibliography entry from a DOI or arXiv id (via doi.org) with a
+  readable key such as `vaswani2017attention`, and cites it at the cursor.
+- **Offline:** after the first visit the app (and, after one compile, the TeX engine) works
+  offline; browsers offer to install it as an app.
 - **Files:** the tree has folders. New files and folders go into the selected folder,
   you can drag to move, and dropping files from your computer onto a folder uploads them
   there.
@@ -150,16 +192,46 @@ A refused change is never lost:
 - the sender keeps it and retries;
 - the editor shows a warning that the project isn't saved on the server.
 
+### Idle projects, admin page, arXiv import
+
+- `--evict-idle-days N` drops the stored copy of projects nobody has opened for N days
+  (default: never). The server copy then behaves like a cache: the next time someone with
+  an edit link opens the project (browser or helper), their copy is uploaded again. Until
+  then, someone with only a link and no copy of their own can't open it.
+- `--admin-token-file FILE` (or `TEXLOOM_ADMIN_TOKEN`) turns on a read-only page at
+  `/admin`. Log in with any user name and the token as password. It shows storage, disk,
+  limits, usage per creation code, and per-project size, owner code, state and last
+  activity. Names and contents stay encrypted. The install script creates the token in
+  `/etc/texloom/admin-token`.
+- Importing an arXiv paper's source goes through the server, because arXiv doesn't allow
+  browsers to fetch it. The server makes one request at a time, at least 3 s apart, at most
+  10 per hour per address, with size caps. `--no-arxiv` turns it off.
+
 ## Working on a project as a folder
 
-Use this for Claude Code or any other tool, and to compile with your own TeX installation:
+Use this for Claude Code or any other tool, and to compile with your own TeX installation.
+
+**In Chrome or Edge, nothing to install:** Settings → *Keep a copy in a folder* →
+**Choose a folder…**. The tab keeps the folder in sync both ways while it is open (files
+changed on both sides take the folder's version; the other stays in History). After a
+browser restart, click **📁 Reconnect folder** once.
+
+**With the `texloom` helper** (any OS, works without a browser, can compile): install it
+once with [uv](https://docs.astral.sh/uv/) (or pipx):
 
 ```bash
-uv run texloom clone '<link>' ~/papers/demo      # quote the link: it contains '&'
-uv run texloom run ~/papers/demo --compile       # live two-way sync + latexmk
+uv tool install git+https://github.com/jhudsy/texloom
 ```
 
-Or share an existing folder: `uv run texloom new ~/papers/existing --server https://your.server`.
+```bash
+texloom clone '<link>' ~/papers/demo      # quote the link: it contains '&'
+texloom run ~/papers/demo --compile       # live two-way sync + latexmk
+```
+
+Or share an existing folder: `texloom new ~/papers/existing --server https://your.server`.
+On Windows, quote paths with spaces: `texloom run "C:\Users\Bob Smith\Desktop\paper"`.
+`texloom run` prints the full path of the folder it syncs. (From a source checkout, prefix
+the commands with `uv run`.)
 
 While `run` is going, edits to the files are merged character by character with what
 collaborators type in their browsers. With `--compile`:
@@ -193,6 +265,23 @@ Collaborators write the document, so compiling is locked down by default:
 
 `shell_escape` (needed for minted and similar) lets the document run programs on *your*
 machine: turn it on only for projects whose editors you trust.
+
+### Agents (MCP)
+
+`texloom mcp` is an [MCP](https://modelcontextprotocol.io) server, so Claude Code, Claude
+Desktop or any MCP client can work on a project directly, without a folder:
+
+```bash
+claude mcp add texloom -- texloom mcp ~/papers/demo        # a folder from texloom clone/new
+claude mcp add texloom -- texloom mcp '<edit link>'         # or straight from a link
+```
+
+The agent appears to everyone as **Claude (agent)** (change with `--name`), with its own
+cursor and its lines credited in "who wrote this". Its tools: list, read, search, write and
+edit files; **suggest** changes and **comment** (shown in the Review tab for people to
+accept or reject); list, reply to and resolve comments; and compile (with local `latexmk`)
+or read the latest compile log. Ask it to "suggest" rather than "edit" when you want to
+review its changes first.
 
 ## Assistant
 
@@ -244,8 +333,9 @@ The in-browser TeX engine is cached once per browser and shared by all projects 
   encrypted in the browser or the folder helper with a key that is only in the link
   (after `#`, which browsers never send to servers). The server stores and relays
   ciphertext.
-- **Edits are signed.** Writes are signed with the edit key, and the server and every
-  peer reject unsigned or wrongly signed changes, so read-only links can't edit.
+- **Edits are signed.** Writes are signed with the owner's key or a personal key the owner
+  granted (the grant travels with each signature), and the server and every peer reject
+  unsigned, wrongly signed or revoked changes, so read-only links can't edit.
 - **The server can't tamper with content.** Files fetched from it are checked against
   their content hash.
 
@@ -255,9 +345,10 @@ The in-browser TeX engine is cached once per browser and shared by all projects 
   trust (or run your own); the folder helper doesn't have this exposure. The server
   sends a strict Content-Security-Policy, and the install script pins the in-browser
   TeX download by checksum.
-- **Anyone with a link has that access, permanently.** Links can't be revoked: to cut
-  someone off, copy the project to a new one. Read-only holders see everything, including
-  the names and presence of other collaborators.
+- **Links can't be un-shared.** Personal edit links can be revoked, but revoking stops
+  editing, not reading: use **Move to new keys** to stop reading too. Owner and read-only
+  links can only be retired by moving to new keys. Read-only holders see everything,
+  including the names and presence of other collaborators.
 - **Editors are trusted with the project.** A malicious editor can delete or vandalise
   content, or tell the server to drop its copy. Keep your own copies (folder copy, zip,
   or your own git) of work that matters.
@@ -283,6 +374,8 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | `texloom/replica.py` | folder helper's replica: pycrdt document, outbox, peer handshake, blobs |
 | `texloom/folder.py` | two-way folder ⇄ CRDT sync, path safety, locked-down latexmk |
 | `texloom/cli.py` | command line |
+| `texloom/mcp.py` | MCP server (stdio JSON-RPC): tools, presence, comments and suggestions |
+| `server/arxiv.py`, `server/admin.py` | arXiv source import proxy; read-only admin page |
 | `web/src/main.ts` | start page and project view wiring |
 | `web/src/replica.ts` | browser replica: Yjs + IndexedDB, outbox, peer handshake, awareness, blobs |
 | `web/src/filetree.ts`, `projectfiles.ts` | folders and files, moves, zip export |
@@ -290,17 +383,22 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | `web/src/output.ts`, `compile.ts`, `pdfview.ts` | compiling (in browser or via the helper), PDF view, log |
 | `web/src/settings.ts`, `storagenotice.ts`, `projects.ts`, `layout.ts` | setup and settings, storage warnings, start-page list, panes |
 | `web/src/assistant/` | assistant: provider adapters (`llm.ts`), tools (`tools.ts`), chat panel (`panel.ts`) |
+| `web/src/history.ts`, `diff.ts` | versions, compare, restore, line authors |
+| `web/src/review.ts` | comments and suggested changes |
+| `web/src/navigate.ts`, `spell.ts` | search and replace, outline, word count; spell check |
+| `web/src/latexlog.ts`, `synctex.ts` | log parsing into problems; SyncTeX |
+| `web/src/templates.ts`, `references.ts`, `pasteimage.ts` | templates and import; DOI/arXiv references; pasted images |
+| `web/src/sharing.ts`, `crypto.ts` | links, personal links, revocation, moving to new keys |
+| `web/src/foldersync.ts` | folder sync from the browser (File System Access API) |
+| `web/sw-template.js` | service worker (offline app) |
 | `deploy/` | install script (nginx, certbot, systemd), Caddy config, systemd unit |
 
 ## Status
 
 Early prototype. Not yet built:
-- history / compare-versions UI
-- comments and tracked changes
-- SyncTeX (click between source and PDF)
-- direct browser-to-browser WebRTC
-- syncing a local folder from the browser itself (File System Access API, Chromium only)
-- packaging the helper for `pipx` / `uvx`
+- direct browser-to-browser WebRTC (changes always pass through a relay)
+- a desktop app bundling the helper (for now: `uv tool install`, or folder sync in Chrome/Edge)
+- tracked changes made by typing in "suggest mode" (suggestions are made from a selection)
 
 ## License
 

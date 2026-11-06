@@ -29,6 +29,7 @@ List codes/usage: texloom-server --codes-file data/codes.txt --list-codes --db d
 from __future__ import annotations
 
 import argparse
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -224,6 +225,9 @@ class Store:
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(projects)")}
         if "owner" not in cols:
             self.db.execute("ALTER TABLE projects ADD COLUMN owner TEXT NOT NULL DEFAULT 'existing'")
+        if "seen" not in cols:  # last time anyone connected (for idle-project eviction)
+            self.db.execute("ALTER TABLE projects ADD COLUMN seen REAL NOT NULL DEFAULT 0")
+            self.db.execute("ALTER TABLE projects ADD COLUMN evicted REAL NOT NULL DEFAULT 0")
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(log)")}
         if "h" not in cols:  # content hash, to recognise replayed updates
             self.db.execute("ALTER TABLE log ADD COLUMN h BLOB")
@@ -244,6 +248,7 @@ class Store:
                 self.usage[project] += n or 0
         self.total = sum(self.usage.values())
         self.owners: dict[str, str] = dict(self.db.execute("SELECT project, owner FROM projects"))
+        self.seen: dict[str, float] = {p: max(s, c) for p, s, c in self.db.execute("SELECT project, seen, created FROM projects")}
         self.dir = path.parent
 
     # --- registration & accounting -------------------------------------------
@@ -256,6 +261,32 @@ class Store:
                             (project, time.time(), label, owner))
         self.owners[project] = owner
         log.info("registered project %s… (%s)", project[:8], label)
+
+    def touch(self, project: str) -> None:
+        """Remember that someone opened the project (written at most hourly)."""
+        now = time.time()
+        if now - self.seen.get(project, 0) < 3600:
+            return
+        self.seen[project] = now
+        with self.db:
+            self.db.execute("UPDATE projects SET seen=?, evicted=0 WHERE project=?", (now, project))
+
+    def idle(self, days: float) -> list[str]:
+        """Stored projects nobody has opened for `days`."""
+        cutoff = time.time() - days * 86400
+        return [p for p, n in self.usage.items() if n > 0 and self.seen.get(p, 0) < cutoff]
+
+    def evict(self, project: str) -> int:
+        """Drop the stored copy (log and files) of an idle project. Its writers re-upload it
+        when they next connect; until then, link holders without a copy can't open it."""
+        freed = self.usage.get(project, 0)
+        with self.db:
+            self.db.execute("DELETE FROM log WHERE project=?", (project,))
+            self.db.execute("DELETE FROM blob WHERE project=?", (project,))
+            self.db.execute("DELETE FROM head WHERE project=?", (project,))
+            self.db.execute("UPDATE projects SET evicted=? WHERE project=?", (time.time(), project))
+        self._recount(project)
+        return freed
 
     def owner_usage(self, owner: str) -> int:
         return sum(self.usage.get(p, 0) for p, o in self.owners.items() if o == owner)
@@ -488,6 +519,7 @@ class Relay:
     async def handle(self, project: str, ws, conn: Conn, t: str, msg: dict) -> None:
         relay_only = self.store.relay_only(project)
         if t == "hello":
+            self.store.touch(project)
             if msg.get("code") and conn.code is None:  # one code check per connection
                 conn.code = self.codes.check(field(msg, "code", str))
             since = field(msg, "since", int, 0)
@@ -663,9 +695,27 @@ async def headers(request: web.Request, handler):
 
 
 def make_app(db: Path, static: Path | None, tex: Path | None = None,
-             limits: Limits | None = None, codes: CodeBook | None = None, arxiv: bool = True) -> web.Application:
+             limits: Limits | None = None, codes: CodeBook | None = None, arxiv: bool = True,
+             admin_token: str = "", evict_days: float = 0) -> web.Application:
     relay = Relay(Store(db), limits, codes)
     app = web.Application(middlewares=[headers], client_max_size=MAX_BLOB + 1024)
+    if admin_token:
+        from .admin import Admin
+        app.router.add_get("/admin", Admin(relay, admin_token, evict_days).page)
+    if evict_days > 0:
+        async def evict_idle(_app: web.Application):
+            async def loop():
+                while True:
+                    for p in relay.store.idle(evict_days):
+                        if relay.rooms.get(p):
+                            continue  # someone is connected right now
+                        freed = relay.store.evict(p)
+                        log.info("evicted idle project %s… (%s, unopened for %g days)", p[:8], fmt_size(freed), evict_days)
+                    await asyncio.sleep(min(3600, max(60, evict_days * 8640)))
+            task = asyncio.create_task(loop())
+            yield
+            task.cancel()
+        app.cleanup_ctx.append(evict_idle)
     app.router.add_get("/ws/{project}", relay.ws_handler)
     app.router.add_put("/blob/{project}/{id}", relay.put_blob)
     app.router.add_get("/blob/{project}/{id}", relay.get_blob)
@@ -702,6 +752,12 @@ def main() -> None:
     p.add_argument("--allowance", default="1G", help="allowance for --add-code: 0, a size, or unlimited (default 1G)")
     p.add_argument("--list-codes", action="store_true", help="list codes, allowances and usage, then exit")
     p.add_argument("--no-arxiv", action="store_true", help="disable importing arXiv sources through this server")
+    p.add_argument("--evict-idle-days", type=float, default=0,
+                   help="drop the stored copy of projects nobody opened for this many days (0 = never); "
+                        "their writers re-upload them on their next visit")
+    p.add_argument("--admin-token-file", type=Path,
+                   help="enable /admin (read-only usage page); password = this file's content "
+                        "(or set TEXLOOM_ADMIN_TOKEN)")
     a = p.parse_args()
     codes = CodeBook(a.codes_file)
     if a.add_code is not None or a.list_codes:
@@ -721,11 +777,16 @@ def main() -> None:
         print(f"{'existing':16}  {'unlimited':>9}  used {fmt_size(store.owner_usage('existing')):>7}  (stored before allowances)")
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    admin_token = (a.admin_token_file.read_text().strip() if a.admin_token_file else
+                   os.environ.get("TEXLOOM_ADMIN_TOKEN", "").strip())
+    if admin_token and len(admin_token) < 16:
+        sys.exit("the admin token must be at least 16 characters")
     limits = Limits(a.max_bytes, a.min_free, a.project_max_bytes)
     log.info("limits: total %s, keep %s free, %s per project; %s",
              fmt_size(limits.max_bytes), fmt_size(limits.min_free), fmt_size(limits.project_max),
              f"allowances from {a.codes_file}" if codes.path else "no codes file: every project may be stored")
-    web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv), host=a.host, port=a.port)
+    web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv,
+                        admin_token=admin_token, evict_days=a.evict_idle_days), host=a.host, port=a.port)
 
 
 if __name__ == "__main__":

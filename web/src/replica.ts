@@ -192,8 +192,11 @@ export class Replica {
         this.storeInfo = m.store ?? null
         this.learnRevoked(m.rv ?? [])
         if (this.storeInfo?.registered && this.storeProblem === 'needs-code') this.storeProblem = null
+        const lost = m.head < this.since && m.mode !== 'relay' // the server dropped its copy (e.g. idle eviction)
+        if (lost) { this.since = m.head; this.seen.clear(); idbPut(this.db, 'kv', 'since', this.since) }
         await this.apply(m.entries)
         this.since = Math.max(this.since, m.head)
+        if (lost && this.keys.writable) await this.reseed()
         for (const q of this.seen) if (q <= this.since) this.seen.delete(q)
         this.markSeen(this.since)
         this.status = 'online'; this.onStatus()
@@ -419,6 +422,14 @@ export class Replica {
     }
     if (this.status === 'online') await this.uploadPending()
     return id
+  }
+
+  /** Give the server back its copy: the whole document, and every file we have. */
+  private async reseed() {
+    console.info('the server has no copy of this project any more: re-uploading it')
+    for (const [, b] of this.bin) if (b?.h && (await idbGet(this.db, 'blobs', b.h))) await idbPut(this.db, 'pending', b.h, 1)
+    await this.uploadPending()
+    await this.send(crypto.randomUUID(), Y.encodeStateAsUpdate(this.doc), [])
   }
 
   private async uploadPending() {

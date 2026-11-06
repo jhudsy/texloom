@@ -75,6 +75,12 @@ if [ ! -s /etc/texloom/codes.txt ]; then
   echo "    owner's creation code (unlimited): $(.venv/bin/texloom-server --codes-file /etc/texloom/codes.txt --db /var/lib/texloom/texloom.db --add-code owner --allowance unlimited)"
 fi
 chown root:texloom /etc/texloom/codes.txt && chmod 640 /etc/texloom/codes.txt
+# admin page (/admin, read-only usage): password in /etc/texloom/admin-token
+if [ ! -s /etc/texloom/admin-token ]; then
+  head -c 24 /dev/urandom | base64 | tr -d '/+=' > /etc/texloom/admin-token
+  echo "    admin page: https://$DOMAIN/admin  (password: sudo cat /etc/texloom/admin-token)"
+fi
+chown root:texloom /etc/texloom/admin-token && chmod 640 /etc/texloom/admin-token
 
 # systemd service
 cat > /etc/systemd/system/texloom.service <<UNIT
@@ -86,7 +92,7 @@ Wants=network-online.target
 [Service]
 User=texloom
 WorkingDirectory=/opt/texloom
-ExecStart=/opt/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static /opt/texloom/web/dist --tex-assets /opt/texloom/tex-assets --codes-file /etc/texloom/codes.txt --min-free 2G --project-max-bytes 200M
+ExecStart=/opt/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static /opt/texloom/web/dist --tex-assets /opt/texloom/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M
 Restart=on-failure
 UMask=0077
 MemoryMax=768M
@@ -179,6 +185,12 @@ server {
         proxy_read_timeout 120s;
     }
     location /api/ {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host \$host;
+    }
+    # read-only admin page (HTTP basic auth against /etc/texloom/admin-token)
+    location = /admin {
+        limit_req zone=texloom_code burst=5 nodelay;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
     }

@@ -373,7 +373,20 @@ class Replica:
         if t == "log":
             self.server_mode = m.get("mode", "server")
             self._revoked(m.get("rv", []))
+            lost = m["head"] < self.since and m.get("mode") != "relay"  # server dropped its copy (idle eviction)
+            if lost:
+                self.since, self._seen = m["head"], set()
             await self._apply_entries(m["entries"])
+            if lost and self.keys.writable:
+                log.info("the server has no copy of this project any more: re-uploading it")
+                pending = self.dir / "blobs-pending"
+                pending.mkdir(exist_ok=True)
+                for info in self.bin.values():
+                    bid = info.get("h") if isinstance(info, dict) else None
+                    if isinstance(bid, str) and BLOB_RE.match(bid) and (self.dir / "blobs" / bid).exists():
+                        (pending / bid).touch()
+                uid = secrets.token_hex(8)
+                self.outbox[uid] = self.doc.get_update()
             if self.keys.writable and self.pending_mode:  # setting changed while offline
                 await self.send_mode(self.pending_mode)
             await self.upload_pending()  # blobs first, so peers can fetch what updates reference
