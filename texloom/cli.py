@@ -48,8 +48,10 @@ DEFAULT_CONFIG = {
 
 def save(d: Path, link: str, create_code: str = "") -> None:
     (d / STATE).mkdir(parents=True, exist_ok=True)
-    config_path(d).write_text(json.dumps({"link": link, **DEFAULT_CONFIG, "create_code": create_code}, indent=2))
-    config_path(d).chmod(0o600)  # contains the project keys
+    os.chmod(d / STATE, 0o700)
+    fd = os.open(config_path(d), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # holds the project keys
+    with os.fdopen(fd, "w") as f:
+        json.dump({"link": link, **DEFAULT_CONFIG, "create_code": create_code}, f, indent=2)
     (d / STATE / ".gitignore").write_text("*\n")
 
 

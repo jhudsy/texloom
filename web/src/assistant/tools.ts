@@ -5,6 +5,7 @@
 import * as Y from 'yjs'
 import { z } from 'zod'
 import type { Replica } from '../replica'
+import { cleanPath } from '../projectfiles'
 
 export const ASSISTANT = Symbol('assistant') // Yjs transaction origin for assistant edits
 
@@ -36,8 +37,9 @@ const textOf = (r: Replica, path: string): Y.Text => {
 }
 
 const validPath = (p: string) => {
-  const clean = p.replace(/^\.?\//, '').trim()
-  if (!clean || clean.split('/').some((s) => s === '..' || s === '') || clean.startsWith('.texloom'))
+  const clean = cleanPath(p)
+  // files TeX tools execute or treat as configuration are off-limits (latexmkrc is Perl)
+  if (!clean || clean.split('/').some((s) => /^(\.?latexmkrc|.*\.latexmkrc|texmf\.cnf)$/i.test(s)))
     throw new ToolError(`Invalid path: ${p}`)
   return clean
 }
@@ -120,7 +122,10 @@ export const TOOLS: ToolDef[] = [
     }),
     run: async ({ pattern, regex, path }, { replica: r }) => {
       let re: RegExp | null = null
-      if (regex) { try { re = new RegExp(pattern) } catch (e) { throw new ToolError(`Bad regex: ${e}`) } }
+      if (regex) {
+        if (pattern.length > 200) throw new ToolError('Regex too long (max 200 characters).')
+        try { re = new RegExp(pattern) } catch (e) { throw new ToolError(`Bad regex: ${e}`) }
+      }
       const hits: string[] = []
       const paths = path ? [validPath(path)] : [...r.files.keys()].sort()
       for (const p of paths) {

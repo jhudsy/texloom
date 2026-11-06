@@ -15,6 +15,11 @@ DOMAIN=${2:?usage: deploy/install.sh user@host domain}
 SSH_OPTS=${SSH_OPTS:-}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 BUSYTEX_VERSION=$(node -p "require('$HERE/web/node_modules/texlyre-busytex/package.json').version")
+# sha256 of busytex-assets.tar.gz per release; set BUSYTEX_SHA256 for a version not listed here
+case "$BUSYTEX_VERSION" in
+  1.4.1) BUSYTEX_SHA256=${BUSYTEX_SHA256:-4f63731fe4ec9238d877846074ab424350add6f6e956944def389e6752d2c78b} ;;
+esac
+[ -n "${BUSYTEX_SHA256:-}" ] || { echo "No checksum known for TeX assets v$BUSYTEX_VERSION: set BUSYTEX_SHA256"; exit 1; }
 ssh_() { ssh $SSH_OPTS "$TARGET" "$@"; }
 
 echo "==> Building the web app locally"
@@ -29,7 +34,7 @@ rsync -az --delete -e "ssh $SSH_OPTS" \
   "$HERE/" "$TARGET:/opt/texloom/"
 
 echo "==> Installing on the server"
-ssh_ DOMAIN="$DOMAIN" BUSYTEX_VERSION="$BUSYTEX_VERSION" SKIP_CERT="${SKIP_CERT:-}" bash -s <<'REMOTE'
+ssh_ DOMAIN="$DOMAIN" BUSYTEX_VERSION="$BUSYTEX_VERSION" BUSYTEX_SHA256="$BUSYTEX_SHA256" SKIP_CERT="${SKIP_CERT:-}" bash -s <<'REMOTE'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
@@ -53,8 +58,10 @@ chown -R root:root /opt/texloom && chmod -R a+rX /opt/texloom
 if [ "$(cat tex-assets/.version 2>/dev/null)" != "$BUSYTEX_VERSION" ]; then
   echo "    downloading TeX assets v$BUSYTEX_VERSION"
   rm -rf tex-assets.new && mkdir -p tex-assets.new
-  curl -fsSL "https://github.com/TeXlyre/texlyre-busytex/releases/download/assets-v$BUSYTEX_VERSION/busytex-assets.tar.gz" \
-    | tar -xz -C tex-assets.new
+  tmp=$(mktemp)
+  curl -fsSL -o "$tmp" "https://github.com/TeXlyre/texlyre-busytex/releases/download/assets-v$BUSYTEX_VERSION/busytex-assets.tar.gz"
+  echo "$BUSYTEX_SHA256  $tmp" | sha256sum -c --quiet - || { rm -f "$tmp"; echo "TeX assets checksum mismatch: refusing to install"; exit 1; }
+  tar -xzf "$tmp" -C tex-assets.new && rm -f "$tmp"
   [ -f tex-assets.new/busytex/busytex.wasm ] || { echo "unexpected archive layout"; ls -R tex-assets.new | head; exit 1; }
   echo "$BUSYTEX_VERSION" > tex-assets.new/.version
   # the archive unpacks as uid 1000 with a world-writable directory: make it root-owned, read-only
@@ -62,29 +69,47 @@ if [ "$(cat tex-assets/.version 2>/dev/null)" != "$BUSYTEX_VERSION" ]; then
   rm -rf tex-assets && mv tex-assets.new tex-assets
 fi
 
-# creation codes: storing a new project needs one (see README); print the first one
+# storage allowances: without a code nothing is stored (default 0); print the owner's code
 install -d -o root -g texloom -m 750 /etc/texloom
 if [ ! -s /etc/texloom/codes.txt ]; then
-  echo "    first creation code: $(.venv/bin/texloom-server --codes-file /etc/texloom/codes.txt --db /var/lib/texloom/texloom.db --add-code owner)"
+  echo "    owner's creation code (unlimited): $(.venv/bin/texloom-server --codes-file /etc/texloom/codes.txt --db /var/lib/texloom/texloom.db --add-code owner --allowance unlimited)"
 fi
 chown root:texloom /etc/texloom/codes.txt && chmod 640 /etc/texloom/codes.txt
 
 # systemd service
 cat > /etc/systemd/system/texloom.service <<UNIT
 [Unit]
-Description=texloom relay server
+Description=TeXLoom relay server
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=texloom
 WorkingDirectory=/opt/texloom
-ExecStart=/opt/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static /opt/texloom/web/dist --tex-assets /opt/texloom/tex-assets --codes-file /etc/texloom/codes.txt --max-bytes 2G --min-free 2G --project-max-bytes 200M
+ExecStart=/opt/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static /opt/texloom/web/dist --tex-assets /opt/texloom/tex-assets --codes-file /etc/texloom/codes.txt --min-free 2G --project-max-bytes 200M
 Restart=on-failure
+UMask=0077
+MemoryMax=768M
+TasksMax=128
 NoNewPrivileges=true
+CapabilityBoundingSet=
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
 ReadWritePaths=/var/lib/texloom
 
 [Install]
@@ -113,6 +138,12 @@ server {
     root /opt/texloom/web/dist;
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
+
+    # security headers (locations that set their own add_header repeat the essentials)
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     # encrypted sync (WebSocket); connections are long-lived
     location /ws/ {
@@ -149,12 +180,14 @@ server {
         alias /opt/texloom/tex-assets/;
         expires 30d;
         add_header Cache-Control "public";
+        add_header X-Content-Type-Options nosniff always;
     }
     # hashed build output (.mjs is missing from nginx's default MIME table)
     location /assets/ {
         types { application/javascript js mjs; text/css css; }
         expires 1y;
         add_header Cache-Control "public, immutable";
+        add_header X-Content-Type-Options nosniff always;
     }
     location / {
         try_files \$uri /index.html;

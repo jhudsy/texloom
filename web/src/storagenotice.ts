@@ -1,7 +1,7 @@
 // Storage-related UI: creation codes, the "only in this browser" warning, and the
 // new-project flow on servers that require a creation code.
 import { creationCode, type Replica } from './replica'
-import { dialog, h } from './settings'
+import { dialog, h } from './dom'
 
 const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent)
 export const SAFARI_NOTE = isSafari ? ' Safari may also delete a site’s data after about 7 days without a visit.' : ''
@@ -21,7 +21,11 @@ export function askCode(intro?: string): Promise<boolean> {
       if (!code) return
       const r = await fetch('/api/code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })
         .then((x) => x.json()).catch(() => null)
-      if (r?.ok) { creationCode.set(code); ok = true; dlg.close() }
+      if (r?.ok) {
+        creationCode.set(code); ok = true
+        if (r.allowance != null) alert(`Code accepted. Its storage allowance is ${(r.allowance / 1048576).toFixed(0)} MB, of which ${(r.used / 1048576).toFixed(1)} MB is used.`)
+        dlg.close()
+      }
       else msg.textContent = r ? 'That code isn’t valid on this server.' : 'Couldn’t reach the server; try again when online.'
     }
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') check() })
@@ -68,6 +72,7 @@ export function riskBanner(r: Replica, writable: boolean, openSettings: () => vo
     const MB = Math.round((r.storeInfo?.projectMax ?? 0) / 1048576)
     const why =
       p === 'needs-code' ? 'Not saved on the server: storing new projects here needs a creation code.'
+      : p === 'quota-full' ? 'Not saved on the server: the storage allowance of the creation code this project was created with is used up.'
       : p === 'project-full' ? `Not saved on the server: this project has reached the server’s ${MB} MB limit.`
       : p === 'server-full' ? 'Not saved on the server: the server is out of space. Changes are kept here and retried every few minutes.'
       : 'This project isn’t stored on the server (Settings → Server storage).'

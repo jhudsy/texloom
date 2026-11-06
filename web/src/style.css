@@ -34,6 +34,9 @@ input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-r
 .project { display: flex; flex-direction: column; height: 100vh; }
 header { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { font-weight: 700; color: var(--accent); text-decoration: none; }
+/* TeXLoom wordmark: the "e" dropped as in the TeX logo */
+.logo { font-family: "Latin Modern Roman", "CMU Serif", Georgia, "Times New Roman", serif; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
+.logo .e { position: relative; top: .22em; margin: 0 -.08em 0 -.13em; text-transform: none; }
 .title { border-color: transparent; background: transparent; font-weight: 600; width: 22ch; }
 .title:hover:not([readonly]), .title:focus { border-color: var(--line); background: var(--bg); }
 .spacer { flex: 1; }
@@ -48,7 +51,12 @@ header { display: flex; align-items: center; gap: 10px; padding: 6px 12px; borde
 
 main { flex: 1; display: grid; min-height: 0; }
 aside { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
-aside .tools { display: flex; gap: 6px; padding: 8px; }
+aside .tools { display: flex; gap: 6px; padding: 8px; flex-wrap: wrap; }
+.filetree { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.filetree .where { padding: 0 10px 4px; min-height: 0; }
+.files li.dir .path { font-weight: 500; }
+.files li.folder-sel { box-shadow: inset 2px 0 0 var(--accent); }
+.files li.drop { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 .files { list-style: none; margin: 0; padding: 0 0 8px; overflow: auto; flex: 1; }
 .files li { display: flex; align-items: center; gap: 6px; padding: 3px 10px; cursor: pointer; white-space: nowrap; }
 .files li:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
@@ -71,7 +79,18 @@ aside .hint { font-size: 12px; padding: 8px 10px; }
 .pdfbar { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .pdf { flex: 1; overflow: auto; background: #7d7d7d; padding: 12px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .pdf canvas { max-width: 100%; height: auto !important; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .4); }
-.log { margin: 0; max-height: 40%; overflow: auto; padding: 8px; font-size: 12px; background: var(--panel); border-bottom: 1px solid var(--line); white-space: pre-wrap; }
+/* compile log, below the PDF */
+.logbox { display: flex; flex-direction: column; min-height: 60px; flex: none; }
+.logbox[hidden] { display: none; }
+.hsplit { height: 5px; flex: none; cursor: row-resize; background: var(--line); touch-action: none; outline: none; position: relative; }
+.hsplit::after { content: ""; position: absolute; inset: -4px 0; }
+.hsplit:hover, .hsplit:focus-visible { background: var(--accent); }
+.log { margin: 0; flex: 1; min-height: 0; overflow: auto; padding: 8px; font-size: 12px; background: var(--panel); white-space: pre-wrap; }
+body.resizing-v { cursor: row-resize; user-select: none; }
+body.resizing-v canvas, body.resizing-v .cm-editor { pointer-events: none; }
+.pdfbar .spacer { flex: 1; }
+.pdfbar { gap: 6px; }
+.pdfbar button.on { border-color: var(--accent); }
 .err { color: var(--err); }
 
 dialog.share { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); width: min(640px, 92vw); }

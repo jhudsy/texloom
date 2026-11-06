@@ -58,7 +58,7 @@ export const projects = {
   sawPeople(project: string, names: string[], me: string) {
     const r = read().find((x) => x.project === project)
     if (!r) return
-    const fresh = names.filter((n) => n && n !== me && !/^anon-\d+$/.test(n))
+    const fresh = names.map((n) => String(n ?? '').slice(0, 64)).filter((n) => n && n !== me && !/^anon-\d+$/.test(n))
     if (!fresh.length) return
     const people = [...new Set([...fresh, ...(r.people ?? [])])].slice(0, 8)
     if (people.join('\n') !== (r.people ?? []).join('\n')) projects.update(project, { people })

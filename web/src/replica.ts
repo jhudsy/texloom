@@ -60,8 +60,9 @@ export const creationCode = {
 }
 
 /** Why the server isn't storing this project's changes (they still reach people online). */
-export type StoreProblem = 'needs-code' | 'project-full' | 'server-full' | null
-export interface StoreInfo { registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number }
+export type StoreProblem = 'needs-code' | 'quota-full' | 'project-full' | 'server-full' | null
+const STORE_PROBLEMS = new Set(['needs-code', 'quota-full', 'project-full', 'server-full'])
+export interface StoreInfo { registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number | null; allowance: number | null }
 
 export type Status = 'offline' | 'connecting' | 'online' | 'paused'
 export type SyncMode = 'live' | 'manual'
@@ -71,6 +72,7 @@ export class Replica {
   readonly doc = new Y.Doc()
   readonly files = this.doc.getMap<Y.Text>('files')
   readonly bin = this.doc.getMap<{ h: string; size: number }>('bin')
+  readonly dirs = this.doc.getMap<boolean>('dirs') // explicit (possibly empty) folders
   readonly meta = this.doc.getMap<any>('meta')
   readonly out = this.doc.getMap<any>('out')
   readonly awareness = new awarenessProtocol.Awareness(this.doc)
@@ -222,7 +224,7 @@ export class Replica {
         this.onStatus()
         break
       case 'err':
-        if (m.code === 'needs-code' || m.code === 'project-full' || m.code === 'server-full') {
+        if (STORE_PROBLEMS.has(m.code)) {
           // Not stored, but already relayed to anyone online. Keep it in the outbox; retry later.
           if (m.id) this.inflight.delete(m.id)
           this.storeProblem = m.code
@@ -395,7 +397,7 @@ export class Replica {
       }).catch(() => null)
       if (r && [403, 413, 507].includes(r.status)) {
         const why = (await r.json().catch(() => ({}))).code
-        if (why) { this.storeProblem = why; this.scheduleRetry(); this.onStatus() }
+        if (STORE_PROBLEMS.has(why)) { this.storeProblem = why; this.scheduleRetry(); this.onStatus() }
       }
       if (!r?.ok) return
       await idbDel(this.db, 'pending', id)
@@ -409,8 +411,12 @@ export class Replica {
       const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`).catch(() => null)
       if (r?.ok) {
         const plain = await this.keys.decrypt(new Uint8Array(await r.arrayBuffer()))
-        await idbPut(this.db, 'blobs', id, plain)
-        return plain
+        // The id is an HMAC of the content: the server can't substitute another file.
+        if ((await this.keys.blobId(plain)) === id) {
+          await idbPut(this.db, 'blobs', id, plain)
+          return plain
+        }
+        console.warn('server returned the wrong content for', id)
       }
     }
     // Ask connected peers for it.

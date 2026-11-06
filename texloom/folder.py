@@ -13,14 +13,16 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import time
+import unicodedata
 from pathlib import Path
 
 from pycrdt import Text
 from watchfiles import awatch
 
-from .replica import Replica
+from .replica import BLOB_RE, Replica
 
 log = logging.getLogger("texloom")
 
@@ -39,6 +41,33 @@ TEXT_SUFFIXES = {
 }
 MAX_TEXT = 4 * 1024 * 1024
 MAX_FILE = 50 * 1024 * 1024
+
+# Files that TeX tools read as configuration or execute (latexmk runs latexmkrc as Perl).
+# They are never written from, or sent to, the shared project.
+UNSAFE_NAMES = {"latexmkrc", ".latexmkrc", "texmf.cnf", ".texmf.cnf", "mktexlsr", "ls-r"}
+WIN_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+
+
+def safe_rel(rel: object) -> str | None:
+    """Validate a project path received from collaborators. None if it must not touch disk.
+
+    Rejects absolute paths, drive letters, backslashes, '.'/'..'/empty segments, control
+    characters, reserved names (compared case-insensitively, Unicode-normalised), and
+    files that TeX tools would execute or treat as configuration.
+    """
+    if not isinstance(rel, str) or not rel or len(rel) > 300:
+        return None
+    if rel.startswith("/") or "\\" in rel or re.match(r"^[A-Za-z]:", rel):
+        return None
+    for seg in rel.split("/"):
+        if seg in ("", ".", "..") or any(ord(c) < 32 or c in '<>:"|?*' for c in seg):
+            return None
+        n = unicodedata.normalize("NFKC", seg).casefold()
+        if n in (STATE, ".git") or n in UNSAFE_NAMES or n.endswith(".latexmkrc"):
+            return None
+        if os.name == "nt" and n.split(".")[0] in WIN_RESERVED:
+            return None
+    return rel
 
 
 def sha(b: bytes) -> str:
@@ -109,6 +138,7 @@ class FolderSync:
         self.opts = {"latexmk_args": [], "shell_escape": False, "label": "latexmk",
                      **(compile_opts or {})}
         self._fetching: set[str] = set()
+        self._refused: set[str] = set()
         self.known: dict[str, dict] = {}  # path -> {"m": mtime_ns, "z": size, "h": hash}
         self._compile_task: asyncio.Task | None = None
         self._known_file = self.root / STATE / "known.json"
@@ -121,6 +151,28 @@ class FolderSync:
     # --- helpers -------------------------------------------------------------
     def rel(self, p: Path) -> str:
         return p.resolve().relative_to(self.root).as_posix()
+
+    def target(self, rel: object) -> Path | None:
+        """Absolute path for a collaborator-supplied project path, or None if unsafe.
+        Guarantees the result is inside the project folder, even through symlinks."""
+        good = safe_rel(rel)
+        if good is None:
+            if rel not in self._refused:
+                self._refused.add(str(rel))
+                log.warning("ignoring unsafe path from the project: %r", rel)
+            return None
+        full = self.root / good
+        try:
+            parent = full.parent.resolve()
+        except OSError:
+            return None
+        if parent != self.root and self.root not in parent.parents:
+            log.warning("ignoring %r: it would leave the project folder (symlink?)", rel)
+            return None
+        if full.is_symlink():
+            log.warning("ignoring %r: it is a symlink on disk", rel)
+            return None
+        return full
 
     def ignored(self, rel: str) -> bool:
         parts = rel.split("/")
@@ -168,6 +220,11 @@ class FolderSync:
         changed = False
         for rel in sorted(paths):
             if self.ignored(rel):
+                continue
+            if safe_rel(rel) is None:
+                if rel not in self._refused:
+                    self._refused.add(rel)
+                    log.warning("not sharing %s: collaborators' helpers never accept this file name", rel)
                 continue
             full = self.root / rel
             if not full.is_file():
@@ -225,41 +282,66 @@ class FolderSync:
     async def write_out(self) -> None:
         changed = False
         wanted: set[str] = set()
+
+        def attempt(fn, rel):  # one bad entry (name clash, permissions) mustn't stop the rest
+            nonlocal changed
+            try:
+                if fn():
+                    changed = True
+            except OSError as e:
+                log.warning("could not write %s: %s", rel, e)
+
         for rel, yt in list(self.r.files.items()):
-            if self.ignored(rel) or ".." in rel.split("/"):
+            if self.ignored(rel) or self.target(rel) is None:
                 continue
             wanted.add(rel)
             data = str(yt).encode("utf-8")
             h = sha(data)
             if self.known.get(rel, {}).get("h") == h and (self.root / rel).exists():
                 continue
-            self._write(rel, data, h)
-            changed = True
+            attempt(lambda rel=rel, data=data, h=h: self._write(rel, data, h) or True, rel)
         for rel, info in list(self.r.bin.items()):
-            if self.ignored(rel) or ".." in rel.split("/"):
+            if self.ignored(rel) or self.target(rel) is None:
+                continue
+            bid = info.get("h") if isinstance(info, dict) else None
+            if not isinstance(bid, str) or not BLOB_RE.match(bid):
+                log.warning("ignoring %r: malformed file reference", rel)
                 continue
             wanted.add(rel)
-            bid = info["h"]
             if self.known.get(rel, {}).get("h") == bid and (self.root / rel).exists():
                 continue
             cached = self.r.dir / "blobs" / bid
             if cached.exists():
-                self._write(rel, cached.read_bytes(), bid)
-                changed = True
+                attempt(lambda rel=rel, cached=cached, bid=bid: self._write(rel, cached.read_bytes(), bid) or True, rel)
             elif bid not in self._fetching:
                 # Fetch in the background: in relay mode the answer comes from a peer
                 # over the same connection that is delivering this update.
                 self._fetching.add(bid)
                 asyncio.get_running_loop().create_task(self._fetch(rel, bid))
+        for d in list(self.r.dirs.keys()):  # explicit (possibly empty) folders
+            full = self.target(d)
+            if full is not None and not full.exists():
+                attempt(lambda full=full: full.mkdir(parents=True, exist_ok=True) or True, d)
         for rel in list(self.known):
             if rel not in wanted:  # deleted remotely
-                (self.root / rel).unlink(missing_ok=True)
+                full = self.target(rel)
+                if full is not None:
+                    attempt(lambda full=full: full.unlink(missing_ok=True) or self._prune(full.parent) or True, rel)
                 del self.known[rel]
                 log.info("✗ %s", rel)
                 changed = True
         if changed:
             self.save_known()
             self.schedule_compile()
+
+    def _prune(self, d: Path) -> None:
+        """Remove now-empty folders left behind by deletions (never the project root)."""
+        while d != self.root and self.root in d.parents:
+            rel = d.relative_to(self.root).as_posix()
+            if rel in self.r.dirs or any(d.iterdir()):
+                return
+            d.rmdir()
+            d = d.parent
 
     async def _fetch(self, rel: str, bid: str) -> None:
         try:
@@ -273,7 +355,9 @@ class FolderSync:
             await self.write_out()
 
     def _write(self, rel: str, data: bytes, h: str) -> None:
-        full = self.root / rel
+        full = self.target(rel)
+        if full is None:
+            return
         full.parent.mkdir(parents=True, exist_ok=True)
         tmp = full.with_name(f".{full.name}.texloom-tmp")
         tmp.write_bytes(data)
@@ -314,17 +398,25 @@ class FolderSync:
         engine = str(self.opts.get("engine") or self.r.meta.get("engine", "pdflatex"))
         flag = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}.get(engine, "-pdf")
         extra = list(self.opts["latexmk_args"])
-        if self.opts["shell_escape"]:
-            extra.append("-shell-escape")
+        # Collaborators write the document, so by default TeX may not run programs
+        # (-no-shell-escape), may not read or write outside the project (openin/openout
+        # "paranoid"), and latexmk ignores rc files (-norc; latexmkrc is Perl). An rc you
+        # trust can be named in .texloom/config.json as "latexmk_rc".
+        extra.append("-shell-escape" if self.opts["shell_escape"] else "-no-shell-escape")
+        if self.opts.get("latexmk_rc"):
+            extra += ["-r", str(Path(self.opts["latexmk_rc"]).expanduser())]
         if self.r.meta.get("bib") == "none":
             extra.append("-bibtex-")
         build = self.root / STATE / "build"
         build.mkdir(parents=True, exist_ok=True)
         t0 = time.time()
-        main_path = self.root / main
+        main_path = self.target(main)
+        if main_path is None or not main_path.is_file():
+            return
+        env = {**os.environ, "openin_any": "p", "openout_any": "p", "TEXMFOUTPUT": str(build)}
         proc = await asyncio.create_subprocess_exec(
-            "latexmk", flag, "-interaction=nonstopmode", "-synctex=1", "-file-line-error",
-            f"-outdir={build}", *extra, main_path.name, cwd=main_path.parent,
+            "latexmk", "-norc", flag, "-interaction=nonstopmode", "-synctex=1", "-file-line-error",
+            f"-outdir={build}", *extra, f"./{main_path.name}", cwd=main_path.parent, env=env,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         )
         try:
@@ -338,8 +430,9 @@ class FolderSync:
         ok = proc.returncode == 0 and pdf.exists()
         log_text = logf.read_bytes() if logf.exists() else out
         log.info("compiled %s in %.1fs: %s", main, time.time() - t0, "ok" if ok else "errors")
-        if pdf.exists():
-            shutil.copyfile(pdf, self.root / (main[:-4] + ".pdf"))
+        out_pdf = self.target(main[:-4] + ".pdf")
+        if pdf.exists() and out_pdf is not None:
+            shutil.copyfile(pdf, out_pdf)
         if not self.r.keys.writable or not self.r.connected.is_set():
             return
         try:

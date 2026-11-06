@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -24,6 +26,7 @@ from .crypto import Keys, b64d, b64e
 log = logging.getLogger("texloom")
 
 COMPACT_AFTER = 300  # log entries before a writer uploads a snapshot
+BLOB_RE = re.compile(r"^[0-9a-f]{32}$")  # blob ids are HMAC hex digests, never paths
 
 
 class Replica:
@@ -36,6 +39,7 @@ class Replica:
         self.doc = Doc()
         self.files: Map = self.doc.get("files", type=Map)
         self.bin: Map = self.doc.get("bin", type=Map)
+        self.dirs: Map = self.doc.get("dirs", type=Map)
         self.meta: Map = self.doc.get("meta", type=Map)
         self.out: Map = self.doc.get("out", type=Map)
         self.since = 0
@@ -62,6 +66,7 @@ class Replica:
     # --- persistence -------------------------------------------------------
     def load(self) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.dir, 0o700)  # holds the plaintext document and project keys
         if (p := self.dir / "doc.bin").exists():
             self.doc.apply_update(p.read_bytes())
         if (p := self.dir / "state.json").exists():
@@ -209,6 +214,8 @@ class Replica:
                 return
 
     async def get_blob(self, bid: str) -> bytes:
+        if not isinstance(bid, str) or not BLOB_RE.match(bid):
+            raise ValueError(f"malformed blob id {bid!r}")
         cache = self.dir / "blobs" / bid
         if cache.exists():
             return cache.read_bytes()
@@ -217,6 +224,9 @@ class Replica:
             async with self.http.get(f"{self.server}/blob/{self.keys.project}/{bid}") as r:
                 if r.status == 200:
                     plaintext = self.keys.decrypt(await r.read())
+                    if self.keys.blob_id(plaintext) != bid:  # the server mustn't swap contents
+                        log.warning("server returned the wrong content for blob %s", bid)
+                        plaintext = None
         if plaintext is None:  # ask connected peers
             fut = asyncio.get_running_loop().create_future()
             self._blob_waiters.setdefault(bid, []).append(fut)
@@ -265,7 +275,10 @@ class Replica:
                 if self.on_remote:
                     await self.on_remote()
         elif k == "breq":
-            cache = self.dir / "blobs" / p["id"]
+            bid = p.get("id")
+            if not isinstance(bid, str) or not BLOB_RE.match(bid):
+                return
+            cache = self.dir / "blobs" / bid
             if cache.exists():
                 await self.p2p({"k": "blob", "id": p["id"], "b": b64e(cache.read_bytes())}, frm)
         elif k == "blob":
@@ -311,6 +324,7 @@ class Replica:
             "needs-code": "NOT SAVED ON SERVER: this server needs a creation code to store new projects. "
                           "Add \"create_code\" to .texloom/config.json (or set TEXLOOM_CODE) and restart. "
                           "Changes still reach collaborators who are online.",
+            "quota-full": "NOT SAVED ON SERVER: the storage allowance of this project's creation code is used up.",
             "project-full": "NOT SAVED ON SERVER: this project has reached the server's size limit.",
             "server-full": "NOT SAVED ON SERVER: the server is out of space; changes are kept here and retried.",
         }.get(code, f"not saved on server: {code}"))
@@ -335,7 +349,10 @@ class Replica:
                         async for msg in ws:
                             if msg.type != aiohttp.WSMsgType.TEXT:
                                 continue
-                            await self._handle(json.loads(msg.data))
+                            try:
+                                await self._handle(json.loads(msg.data))
+                            except Exception as e:  # noqa: BLE001 - never let one bad frame kill the helper
+                                log.warning("ignored a malformed message (%s: %s)", type(e).__name__, str(e)[:120])
                 except (aiohttp.ClientError, OSError) as e:
                     log.info("offline (%s); retrying in %ds", e.__class__.__name__, backoff)
                 finally:
@@ -374,7 +391,7 @@ class Replica:
             self.outbox.pop(m.get("id"), None)
             self.save()
         elif t == "err":
-            if m.get("code") in ("needs-code", "project-full", "server-full"):
+            if m.get("code") in ("needs-code", "quota-full", "project-full", "server-full"):
                 self._storage_warning(m["code"])  # kept in the outbox; retried on reconnect
             else:
                 log.warning("server: %s", m.get("m"))

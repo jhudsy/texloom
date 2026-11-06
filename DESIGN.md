@@ -1,4 +1,4 @@
-# texloom — design
+# TeXLoom — design
 
 A local-first, collaborative LaTeX editor. Every participant holds a full copy of
 each project; a tiny server relays and stores **encrypted** changes it cannot read.
@@ -43,6 +43,7 @@ No accounts: a project is shared by sending a link.
 |-------------------|-----------------------------------------------------------------|
 | `files`: Y.Map    | path → Y.Text, for text files (.tex, .bib, .sty, …)             |
 | `bin`: Y.Map      | path → `{h, size}`: content id of an encrypted blob (images, PDFs used as figures, fonts…) |
+| `dirs`: Y.Map     | path → true for explicit folders (folders are otherwise implied by file paths) |
 | `meta`: Y.Map     | `name`, `main` (main .tex file), settings                       |
 | `out`: Y.Map      | latest compiled output: `{pdf, log, by, at}` (blob ids)         |
 
@@ -120,19 +121,37 @@ command only when its user *changes* the setting, queuing it if offline; it neve
 "corrects" the server on connect, so a stale replica can't undo someone else's
 switch. Switching back to `server` re-uploads a full snapshot and all blobs.
 
-**Storage safeguards.** The server can't inspect content, and project ids are free to
-mint, so it limits by size and, optionally, by who may create stored projects.
-- **Usage:** it keeps byte counts per project (log + blobs) and overall, and checks free
-  disk space before each write.
-- **Refusals:** a write that would exceed `--project-max-bytes`, `--max-bytes` or
-  `--min-free` is refused with `err {code: "project-full" | "server-full"}`. Under
-  `--codes-file`, the first write to an unregistered project needs a valid creation code,
-  sent in `hello` or the `X-Create-Code` header; otherwise it gets `needs-code`.
-- **No lost work:** a refused `up` is still broadcast live but not acked, so it stays in the
+**Storage allowances.** The server can't inspect content and project ids are free to
+mint, so storage is governed by allowances in a codes file: `<code|default> <0|size|unlimited>`.
+- **Owner:** the first stored write to a project registers it to the creation code sent
+  in `hello` or `X-Create-Code`, or to `default`.
+- **Allowance:** an owner's allowance is the sum over all its projects.
+- **Refusals:** `needs-code` (default allowance 0), `quota-full`, `project-full`
+  (`--project-max-bytes`, not applied to unlimited owners) and `server-full`
+  (`--max-bytes`, `--min-free`).
+- **No lost work:** a refused `up` is still broadcast live but not acked; it stays in the
   sender's outbox and is retried. Clients show a "not saved on server" warning.
-- **Registration:** registered projects need no code afterwards. Projects stored before
-  this feature are grandfathered in.
-- **Rate limits:** nginx limits code checks (6/min per IP), uploads and connections.
+- **Snapshots** must satisfy `last snapshot < upto ≤ head`, at most 48 MB, and they are
+  counted against limits by their size change.
+- **Replays:** an identical `up` (same ciphertext hash) is acked with its existing sequence
+  number and not stored again.
+- **Per-connection limits:** frame-size caps per message type, a message/byte rate limit,
+  and a global connection cap. nginx adds per-IP limits on code checks, uploads and
+  connections.
+
+**Folder helper hardening.** Every path from the project goes through `safe_rel`. It
+rejects:
+- absolute paths, drive letters, backslashes, and `.`, `..` or empty segments;
+- control characters;
+- `.texloom`/`.git`, compared case-insensitively;
+- files TeX tools execute (`latexmkrc`, `texmf.cnf`).
+
+The resolved path must stay inside the project folder (no writing through symlinks).
+- **Blob ids** must be 32 hex characters, and blobs from the server are checked against
+  their HMAC id.
+- **latexmk** runs with `-norc`, `-no-shell-escape` (unless opted in locally) and
+  `openin_any=p`/`openout_any=p`; the main file is passed as `./name`.
+- **Malformed frames** are logged and dropped.
 
 **Manual sync (per device):** the replica doesn't keep a connection open. Local edits
 build up in the outbox; **Sync now** connects, runs the same catch-up, flushes the

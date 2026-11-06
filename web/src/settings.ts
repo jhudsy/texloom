@@ -1,6 +1,7 @@
 // Per-device settings, the first-open setup dialog and the settings dialog.
 import type { Replica, StorageMode, SyncMode } from './replica'
 import { engineCached, clearEngineCache } from './compile'
+import { h, dialog } from './dom'
 
 export type CompileWhere = 'browser' | 'local' | 'none'
 export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean }
@@ -23,26 +24,6 @@ export const prefs = {
     const { sync, compile, autoCompile } = d
     localStorage.setItem('texloom.device', JSON.stringify({ sync, compile, autoCompile }))
   },
-}
-
-type Kid = Node | string
-export const h = (tag: string, attrs: Record<string, any> = {}, ...kids: Kid[]) => {
-  const el = document.createElement(tag)
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k.startsWith('on')) el.addEventListener(k.slice(2), v)
-    else if (k === 'checked' || k === 'value') (el as any)[k] = v
-    else if (v !== false && v != null) el.setAttribute(k, v === true ? '' : v)
-  }
-  el.append(...kids)
-  return el
-}
-
-export function dialog(cls: string, ...kids: Kid[]): HTMLDialogElement {
-  const dlg = h('dialog', { class: `dlg ${cls}` }, ...kids) as HTMLDialogElement
-  document.body.append(dlg)
-  dlg.addEventListener('close', () => dlg.remove())
-  dlg.showModal()
-  return dlg
 }
 
 function radios<T extends string>(name: string, value: T, options: [T, string, string?][], onChange: (v: T) => void) {

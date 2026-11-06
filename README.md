@@ -1,15 +1,20 @@
-# texloom
+# TeXLoom
 
 Local-first, collaborative LaTeX. Every collaborator has a full copy of the project,
-in the browser or as a plain folder on disk, and can keep working offline. A tiny
-server passes **end-to-end encrypted** changes between people; it never sees your
-files and can be told to keep no copy at all. No accounts: you share a link.
+in the browser or as a plain folder on disk, and can keep working offline. A small
+server passes **end-to-end encrypted** changes between people and can be told to keep
+no copy at all. No accounts: you share a link. (The command-line tools are called
+`texloom`.)
 
 - Live editing with other people's cursors; offline edits merge automatically on reconnect.
 - Compile in the browser (TeX Live 2026 in WebAssembly), or with your own TeX installation.
 - Edit the project as an ordinary folder, so Claude Code, vim or VS Code can work on it
   directly. Changes flow both ways, live.
-- Images and other binary files are shared too, so everyone can compile.
+- Folders, images and other files; download the PDF or the whole project as a `.zip`.
+- LaTeX-aware editor:
+  - environments complete with their bodies;
+  - `\includegraphics`, `\cite`, `\ref` and `\input` suggest the project's files, bibliography keys and labels;
+  - missing ones are flagged.
 - Edit links and read-only links.
 - A built-in assistant that reads, edits and compiles the project, using Claude, any
   OpenAI-compatible API, or a local model (LM Studio, Ollama).
@@ -17,9 +22,23 @@ files and can be told to keep no copy at all. No accounts: you share a link.
 
 See [DESIGN.md](DESIGN.md) for how it works.
 
-## Using texloom: nothing to install
+## How this was made: an AI note
 
-One person runs a texloom server, for example at `https://texloom.example.org`. Everyone
+TeXLoom was **vibe coded**: nearly all of the code, tests, deployment scripts and
+documentation were written by an AI assistant (Anthropic's Claude, working in Claude
+Code), directed and reviewed by the author through conversation. The author chose
+the design and the features; the AI wrote the implementation, ran the tests, and
+deployed it.
+
+Its security review was also AI-performed: an independent AI audit, followed by fixes
+that were verified by testing. That is not the same as a professional audit.
+
+Treat this as an early prototype: keep your own copies of important work, and read the
+security model below before relying on it.
+
+## Using TeXLoom: nothing to install
+
+One person runs a TeXLoom server, for example at `https://texloom.example.org`. Everyone
 else just opens a link in a browser. No accounts, no software. The first time someone
 opens a link, they're asked:
 - their name;
@@ -29,27 +48,41 @@ opens a link, they're asked:
 
 **If you work only in the browser, your copy lives in the browser's storage.** Clearing
 the site's data (or history and site data) deletes it, and Safari may delete a site's
-data after about 7 days without a visit. A project stored on the server can be
-reopened from its link. One that isn't (marked **not on server**, with a warning in the
-editor) survives only on devices, so keep a folder copy.
+data after about 7 days without a visit. A project stored on the server can be reopened
+from its link. One that isn't (marked **not on server**, with a warning in the editor)
+survives only on devices, so keep a folder copy or download a `.zip`.
 
-The start page lists the projects you've opened **in that browser**, with ✕ to remove
-one. Each entry shows a short **project code** (the same one `texloom links` prints), so
-two projects with the same name can always be told apart. It also shows:
-- the document's `\title`;
-- who started it and who else you've seen in it;
-- whether you have edit or read-only access.
+The start page lists the projects you've opened **in that browser**:
+- each has a short **project code** (the same one `texloom links` prints), so two
+  projects with the same name can always be told apart;
+- each shows the document's `\title`, who started it and who else you've seen in it, and
+  whether you have edit or read-only access;
+- ✎ gives a project a private label that only you see;
+- ✕ removes this browser's copy only. Collaborators keep theirs, and the server's copy
+  stays unless the project is set to "Don't store anything on the server".
 
-✎ gives a project a private label that only you see. Removing deletes only that browser's copy: collaborators keep theirs, a folder
-copy is just a folder, and the server's encrypted copy is deleted only by choosing
-"Don't store anything on the server" in the project's settings. The list is kept
-per browser and the server can't read or recover links, so keep important links
-somewhere safe (a password manager works well). Any saved link restores the project
-from the server's copy.
+The server can't read or recover links, so keep important links somewhere safe; a
+password manager works well.
 
-Installing anything is optional, and only for people who want the project as a folder
-on disk (for Claude Code, vim, …) or want to compile with their own TeX installation;
-see "Working on a project as a folder" below.
+### Editor
+
+| | |
+|---|---|
+| **⌘S** / **Ctrl+S** | compile |
+| **⌘B** / **Ctrl+B**, **⌘I** / **Ctrl+I** | wrap the selection in `\textbf{}` / `\textit{}` (or insert an empty one; press again to unwrap) |
+| **⌘/** / **Ctrl+/** | comment or uncomment lines |
+| `\begin{…}` + **Enter** | adds the matching `\end{…}` (and `\item` for lists) |
+| typing `\` | completes commands and environments; `\begin{table}`, `figure`, `itemize`, `align`, … come with their usual contents. **Tab** moves between the fields to fill in |
+| inside `\includegraphics{`, `\cite{`, `\ref{`, `\input{`, `\usepackage{` | suggests the project's images, bibliography keys (with titles), labels, files and common packages |
+
+Images, citation keys and labels that don't exist in the project are underlined.
+- **Files:** the tree has folders. New files and folders go into the selected folder,
+  you can drag to move, and dropping files from your computer onto a folder uploads them
+  there.
+- **Panes:** drag the dividers between the file list, the editor and the PDF/assistant
+  panel; ☰ and ▥ hide the side panes.
+- **Compile log:** **Log** shows it under the PDF; drag its top edge to resize.
+- **Downloads:** **⤓ PDF** and **⤓ Source** (a `.zip`).
 
 ## Running a server
 
@@ -70,55 +103,52 @@ browsers only allow the encryption the editor relies on over secure connections.
 
 | option | what you need | result |
 |---|---|---|
-| **Caddy** ([deploy/Caddyfile](deploy/Caddyfile)) | a domain name pointing at the server, ports 80/443 open | `https://texloom.example.org`; Caddy gets and renews the Let's Encrypt certificate itself |
-| **Cloudflare Tunnel** | a free Cloudflare account (and a domain, for a permanent name) | HTTPS with **no open ports**, so it's ideal for a Raspberry Pi at home. Try it instantly with `cloudflared tunnel --url http://localhost:8787`, which prints a temporary `https://….trycloudflare.com` address |
-| **Tailscale Funnel** | Tailscale on the server | `tailscale funnel 8787` gives `https://<machine>.<tailnet>.ts.net`, also with no open ports |
+| **nginx + Let's Encrypt** ([deploy/install.sh](deploy/install.sh)) | an Ubuntu/Debian server with a domain name | a sandboxed service plus an nginx site with a certificate, rate limits and security headers. It works alongside other sites. Run `deploy/install.sh root@host texloom.example.org`; re-run it to update |
+| **Caddy** ([deploy/Caddyfile](deploy/Caddyfile)) | a domain name pointing at the server, ports 80/443 open | Caddy gets and renews the certificate itself |
+| **Cloudflare Tunnel** | a free Cloudflare account | HTTPS with **no open ports**, ideal for a Raspberry Pi at home. Try `cloudflared tunnel --url http://localhost:8787` |
+| **Tailscale Funnel** | Tailscale on the server | `tailscale funnel 8787`, also with no open ports |
 
-To keep it running, there's a systemd unit in [deploy/texloom.service](deploy/texloom.service).
+Participants only ever make outgoing HTTPS connections to the server, so their
+firewalls and NAT need no changes.
 
-### Storage limits and creation codes
+### Storage allowances (creation codes)
 
-The server can't see what it stores, and making a project needs no account, so it
-protects itself by size, and optionally by who may *create* stored projects:
+The server can't see what it stores, and making a project needs no account, so storage
+is governed by **allowances** in a small text file (`--codes-file`):
 
-| option | default | effect |
-|---|---|---|
-| `--max-bytes` | `2G` | total texloom may store |
-| `--min-free` | `2G` | stop storing when the disk's free space drops below this (protects other sites on the machine) |
-| `--project-max-bytes` | `200M` | cap per project |
-| `--codes-file FILE` | off | storing a **new** project needs a creation code from this file |
+```
+# <code|default>  <allowance>  [label]
+default          0             # projects created without a code: not stored on the server
+A3F7-9KQ2-XM4P   unlimited     owner
+K7P2-QX4M-9H3D   2G            alice
+```
 
-A refused change is never lost:
-- it still reaches everyone online at that moment;
-- the sender keeps it and retries later;
-- the editor shows a warning that the project isn't saved on the server.
-
-With creation codes, opening and editing projects shared with you still needs only the
-link. A code is needed once per browser, and only to make the server store a project it
-doesn't already have. Without a code, people can still create projects with no server
-copy.
+- A code's allowance is the total stored across **all** projects created with it.
+  `default` covers people without a code. `0` means "not stored on the server": those
+  people can still create projects, but only as live, relay-only projects whose copies
+  live on their devices.
+- Anyone with a project's link can open and edit it; codes only govern **storage of new
+  projects**. A code is entered once per browser (**New project** asks, or ⚙ Settings →
+  Creation code…). The folder helper takes `texloom new … --code`, `create_code` in
+  `.texloom/config.json`, or the `TEXLOOM_CODE` environment variable.
+- The file is re-read when it changes. Deleting a line revokes a code: its projects stay
+  stored, but new changes then count against `default`.
+- Projects stored before allowances existed are grandfathered as unlimited.
 
 ```bash
-texloom-server --codes-file /etc/texloom/codes.txt --add-code alice   # prints a new code
+texloom-server --codes-file /etc/texloom/codes.txt --add-code alice --allowance 2G   # prints a new code
 texloom-server --codes-file /etc/texloom/codes.txt --list-codes --db /var/lib/texloom/texloom.db
 ```
 
-The file is plain text, `code  label` per line. Delete a line to revoke a code (projects
-already created stay stored). It's re-read automatically. The folder helper takes a
-code with `texloom new … --code`, the `create_code` entry in `.texloom/config.json`, or
-`TEXLOOM_CODE`.
+The server also refuses to store anything when free disk drops below `--min-free`
+(default 2G), which protects other sites on the machine. Two more limits are
+`--project-max-bytes` (default 200M per project, except for unlimited allowances) and
+`--max-bytes` (total). Without `--codes-file`, every project may be stored.
 
-**Ubuntu/Debian with nginx** (e.g. alongside other sites): [deploy/install.sh](deploy/install.sh)
-builds locally, copies the code over SSH and sets up a `texloom` user, a sandboxed
-systemd service on `127.0.0.1:8787`, an nginx site and a Let's Encrypt certificate.
-nginx serves the static files itself (web app and TeX files), so only sync traffic
-reaches Python. Re-run it to update:
-
-```bash
-deploy/install.sh root@texloom.example.org texloom.example.org
-```
-Participants only ever make outgoing HTTPS connections to the server, so their
-firewalls and NAT need no changes.
+A refused change is never lost:
+- it still reaches everyone online at that moment;
+- the sender keeps it and retries;
+- the editor shows a warning that the project isn't saved on the server.
 
 ## Working on a project as a folder
 
@@ -138,32 +168,45 @@ collaborators type in their browsers. With `--compile`:
 
 | command | |
 |---|---|
-| `texloom new <dir> --server URL` | share an existing folder as a new project; prints both links |
+| `texloom new <dir> --server URL [--code C]` | share an existing folder as a new project; prints both links |
 | `texloom clone <link> <dir>` | check out a project |
 | `texloom run <dir> [--compile] [--shell-escape]` | keep the folder in sync, live |
 | `texloom sync <dir>` | sync once and exit (manual sync) |
 | `texloom storage <dir> server\|relay` | keep an encrypted copy on the server, or nothing |
-| `texloom links <dir>` | print the edit / read-only links |
+| `texloom links <dir>` | print the project code and the edit / read-only links |
 
-Per-folder options are in `<dir>/.texloom/config.json`. They are never shared:
+Per-folder options are in `<dir>/.texloom/config.json`, which only you can read. They are
+never shared:
 
 ```json
-{ "compile": false, "engine": null, "latexmk_args": [], "shell_escape": false, "label": "" }
+{ "compile": false, "engine": null, "latexmk_args": [], "shell_escape": false, "latexmk_rc": null, "label": "", "create_code": "" }
 ```
 
-`shell_escape` (needed for minted and similar packages) lets the document run programs
-on *your* machine. Since collaborators write the document, it is only ever a local opt-in.
+Collaborators write the document, so compiling is locked down by default:
+- **No running programs:** TeX may not run programs (`-no-shell-escape`).
+- **No access outside the project:** TeX may not read or write files there (TeX's
+  "paranoid" file access).
+- **No rc files:** latexmk ignores rc files (`-norc`), because a `latexmkrc` is Perl.
+  Name one you trust with `latexmk_rc`.
+- **Unsafe files aren't written:** the helper never writes files such as `latexmkrc` or
+  `texmf.cnf` from the project, nor any path outside the folder.
+
+`shell_escape` (needed for minted and similar) lets the document run programs on *your*
+machine: turn it on only for projects whose editors you trust.
 
 ## Assistant
 
 The **Assistant** tab next to the PDF is a chat that works on the project like a
-collaborator. It can list, read and search files, make targeted edits, create or delete
-files, compile, and read the compile log. With **Ask before applying edits** (the
-default), each change appears as a diff to apply or reject. Every request's edits can
-be undone in one click, and they reach collaborators like anyone else's.
+collaborator:
+- it can list, read and search files, make targeted edits, create or delete files,
+  compile, and read the compile log;
+- with **Ask before applying edits** (the default), each change appears as a diff to
+  apply or reject;
+- every request's edits can be undone in one click, and they reach collaborators like
+  anyone else's.
 
 Providers (pick one in the tab; settings via ⚙):
-- **Anthropic (Claude):** uses the official SDK from the browser; default model
+- **Anthropic (Claude):** uses the official SDK from the browser; the default model is
   `claude-opus-5-5`. Effort is adjustable, thinking summaries are shown, and if a safety
   classifier declines a request it is retried on Anthropic's recommended fallback model.
 - **OpenAI, OpenRouter, or any OpenAI-compatible endpoint** (vLLM, llama.cpp, LiteLLM, …).
@@ -172,7 +215,7 @@ Providers (pick one in the tab; settings via ⚙):
   site, set `OLLAMA_ORIGINS`. Use a model with tool calling (for example a Qwen 3.x model).
 
 API keys and provider settings are stored only in your browser. They are not part of
-the project and never pass through the texloom server: requests go straight from your
+the project and never pass through the TeXLoom server: requests go straight from your
 browser to the provider.
 
 ## Settings
@@ -182,21 +225,49 @@ browser to the provider.
 - engine (pdfLaTeX, XeLaTeX or LuaLaTeX)
 - bibliography tool (detect automatically, BibTeX, Biber or none)
 - server storage:
-  - **Keep an encrypted copy** (default): collaborators receive changes even if you're
-    never online at the same time.
-  - **Don't store anything**: the server only relays between people who are connected at
-    the same moment. Switching to this deletes the server's copy.
+  - **Keep an encrypted copy** (default)
+  - **Don't store anything:** this deletes the server's copy
 
 **Device settings** apply only in your browser:
 - your name
-- live or manual sync. Manual keeps changes on your device until you press **Sync now**,
-  for example to finish a thought first. Live updates are tiny, so bandwidth is rarely
-  a reason.
+- creation code
+- live or manual sync. Manual keeps changes on your device until you press **Sync now**.
 - where to compile, and whether to recompile automatically after you stop typing.
 
-The in-browser TeX engine is cached once per browser and shared by all projects. Only
-the engine plus the basic package set (about 125 MB) is fetched up front; larger package
-sets load only if a document needs them. Progress is shown while it downloads.
+The in-browser TeX engine is cached once per browser and shared by all projects (about
+125 MB up front; larger package sets load only if a document needs them).
+
+## Security model
+
+**What's protected**
+- **Server storage is encrypted.** Project content, file names and compiled PDFs are
+  encrypted in the browser or the folder helper with a key that is only in the link
+  (after `#`, which browsers never send to servers). The server stores and relays
+  ciphertext.
+- **Edits are signed.** Writes are signed with the edit key, and the server and every
+  peer reject unsigned or wrongly signed changes, so read-only links can't edit.
+- **The server can't tamper with content.** Files fetched from it are checked against
+  their content hash.
+
+**What isn't**
+- **The web app trusts the server that serves it.** A malicious or compromised operator
+  could serve modified JavaScript that reads the keys from the link. Use a server you
+  trust (or run your own); the folder helper doesn't have this exposure. The server
+  sends a strict Content-Security-Policy, and the install script pins the in-browser
+  TeX download by checksum.
+- **Anyone with a link has that access, permanently.** Links can't be revoked: to cut
+  someone off, copy the project to a new one. Read-only holders see everything, including
+  the names and presence of other collaborators.
+- **Editors are trusted with the project.** A malicious editor can delete or vandalise
+  content, or tell the server to drop its copy. Keep your own copies (folder copy, zip,
+  or your own git) of work that matters.
+- **The project ID is not secret.** It appears in server logs. It lets someone connect
+  and see encrypted traffic sizes and presence, but not content.
+- **Compiling with your own TeX runs TeX on documents others wrote.** The defaults above
+  close the known ways to read your files or run commands. For untrusted collaborators,
+  run the helper in a container or VM.
+
+Found a problem? Please open an issue.
 
 ## Development
 
@@ -207,25 +278,28 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 
 | path | what |
 |---|---|
-| `server/relay.py` | relay + encrypted store (aiohttp, SQLite); verifies signatures; storage modes |
+| `server/relay.py` | relay + encrypted store (aiohttp, SQLite): signatures, storage modes, allowances, limits |
 | `texloom/crypto.py` | keys, links, AES-GCM, Ed25519 (mirrors `web/src/crypto.ts`) |
-| `texloom/replica.py` | Python replica: pycrdt doc, outbox, peer handshake, blobs |
-| `texloom/folder.py` | two-way folder ⇄ CRDT sync with fine-grained diffs; latexmk |
+| `texloom/replica.py` | folder helper's replica: pycrdt document, outbox, peer handshake, blobs |
+| `texloom/folder.py` | two-way folder ⇄ CRDT sync, path safety, locked-down latexmk |
 | `texloom/cli.py` | command line |
+| `web/src/main.ts` | start page and project view wiring |
 | `web/src/replica.ts` | browser replica: Yjs + IndexedDB, outbox, peer handshake, awareness, blobs |
-| `web/src/main.ts` | UI: file tree, CodeMirror 6 collaborative editor, PDF viewer (PDF.js) |
-| `web/src/settings.ts` | first-open setup, project + device settings |
-| `web/src/compile.ts` | in-browser compile (texlyre-busytex) |
-| `web/src/assistant/` | assistant: provider adapters (`llm.ts`), project tools (`tools.ts`), chat panel (`panel.ts`) |
-| `deploy/` | Caddy config (automatic HTTPS) and systemd unit |
+| `web/src/filetree.ts`, `projectfiles.ts` | folders and files, moves, zip export |
+| `web/src/editor.ts`, `latex.ts` | CodeMirror editor; LaTeX completion, shortcuts, reference checks |
+| `web/src/output.ts`, `compile.ts`, `pdfview.ts` | compiling (in browser or via the helper), PDF view, log |
+| `web/src/settings.ts`, `storagenotice.ts`, `projects.ts`, `layout.ts` | setup and settings, storage warnings, start-page list, panes |
+| `web/src/assistant/` | assistant: provider adapters (`llm.ts`), tools (`tools.ts`), chat panel (`panel.ts`) |
+| `deploy/` | install script (nginx, certbot, systemd), Caddy config, systemd unit |
 
 ## Status
 
 Early prototype. Not yet built:
 - history / compare-versions UI
+- comments and tracked changes
+- SyncTeX (click between source and PDF)
 - direct browser-to-browser WebRTC
 - syncing a local folder from the browser itself (File System Access API, Chromium only)
-- conflict warnings when two people create the same path offline
 - packaging the helper for `pipx` / `uvx`
 
 ## License

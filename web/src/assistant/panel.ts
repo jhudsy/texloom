@@ -1,7 +1,7 @@
 // The in-editor assistant: a chat panel that acts on the project like a collaborator.
 import * as Y from 'yjs'
 import type { Replica } from '../replica'
-import { dialog, h } from '../settings'
+import { dialog, h } from '../dom'
 import { aiPrefs, listModels, PRESETS, type ProviderConfig } from './providers'
 import { createSession, explainError, type LlmSession } from './llm'
 import { ASSISTANT, runTool, toolsFor, type Change, type ToolCtx } from './tools'
