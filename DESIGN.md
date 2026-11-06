@@ -45,7 +45,11 @@ No accounts: a project is shared by sending a link.
 | `bin`: Y.Map      | path → `{h, size}`: content id of an encrypted blob (images, PDFs used as figures, fonts…) |
 | `dirs`: Y.Map     | path → true for explicit folders (folders are otherwise implied by file paths) |
 | `meta`: Y.Map     | `name`, `main` (main .tex file), settings                       |
-| `out`: Y.Map      | latest compiled output: `{pdf, log, by, at}` (blob ids)         |
+| `out`: Y.Map      | latest compiled output: `{pdf, log, synctex, by, at}` (blob ids) |
+| `versions`: Y.Array | saved versions: `{at, by, label?, auto?, snap}` (encoded `Y.snapshot`) |
+| `clients`: Y.Map  | Yjs client id → display name (for "who wrote this")             |
+| `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, resolved, outcome?, replies: Y.Array}`; `start`/`end` are encoded Yjs relative positions, so they follow edits |
+| `members`: Y.Map  | personal edit links the owner issued: public key → `{name, at, by, revoked?}` (informational; enforcement is by signatures) |
 
 Text merges character by character (CRDT). Binary files are last-writer-wins
 per path (whole-file replacement), as in Dropbox.
@@ -65,7 +69,20 @@ without compiling.
 - Keys live after `#`, which browsers never send to the server.
 - Every stored update is `sign(seed, "upd:" ‖ ciphertext)`. The server and peers
   reject unsigned writes. Without `w`, the editor is read-only.
-- Revocation = create a new project (new keys) and re-share. Documented limitation.
+- **Personal edit links:** `#p=<id>&k=<aes key>&m=<personal seed>&g=<grant>&n=<name>`, where
+  `grant = sign(owner seed, "grant:" ‖ personal public key ‖ ":" ‖ name)`. A personal
+  signature is `'M' ‖ personal pub (32) ‖ grant (64) ‖ len(name) ‖ name ‖ sig (64)`, so
+  anyone can verify it against the project id alone. A plain 64-byte signature is the
+  owner's.
+- **Revocation:** the owner sends `sign(owner seed, "revoke:" ‖ personal pub)`. The relay
+  stores it, refuses that key's updates, snapshots, blobs and mode changes, and sends
+  the list in every `log` reply (and `rv` frames); peers refuse that key's peer-to-peer
+  updates. Already-stored updates stay valid (the relay accepted them while the key was
+  good), so documents still converge.
+- Revoked people keep the AES key and can still read. **Moving to new keys** copies the
+  document (with history) into a fresh project, re-encrypts every blob (ids are keyed),
+  clears `members`, marks the old document `meta.movedAt`, and switches the old project
+  to relay-only so the server deletes its copy.
 - Attribution: each user picks a display name, stored in their local settings. It is
   shown in cursors and history, and is self-declared, not authenticated.
 
@@ -246,13 +263,26 @@ The Yjs document keeps tombstones of deleted text, so snapshots are cheap:
 versions" and "restore file" are computed client-side. Named versions are just
 labelled snapshots.
 
+## Agents (MCP)
+
+`texloom mcp` keeps its own replica (state under `~/.cache/texloom/mcp/<project>`) and
+speaks JSON-RPC 2.0 over stdio. It publishes y-protocols awareness frames (encrypted like
+everything else) with its name and a cursor built from pycrdt sticky indices (UTF-16
+offsets, matching Yjs), so it shows up like a person. Comments and suggestions it makes
+use the same `review` entries as the web app; their anchors are encoded relative
+positions, which pycrdt produces in the Yjs wire format.
+
 ## Known limitations / open questions
 
 - Two peers who both *create* the same path while offline: one file wins (LWW on the
   `files` map). Mitigation: show a warning, keep the loser as `name (conflict).tex`.
 - Long divergent offline edits of the same paragraph merge character-wise and may
   interleave. Plan: highlight concurrently-edited regions after a sync for review.
-- Self-declared identities; no revocation without re-keying.
+- Self-declared display names. Personal links tie edits to a key the owner named, but
+  revoking stops writing, not reading, without re-keying.
+- Idle eviction (`--evict-idle-days`) makes the server copy a cache: a client whose
+  `since` is ahead of the server's `head` re-uploads its whole state and files. Link
+  holders with no copy can't open an evicted project until a writer returns.
 - Browser storage can be evicted: request persistent storage; the server copy and
   daemon copies are the backup.
 
