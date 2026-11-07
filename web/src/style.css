@@ -321,3 +321,6 @@ aside .tab { padding: 4px 8px; }
 .members li { display: flex; align-items: baseline; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .members li.revoked .mname { text-decoration: line-through; color: var(--muted); }
 .share .row input { flex: 1; min-width: 0; }
+
+.radio.disabled { opacity: .55; cursor: not-allowed; }
+.radio.disabled input { cursor: not-allowed; }

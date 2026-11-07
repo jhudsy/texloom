@@ -27,10 +27,10 @@ export const prefs = {
   },
 }
 
-function radios<T extends string>(name: string, value: T, options: [T, string, string?][], onChange: (v: T) => void) {
-  return h('div', { class: 'radios' }, ...options.map(([v, label, hint]) =>
-    h('label', { class: 'radio' },
-      h('input', { type: 'radio', name, value: v, 'aria-label': label, checked: v === value, onchange: () => onChange(v) }),
+function radios<T extends string>(name: string, value: T, options: [T, string, string?, boolean?][], onChange: (v: T) => void) {
+  return h('div', { class: 'radios' }, ...options.map(([v, label, hint, disabled]) =>
+    h('label', { class: disabled ? 'radio disabled' : 'radio' },
+      h('input', { type: 'radio', name, value: v, 'aria-label': label, checked: v === value, disabled: !!disabled, onchange: () => onChange(v) }),
       h('span', {}, h('b', {}, label), hint ? h('small', { class: 'muted' }, hint) : ''))))
 }
 
@@ -99,6 +99,32 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     h('select', { disabled: !w, onchange: (e: any) => r.meta.set(key, e.target.value) },
       ...options.map(([v, l]) => h('option', { value: v, ...(String(r.meta.get(key) ?? def) === v ? { selected: true } : {}) }, l)))
   const note = await engineNote()
+  // A server that needs a creation code won't store a project it doesn't have yet: then
+  // "keep a copy on the server" isn't something you can choose until a code is entered.
+  // (A full allowance or disk is different: storing is allowed, just not right now.)
+  const info = r.storeInfo
+  let noStorage = r.storeProblem === 'needs-code' || (!!info && !info.registered && !info.canCreate)
+  const storageBox = h('div', {})
+  let codeRow: HTMLElement | null = null
+  const storageRadios = () => radios('storage', r.storage, [
+    ['server', 'Keep an encrypted copy on the server',
+      noStorage ? 'Not available yet: this server stores new projects only with a creation code. Until one is entered, your changes are kept here and reach collaborators who are online.'
+        : r.storeProblem ? `Collaborators get your changes even if you’re never online at the same time. Right now the server isn’t taking more (${r.storeProblem.replace('-', ' ')}): your changes are kept here and sent later.`
+          : 'Collaborators get your changes even if you’re never online at the same time. The server can’t read it.',
+      !w || noStorage],
+    ['relay', 'Don’t store anything on the server', 'The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.', !w],
+  ], async (v: StorageMode) => {
+    if (!w) return
+    if (v === 'relay' && !r.keys.owner) {
+      alert('Only the project’s owner can delete the server’s copy.')
+      const keep = document.querySelector<HTMLInputElement>('input[name="storage"][value="server"]')
+      if (keep) keep.checked = true
+      return
+    }
+    if (v === 'relay' && !confirm('Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.')) return
+    await r.setStorage(v)
+  })
+  storageBox.append(storageRadios())
   const cacheBtn = h('button', { onclick: async () => { await clearEngineCache(); cacheBtn.textContent = 'Cleared' } }, 'Remove downloaded TeX engine')
   const dlg = dialog('settings',
     h('h3', {}, 'Settings'),
@@ -111,20 +137,17 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
         ['es', 'Spanish'], ['it', 'Italian'], ['nl', 'Dutch'], ['pt', 'Portuguese'], ['sv', 'Swedish'], ['pl', 'Polish']], ''),
     ),
     h('h4', {}, 'Server storage'),
-    radios('storage', r.storage, [
-      ['server', 'Keep an encrypted copy on the server', 'Collaborators get your changes even if you’re never online at the same time. The server can’t read it.'],
-      ['relay', 'Don’t store anything on the server', 'The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.'],
-    ], async (v: StorageMode) => {
-      if (!w) return
-      if (v === 'relay' && !r.keys.owner) {
-        alert('Only the project’s owner can delete the server’s copy.')
-        const keep = document.querySelector<HTMLInputElement>('input[name="storage"][value="server"]')
-        if (keep) keep.checked = true
-        return
-      }
-      if (v === 'relay' && !confirm('Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.')) return
-      await r.setStorage(v)
-    }),
+    storageBox,
+    codeRow = noStorage ? h('div', { class: 'row' },
+      h('button', { onclick: async () => {
+        const { askCode } = await import('./storagenotice')
+        if (!(await askCode())) return
+        r.retryStore() // reconnects with the code; the server then stores this project
+        noStorage = false
+        storageBox.replaceChildren(storageRadios())
+        codeRow?.remove()
+      } }, 'Enter creation code…'),
+      h('span', { class: 'muted small' }, 'Codes come from whoever runs this server.')) : null,
     h('h4', {}, 'This device'),
     h('label', { class: 'field' }, 'Your name', h('input', { value: prefs.name, onchange: (e: any) => (prefs.name = e.target.value) })),
     h('h5', {}, 'Syncing'),
