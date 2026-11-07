@@ -4,15 +4,19 @@
 #   deploy/install.sh root@server.example.org texloom.example.org
 #
 # Re-run it to update. Used for https://texloom.jhudsy.org (Ubuntu 24.04, aarch64,
-# alongside other nginx sites). It only adds things: a `texloom` system user, /opt/texloom,
-# /var/lib/texloom, a systemd service on 127.0.0.1:8787 and an nginx site for the
-# domain, plus a Let's Encrypt certificate via certbot. Other sites are left alone.
-# Extra ssh options can be passed in SSH_OPTS. Set SKIP_CERT=1 to skip certbot.
+# alongside other nginx sites). It only adds things: a `texloom` system user, the app in
+# /var/www/texloom (set TEXLOOM_DIR for elsewhere), its data in /var/lib/texloom, settings
+# in /etc/texloom, a systemd service on 127.0.0.1:8787 and an nginx site for the domain,
+# plus a Let's Encrypt certificate via certbot. Other sites are left alone. An install in
+# the old place (/opt/texloom) is moved over and then removed. It keeps no backups: back up
+# /var/lib/texloom (the data) and /etc/texloom (codes, admin token) yourself. Extra ssh
+# options can be passed in SSH_OPTS; set SKIP_CERT=1 to skip certbot.
 set -euo pipefail
 
 TARGET=${1:?usage: deploy/install.sh user@host domain}
 DOMAIN=${2:?usage: deploy/install.sh user@host domain}
 SSH_OPTS=${SSH_OPTS:-}
+APP_DIR=${TEXLOOM_DIR:-/var/www/texloom}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 BUSYTEX_VERSION=$(node -p "require('$HERE/web/node_modules/texlyre-busytex/package.json').version")
 # sha256 of busytex-assets.tar.gz per release; set BUSYTEX_SHA256 for a version not listed here
@@ -26,17 +30,24 @@ echo "==> Building the web app locally"
 (cd "$HERE/web" && npx tsc && npx vite build >/dev/null)
 (cd "$HERE" && uv export --frozen --no-dev --no-emit-project --format requirements-txt -q -o deploy/.requirements.txt)
 
-echo "==> Copying code to $TARGET:/opt/texloom"
-ssh_ 'mkdir -p /opt/texloom'
+echo "==> Copying code to $TARGET:$APP_DIR"
+ssh_ "mkdir -p '$APP_DIR'"
+# Only what the server runs: the Python packages, the built web app and the deploy files
+# (not the desktop app build, the web sources, caches or CI files).
+# (Excluded paths are left alone on the server: its tex-assets and .venv stay.)
 rsync -az --delete -e "ssh $SSH_OPTS" \
-  --exclude .git --exclude .venv --exclude node_modules --exclude tex-assets --exclude data \
-  --exclude .claude --exclude '__pycache__' --exclude .DS_Store --exclude build --exclude '*.egg-info' \
-  "$HERE/" "$TARGET:/opt/texloom/"
+  --include /web/ --include '/web/dist/***' --exclude '/web/*' \
+  --exclude /dist --exclude /packaging --exclude /.github --exclude .ruff_cache --exclude .pytest_cache \
+  --exclude .git --exclude .venv --exclude node_modules --exclude /tex-assets --exclude /data \
+  --exclude .claude --exclude '__pycache__' --exclude .DS_Store --exclude /build --exclude '*.egg-info' \
+  --exclude /.python-version \
+  "$HERE/" "$TARGET:$APP_DIR/"
 
 echo "==> Installing on the server"
-ssh_ DOMAIN="$DOMAIN" BUSYTEX_VERSION="$BUSYTEX_VERSION" BUSYTEX_SHA256="$BUSYTEX_SHA256" SKIP_CERT="${SKIP_CERT:-}" bash -s <<'REMOTE'
+ssh_ DOMAIN="$DOMAIN" APP_DIR="$APP_DIR" BUSYTEX_VERSION="$BUSYTEX_VERSION" BUSYTEX_SHA256="$BUSYTEX_SHA256" SKIP_CERT="${SKIP_CERT:-}" bash -s <<'REMOTE'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+export PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1  # leave no caches behind
 
 # packages (only installs what's missing)
 need=()
@@ -47,12 +58,17 @@ if ((${#need[@]})); then apt-get update -qq && apt-get install -y -qq "${need[@]
 # user, directories, Python environment
 id texloom >/dev/null 2>&1 || useradd --system --home /var/lib/texloom --shell /usr/sbin/nologin texloom
 install -d -o texloom -g texloom -m 750 /var/lib/texloom
-cd /opt/texloom
+install -d -m 700 /root/texloom-backups
+OLD=/opt/texloom  # where earlier versions of this script installed it
+if [ "$APP_DIR" != "$OLD" ] && [ -d "$OLD/tex-assets" ] && [ ! -e "$APP_DIR/tex-assets" ]; then
+  mv "$OLD/tex-assets" "$APP_DIR/tex-assets"  # ~700 MB: moved, not downloaded again
+fi
+cd "$APP_DIR"
 python3 -m venv .venv
-.venv/bin/pip install -q --upgrade pip
-.venv/bin/pip install -q --require-hashes -r deploy/.requirements.txt
-.venv/bin/pip install -q --no-deps .
-chown -R root:root /opt/texloom && chmod -R a+rX /opt/texloom
+.venv/bin/pip install -q --no-cache-dir --upgrade pip
+.venv/bin/pip install -q --no-cache-dir --require-hashes -r deploy/.requirements.txt
+.venv/bin/pip install -q --no-cache-dir --no-deps .
+chown -R root:root "$APP_DIR" && chmod -R a+rX "$APP_DIR"
 
 # in-browser TeX (WebAssembly TeX Live): downloaded once, ~700 MB unpacked
 if [ "$(cat tex-assets/.version 2>/dev/null)" != "$BUSYTEX_VERSION" ]; then
@@ -91,8 +107,8 @@ Wants=network-online.target
 
 [Service]
 User=texloom
-WorkingDirectory=/opt/texloom
-ExecStart=/opt/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static /opt/texloom/web/dist --tex-assets /opt/texloom/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M
+WorkingDirectory=$APP_DIR
+ExecStart=$APP_DIR/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static $APP_DIR/web/dist --tex-assets $APP_DIR/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M
 Restart=on-failure
 UMask=0077
 MemoryMax=768M
@@ -141,7 +157,7 @@ server {
     listen [::]:80;
     server_name $DOMAIN;
 
-    root /opt/texloom/web/dist;
+    root $APP_DIR/web/dist;
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
 
@@ -197,7 +213,7 @@ server {
 
     # in-browser TeX engine and packages: big, immutable per version
     location /core/ {
-        alias /opt/texloom/tex-assets/;
+        alias $APP_DIR/tex-assets/;
         expires 30d;
         add_header Cache-Control "public";
         add_header X-Content-Type-Options nosniff always;
@@ -217,9 +233,10 @@ server {
 NGINX
   ln -sf "$SITE" "/etc/nginx/sites-enabled/$DOMAIN"
 else
-  # Updating: add routes introduced since the site was first written, before the
-  # catch-all /api/ location (certbot's lines are left as they are).
-  cp "$SITE" "/root/nginx-$DOMAIN.bak"
+  # Updating: point it at this install's folder, and add routes introduced since the site
+  # was first written, before the catch-all /api/ location (certbot's lines stay as they are).
+  cp "$SITE" "/root/texloom-backups/nginx-$DOMAIN.bak"
+  sed -i "s#$OLD/#$APP_DIR/#g" "$SITE"
   python3 - "$SITE" <<'PY'
 import sys
 path = sys.argv[1]
@@ -250,7 +267,8 @@ if missing and anchor in site:
     print("    nginx: added", ", ".join(k for k in blocks if k in missing))
 PY
 fi
-nginx -t -q && systemctl reload nginx || { cp "/root/nginx-$DOMAIN.bak" "$SITE"; systemctl reload nginx; echo "nginx update failed: restored"; exit 1; }
+nginx -t -q && systemctl reload nginx || { cp "/root/texloom-backups/nginx-$DOMAIN.bak" "$SITE"; systemctl reload nginx; echo "nginx update failed: restored"; exit 1; }
+rm -rf /root/texloom-backups  # only needed until nginx accepted the change
 
 # TLS certificate (uses the server's existing Let's Encrypt account if there is one)
 if [ -z "$SKIP_CERT" ] && [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
@@ -259,6 +277,16 @@ fi
 
 sleep 1
 systemctl is-active --quiet texloom && echo "    texloom service: running" || { journalctl -u texloom -n 30 --no-pager; exit 1; }
+
+# The old install, once this one answers through nginx: remove it.
+if [ "$APP_DIR" != "$OLD" ] && [ -d "$OLD" ]; then
+  for i in 1 2 3 4 5; do curl -fsS -o /dev/null "http://127.0.0.1:8787/api/info" && break; sleep 1; done
+  if curl -fsS -o /dev/null "http://127.0.0.1:8787/api/info" && ! grep -rqs "$OLD/" /etc/nginx/sites-enabled/ /etc/systemd/system/texloom.service; then
+    rm -rf "$OLD" && echo "    removed the old install in $OLD"
+  else
+    echo "    kept $OLD: the new install in $APP_DIR didn't check out"
+  fi
+fi
 REMOTE
 
 echo "==> Done: https://$DOMAIN"
