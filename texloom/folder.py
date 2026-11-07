@@ -88,6 +88,63 @@ def text_ops(old: str, new: str) -> list[tuple[int, int, str]]:
     return ops
 
 
+def merge3(base: str, theirs: str, ours: str) -> str:
+    """Three-way merge by lines: `ours`' changes to `base`, applied on top of `theirs`.
+
+    In a synced folder, `base` is the text last written to (or read from) disk, `ours` the
+    file as it is now, and `theirs` the project's text, which may have moved on since (a
+    collaborator typing). Applying only our changes keeps theirs; making the project equal
+    to the file would undo them. Where both changed the same lines, ours wins; text both
+    inserted at the same place is kept twice only if it differs.
+    """
+    if ours == base or theirs == ours:
+        return theirs
+    if theirs == base:
+        return ours
+    b, t, o = (x.splitlines(keepends=True) for x in (base, theirs, ours))
+    ops_t = difflib.SequenceMatcher(a=b, b=t, autojunk=False).get_opcodes()
+    ops_o = difflib.SequenceMatcher(a=b, b=o, autojunk=False).get_opcodes()
+
+    def at(ops, i: int, end: bool) -> int:
+        """Where a region starting (or ending) at base line i starts (ends) in the other text;
+        i is never strictly inside one of that text's changes."""
+        for tag, i1, i2, j1, j2 in (reversed(ops) if end else ops):
+            if tag != "equal" and (i2 == i if end else i1 == i):
+                return j2 if end else j1
+        for tag, i1, i2, j1, _j2 in ops:
+            if tag == "equal" and i1 <= i <= i2:
+                return j1 + (i - i1)
+        return ops[-1][4] if ops else 0  # the end of the other text
+
+    hunks = sorted([(i1, i2, "t") for tag, i1, i2, _j1, _j2 in ops_t if tag != "equal"]
+                   + [(i1, i2, "o") for tag, i1, i2, _j1, _j2 in ops_o if tag != "equal"])
+    out: list[str] = []
+    pos = 0
+    k = 0
+    while k < len(hunks):
+        s, e, sides = hunks[k][0], hunks[k][1], {hunks[k][2]}
+        k += 1
+        # changes overlap if they share lines, or are insertions at the same place
+        while k < len(hunks) and (hunks[k][0] < e or hunks[k][0] == hunks[k][1] == s == e):
+            e = max(e, hunks[k][1])
+            sides.add(hunks[k][2])
+            k += 1
+        out += b[pos:s]
+        mine = o[at(ops_o, s, False):at(ops_o, e, True)]
+        other = t[at(ops_t, s, False):at(ops_t, e, True)]
+        if sides == {"o"}:
+            out += mine
+        elif sides == {"t"}:
+            out += other
+        elif s == e and mine != other:  # both inserted here: keep both
+            out += other + mine
+        else:  # both changed these lines: the file's version
+            out += mine
+        pos = e
+    out += b[pos:]
+    return "".join(out)
+
+
 def apply_text(ytext: Text, old: str, new: str) -> None:
     """Apply a diff to a Y.Text. pycrdt indexes text by UTF-8 bytes."""
     for start, end, repl in reversed(text_ops(old, new)):  # back-to-front keeps offsets valid
@@ -111,6 +168,11 @@ class FolderSync:
         self._fetching: set[str] = set()
         self._refused: set[str] = set()
         self.known: dict[str, dict] = {}  # path -> {"m": mtime_ns, "z": size, "h": hash}
+        # Text files: the text last synced with disk (the base of a three-way merge), and the
+        # hashes of versions recently written or read here. An older one reappearing on disk
+        # is a replay (an editor saving or reloading a stale copy), not an edit.
+        self.base: dict[str, str] = {}
+        self.recent: dict[str, list[str]] = {}
         self._compile_task: asyncio.Task | None = None
         self._known_file = self.root / STATE / "known.json"
         if self._known_file.exists():
@@ -125,6 +187,7 @@ class FolderSync:
         self._warned_shell: frozenset[str] = frozenset()
         self._last_request = 0.0
         self._clean_build = False  # the next compile starts from scratch (requested from a browser)
+        self._rewrite = False  # write the project's text to disk after this ingest
 
     # --- helpers -------------------------------------------------------------
     def rel(self, p: Path) -> str:
@@ -224,6 +287,15 @@ class FolderSync:
     def _remember(self, rel: str, h: str) -> None:
         st = (self.root / rel).stat()
         self.known[rel] = {"m": st.st_mtime_ns, "z": st.st_size, "h": h}
+        seen = self.recent.setdefault(rel, [])
+        if h in seen:
+            seen.remove(h)
+        seen.append(h)
+        del seen[:-30]
+
+    def _stale(self, rel: str, h: str) -> bool:
+        """The file holds a version this folder had earlier, not the latest: a replay."""
+        return h in self.recent.get(rel, [])[:-1]
 
     # --- disk -> CRDT ----------------------------------------------------------
     async def ingest_all(self) -> None:
@@ -265,6 +337,16 @@ class FolderSync:
             h = sha(data)
             if self.known.get(rel, {}).get("h") == h:
                 self._remember(rel, h)  # touched, not changed
+                if is_text(rel, data):
+                    self.base[rel] = data.decode("utf-8")
+                continue
+            if is_text(rel, data) and self._stale(rel, h):
+                # An older version came back (an editor saved or reloaded a stale copy). It
+                # isn't an edit: applying it would undo collaborators' changes. Write the
+                # project's current text back instead.
+                log.warning("%s: an older version reappeared on disk (another program wrote it); keeping the project's text", rel)
+                self.known.pop(rel, None)
+                self._rewrite = True
                 continue
             if is_text(rel, data):
                 new = data.decode("utf-8")
@@ -274,8 +356,16 @@ class FolderSync:
                     yt = self.r.files.get(rel)
                     if yt is None:
                         self.r.files[rel] = Text(new)
-                    else:
-                        apply_text(yt, str(yt), new)
+                        self.base[rel] = new
+                        return
+                    cur, base = str(yt), self.base.get(rel)
+                    # only what changed on disk since it was last synced, on top of what
+                    # collaborators changed meanwhile (without a base: the file as it is)
+                    merged = merge3(base, cur, new) if base is not None else new
+                    apply_text(yt, cur, merged)
+                    self.base[rel] = merged
+                    if merged != new:
+                        self._rewrite = True  # the file lacks collaborators' changes
                 self.r.local_change(edit)
             else:
                 bid = await self.r.put_blob(data)
@@ -291,6 +381,9 @@ class FolderSync:
         if changed:
             self.save_known()
             self.schedule_compile()
+        if self._rewrite:
+            self._rewrite = False
+            await self.write_out()
 
     # --- CRDT -> disk ----------------------------------------------------------
     async def on_remote(self) -> None:
@@ -312,8 +405,10 @@ class FolderSync:
             if self.ignored(rel) or self.target(rel) is None:
                 continue
             wanted.add(rel)
-            data = str(yt).encode("utf-8")
+            text = str(yt)
+            data = text.encode("utf-8")
             h = sha(data)
+            self.base[rel] = text  # what disk will hold (or holds already)
             if self.known.get(rel, {}).get("h") == h and (self.root / rel).exists():
                 continue
             attempt(lambda rel=rel, data=data, h=h: self._write(rel, data, h) or True, rel)

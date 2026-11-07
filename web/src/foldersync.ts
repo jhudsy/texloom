@@ -3,6 +3,7 @@
 // Works while the tab is open; the texloom helper does the same without a browser.
 import type { Replica } from './replica'
 import { cleanPath, isText, mainFile, putBinary, putText } from './projectfiles'
+import { applyText, merge3 } from './diff'
 import { addedProgramLines, type ProgramLine } from './texscan'
 import { tn, t, locale } from './i18n'
 
@@ -83,6 +84,16 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
   const known: Known = (same && (await kv<Known>(KEY))) || {}
   const knownDirs = new Set<string>((same && (await kv<string[]>(DKEY))) || []) // folders mirrored both ways
   let busy = false, stopped = false, last = '', errors = 0
+  // Text files: the text last synced with disk (the base of a three-way merge), and the hashes
+  // of versions recently written or read here. An older one reappearing on disk is a replay
+  // (an editor saving or reloading a stale copy), not an edit. Same rules as texloom/folder.py.
+  const base = new Map<string, string>(), recent = new Map<string, string[]>()
+  let rewrite = false
+  const remember = (p: string, h: string) => {
+    const seen = (recent.get(p) ?? []).filter((x) => x !== h)
+    seen.push(h); recent.set(p, seen.slice(-30))
+  }
+  const stale = (p: string, h: string) => (recent.get(p) ?? []).slice(0, -1).includes(h)
   const save = () => Promise.all([kv(KEY, known), kv(DKEY, [...knownDirs])]).catch(() => {})
   const sync: FolderSync = { name: root.name, stop, status: () => last, onChange: null, onPrograms: null }
   const note = (s: string) => { last = s; sync.onChange?.() }
@@ -95,6 +106,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       want.add(p)
       const text = yt.toString(), data = new TextEncoder().encode(text)
       const h = await sha(data)
+      base.set(p, text) // what disk holds, or will
       if (known[p]?.h === h) continue
       const prev = await readText(p)
       if (await put(p, data, h)) { n++; programs.push(...addedProgramLines(p, prev, text)) }
@@ -150,6 +162,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     await w.write(data as BufferSource); await w.close()
     const f = await fh.getFile()
     known[p] = { h, m: f.lastModified, z: f.size }
+    remember(p, h)
     return true
   }
 
@@ -182,10 +195,26 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       const data = new Uint8Array(await f.arrayBuffer())
       const text = isText(path, data)
       const h = text !== null ? await sha(data) : await r.keys.blobId(data)
-      if (k?.h === h) { known[path] = { h, m: f.lastModified, z: f.size }; continue }
-      if (text !== null) r.doc.transact(() => putText(r, path, text))
-      else { const id = await r.putBlob(data); r.doc.transact(() => putBinary(r, path, id, data.length)) }
-      known[path] = { h, m: f.lastModified, z: f.size }; n++
+      if (k?.h === h) { known[path] = { h, m: f.lastModified, z: f.size }; if (text !== null) base.set(path, text); continue }
+      if (text !== null && stale(path, h)) {
+        // an older version came back: not an edit (it would undo collaborators' changes)
+        console.warn(`${path}: an older version reappeared in the folder; keeping the project's text`)
+        delete known[path]; rewrite = true
+        continue
+      }
+      if (text !== null) {
+        r.doc.transact(() => {
+          const yt = r.files.get(path)
+          if (!yt || r.bin.has(path)) { putText(r, path, text); base.set(path, text); return }
+          // only what changed on disk since it was last synced, on top of collaborators' changes
+          const cur = yt.toString(), b = base.get(path)
+          const merged = b !== undefined ? merge3(b, cur, text) : text
+          applyText(yt, cur, merged)
+          base.set(path, merged)
+          if (merged !== text) rewrite = true // the file lacks collaborators' changes
+        })
+      } else { const id = await r.putBlob(data); r.doc.transact(() => putBinary(r, path, id, data.length)) }
+      known[path] = { h, m: f.lastModified, z: f.size }; remember(path, h); n++
     }
     for (const p of Object.keys(known)) {
       if (disk.has(p)) continue
@@ -193,12 +222,20 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       delete known[p]; n++
     }
     if (n) { await save(); note(tn(n, '↑ {{n}} file · {{time}}', '↑ {{n}} files · {{time}}', { time: new Date().toLocaleTimeString(locale) })) }
+    if (rewrite) { rewrite = false; await writeOut() }
   }
 
   async function round(dir: 'in' | 'out' | 'both') {
     if (busy || stopped) return
     busy = true
     try {
+      // A texloom helper (the app, `texloom run`) keeps this folder in sync too: two syncs on
+      // one folder each take the other's writes for edits, duplicating text. Leave it to the helper.
+      if (await root.getDirectoryHandle('.texloom').then(() => true, () => false)) {
+        note(t('stopped: the TeXLoom app (or texloom helper) already syncs this folder'))
+        stop()
+        return
+      }
       if (dir !== 'out') await ingest()
       if (dir !== 'in') await writeOut()
       errors = 0

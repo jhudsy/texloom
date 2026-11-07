@@ -64,9 +64,20 @@ V2 = """        // texloom patch: bib files in folders v2 (\\addbibresource{bib/
         }
 """
 
+# Biber turns LaTeX accent macros ({\\'e}, \\v{c}) into Unicode, and the WebAssembly build gets
+# the combining accents wrong: the .bbl gets stray control characters (U+0081 from \\', U+008C
+# from \\v) and LaTeX stops with "Unicode character ^^c2^^8c not set up". Leave the macros to
+# LaTeX instead (its font encoding typesets them; text already in UTF-8 is unaffected).
+ARGV = """        const argv = [this.bin_biber, '--output-format=bbl', `--outfile=${bbl}`, '--nolog', ...verbose_args, bcf];
+"""
+ARGV_NODECODE = """        // texloom patch: biber accents (macros left to LaTeX: decoding them garbles the .bbl)
+        const argv = [this.bin_biber, '--output-format=bbl', `--outfile=${bbl}`, '--nolog', '--decodecharsset=null', ...verbose_args, bcf];
+"""
+
 PATCHES = [
     # (file, name, [texts it replaces], new text)
     ("busytex/busytex_biber.js", "bib files in folders v2", [ORIGINAL, V1], V2),
+    ("busytex/busytex_biber.js", "biber accents", [ARGV], ARGV_NODECODE),
 ]
 
 

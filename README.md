@@ -244,9 +244,15 @@ A refused change is never lost:
 Use this for Claude Code or any other tool, and to compile with your own TeX installation.
 
 **In Chrome or Edge, nothing to install:** Settings → *Keep a copy in a folder* →
-**Choose a folder…**. The tab keeps the folder in sync both ways while it is open (files
-changed on both sides take the folder's version; the other stays in History). After a
+**Choose a folder…**. The tab keeps the folder in sync both ways while it is open. After a
 browser restart, click **📁 Reconnect folder** once.
+
+How a folder copy (browser or app) takes in an edit made on disk: only what changed since
+the file was last synced is applied, on top of collaborators' edits made meanwhile (lines
+changed on both sides take the folder's version; the other stays in History). An older
+version reappearing in the file (an editor saving or reloading a stale copy) is not an
+edit: the project's text is written back. Sync a folder with one TeXLoom at a time: the
+browser stops if it finds the app or `texloom run` keeping the same folder.
 
 **With the TeXLoom app** (macOS, Windows, Linux): download it from the
 [releases page](https://github.com/jhudsy/texloom/releases/latest), or install it with
