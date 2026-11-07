@@ -5,6 +5,7 @@ import * as Y from 'yjs'
 import type { Replica } from './replica'
 import type { ProjectIndex } from './latex'
 import { dialog, h } from './dom'
+import { cleanPath, mainFile } from './projectfiles'
 
 /** The DOI for a pasted DOI, doi.org/arXiv URL or arXiv id, or null. */
 export function parseId(input: string): string | null {
@@ -93,13 +94,92 @@ export function formatEntry(type: string, key: string, fields: [string, string][
 
 export interface Added { key: string; file: string; existed: boolean; entry: string }
 
-/** Fetch and append to the project's bibliography (creating references.bib if there is none). */
-export async function addReference(r: Replica, index: ProjectIndex, input: string): Promise<Added> {
+// ---- which .bib file -------------------------------------------------------------------------
+const stripComments = (t: string) => t.replace(/(^|[^\\])%.*$/gm, '$1')
+const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '')
+
+/** Where a new entry can go, from what the document itself names. */
+export interface BibPlan {
+  /** Files the entry can go to, best first (the document's own, or every .bib if it names none). */
+  options: string[]
+  /** The document already names a bibliography (\bibliography or \addbibresource). */
+  declared: boolean
+  /** Files in `options` that don't exist yet (named by the document, or the default). */
+  missing: Set<string>
+  main: string | null
+  biblatex: boolean
+}
+
+export function bibPlan(r: Replica, index: ProjectIndex): BibPlan {
+  const idx = index.get()
+  const main = mainFile(r)
+  const base = main ? dirOf(main) : ''
+  const names: string[] = []
+  let biblatex = false
+  for (const p of [...(main ? [main] : []), ...idx.texFiles.filter((f) => f !== main)]) {
+    const t = stripComments(r.files.get(p)?.toString() ?? '')
+    if (/\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bbiblatex\b/.test(t)) biblatex = true
+    for (const m of t.matchAll(/\\(addbibresource|bibliography)\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/g)) {
+      for (const n of m[1] === 'bibliography' ? m[2].split(',') : [m[2]]) {
+        const name = n.trim().replace(/^\.\//, '')
+        if (name) names.push(m[1] === 'bibliography' && !/\.bib$/i.test(name) ? name + '.bib' : name)
+      }
+    }
+  }
+  // names are relative to the main file's folder (where TeX runs); accept project-root paths too
+  const resolve = (n: string) => [base + n, n].find((p) => idx.bibFiles.includes(p))
+  const found = [...new Set(names.map(resolve).filter((p): p is string => !!p))]
+  const plan = { declared: names.length > 0, main, biblatex, missing: new Set<string>() }
+  if (found.length) return { ...plan, options: found }
+  if (names.length) { // the document names a file that isn't there yet: create it
+    const want = [...new Set(names.map((n) => cleanPath(base + n)).filter((p): p is string => !!p && /\.bib$/i.test(p)))]
+    if (want.length) return { ...plan, options: want, missing: new Set(want) }
+  }
+  if (idx.bibFiles.length) return { ...plan, options: idx.bibFiles }
+  const fresh = base + 'references.bib'
+  return { ...plan, options: [fresh], missing: new Set([fresh]) }
+}
+
+/** The line(s) that make the document print `file`, for showing before adding them. */
+export function bibliographyLine(plan: BibPlan, file: string): string {
+  const base = plan.main ? dirOf(plan.main) : ''
+  const rel = file.startsWith(base) ? file.slice(base.length) : file
+  return plan.biblatex ? `\\addbibresource{${rel}}` : `\\bibliography{${rel.replace(/\.bib$/i, '')}}`
+}
+
+/** Add \bibliography (or biblatex's \addbibresource and \printbibliography) to the main file. */
+export function addBibliography(r: Replica, plan: BibPlan, file: string): boolean {
+  const yt = plan.main ? r.files.get(plan.main) : undefined
+  if (!yt) return false
+  const t = yt.toString(), clean = stripComments(t)
+  const end = clean.search(/\\end\s*\{document\}/), begin = clean.search(/\\begin\s*\{document\}/)
+  if (end < 0 || begin < 0) return false
+  const atLine = (i: number) => (i > 0 && t[i - 1] !== '\n' ? '\n' : '')
+  const line = bibliographyLine(plan, file)
+  r.doc.transact(() => {
+    if (plan.biblatex) { // later position first, so the earlier one stays valid
+      if (!/\\printbibliography/.test(clean)) yt.insert(end, atLine(end) + '\\printbibliography\n\n')
+      yt.insert(begin, atLine(begin) + line + '\n')
+    } else {
+      let all = ''
+      for (const [p, f] of r.files) if (p.endsWith('.tex')) all += stripComments(f.toString())
+      const natbib = /\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bnatbib\b/.test(all)
+      const style = /\\bibliographystyle\s*\{/.test(all) ? '' : `\\bibliographystyle{${natbib ? 'plainnat' : 'plain'}}\n`
+      yt.insert(end, atLine(end) + style + line + '\n\n')
+    }
+  })
+  return true
+}
+
+/** Fetch and append to `file` (created if needed); a DOI already in the document's bibliography is reused. */
+export async function addReference(r: Replica, index: ProjectIndex, input: string, file?: string): Promise<Added> {
   const doi = parseId(input)
   if (!doi) throw new Error('That doesn’t look like a DOI (10.xxxx/…) or an arXiv id (e.g. 1706.03762).')
   const idx = index.get()
-  // already in the project?
-  for (const f of idx.bibFiles) {
+  const plan = bibPlan(r, index)
+  file ??= plan.options[0]
+  // already there? Only files the document uses count (an entry elsewhere would print as “?”).
+  for (const f of plan.declared ? plan.options : idx.bibFiles) {
     const text = r.files.get(f)?.toString() ?? ''
     const at = text.toLowerCase().indexOf(doi.toLowerCase())
     if (at >= 0) {
@@ -119,14 +199,13 @@ export async function addReference(r: Replica, index: ProjectIndex, input: strin
   }
   const key = makeKey(e.fields, new Set(idx.bib.map((b) => b.key)))
   const entry = formatEntry(e.type, key, e.fields)
-  const file = idx.bibFiles[0] ?? 'references.bib'
   r.doc.transact(() => {
-    let yt = r.files.get(file)
-    if (!yt) { yt = new Y.Text(); r.files.set(file, yt) }
+    let yt = r.files.get(file!)
+    if (!yt) { yt = new Y.Text(); r.files.set(file!, yt) }
     const t = yt.toString()
     yt.insert(yt.length, (t && !t.endsWith('\n\n') ? (t.endsWith('\n') ? '\n' : '\n\n') : '') + entry)
   })
-  return { key, file, existed: false, entry }
+  return { key, file: file!, existed: false, entry }
 }
 
 /** A small dialog: paste a DOI/arXiv id, get a key back (inserted by the caller). */
@@ -134,30 +213,64 @@ export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: st
   const input = h('input', { placeholder: '10.1145/361604.361612 or arXiv:1706.03762', value: seed, 'aria-label': 'DOI or arXiv id', style: 'width: 100%' })
   const msg = h('p', { class: 'muted small' }, 'Paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.')
   const pre = h('pre', { class: 'bibpreview', hidden: true })
+  const target = h('div', { class: 'reftarget' })
   const go = h('button', { class: 'primary', onclick: () => run() }, 'Add reference')
-  const dlg = dialog('refdlg', h('h3', {}, 'Add a reference'), input, msg, pre,
+  const dlg = dialog('refdlg', h('h3', {}, 'Add a reference'), input, target, msg, pre,
     h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, 'Close'), go))
+  const REMEMBER = `texloom.bibfile.${r.keys.project}`
+  let plan = bibPlan(r, index)
+  let select: HTMLSelectElement | null = null
+  let addLine: HTMLInputElement | null = null
+  const chosen = () => select?.value ?? plan.options[0]
+
+  function render() {
+    plan = bibPlan(r, index)
+    let prev = select?.value
+    try { prev ??= localStorage.getItem(REMEMBER) ?? undefined } catch {}
+    const label = (f: string) => f + (plan.missing.has(f) ? ' (new file)' : '')
+    const kids: (HTMLElement | string)[] = []
+    if (plan.options.length > 1) {
+      select = h('select', { 'aria-label': 'Bibliography file', onchange: () => { try { localStorage.setItem(REMEMBER, select!.value) } catch {}; lineText() } },
+        ...plan.options.map((f) => h('option', { value: f }, label(f))))
+      if (prev && plan.options.includes(prev)) select.value = prev
+      kids.push(h('div', { class: 'row' }, h('span', { class: 'small' }, 'Add to'), select))
+    } else {
+      select = null
+      kids.push(h('p', { class: 'small' }, plan.missing.has(plan.options[0]) ? `Creates ${plan.options[0]} for the entry.` : `Adds to ${plan.options[0]}.`))
+    }
+    addLine = null
+    if (!plan.declared && plan.main) {
+      addLine = h('input', { type: 'checkbox', checked: true })
+      kids.push(h('label', { class: 'small check' }, addLine, h('span', { class: 'linetext' })))
+    }
+    target.replaceChildren(...kids)
+    lineText()
+  }
+  function lineText() {
+    const span = target.querySelector('.linetext')
+    if (span) span.textContent = ` Also add ${bibliographyLine(plan, chosen())}${plan.biblatex ? ' and \\printbibliography' : ''} to ${plan.main}, so the list is printed`
+  }
+
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run() } })
+  render()
   input.focus()
   async function run() {
     go.setAttribute('disabled', ''); msg.className = 'muted small'; msg.textContent = 'Fetching…'
     try {
-      const a = await addReference(r, index, input.value)
+      const file = chosen()
+      const a = await addReference(r, index, input.value, file)
       onKey(a.key)
       msg.textContent = a.existed ? `Already in ${a.file} as “${a.key}”; cited it.` : `Added to ${a.file} as “${a.key}”.`
       if (a.entry) { pre.textContent = a.entry; pre.hidden = false }
-      if (!index.get().bibFiles.length || (!a.existed && a.file === 'references.bib' && !mentionsBib(r))) {
-        msg.textContent += ' Add \\bibliography{references} (or \\addbibresource{references.bib}) to your document to print it.'
+      if (!plan.declared) {
+        if (addLine?.checked && addBibliography(r, plan, a.file)) msg.textContent += ` Added ${bibliographyLine(plan, a.file)} to ${plan.main}.`
+        else msg.textContent += ` Add ${bibliographyLine(plan, a.file)} to your document to print it.`
       }
       input.value = ''
+      render()
     } catch (e) {
       msg.className = 'err small'
       msg.textContent = String(e instanceof Error ? e.message : e).replace(/^(TypeError: )?(Failed to fetch|Load failed|NetworkError.*)$/, 'Couldn’t reach doi.org (offline?).')
     } finally { go.removeAttribute('disabled') }
   }
-}
-
-function mentionsBib(r: Replica): boolean {
-  for (const [p, yt] of r.files) if (p.endsWith('.tex') && /\\(bibliography|addbibresource)\s*\{/.test(yt.toString())) return true
-  return false
 }
