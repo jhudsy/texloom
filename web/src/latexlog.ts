@@ -16,6 +16,14 @@ function toProject(path: string | null, files: string[]): string | null {
   return files.find((f) => p.endsWith('/' + f)) ?? files.find((f) => p.endsWith('/' + f.replace(/\.tex$/, '')) || p === f.replace(/\.tex$/, '')) ?? null
 }
 
+/** The project file a .bib path from biber means: relative to the main file, which may be
+ *  in a folder ("bib/own.bib" is "paper/bib/own.bib"); case-insensitively as a fallback. */
+function bibFile(path: string, files: string[]): string | null {
+  const p = path.split('/').filter((s) => s && s !== '.' && s !== '..').join('/')
+  const ends = (f: string, t: string) => f === t || f.endsWith('/' + t)
+  return files.find((f) => ends(f, p)) ?? files.find((f) => ends(f.toLowerCase(), p.toLowerCase())) ?? null
+}
+
 export function parseLog(log: string, files: string[]): Problem[] {
   const lines = log.split('\n')
   const out: Problem[] = []
@@ -25,6 +33,7 @@ export function parseLog(log: string, files: string[]): Problem[] {
     if (!seen.has(key)) { seen.add(key); out.push(p) }
   }
   const stack: (string | null)[] = [] // open "(file" groups; null for ordinary parentheses
+  let bibSource: string | null = null // the .bib biber is reading ("Found BibTeX data source 'bib/own.bib'")
   const current = () => { for (let i = stack.length - 1; i >= 0; i--) if (stack[i]) return stack[i]; return null }
 
   for (let i = 0; i < lines.length; i++) {
@@ -54,8 +63,18 @@ export function parseLog(log: string, files: string[]): Problem[] {
     }
 
     // biber ("ERROR - Cannot find 'refs.bib'!") and BibTeX ("I couldn't open database file refs.bib")
+    const source = /Found BibTeX data source '([^']+)'/.exec(line)
+    if (source) bibSource = source[1]
     const biber = /\b(ERROR|WARN) - (.*)$/.exec(line)
-    if (biber) add({ severity: biber[1] === 'ERROR' ? 'error' : 'warning', file: null, line: null, message: `Biber: ${biber[2].trim()}` })
+    if (biber) {
+      // a syntax error is reported in biber's UTF-8 copy of the .bib ("/tmp/biber_tmp_…utf8,
+      // line 130, …"): name the project's file and line instead, so it can be clicked
+      const sub = /^BibTeX subsystem: \S+, line (\d+), (.*)$/.exec(biber[2].trim())
+      const bib = sub && bibSource ? bibFile(bibSource, files) : null
+      add(sub && bibSource
+        ? { severity: biber[1] === 'ERROR' ? 'error' : 'warning', file: bib, line: +sub[1], message: `Biber: ${bibSource}, line ${sub[1]}: ${sub[2]}` }
+        : { severity: biber[1] === 'ERROR' ? 'error' : 'warning', file: null, line: null, message: `Biber: ${biber[2].trim()}` })
+    }
     const bibtex = /^I (couldn't open (?:database|style|auxiliary) file .*|found no \\\w+ commands?.*)$/.exec(line)
     if (bibtex) add({ severity: 'error', file: null, line: null, message: `BibTeX: I ${bibtex[1].replace(/---.*$/, '').trim()}` })
     const bibwarn = /^Warning--(.*)$/.exec(line)
