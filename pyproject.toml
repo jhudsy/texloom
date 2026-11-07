@@ -16,6 +16,14 @@ dependencies = [
 texloom = "texloom.cli:main"
 texloom-server = "server.relay:main"
 
+[project.gui-scripts]
+texloom-app = "texloom.app:main"
+
+[project.optional-dependencies]
+app = [
+    "pyside6-essentials>=6.8",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

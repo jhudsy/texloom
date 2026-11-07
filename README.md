@@ -224,6 +224,26 @@ Use this for Claude Code or any other tool, and to compile with your own TeX ins
 changed on both sides take the folder's version; the other stays in History). After a
 browser restart, click **📁 Reconnect folder** once.
 
+**With the TeXLoom app** (macOS, Windows, Linux): download it from the
+[releases page](https://github.com/jhudsy/texloom/releases/latest), or install it with
+`uv tool install 'texloom[app] @ git+https://github.com/jhudsy/texloom'` and run
+`texloom app`. It keeps all your project folders in sync from the menu bar or tray:
+- **Join project…** takes a link (from the Share dialog or an email), shows the project's
+  name and your access, and puts it in a folder you choose (`~/TeXLoom/<name>` by default).
+  In the web app, Settings → *Keep a copy in a folder* → **Open in the TeXLoom app** does
+  the same in one click; the app asks before joining.
+- **Share a folder…** turns an existing folder into a new project.
+- Each folder shows whether it is up to date, offline or sending changes, with its recent
+  activity, and switches for compiling with your own TeX and for keeping its git repository
+  in step. **Leave…** stops syncing a folder (its files stay).
+- **Start at login** keeps it running in the menu bar or tray.
+
+The downloads aren't signed with paid certificates yet. On macOS, the first time,
+right-click the app → **Open** (or System Settings → Privacy & Security → **Open Anyway**);
+on Windows, SmartScreen → **More info** → **Run anyway**. The app is the same helper as
+below, with a window: it and `texloom start` share the folder list, and only one of them
+syncs a given folder at a time.
+
 **With the `texloom` helper** (any OS, works without a browser, can compile): install it
 once with [uv](https://docs.astral.sh/uv/) (or pipx):
 

@@ -22,6 +22,26 @@ def executable() -> list[str]:
     return [sys.executable, "-m", "texloom.cli"]
 
 
+def app_bundle() -> Path | None:
+    """The TeXLoom.app this is running from (a packaged macOS app), if any."""
+    p = Path(sys.executable).resolve()
+    for parent in p.parents:
+        if parent.suffix == ".app":
+            return parent
+    return None
+
+
+def command(app: bool) -> tuple[list[str], bool]:
+    """The login item's command, and whether it keeps running (launchd should restart it)."""
+    if not app:
+        return [*executable(), "start"], True
+    if getattr(sys, "frozen", False):  # a downloaded app
+        if sys.platform == "darwin" and (b := app_bundle()):
+            return ["/usr/bin/open", "-g", "-a", str(b), "--args", "--hidden"], False
+        return [sys.executable, "--hidden"], True
+    return [*executable(), "app", "--hidden"], True
+
+
 def log_file() -> Path:
     return config_dir() / "texloom.log"
 
@@ -43,8 +63,8 @@ def _xml(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def plist(cmd: list[str], log: Path) -> str:
-    args = "".join(f"\n    <string>{_xml(a)}</string>" for a in [*cmd, "start"])
+def plist(cmd: list[str], log: Path, keep_alive: bool = True) -> str:
+    args = "".join(f"\n    <string>{_xml(a)}</string>" for a in cmd)
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -54,7 +74,7 @@ def plist(cmd: list[str], log: Path) -> str:
   <array>{args}
   </array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key><{"true" if keep_alive else "false"}/>
   <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>{_xml(str(log))}</string>
   <key>StandardErrorPath</key><string>{_xml(str(log))}</string>
@@ -64,7 +84,7 @@ def plist(cmd: list[str], log: Path) -> str:
 
 
 def unit(cmd: list[str]) -> str:
-    q = " ".join(f'"{a}"' if " " in a else a for a in [*cmd, "start"])
+    q = " ".join(f'"{a}"' if " " in a else a for a in cmd)
     return f"""[Unit]
 Description=TeXLoom: keep project folders in sync
 After=network-online.target
@@ -81,18 +101,19 @@ WantedBy=default.target
 
 def vbs(cmd: list[str], log: Path) -> str:
     # cmd /c with output redirected; window style 0 = hidden
-    inner = " ".join(f'""{a}""' for a in [*cmd, "start"])
+    inner = " ".join(f'""{a}""' for a in cmd)
     return f'CreateObject("WScript.Shell").Run "cmd /c {inner} >> ""{log}"" 2>&1", 0, False\n'
 
 
-def enable(dry_run: bool = False) -> str:
-    cmd, log = executable(), log_file()
+def enable(dry_run: bool = False, app: bool = False) -> str:
+    """Start `texloom start` (or, with app=True, the TeXLoom app in the tray) at login."""
+    (cmd, keep), log = command(app), log_file()
     log.parent.mkdir(parents=True, exist_ok=True)
     if sys.platform == "darwin":
         p = _mac_plist()
         if not dry_run:
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(plist(cmd, log))
+            p.write_text(plist(cmd, log, keep))
             subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}", str(p)], capture_output=True)
             subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(p)], check=True, capture_output=True)
         return f"Starts at login (launchd agent {p}); running now. Log: {log}"

@@ -26,7 +26,7 @@ from . import __version__
 from .crypto import Keys
 from .folder import STATE, FolderSync
 from . import registry
-from .daemon import FolderProblem, FolderTag, lock_folder
+from .daemon import CURRENT, FolderProblem, FolderTag, lock_folder
 from .paths import safe_rel
 from .replica import Replica
 
@@ -76,9 +76,18 @@ def print_links(keys: Keys, server: str) -> None:
 
 
 async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | str = False, git: bool = False) -> None:
+    """Sync one folder (until cancelled, or one round with once=True). Holds the folder's lock
+    while running, released however it ends (a cancelled task may keep its frame alive)."""
+    held = lock_folder(d)
+    try:
+        await _run(d, compile_, once, shell_escape, git)
+    finally:
+        held.close()
+
+
+async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, git: bool) -> None:
     cfg = {**DEFAULT_CONFIG, **load_config(d)}
     keys, server = load(d)
-    held = lock_folder(d)  # noqa: F841 - released when this returns
     code = cfg["create_code"] or os.environ.get("TEXLOOM_CODE", "")
     replica = Replica(d / STATE, keys, server, code or None)
     import platform
@@ -86,6 +95,8 @@ async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | 
             "shell_escape": cfg["shell_escape"] or shell_escape,
             "label": cfg["label"] or f"latexmk on {platform.node().split('.')[0]}"}
     fs = FolderSync(d, replica, compile_ or cfg["compile"], opts)
+    if (state := CURRENT.get()) is not None:  # running under the app or `texloom start`
+        state.replica, state.fs = replica, fs
     bridge = None
     if git or cfg.get("git"):
         from .gitsync import GitBridge
@@ -127,6 +138,57 @@ async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | 
     finally:
         later.cancel()
         replica.save()
+
+
+async def clone_project(link: str, d: Path) -> None:
+    """Check a project out into a new or empty folder, and add it to the folder list."""
+    Keys.from_link(link)  # a usable link?
+    if d.exists() and (not d.is_dir() or any(d.iterdir())):
+        raise FolderProblem(f"{d} is not empty: choose a new or empty folder")
+    d.mkdir(parents=True, exist_ok=True)
+    save(d, link)
+    await run(d, False, once=True)
+    registry.add(d)
+
+
+async def new_project(d: Path, server: str, name: str = "", code: str = "") -> Keys:
+    """Share an existing folder as a new project, and add it to the folder list."""
+    if config_path(d).exists():
+        raise FolderProblem(f"{d} is already a texloom project")
+    d.mkdir(parents=True, exist_ok=True)
+    keys = Keys.generate()
+    save(d, keys.link(server), code)
+    r = Replica(d / STATE, keys, server, code or None)
+    r.local_change(lambda: r.meta.__setitem__("name", name or d.resolve().name))
+    r.save()
+    await run(d, False, once=True)
+    registry.add(d)
+    return keys
+
+
+async def peek(link: str, timeout: float = 15) -> dict:
+    """Look at a project before joining it: its name, access and size (nothing is kept)."""
+    import tempfile
+    keys, server = Keys.from_link(link)
+    with tempfile.TemporaryDirectory(prefix="texloom-peek-") as tmp:
+        r = Replica(Path(tmp), keys, server)
+        task = asyncio.create_task(r.run())
+        try:
+            await asyncio.wait_for(r.synced.wait(), timeout)
+        except asyncio.TimeoutError:
+            raise FolderProblem(f"couldn't reach {server}") from None
+        finally:
+            task.cancel()
+        return {"name": str(r.meta.get("name") or ""), "writable": keys.writable, "server": server,
+                "files": len(r.files) + len(r.bin), "member": keys.member[2] if keys.member else None}
+
+
+def update_config(d: Path, **changes) -> None:
+    """Change settings in a folder's .texloom/config.json (kept readable by you only)."""
+    cfg = {**load_config(d), **changes}
+    fd = os.open(config_path(d), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(cfg, f, indent=2)
 
 
 def list_folders() -> None:
@@ -195,6 +257,9 @@ def main() -> None:
     p.add_argument("--shell-escape", action="store_true",
                    help="allow shell-escape (minted etc.); runs code collaborators write")
     sub.add_parser("start", help="sync every folder on this computer's list, in one process")
+    p = sub.add_parser("app", help="the TeXLoom app: your synced folders in a window and the tray (needs texloom[app])")
+    p.add_argument("--hidden", action="store_true", help="start in the tray, without opening the window")
+    p.add_argument("url", nargs="?", help="a texloom://join?link=… URL")
     p = sub.add_parser("autostart", help="run `texloom start` at login (on/off/status)")
     p.add_argument("state", choices=["on", "off", "status"])
     sub.add_parser("list", help="the folders this computer keeps in sync")
@@ -224,25 +289,16 @@ def main() -> None:
     logging.getLogger("watchfiles").setLevel(logging.WARNING)
 
     if a.cmd == "new":
-        a.dir.mkdir(parents=True, exist_ok=True)
-        if config_path(a.dir).exists():
-            sys.exit(f"{a.dir} is already a texloom project")
-        keys = Keys.generate()
-        save(a.dir, keys.link(a.server), a.code)
-        r = Replica(a.dir / STATE, keys, a.server, a.code or None)
-        r.local_change(lambda: r.meta.__setitem__("name", a.name or a.dir.resolve().name))
-        r.save()
-        asyncio.run(run(a.dir, False, once=True))
-        registry.add(a.dir)
+        try:
+            keys = asyncio.run(new_project(a.dir, a.server, a.name or "", a.code))
+        except FolderProblem as e:
+            sys.exit(str(e))
         print_links(keys, a.server)
     elif a.cmd == "clone":
-        keys, server = Keys.from_link(a.link)
-        if a.dir.exists() and any(a.dir.iterdir()):
-            sys.exit(f"{a.dir} is not empty")
-        a.dir.mkdir(parents=True, exist_ok=True)
-        save(a.dir, a.link)
-        asyncio.run(run(a.dir, False, once=True))
-        registry.add(a.dir)
+        try:
+            asyncio.run(clone_project(a.link, a.dir))
+        except FolderProblem as e:
+            sys.exit(str(e))
         print(f"Cloned into {a.dir}. A running `texloom start` picks it up; or run `texloom run {a.dir}`.")
         print("Collaborators' files are written there. texloom won't write files that LaTeX tools run as\n"
               "programs and warns about lines that ask to run one, but compile the folder with your own\n"
@@ -255,6 +311,13 @@ def main() -> None:
             sys.exit(str(e))
         except KeyboardInterrupt:
             pass
+    elif a.cmd == "app":
+        try:
+            from .app import main as app_main
+        except ImportError:
+            sys.exit("The app needs Qt: install it with `uv tool install 'texloom[app]'` (or pip install 'texloom[app]').")
+        app_main((["--hidden"] if a.hidden else []) + ([a.url] if a.url else []))
+        return
     elif a.cmd == "start":
         from .daemon import start
         try:

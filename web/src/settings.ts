@@ -37,9 +37,14 @@ function radios<T extends string>(name: string, value: T, options: [T, string, s
 function folderHelp(r: Replica, link: string): HTMLElement {
   const name = (r.meta.get('name') || 'project').toLowerCase().replace(/[^a-z0-9]+/g, '-')
   return h('div', { class: 'cmds' },
-    h('p', { class: 'muted' }, 'A web page can’t keep a folder in sync while it’s closed, so this uses the small texloom helper (Python). Run once in a terminal:'),
-    h('pre', {}, `texloom clone '${link}' ~/papers/${name}\ntexloom run ~/papers/${name} --compile`),
-    h('p', { class: 'muted' }, 'Edit the files with anything (Claude Code, vim, VS Code); changes flow both ways while it runs. Leave out --compile if you don’t want your TeX installation used. Install: see the README.'))
+    h('p', { class: 'muted' }, 'A web page can’t keep a folder in sync while it’s closed. The TeXLoom app can, for all your projects, from the menu bar or tray, and starting at login if you like:'),
+    h('div', { class: 'row' },
+      // Hands this link to the app on this computer (texloom:// links open it). It asks before joining.
+      h('a', { class: 'button primary', href: `texloom://join?link=${encodeURIComponent(link)}` }, 'Open in the TeXLoom app'),
+      h('a', { class: 'small', href: 'https://github.com/jhudsy/texloom/releases/latest', target: '_blank', rel: 'noopener' }, 'Download the app')),
+    h('p', { class: 'muted' }, 'Or with the texloom command-line helper:'),
+    h('pre', {}, `texloom clone '${link}' ~/papers/${name}\ntexloom start      # syncs all your folders; \`texloom autostart on\` runs it at login`),
+    h('p', { class: 'muted' }, 'Edit the files with anything (Claude Code, vim, VS Code); changes flow both ways. Install: see the README.'))
 }
 
 const engineNote = async () => (await engineCached()) ? 'already downloaded on this browser' : 'one-time download of ≈125 MB, shared by all projects'

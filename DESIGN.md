@@ -313,6 +313,19 @@ offsets, matching Yjs), so it shows up like a person. Comments and suggestions i
 use the same `review` entries as the web app; their anchors are encoded relative
 positions, which pycrdt produces in the Yjs wire format.
 
+## The desktop app
+
+`texloom app` (PySide6, optional extra `texloom[app]`; PyInstaller builds from
+`packaging/texloom-app.spec`, made by `.github/workflows/app.yml`) runs the same `Daemon`
+as `texloom start` on a background thread with its own asyncio loop; the Qt window on the
+main thread only reads `Daemon.states` and hands work (join, share, restart) to that loop.
+- **Folder list:** `texloom/registry.py`, one JSON file in the user config directory,
+  shared with the CLI. A per-folder lock (`.texloom/lock`) keeps two processes off one folder.
+- **One copy per user:** a local socket; a second launch hands over its arguments and exits.
+- **texloom://join?link=<encoded link>** opens the join dialog with the link filled in
+  (registered by the macOS bundle, in HKCU on Windows, by a .desktop file on Linux). It
+  stays on the machine, and nothing is joined without confirming in the app.
+
 ## Known limitations / open questions
 
 - Two peers who both *create* the same path while offline: one file wins (LWW on the
