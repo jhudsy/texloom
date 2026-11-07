@@ -247,7 +247,7 @@ A refused change is never lost:
 
 ### Idle projects, admin page, arXiv import
 
-- `--evict-idle-days N` drops the stored copy of projects nobody has opened for N days
+- `--evict-idle-days N` (or `TEXLOOM_EVICT_IDLE_DAYS`) drops the stored copy of projects nobody has opened for N days
   (default: never). The server copy then behaves like a cache: the next time someone with
   an edit link opens the project (browser or helper), their copy is uploaded again. Until
   then, someone with only a link and no copy of their own can't open it.

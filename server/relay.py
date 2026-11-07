@@ -1085,9 +1085,9 @@ def main() -> None:
                         "ago (checked hourly; default: never, or TEXLOOM_PURGE_EXPIRED_AFTER). Their files stay "
                         "on people's devices")
     p.add_argument("--no-arxiv", action="store_true", help="disable importing arXiv sources through this server")
-    p.add_argument("--evict-idle-days", type=float, default=0,
-                   help="drop the stored copy of projects nobody opened for this many days (0 = never); "
-                        "their writers re-upload them on their next visit")
+    p.add_argument("--evict-idle-days", type=float, default=float(os.environ.get("TEXLOOM_EVICT_IDLE_DAYS") or 0),
+                   help="drop the stored copy of projects nobody opened for this many days (0 = never; or "
+                        "TEXLOOM_EVICT_IDLE_DAYS); their writers re-upload them on their next visit")
     p.add_argument("--admin-token-file", type=Path,
                    help="enable /admin (read-only usage page); password = this file's content "
                         "(or set TEXLOOM_ADMIN_TOKEN)")
