@@ -1,9 +1,9 @@
-"""The desktop app's language: English, or French when the system (or TEXLOOM_LANG) says so.
+"""The desktop app's language: English, or one of the translations in texloom/locales.
 
-`_("English text", name=value)` returns the French from `locales_fr.FR` when the app runs in
-French, then fills `{name}` placeholders; `ngettext(n, one, other, ...)` picks the plural form.
-The English strings are the catalogue keys, so a string missing from it shows in English.
-No Qt here: the language is decided from the environment and the `locale` module.
+`_("English text", name=value)` returns the text in the app's language, then fills `{name}`
+placeholders; `ngettext(n, one, other, ...)` picks the form for the count. The English
+strings are the catalogue keys, so a string missing from a catalogue shows in English.
+The language is TEXLOOM_LANG if set, else the system's. No Qt here.
 """
 
 from __future__ import annotations
@@ -13,9 +13,48 @@ import os
 import re
 import subprocess
 import sys
+from typing import Callable
+
+from .locales import CATALOGS
 
 _LANG: str | None = None
 _FIELD = re.compile(r"\{(\w+)\}")
+
+# Plural categories by language (CLDR names: zero, one, two, few, many, other), for counts.
+# A catalogue entry for a count is (one, other), or a dict with one text per category the
+# language uses. Languages not listed use English's: "one" for 1, else "other".
+
+
+def _slavic_east(n: int) -> str:  # Russian, Ukrainian, Belarusian
+    if n % 10 == 1 and n % 100 != 11:
+        return "one"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "few"
+    return "many"
+
+
+def _polish(n: int) -> str:
+    if n == 1:
+        return "one"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "few"
+    return "many"
+
+
+PLURAL_RULES: dict[str, Callable[[int], str]] = {
+    "fr": lambda n: "one" if n in (0, 1) else "other",
+    "pt_BR": lambda n: "one" if n in (0, 1) else "other",
+    "pl": _polish,
+    "ru": _slavic_east, "uk": _slavic_east, "be": _slavic_east,
+    "cs": lambda n: "one" if n == 1 else "few" if 2 <= n <= 4 else "other",
+    "sk": lambda n: "one" if n == 1 else "few" if 2 <= n <= 4 else "other",
+    "ja": lambda n: "other", "zh": lambda n: "other", "ko": lambda n: "other",
+}
+
+
+def plural_category(lang: str, n: int) -> str:
+    rule = PLURAL_RULES.get(lang) or PLURAL_RULES.get(lang.split("_")[0])
+    return rule(n) if rule else ("one" if n == 1 else "other")
 
 
 def _system_lang() -> str:
@@ -36,13 +75,24 @@ def _system_lang() -> str:
     return code
 
 
+def _match(code: str) -> str:
+    """The catalogue for a locale code such as fr_FR.UTF-8 or pt-BR: the exact region if
+    there is one (pt_BR), else the language (pt), else English."""
+    code = code.split(".")[0].split("@")[0].replace("-", "_")
+    lang, _sep, region = code.partition("_")
+    lang = lang.lower()
+    full = f"{lang}_{region.upper()}" if region else lang
+    for c in (full, lang):
+        if c in CATALOGS:
+            return c
+    return "en"
+
+
 def lang() -> str:
-    """'fr' or 'en', decided once: TEXLOOM_LANG if set, else the system locale."""
+    """The app's language ('en' or a key of CATALOGS), decided once."""
     global _LANG
     if _LANG is None:
-        forced = os.environ.get("TEXLOOM_LANG", "").strip().lower()
-        code = forced or _system_lang().lower()
-        _LANG = "fr" if code.startswith("fr") else "en"
+        _LANG = _match(os.environ.get("TEXLOOM_LANG", "").strip() or _system_lang())
     return _LANG
 
 
@@ -53,24 +103,17 @@ def _fill(s: str, vars: dict) -> str:
     return _FIELD.sub(lambda m: str(vars[m[1]]) if m[1] in vars else m[0], s)
 
 
-def _fr():
-    from .locales_fr import FR
-    return FR
-
-
 def _(en: str, /, **vars) -> str:
-    s = en
-    if lang() == "fr":
-        t = _fr().get(en)
-        if isinstance(t, str):
-            s = t
-    return _fill(s, vars)
+    t = CATALOGS.get(lang(), {}).get(en)
+    return _fill(t if isinstance(t, str) else en, vars)
 
 
 def ngettext(n: int, one: str, other: str, /, **vars) -> str:
-    """`one` or `other` for the count `n` (French counts 0 and 1 as singular); keyed by `other`."""
-    if lang() == "fr":
-        t = _fr().get(other)
-        if isinstance(t, tuple):
-            return _fill(t[0] if n in (0, 1) else t[1], vars)
+    """The form of `one`/`other` for the count `n` in the app's language; keyed by `other`."""
+    t = CATALOGS.get(lang(), {}).get(other)
+    cat = plural_category(lang(), n)
+    if isinstance(t, tuple):
+        return _fill(t[0] if cat == "one" else t[1], vars)
+    if isinstance(t, dict):
+        return _fill(t.get(cat, t.get("other", other)), vars)
     return _fill(one if n == 1 else other, vars)

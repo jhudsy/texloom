@@ -6,7 +6,10 @@
 // The language is fixed for the page's life: chosen in Settings, else the browser's.
 
 export type Lang = 'en' | 'fr'
-type Entry = string | [one: string, other: string]
+/** A plain text, or a count's forms: [one, other] for languages with two (English, French,
+ *  German, Spanish…), or one per plural category the language uses (Intl.PluralRules:
+ *  zero, one, two, few, many, other), e.g. Polish { one, few, many, other }. */
+type Entry = string | [one: string, other: string] | ({ other: string } & Partial<Record<Intl.LDMLPluralRule, string>>)
 export type Catalog = Record<string, Entry>
 
 const LANG_KEY = 'texloom.lang'
@@ -51,12 +54,14 @@ export function t(en: string, vars?: Record<string, unknown>): string {
   return fill(typeof tr === 'string' ? tr : en, vars)
 }
 
-/** A count: tn(n, '{{n}} file', '{{n}} files'). The catalogue keys it by the plural form
- *  and holds [one, other] (French counts 0 and 1 as "one"). */
+/** A count: tn(n, '{{n}} file', '{{n}} files'). The catalogue keys it by the English plural
+ *  form; the language's own rules pick the form (French counts 0 and 1 as "one"). */
 export function tn(n: number, one: string, other: string, vars?: Record<string, unknown>): string {
   const v = { n, ...vars }
   const tr = catalog[other]
-  if (Array.isArray(tr)) return fill(plural.select(n) === 'one' ? tr[0] : tr[1], v)
+  const cat = plural.select(n)
+  if (Array.isArray(tr)) return fill(cat === 'one' ? tr[0] : tr[1], v)
+  if (tr && typeof tr === 'object') return fill(tr[cat] ?? tr.other, v)
   return fill(n === 1 ? one : other, v)
 }
 

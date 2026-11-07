@@ -541,11 +541,22 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 ### Translations
 
 Interface text is written in English inside `t('…')` (web) or `_('…')` (desktop app); the
-English is the key. French is in `web/src/locales/fr/<module>.ts` (one file per source file)
-and `texloom/locales_fr.py`. Text without a translation shows in English. After changing
-interface text, run `npm run check-i18n` in `web/`: it lists text with no French, unused
-entries, plural and `{{placeholder}}` mismatches. To add a language, add it to `Lang` and `LANGUAGES` in
-`web/src/i18n.ts` and create `web/src/locales/<id>/`.
+English is the key, and text without a translation shows in English. Each language has
+`web/src/locales/<code>/<module>.ts` (one file per source file) and
+`texloom/locales/<code>.py`. A count is keyed by its English plural form and holds the
+language's forms: `['{{n}} fichier', '{{n}} fichiers']`, or one per plural category for
+languages with more (Polish: `{ one, few, many, other }`).
+
+To add a language (`de`, say):
+1. Web: copy `web/src/locales/fr/` to `web/src/locales/de/` and translate the values;
+   add `'de'` to `Lang` and `LANGUAGES` in `web/src/i18n.ts` so it can be chosen.
+2. Desktop app: copy `texloom/locales/fr.py` to `de.py`, translate it, and add it to
+   `CATALOGS` in `texloom/locales/__init__.py`. If its plurals aren't "one for 1, other
+   otherwise", add the rule to `PLURAL_RULES` in `texloom/i18n.py`.
+3. Check: `npm run check-i18n` in `web/` and `python scripts/check_i18n.py`. Both list
+   missing or unused text, wrong plural forms and `{{placeholder}}` mismatches for every
+   language (name languages to check only those; `--allow-missing` for one in progress).
+
 ## Status
 
 Early prototype. Not yet built:

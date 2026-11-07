@@ -1,5 +1,6 @@
-// Checks the French catalogue against the code: every t()/tn()/tNodes() text needs an entry,
-// plural texts need [one, other], and placeholders must match. Run: node scripts/check-i18n.mjs
+// Checks each language's catalogue against the code: every t()/tn()/tNodes() text needs an entry,
+// counts need the language's plural forms, and placeholders must match.
+// Run: npm run check-i18n [-- de pl] [-- --allow-missing]
 import { parseAst } from 'rolldown/parseAst'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -36,43 +37,79 @@ for (const p of files(root)) {
   })
 }
 
-const catalog = new Map() // key -> {value, file}
-const dupes = []
-for (const p of files(join(root, 'locales/fr'))) {
-  const sf = parse(p)
-  walk(sf.ast, (n) => {
-    if (n.type === 'Property') {
-      const k = n.key.type === 'Identifier' ? n.key.name : literal(n.key)
-      const v = literal(n.value) ?? (n.value.type === 'ArrayExpression' ? n.value.elements.map(literal) : null)
-      if (k !== null) {
-        if (catalog.has(k) && JSON.stringify(catalog.get(k).value) !== JSON.stringify(v)) dupes.push(`${k} (${catalog.get(k).file} / ${relative(root, p)})`)
-        catalog.set(k, { value: v, file: relative(root, p) })
-      }
-    }
-  })
-}
+// Languages: every folder in src/locales (or the ones named: node scripts/check-i18n.mjs de pl).
+// --allow-missing: report untranslated text without failing (for a translation in progress).
+const args = process.argv.slice(2)
+const allowMissing = args.includes('--allow-missing')
+const named = args.filter((a) => !a.startsWith('--'))
+const langs = named.length ? named : readdirSync(join(root, 'locales')).filter((d) => statSync(join(root, 'locales', d)).isDirectory()).sort()
+const declared = [...readFileSync(join(root, 'i18n.ts'), 'utf8').matchAll(/\{\s*id:\s*'(\w+)'/g)].map((m) => m[1])
 
 const holes = (s) => [...String(s).matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort().join(',')
-const missing = [], wrongShape = [], badHoles = []
-for (const [k, u] of used) {
-  const c = catalog.get(k)
-  if (!c) { missing.push(`${u.where}  ${JSON.stringify(k)}`); continue }
-  if (u.plural !== Array.isArray(c.value)) { wrongShape.push(`${u.where}  ${JSON.stringify(k)}`); continue }
-  const vals = Array.isArray(c.value) ? c.value : [c.value]
-  const want = holes(u.plural ? `${u.one} ${k}` : k).split(',').filter(Boolean)
-  for (const v of vals) {
-    const have = holes(v).split(',').filter(Boolean)
-    const bad = have.filter((h) => !want.includes(h)).concat(u.plural ? [] : want.filter((h) => !have.includes(h)))
-    if (bad.length) badHoles.push(`${u.where}  ${JSON.stringify(k)} → ${JSON.stringify(v)}`)
-  }
-}
-const unused = [...catalog.keys()].filter((k) => !used.has(k))
 const report = (title, list) => { if (list.length) console.log(`\n${title} (${list.length}):\n  ${list.slice(0, 60).join('\n  ')}`) }
-console.log(`texts in code: ${used.size}; French entries: ${catalog.size}`)
-report('MISSING French', missing)
-report('Plural/singular mismatch', wrongShape)
-report('Placeholder mismatch', badHoles)
-report('Conflicting duplicates', dupes)
+let failed = false
+console.log(`texts in code: ${used.size}`)
 report('Calls with a non-literal text (check by hand)', dynamic)
-report('Unused French entries', unused.map((k) => `${catalog.get(k).file}  ${JSON.stringify(k)}`))
-process.exit(missing.length || wrongShape.length || badHoles.length || dupes.length ? 1 : 0)
+
+for (const lang of langs) {
+  const dir = join(root, 'locales', lang)
+  // the forms a count needs, e.g. pl: one, few, many, other. French, Spanish, Italian,
+  // Portuguese and Catalan have "many" only for round millions ("1 million de fichiers"),
+  // where the "other" form serves, so it isn't required there.
+  const LARGE_MANY = ['fr', 'es', 'it', 'pt', 'ca']
+  const categories = new Intl.PluralRules(lang).resolvedOptions().pluralCategories
+    .filter((c) => !(c === 'many' && LARGE_MANY.includes(lang.split('-')[0])))
+  const catalog = new Map() // key -> {value, file}
+  const dupes = []
+  for (const p of files(dir)) {
+    const sf = parse(p)
+    const inner = new Set() // the forms inside a count's { one, few, … } entry
+    walk(sf.ast, (n) => {
+      if (n.type !== 'Property' || inner.has(n)) return
+      const k = n.key.type === 'Identifier' ? n.key.name : literal(n.key)
+      if (k === null) return
+      let v = literal(n.value)
+      if (v === null && n.value.type === 'ArrayExpression') v = n.value.elements.map(literal)
+      if (v === null && n.value.type === 'ObjectExpression') {
+        for (const q of n.value.properties) inner.add(q)
+        v = Object.fromEntries(n.value.properties.map((q) => [q.key.type === 'Identifier' ? q.key.name : literal(q.key), literal(q.value)]))
+      }
+      if (v === null) return
+      if (catalog.has(k) && JSON.stringify(catalog.get(k).value) !== JSON.stringify(v)) dupes.push(`${k} (${catalog.get(k).file} / ${relative(root, p)})`)
+      catalog.set(k, { value: v, file: relative(root, p) })
+    })
+  }
+  const missing = [], wrongShape = [], badHoles = []
+  for (const [k, u] of used) {
+    const c = catalog.get(k)
+    if (!c) { missing.push(`${u.where}  ${JSON.stringify(k)}`); continue }
+    const v = c.value, isPlural = typeof v !== 'string'
+    if (u.plural !== isPlural) { wrongShape.push(`${u.where}  ${JSON.stringify(k)}: ${u.plural ? 'a count needs plural forms' : 'not a count: give one text'}`); continue }
+    let forms = [v]
+    if (Array.isArray(v)) {
+      forms = v
+      if (v.length !== 2) wrongShape.push(`${u.where}  ${JSON.stringify(k)}: [one, other] needs exactly two forms`)
+      else if (categories.some((c) => c !== 'one' && c !== 'other')) wrongShape.push(`${u.where}  ${JSON.stringify(k)}: ${lang} has the forms ${categories.join(', ')}: write { ${categories.map((c) => `${c}: …`).join(', ')} }`)
+    } else if (isPlural) {
+      forms = Object.values(v)
+      const lacking = categories.filter((c) => !(c in v))
+      const extra = Object.keys(v).filter((c) => !new Intl.PluralRules(lang).resolvedOptions().pluralCategories.includes(c))
+      if (lacking.length || extra.length) wrongShape.push(`${u.where}  ${JSON.stringify(k)}: ${lang} needs ${categories.join(', ')}${extra.length ? ` (not ${extra.join(', ')})` : ''}`)
+    }
+    const want = holes(u.plural ? `${u.one} ${k}` : k).split(',').filter(Boolean)
+    for (const f of forms) {
+      const have = holes(f).split(',').filter(Boolean)
+      const bad = have.filter((h) => !want.includes(h)).concat(u.plural ? [] : want.filter((h) => !have.includes(h)))
+      if (bad.length) badHoles.push(`${u.where}  ${JSON.stringify(k)} → ${JSON.stringify(f)}`)
+    }
+  }
+  const unused = [...catalog.keys()].filter((k) => !used.has(k))
+  console.log(`\n== ${lang}: ${used.size - missing.length} of ${used.size} translated (${categories.join('/')} plurals)${declared.includes(lang) ? '' : ` — not in LANGUAGES in i18n.ts, so nobody can choose it yet`}`)
+  report(`Missing ${lang}`, missing)
+  report('Plural forms wrong', wrongShape)
+  report('Placeholder mismatch', badHoles)
+  report('Conflicting duplicates', dupes)
+  report('Unused entries', unused.map((k) => `${catalog.get(k).file}  ${JSON.stringify(k)}`))
+  if ((missing.length && !allowMissing) || wrongShape.length || badHoles.length || dupes.length) failed = true
+}
+process.exit(failed ? 1 : 0)

@@ -1,11 +1,11 @@
 """French for the desktop app (texloom/app.py), keyed by the exact English strings.
 
 Plural entries are keyed by the English plural form and hold (singular, plural); French
-uses the singular for 0 and 1. Spaces before : ; ! ? and inside « » are non-breaking (U+00A0).
+uses the singular for 0 and 1 (see PLURAL_RULES in texloom/i18n.py). Spaces before : ; ! ? and inside « » are non-breaking (U+00A0).
 `{name}` placeholders must stay as they are.
 """
 
-FR: dict[str, str | tuple[str, str]] = {
+CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     # -- folder status
     "Paused": "En pause",
     "Syncing is paused for all folders.": "La synchronisation est en pause pour tous les dossiers.",
