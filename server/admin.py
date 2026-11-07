@@ -46,6 +46,7 @@ h1{font-size:20px} h2{font-size:16px;margin-top:28px}
 table{border-collapse:collapse;width:100%;max-width:1100px}
 td,th{border-bottom:1px solid #ddd;padding:4px 8px;text-align:left;white-space:nowrap}
 td.n,th.n{text-align:right} code{font-size:12px}
+details summary{cursor:pointer;list-style:none} details[open] summary{display:none}
 .muted{color:#777} .grid{display:grid;grid-template-columns:max-content max-content;gap:4px 16px}
 @media (prefers-color-scheme:dark){body{background:#1b1b1b;color:#ddd} td,th{border-color:#333}}
 """
@@ -93,8 +94,15 @@ class Admin:
         owners: dict[str, list[str]] = {}
         for p, _c, o, _s, _e in rows:
             owners.setdefault(o, []).append(p)
+        def code_cell(c: str) -> str:
+            """The code itself, for handing out: the start shown, the rest on click (no script needed)."""
+            if c not in r.codes.codes:
+                return "<td class=muted>—</td>"
+            full = f"{c[:4]}-{c[4:8]}-{c[8:]}"
+            return f"<td><details><summary><code>{e(full[:4])}-…</code></summary><code>{e(full)}</code></details></td>"
+
         crow = "".join(
-            f"<tr><td>{e(code_name(c))}</td><td class=n>{_size(r.codes.allowance(c))}</td>"
+            f"<tr><td>{e(code_name(c))}</td>{code_cell(c)}<td class=n>{_size(r.codes.allowance(c))}</td>"
             f"<td class=n>{_size(st.owner_usage(c))}</td><td class=n>{len(owners.get(c, []))}</td></tr>"
             for c in ["default", *r.codes.codes.keys(), *(["existing"] if "existing" in owners else [])])
         lim = r.limits
@@ -112,7 +120,9 @@ class Admin:
 <span>New projects</span><span>{"anyone" if r.codes.open_creation else "creation code needed"}</span>
 </div>
 <h2>Creation codes</h2>
-<table><tr><th>Code</th><th class=n>Allowance</th><th class=n>Used</th><th class=n>Projects</th></tr>{crow}</table>
+<table><tr><th>Label</th><th>Code</th><th class=n>Allowance</th><th class=n>Used</th><th class=n>Projects</th></tr>{crow}</table>
+<p class=muted>Click a code to show it all. A code lets people store new projects here up to its allowance; it doesn't
+open anyone's project. To withdraw one, delete its line from the codes file.</p>
 <p class=muted>Add a code: <code>texloom-server --codes-file … --add-code LABEL --allowance 1G</code></p>
 <h2>Projects (largest first{", first 500" if len(rows) > 500 else ""})</h2>
 <table><tr><th>Project id</th><th>Created with</th><th class=n>Stored</th><th>State</th><th>Created</th><th>Last opened</th><th class=n>Online</th></tr>{prow}</table>
