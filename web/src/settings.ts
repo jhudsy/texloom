@@ -3,6 +3,7 @@ import type { Replica, StorageMode, SyncMode } from './replica'
 import { engineCached, clearEngineCache } from './compile'
 import { h, dialog } from './dom'
 import { detectMain } from './projectfiles'
+import { t, tn, LANGUAGES, langPref, setLangPref, type Lang } from './i18n'
 
 export type CompileWhere = 'browser' | 'local' | 'none'
 export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean; spell: boolean; mathPreview: boolean; checks: boolean }
@@ -27,6 +28,14 @@ export const prefs = {
   },
 }
 
+/** The interface language for this browser (all projects). Changing it reloads the page. */
+export function languagePicker(): HTMLElement {
+  return h('label', { class: 'lang' }, t('Interface language'),
+    h('select', { 'aria-label': t('Interface language'), onchange: (e: any) => { setLangPref(e.target.value as Lang | 'auto'); location.reload() } },
+      h('option', { value: 'auto', selected: langPref() === 'auto' }, t('Automatic (the browser’s language)')),
+      ...LANGUAGES.map((l) => h('option', { value: l.id, selected: langPref() === l.id }, l.name))))
+}
+
 function radios<T extends string>(name: string, value: T, options: [T, string, string?, boolean?][], onChange: (v: T) => void) {
   return h('div', { class: 'radios' }, ...options.map(([v, label, hint, disabled]) =>
     h('label', { class: disabled ? 'radio disabled' : 'radio' },
@@ -37,47 +46,50 @@ function radios<T extends string>(name: string, value: T, options: [T, string, s
 function folderHelp(r: Replica, link: string): HTMLElement {
   const name = (r.meta.get('name') || 'project').toLowerCase().replace(/[^a-z0-9]+/g, '-')
   return h('div', { class: 'cmds' },
-    h('p', { class: 'muted' }, 'A web page can’t keep a folder in sync while it’s closed. The TeXLoom app can, for all your projects, from the menu bar or tray, and starting at login if you like:'),
+    h('p', { class: 'muted' }, t('A web page can’t keep a folder in sync while it’s closed. The TeXLoom app can, for all your projects, from the menu bar or tray, and starting at login if you like:')),
     h('div', { class: 'row' },
       // Hands this link to the app on this computer (texloom:// links open it). It asks before joining.
-      h('a', { class: 'button primary', href: `texloom://join?link=${encodeURIComponent(link)}` }, 'Open in the TeXLoom app'),
-      h('a', { class: 'small', href: 'https://github.com/jhudsy/texloom/releases/latest', target: '_blank', rel: 'noopener' }, 'Download the app')),
-    h('p', { class: 'muted' }, 'Or with the texloom command-line helper:'),
-    h('pre', {}, `texloom clone '${link}' ~/papers/${name}\ntexloom start      # syncs all your folders; \`texloom autostart on\` runs it at login`),
-    h('p', { class: 'muted' }, 'Edit the files with anything (Claude Code, vim, VS Code); changes flow both ways. Install: see the README.'))
+      h('a', { class: 'button primary', href: `texloom://join?link=${encodeURIComponent(link)}` }, t('Open in the TeXLoom app')),
+      h('a', { class: 'small', href: 'https://github.com/jhudsy/texloom/releases/latest', target: '_blank', rel: 'noopener' }, t('Download the app'))),
+    h('p', { class: 'muted' }, t('Or with the texloom command-line helper:')),
+    h('pre', {}, `texloom clone '${link}' ~/papers/${name}\ntexloom start      # ${t('syncs all your folders; `texloom autostart on` runs it at login')}`),
+    h('p', { class: 'muted' }, t('Edit the files with anything (Claude Code, vim, VS Code); changes flow both ways. Install: see the README.')))
 }
 
-const engineNote = async () => (await engineCached()) ? 'already downloaded on this browser' : 'one-time download of ≈125 MB, shared by all projects'
+/** Why the server isn't storing more right now, in words. */
+const problemText = (p: string) => ({ 'needs-code': t('needs code'), 'quota-full': t('quota full'), 'project-full': t('project full'), 'server-full': t('server full') } as Record<string, string>)[p] ?? p.replace('-', ' ')
+
+const engineNote = async () => (await engineCached()) ? t('already downloaded on this browser') : t('one-time download of ≈125 MB, shared by all projects')
 
 /** Shown the first time a link is opened in this browser. */
 export async function setupDialog(r: Replica, link: string): Promise<Device> {
   const d = prefs.device(r.keys.project)
   const note = await engineNote()
-  const nameIn = h('input', { value: prefs.name, placeholder: 'Shown to collaborators' }) as HTMLInputElement
+  const nameIn = h('input', { value: prefs.name, placeholder: t('Shown to collaborators') }) as HTMLInputElement
   const folderBox = h('div', { hidden: true }, folderHelp(r, link))
   return new Promise((resolve) => {
     const dlg = dialog('setup',
-      h('h3', {}, `Open “${r.meta.get('name') || 'project'}”`),
-      h('p', { class: 'muted' }, r.keys.writable ? 'You can edit this project.' : 'This is a read-only link.'),
-      h('label', { class: 'field' }, 'Your name', nameIn),
-      h('h4', {}, 'Where do the files live?'),
+      h('h3', {}, t('Open “{{name}}”', { name: r.meta.get('name') || t('project') })),
+      h('p', { class: 'muted' }, r.keys.writable ? t('You can edit this project.') : t('This is a read-only link.')),
+      h('label', { class: 'field' }, t('Your name'), nameIn),
+      h('h4', {}, t('Where do the files live?')),
       radios('where', 'browser', [
-        ['browser', 'Only in this browser', 'Works offline. Nothing to install. Note: clearing this browser’s data deletes this copy; keep the link so it can be reopened from the server’s copy.'],
-        ['folder', 'In this browser and in a folder on this computer', 'For editing with other tools or agents, and compiling with your own TeX. The folder is a separate copy: delete it like any folder. Choose this only for projects whose editors you trust: your own LaTeX tools may run programs the files ask for.'],
+        ['browser', t('Only in this browser'), t('Works offline. Nothing to install. Note: clearing this browser’s data deletes this copy; keep the link so it can be reopened from the server’s copy.')],
+        ['folder', t('In this browser and in a folder on this computer'), t('For editing with other tools or agents, and compiling with your own TeX. The folder is a separate copy: delete it like any folder. Choose this only for projects whose editors you trust: your own LaTeX tools may run programs the files ask for.')],
       ], (v) => (folderBox.hidden = v !== 'folder')),
       folderBox,
-      h('h4', {}, 'Compiling'),
+      h('h4', {}, t('Compiling')),
       radios('compile', d.compile, [
-        ['browser', 'In this browser', `TeX Live 2026 in WebAssembly — ${note}.`],
-        ['local', 'With my own TeX installation', 'Sends compile requests to a texloom helper running with --compile.'],
-        ['none', 'Don’t compile here', 'Just view the PDFs collaborators publish.'],
+        ['browser', t('In this browser'), t('TeX Live 2026 in WebAssembly — {{note}}.', { note })],
+        ['local', t('With my own TeX installation'), t('Sends compile requests to a texloom helper running with --compile.')],
+        ['none', t('Don’t compile here'), t('Just view the PDFs collaborators publish.')],
       ], (v) => (d.compile = v)),
-      h('h4', {}, 'Syncing'),
+      h('h4', {}, t('Syncing')),
       radios('sync', d.sync, [
-        ['live', 'Live', 'See collaborators’ changes as they type.'],
-        ['manual', 'Manual', 'Keep changes on this device until you press Sync.'],
+        ['live', t('Live'), t('See collaborators’ changes as they type.')],
+        ['manual', t('Manual'), t('Keep changes on this device until you press Sync.')],
       ], (v) => (d.sync = v)),
-      h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => dlg.close() }, 'Start')),
+      h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => dlg.close() }, t('Start'))),
     )
     dlg.addEventListener('close', () => {
       prefs.name = nameIn.value.trim()
@@ -107,36 +119,36 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
   const storageBox = h('div', {})
   let codeRow: HTMLElement | null = null
   const storageRadios = () => radios('storage', r.storage, [
-    ['server', 'Keep an encrypted copy on the server',
-      noStorage ? 'Not available yet: this server stores new projects only with a creation code. Until one is entered, your changes are kept here and reach collaborators who are online.'
-        : r.storeProblem ? `Collaborators get your changes even if you’re never online at the same time. Right now the server isn’t taking more (${r.storeProblem.replace('-', ' ')}): your changes are kept here and sent later.`
-          : 'Collaborators get your changes even if you’re never online at the same time. The server can’t read it.',
+    ['server', t('Keep an encrypted copy on the server'),
+      noStorage ? t('Not available yet: this server stores new projects only with a creation code. Until one is entered, your changes are kept here and reach collaborators who are online.')
+        : r.storeProblem ? t('Collaborators get your changes even if you’re never online at the same time. Right now the server isn’t taking more ({{reason}}): your changes are kept here and sent later.', { reason: problemText(r.storeProblem) })
+          : t('Collaborators get your changes even if you’re never online at the same time. The server can’t read it.'),
       !w || noStorage],
-    ['relay', 'Don’t store anything on the server', 'The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.', !w],
+    ['relay', t('Don’t store anything on the server'), t('The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.'), !w],
   ], async (v: StorageMode) => {
     if (!w) return
     if (v === 'relay' && !r.keys.owner) {
-      alert('Only the project’s owner can delete the server’s copy.')
+      alert(t('Only the project’s owner can delete the server’s copy.'))
       const keep = document.querySelector<HTMLInputElement>('input[name="storage"][value="server"]')
       if (keep) keep.checked = true
       return
     }
-    if (v === 'relay' && !confirm('Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.')) return
+    if (v === 'relay' && !confirm(t('Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.'))) return
     await r.setStorage(v)
   })
   storageBox.append(storageRadios())
-  const cacheBtn = h('button', { onclick: async () => { await clearEngineCache(); cacheBtn.textContent = 'Cleared' } }, 'Remove downloaded TeX engine')
+  const cacheBtn = h('button', { onclick: async () => { await clearEngineCache(); cacheBtn.textContent = t('Cleared') } }, t('Remove downloaded TeX engine'))
   const dlg = dialog('settings',
-    h('h3', {}, 'Settings'),
-    h('h4', {}, 'Project', h('small', { class: 'muted' }, w ? ' — shared with all collaborators' : ' — read-only')),
+    h('h3', {}, t('Settings')),
+    h('h4', {}, t('Project'), h('small', { class: 'muted' }, ' — ' + (w ? t('shared with all collaborators') : t('read-only')))),
     h('div', { class: 'grid' },
-      h('span', {}, 'Main file'), sel('main', texFiles.map((p) => [p, p]), detectedMain),
-      h('span', {}, 'Engine'), sel('engine', [['pdflatex', 'pdfLaTeX'], ['xelatex', 'XeLaTeX'], ['lualatex', 'LuaLaTeX']], 'pdflatex'),
-      h('span', {}, 'Bibliography'), sel('bib', [['auto', 'Detect automatically'], ['bibtex', 'BibTeX'], ['biber', 'Biber'], ['none', 'None']], 'auto'),
-      h('span', {}, 'Spelling'), sel('lang', [['', 'Browser’s language'], ['en-GB', 'English (UK)'], ['en-US', 'English (US)'], ['de', 'German'], ['fr', 'French'],
-        ['es', 'Spanish'], ['it', 'Italian'], ['nl', 'Dutch'], ['pt', 'Portuguese'], ['sv', 'Swedish'], ['pl', 'Polish']], ''),
+      h('span', {}, t('Main file')), sel('main', texFiles.map((p) => [p, p]), detectedMain),
+      h('span', {}, t('Engine')), sel('engine', [['pdflatex', 'pdfLaTeX'], ['xelatex', 'XeLaTeX'], ['lualatex', 'LuaLaTeX']], 'pdflatex'),
+      h('span', {}, t('Bibliography')), sel('bib', [['auto', t('Detect automatically')], ['bibtex', 'BibTeX'], ['biber', 'Biber'], ['none', t('None')]], 'auto'),
+      h('span', {}, t('Spelling')), sel('lang', [['', t('Browser’s language')], ['en-GB', t('English (UK)')], ['en-US', t('English (US)')], ['de', t('German')], ['fr', t('French')],
+        ['es', t('Spanish')], ['it', t('Italian')], ['nl', t('Dutch')], ['pt', t('Portuguese')], ['sv', t('Swedish')], ['pl', t('Polish')]], ''),
     ),
-    h('h4', {}, 'Server storage'),
+    h('h4', {}, t('Server storage')),
     storageBox,
     codeRow = noStorage ? h('div', { class: 'row' },
       h('button', { onclick: async () => {
@@ -146,55 +158,57 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
         noStorage = false
         storageBox.replaceChildren(storageRadios())
         codeRow?.remove()
-      } }, 'Enter creation code…'),
-      h('span', { class: 'muted small' }, 'Codes come from whoever runs this server.')) : null,
-    h('h4', {}, 'This device'),
-    h('label', { class: 'field' }, 'Your name', h('input', { value: prefs.name, onchange: (e: any) => (prefs.name = e.target.value) })),
-    h('h5', {}, 'Syncing'),
+      } }, t('Enter creation code…')),
+      h('span', { class: 'muted small' }, t('Codes come from whoever runs this server.'))) : null,
+    h('h4', {}, t('This device')),
+    h('label', { class: 'field' }, t('Your name'), h('input', { value: prefs.name, onchange: (e: any) => (prefs.name = e.target.value) })),
+    h('h5', {}, t('Syncing')),
     radios('sync', d.sync, [
-      ['live', 'Live sync'],
-      ['manual', 'Manual sync', 'Changes stay here until you press Sync (e.g. to finish a thought, or save bandwidth).'],
+      ['live', t('Live sync')],
+      ['manual', t('Manual sync'), t('Changes stay here until you press Sync (e.g. to finish a thought, or save bandwidth).')],
     ], (v) => { d.sync = v; prefs.saveDevice(r.keys.project, d); onDevice(d) }),
-    h('h5', {}, 'Compiling'),
+    h('h5', {}, t('Compiling')),
     radios('compile', d.compile, [
-      ['browser', 'Compile in this browser', `${note[0].toUpperCase()}${note.slice(1)}.`],
-      ['local', 'Compile with my own TeX', 'Needs `texloom run <folder> --compile` running.'],
-      ['none', 'Don’t compile here'],
+      ['browser', t('Compile in this browser'), `${note[0].toUpperCase()}${note.slice(1)}.`],
+      ['local', t('Compile with my own TeX'), t('Needs `texloom run <folder> --compile` running.')],
+      ['none', t('Don’t compile here')],
     ], (v) => { d.compile = v; prefs.saveDevice(r.keys.project, d); onDevice(d) }),
     h('label', { class: 'check' },
-      h('input', { type: 'checkbox', 'aria-label': 'Recompile automatically', checked: d.autoCompile, onchange: (e: any) => { d.autoCompile = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
-      'Recompile automatically after I stop typing'),
-    h('h5', {}, 'Editing'),
+      h('input', { type: 'checkbox', 'aria-label': t('Recompile automatically'), checked: d.autoCompile, onchange: (e: any) => { d.autoCompile = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
+      t('Recompile automatically after I stop typing')),
+    h('h5', {}, t('Language')),
+    languagePicker(),
+    h('h5', {}, t('Editing')),
     h('label', { class: 'check' },
-      h('input', { type: 'checkbox', 'aria-label': 'Check spelling', checked: d.spell, onchange: (e: any) => { d.spell = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
-      'Check spelling (uses the browser’s dictionary; LaTeX commands, maths and labels are skipped)'),
+      h('input', { type: 'checkbox', 'aria-label': t('Check spelling'), checked: d.spell, onchange: (e: any) => { d.spell = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
+      t('Check spelling (uses the browser’s dictionary; LaTeX commands, maths and labels are skipped)')),
     h('label', { class: 'check' },
-      h('input', { type: 'checkbox', 'aria-label': 'Preview equations', checked: d.mathPreview, onchange: (e: any) => { d.mathPreview = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
-      'Preview the equation under the cursor'),
+      h('input', { type: 'checkbox', 'aria-label': t('Preview equations'), checked: d.mathPreview, onchange: (e: any) => { d.mathPreview = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
+      t('Preview the equation under the cursor')),
     h('label', { class: 'check' },
-      h('input', { type: 'checkbox', 'aria-label': 'Point out common mistakes', checked: d.checks, onchange: (e: any) => { d.checks = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
-      'Point out common LaTeX mistakes (unclosed environments, stray braces, \\label before \\caption, quotes, ties, …)'),
+      h('input', { type: 'checkbox', 'aria-label': t('Point out common mistakes'), checked: d.checks, onchange: (e: any) => { d.checks = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
+      t('Point out common LaTeX mistakes (unclosed environments, stray braces, \\label before \\caption, quotes, ties, …)')),
     h('div', { class: 'row' },
-      h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, 'Creation code…'),
-      h('span', { class: 'muted small' }, 'Needed only to store new projects on servers that ask for one.')),
-    h('details', {}, h('summary', {}, 'Keep a copy in a folder on this computer'),
+      h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, t('Creation code…')),
+      h('span', { class: 'muted small' }, t('Needed only to store new projects on servers that ask for one.'))),
+    h('details', {}, h('summary', {}, t('Keep a copy in a folder on this computer')),
       chooseFolder ? h('div', {},
-        h('p', { class: 'muted small' }, 'This browser can sync a folder itself while this tab is open: nothing to install. Changes go both ways; files changed on both sides take the folder’s version (it stays in History).'),
-        h('p', { class: 'muted small' }, 'Collaborators’ files are written there. TeXLoom won’t write files that LaTeX tools run as programs, and points out lines that ask to run one, but compile the folder with your own tools only if you trust everyone who can edit this project.'),
-        h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => { dlg.close(); await chooseFolder() } }, 'Choose a folder…'))) : null,
-      chooseFolder ? h('p', { class: 'muted small' }, 'Or, to keep it in sync without a browser (and compile with your own TeX):') : null,
+        h('p', { class: 'muted small' }, t('This browser can sync a folder itself while this tab is open: nothing to install. Changes go both ways; files changed on both sides take the folder’s version (it stays in History).')),
+        h('p', { class: 'muted small' }, t('Collaborators’ files are written there. TeXLoom won’t write files that LaTeX tools run as programs, and points out lines that ask to run one, but compile the folder with your own tools only if you trust everyone who can edit this project.')),
+        h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => { dlg.close(); await chooseFolder() } }, t('Choose a folder…')))) : null,
+      chooseFolder ? h('p', { class: 'muted small' }, t('Or, to keep it in sync without a browser (and compile with your own TeX):')) : null,
       folderHelp(r, link)),
-    h('h4', {}, 'Remove'),
+    h('h4', {}, t('Remove')),
     h('p', { class: 'muted small' },
-      'Removing deletes this browser’s copy only. Collaborators keep theirs, folder copies stay until you delete the folder, and the server’s encrypted copy stays unless you choose “Don’t store anything on the server” above.'),
+      t('Removing deletes this browser’s copy only. Collaborators keep theirs, folder copies stay until you delete the folder, and the server’s encrypted copy stays unless you choose “Don’t store anything on the server” above.')),
     h('div', { class: 'row' }, h('button', { class: 'danger', onclick: async () => {
       const warn: string[] = []
-      if (r.pending) warn.push(`${r.pending} change(s) from this browser haven’t reached the server or anyone else yet and will be lost.`)
-      if (r.storage === 'relay') warn.push('The server keeps no copy of this project: if nobody else has one, it will be gone for good.')
-      if (!confirm(['Remove this project from this browser?', ...warn].join('\n\n'))) return
+      if (r.pending) warn.push(tn(r.pending, '{{n}} change from this browser hasn’t reached the server or anyone else yet and will be lost.', '{{n}} changes from this browser haven’t reached the server or anyone else yet and will be lost.'))
+      if (r.storage === 'relay') warn.push(t('The server keeps no copy of this project: if nobody else has one, it will be gone for good.'))
+      if (!confirm([t('Remove this project from this browser?'), ...warn].join('\n\n'))) return
       dlg.close()
       await onRemove()
-    } }, 'Remove from this browser')),
-    h('div', { class: 'row end' }, cacheBtn, h('button', { class: 'primary', onclick: () => dlg.close() }, 'Done')),
+    } }, t('Remove from this browser'))),
+    h('div', { class: 'row end' }, cacheBtn, h('button', { class: 'primary', onclick: () => dlg.close() }, t('Done'))),
   )
 }

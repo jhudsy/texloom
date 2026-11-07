@@ -1,0 +1,30 @@
+import type { Catalog } from '../../i18n'
+const fr: Catalog = {
+  'No record found for {{doi}}.': 'Aucune notice trouvée pour {{doi}}.',
+  'doi.org answered {{status}}.': 'doi.org a répondu {{status}}.',
+  'doi.org didn’t return BibTeX for this id.': 'doi.org n’a pas renvoyé de BibTeX pour cet identifiant.',
+  'The record is unexpectedly large.': 'La notice est anormalement volumineuse.',
+  'That doesn’t look like a DOI (10.xxxx/…) or an arXiv id (e.g. 1706.03762).': 'Cela ne ressemble ni à un DOI (10.xxxx/…) ni à un identifiant arXiv (p. ex. 1706.03762).',
+  'Couldn’t read the BibTeX that came back.': 'Impossible de lire le BibTeX reçu.',
+  '10.1145/361604.361612 or arXiv:1706.03762': '10.1145/361604.361612 ou arXiv:1706.03762',
+  'DOI or arXiv id': 'DOI ou identifiant arXiv',
+  'Paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.':
+    'Collez un DOI, un lien doi.org ou arXiv, ou un identifiant arXiv. L’entrée est récupérée sur doi.org et ajoutée à votre fichier .bib.',
+  'Add reference': 'Ajouter la référence',
+  'Add a reference': 'Ajouter une référence',
+  'Close': 'Fermer',
+  '{{file}} (new file)': '{{file}} (nouveau fichier)',
+  'Bibliography file': 'Fichier de bibliographie',
+  'Add to': 'Ajouter à',
+  'Creates {{file}} for the entry.': 'Crée {{file}} pour cette entrée.',
+  'Adds to {{file}}.': 'Ajoute à {{file}}.',
+  'Also add {{line}} and {{print}} to {{main}}, so the list is printed': 'Ajouter aussi {{line}} et {{print}} à {{main}}, pour que la bibliographie apparaisse dans le document',
+  'Also add {{line}} to {{main}}, so the list is printed': 'Ajouter aussi {{line}} à {{main}}, pour que la bibliographie apparaisse dans le document',
+  'Fetching…': 'Récupération…',
+  'Already in {{file}} as “{{key}}”; cited it.': 'Déjà dans {{file}} sous la clé « {{key}} » ; citation insérée.',
+  'Added to {{file}} as “{{key}}”.': 'Ajoutée à {{file}} sous la clé « {{key}} ».',
+  'Added {{line}} to {{main}}.': '{{line}} ajouté à {{main}}.',
+  'Add {{line}} to your document to print it.': 'Ajoutez {{line}} à votre document pour y faire apparaître la bibliographie.',
+  'Couldn’t reach doi.org (offline?).': 'Impossible de joindre doi.org (hors ligne ?).',
+}
+export default fr

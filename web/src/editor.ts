@@ -10,6 +10,7 @@ import { yCollab } from 'y-codemirror.next'
 import { oneDark } from '@codemirror/theme-one-dark'
 import type { Replica } from './replica'
 import { h, saveFile } from './dom'
+import { t } from './i18n'
 import { latexSupport, recheck, type AddReference, type ProjectIndex } from './latex'
 import { imageDropExtension } from './pasteimage'
 import { spellcheck } from './spell'
@@ -159,7 +160,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     const info = r.bin.get(path)
     if (!info) return
     const name = path.slice(path.lastIndexOf('/') + 1)
-    const box = h('div', { class: 'binary' }, h('p', {}, `${path} — ${(info.size / 1024).toFixed(1)} KB`))
+    const box = h('div', { class: 'binary' }, h('p', {}, t('{{path}} — {{size}} KB', { path, size: (info.size / 1024).toFixed(1) })))
     el.append(box)
     r.getBlob(info.h).then((data) => {
       if (current !== path) return
@@ -174,7 +175,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
         box.append(img)
       }
       else if (type === 'application/pdf') { const pv = new PdfView(); box.append(pv.el); pv.show(data).catch(() => {}) }
-      box.append(h('p', {}, h('button', { onclick: () => saveFile(name, data) }, `Download ${name}`)))
+      box.append(h('p', {}, h('button', { onclick: () => saveFile(name, data) }, t('Download {{name}}', { name }))))
     }).catch((e) => box.append(h('p', { class: 'err' }, String(e))))
   }
 

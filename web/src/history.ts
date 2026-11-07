@@ -5,6 +5,7 @@ import type { Replica } from './replica'
 import { h } from './dom'
 import { diffLines, diffStats, type Op } from './diff'
 import { putText } from './projectfiles'
+import { t, tn, locale } from './i18n'
 
 export interface Version { at: number; by: string; label?: string; auto?: boolean; snap: Uint8Array }
 
@@ -98,28 +99,33 @@ export interface HistoryHost {
   openFile: (path: string) => void
 }
 
-const when = (t: number) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+const when = (at: number) => new Date(at).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
+
+// what happened to a file since a version (the key is also its CSS class)
+const STATUS: Record<string, string> = {
+  changed: t('changed'), deleted: t('deleted since'), added: t('added since'), 'changed-file': t('changed (file)'), 'changed-type': t('changed type'),
+}
 
 export function createHistoryPanel(host: HistoryHost): HTMLElement {
   const r = host.replica
   const list = h('ul', { class: 'versions' })
   const detail = h('div', { class: 'version-detail' })
-  const authorsChk = h('input', { type: 'checkbox', 'aria-label': 'Show who wrote each line', onchange: (e: any) => host.showAuthors(e.target.checked) })
+  const authorsChk = h('input', { type: 'checkbox', 'aria-label': t('Show who wrote each line'), onchange: (e: any) => host.showAuthors(e.target.checked) })
   let selected: Version | null = null
   let filter: 'all' | 'named' = 'all'
 
-  const filterSel = h('select', { 'aria-label': 'Which versions', onchange: (e: any) => { filter = e.target.value; render() } },
-    h('option', { value: 'all' }, 'All versions'), h('option', { value: 'named' }, 'Named only'))
+  const filterSel = h('select', { 'aria-label': t('Which versions'), onchange: (e: any) => { filter = e.target.value; render() } },
+    h('option', { value: 'all' }, t('All versions')), h('option', { value: 'named' }, t('Named only')))
 
   const panel = h('div', { class: 'history' },
     h('div', { class: 'ai-bar' },
       host.writable ? h('button', { class: 'primary', onclick: () => {
-        const label = prompt('Name this version (e.g. “Submitted to journal”):')?.trim()
+        const label = prompt(t('Name this version (e.g. “Submitted to journal”):'))?.trim()
         if (label) saveVersion(r, host.userName(), label.slice(0, 120))
-      } }, 'Save version…') : null,
+      } }, t('Save version…')) : null,
       filterSel,
       h('span', { class: 'spacer' }),
-      h('label', { class: 'check small' }, authorsChk, 'Who wrote this')),
+      h('label', { class: 'check small' }, authorsChk, t('Who wrote this'))),
     h('div', { class: 'history-body' }, list, detail))
 
   function render() {
@@ -127,21 +133,21 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
     const shown = all.filter((v) => filter === 'all' || versionLabel(r, v)).sort((a, b) => b.at - a.at)
     if (!shown.length) {
       list.replaceChildren(h('li', { class: 'muted small' },
-        all.length ? 'No named versions yet.' : 'No versions yet. Versions are saved automatically a couple of minutes after you stop editing; use “Save version…” to name one.'))
+        all.length ? t('No named versions yet.') : t('No versions yet. Versions are saved automatically a couple of minutes after you stop editing; use “Save version…” to name one.')))
       return
     }
     list.replaceChildren(...shown.map((v) => { const label = versionLabel(r, v); return h('li', {
       class: `${v === selected ? 'active' : ''} ${label ? 'named' : ''}`,
       onclick: () => { selected = v; render(); showVersion(v) },
     },
-      h('div', { class: 'vlabel' }, label ? `★ ${label}` : 'Auto-saved'),
+      h('div', { class: 'vlabel' }, label ? `★ ${label}` : t('Auto-saved')),
       h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`)) }))
   }
 
   function showVersion(v: Version) {
     let past: Snap
     try { past = contents(docAt(r, v)) } catch (e) {
-      detail.replaceChildren(h('p', { class: 'err' }, `This version can’t be reconstructed (${e}). It predates full history.`))
+      detail.replaceChildren(h('p', { class: 'err' }, t('This version can’t be reconstructed ({{error}}). It predates full history.', { error: e })))
       return
     }
     const now = contents(r.doc)
@@ -154,25 +160,25 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
       if (a !== undefined && b !== undefined) {
         if (a === b) continue
         const d = diffStats(diffLines(a, b)); status = 'changed'; stats = `+${d.added} −${d.removed}`
-      } else if ((a !== undefined || ab) && b === undefined && !bb) status = 'deleted since'
-      else if (a === undefined && !ab && (b !== undefined || bb)) status = 'added since'
-      else if (ab && bb) { if (ab.h === bb.h) continue; status = 'changed (file)' }
-      else status = 'changed type'
+      } else if ((a !== undefined || ab) && b === undefined && !bb) status = 'deleted'
+      else if (a === undefined && !ab && (b !== undefined || bb)) status = 'added'
+      else if (ab && bb) { if (ab.h === bb.h) continue; status = 'changed-file' }
+      else status = 'changed-type'
       rows.push(h('li', { onclick: () => showFile(v, p, past, now) },
-        h('span', { class: 'path' }, p), h('span', { class: `vstat ${status.split(' ')[0]}` }, `${status} ${stats}`)))
+        h('span', { class: 'path' }, p), h('span', { class: `vstat ${status.split('-')[0]}` }, `${STATUS[status]} ${stats}`)))
     }
     detail.replaceChildren(
       h('div', { class: 'vhead' },
-        h('div', {}, h('b', {}, versionLabel(r, v) ?? 'Auto-saved'), h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`)),
-        host.writable ? h('button', { title: 'Give this version a name (named versions are kept for good)', onclick: () => rename(v) }, versionLabel(r, v) ? 'Rename…' : 'Name…') : null,
-        host.writable ? h('button', { onclick: () => restoreAll(past) }, 'Restore all files…') : null),
-      rows.length ? h('p', { class: 'muted small' }, 'Changed since this version (click a file to compare):') : h('p', { class: 'muted small' }, 'Nothing has changed since this version.'),
+        h('div', {}, h('b', {}, versionLabel(r, v) ?? t('Auto-saved')), h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`)),
+        host.writable ? h('button', { title: t('Give this version a name (named versions are kept for good)'), onclick: () => rename(v) }, versionLabel(r, v) ? t('Rename…') : t('Name…')) : null,
+        host.writable ? h('button', { onclick: () => restoreAll(past) }, t('Restore all files…')) : null),
+      rows.length ? h('p', { class: 'muted small' }, t('Changed since this version (click a file to compare):')) : h('p', { class: 'muted small' }, t('Nothing has changed since this version.')),
       h('ul', { class: 'vfiles' }, ...rows))
   }
 
   function rename(v: Version) {
     const was = versionLabel(r, v)
-    const label = prompt(was ? 'Rename this version (leave empty to remove the name):' : 'Name this version (e.g. “Submitted to journal”):', was ?? '')
+    const label = prompt(was ? t('Rename this version (leave empty to remove the name):') : t('Name this version (e.g. “Submitted to journal”):'), was ?? '')
     if (label === null || label.trim() === (was ?? '')) return
     nameVersion(r, v, label)
     if (selected === v) showVersion(v)
@@ -180,20 +186,20 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
 
   function showFile(v: Version, path: string, past: Snap, now: Snap) {
     const a = past.files.get(path), b = now.files.get(path)
-    const back = h('button', { onclick: () => showVersion(v) }, '← Files')
+    const back = h('button', { onclick: () => showVersion(v) }, t('← Files'))
     const restore = host.writable && (a !== undefined || past.bin.has(path))
-      ? h('button', { class: 'primary', onclick: () => restoreFile(path, past) }, 'Restore this file') : null
+      ? h('button', { class: 'primary', onclick: () => restoreFile(path, past) }, t('Restore this file')) : null
     const body = a !== undefined || b !== undefined
       ? fullDiff(diffLines(a ?? '', b ?? ''))
-      : h('p', { class: 'muted' }, 'Binary file: compare by opening it.')
+      : h('p', { class: 'muted' }, t('Binary file: compare by opening it.'))
     detail.replaceChildren(
       h('div', { class: 'vhead' }, back, h('span', { class: 'path' }, path), restore),
-      h('p', { class: 'muted small' }, `Red: in the version from ${when(v.at)} · Green: now`),
+      h('p', { class: 'muted small' }, t('Red: in the version from {{when}} · Green: now', { when: when(v.at) })),
       body)
   }
 
   function restoreFile(path: string, past: Snap) {
-    if (!confirm(`Restore ${path} to this version? The current text is replaced (and stays in history).`)) return
+    if (!confirm(t('Restore {{path}} to this version? The current text is replaced (and stays in history).', { path }))) return
     r.doc.transact(() => {
       const old = past.files.get(path)
       if (old !== undefined) putText(r, path, old)
@@ -203,14 +209,14 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
   }
 
   function restoreAll(past: Snap) {
-    if (!confirm('Restore every file to this version? Files added since are removed. Everything stays in history.')) return
+    if (!confirm(t('Restore every file to this version? Files added since are removed. Everything stays in history.'))) return
     r.doc.transact(() => {
       for (const p of [...r.files.keys()]) if (!past.files.has(p)) r.files.delete(p)
       for (const p of [...r.bin.keys()]) if (!past.bin.has(p)) r.bin.delete(p)
       past.files.forEach((text, p) => putText(r, p, text))
       past.bin.forEach((b, p) => { if (r.bin.get(p)?.h !== b.h) r.bin.set(p, b) })
     })
-    saveVersion(r, host.userName(), `Restored version from ${when(selected?.at ?? Date.now())}`)
+    saveVersion(r, host.userName(), t('Restored version from {{when}}', { when: when(selected?.at ?? Date.now()) }))
   }
 
   r.versions.observe(render)
@@ -233,7 +239,7 @@ function fullDiff(ops: Op[]): HTMLElement {
     const run = j - i
     if (run > 2 * C + 1) {
       for (let k = i; k < i + (i === 0 ? 0 : C); k++) line('ctx', ops[k].b + 1, ops[k].text)
-      rows.push(h('div', { class: 'dl skip' }, `… ${run - (i === 0 ? C : 2 * C) + (j === ops.length ? C : 0)} unchanged lines`))
+      rows.push(h('div', { class: 'dl skip' }, tn(run - (i === 0 ? C : 2 * C) + (j === ops.length ? C : 0), '… {{n}} unchanged line', '… {{n}} unchanged lines')))
       for (let k = j - (j === ops.length ? 0 : C); k < j; k++) line('ctx', ops[k].b + 1, ops[k].text)
     } else for (let k = i; k < j; k++) line('ctx', ops[k].b + 1, ops[k].text)
     i = j - 1

@@ -1,0 +1,36 @@
+import type { Catalog } from '../../i18n'
+const fr: Catalog = {
+  'The text this suggestion refers to no longer exists.': 'Le texte visé par cette suggestion n’existe plus.',
+  'The text has changed since this was suggested.\n\nNow: “{{now}}”\nSuggested replacement: “{{suggested}}”\n\nApply anyway?':
+    'Le texte a changé depuis cette suggestion.\n\nActuellement : « {{now}} »\nRemplacement suggéré : « {{suggested}} »\n\nAppliquer quand même ?',
+  'Suggested replacement': 'Remplacement suggéré',
+  '{{name}} suggests a change': '{{name}} suggère une modification',
+  'Show resolved': 'Afficher les résolus',
+  'Comment on the selected text (⌘⌥M / Ctrl+Alt+M)': 'Commenter le texte sélectionné (⌘⌥M / Ctrl+Alt+M)',
+  '💬 Comment': '💬 Commenter',
+  'Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)': 'Suggérer un remplacement pour le texte sélectionné (⌘⌥E / Ctrl+Alt+E)',
+  '✎ Suggest': '✎ Suggérer',
+  'Open a text file and select some text first.': 'Ouvrez d’abord un fichier texte et sélectionnez du texte.',
+  'Select the text you want to comment on.': 'Sélectionnez le texte à commenter.',
+  'Comment:': 'Commentaire :',
+  'Replace “{{text}}” with:': 'Remplacer « {{text}} » par :',
+  'Reply…': 'Répondre…',
+  'Reply': 'Répondre',
+  'Show in the editor': 'Afficher dans l’éditeur',
+  'The text it referred to was deleted': 'Le texte concerné a été supprimé',
+  '(insert here)': '(insérer ici)',
+  '(delete)': '(supprimer)',
+  'Suggestion accepted': 'Suggestion acceptée',
+  'Suggestion rejected': 'Suggestion refusée',
+  'Resolved': 'Résolu',
+  'Reopen': 'Rouvrir',
+  'Accept': 'Accepter',
+  'Reject': 'Refuser',
+  'Resolve': 'Résoudre',
+  'Delete': 'Supprimer',
+  'Delete this for everyone?': 'Supprimer ceci pour tout le monde ?',
+  'No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.':
+    'Aucun commentaire ni aucune suggestion en cours. Sélectionnez du texte dans l’éditeur, puis 💬 Commenter ou ✎ Suggérer.',
+  'No open comments or suggestions.': 'Aucun commentaire ni aucune suggestion en cours.',
+}
+export default fr

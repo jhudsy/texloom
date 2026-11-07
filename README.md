@@ -26,6 +26,8 @@ no copy at all. No accounts: you share a link. (The command-line tools are calle
   labels; a preview of the equation under the cursor; a checker for common mistakes, with
   one-click fixes; spell check that skips LaTeX; search and replace across files; an outline with
   word counts; paste or drop images; add references from a DOI or arXiv id.
+- In English or French: the browser's language is used, or choose one in Settings (the
+  desktop app follows the system language, or `TEXLOOM_LANG=fr`).
 - Start from templates, or import a `.zip` (e.g. from Overleaf) or an arXiv paper's source.
 - Read-only links, and personal edit links that can be revoked one by one.
 - The server is a single Python process with SQLite, small enough for a Raspberry Pi.
@@ -535,6 +537,15 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | `web/sw-template.js` | service worker (offline app) |
 | `deploy/` | install script (nginx, certbot, systemd), Caddy config, systemd unit |
 
+
+### Translations
+
+Interface text is written in English inside `t('…')` (web) or `_('…')` (desktop app); the
+English is the key. French is in `web/src/locales/fr/<module>.ts` (one file per source file)
+and `texloom/locales_fr.py`. Text without a translation shows in English. After changing
+interface text, run `npm run check-i18n` in `web/`: it lists text with no French, unused
+entries, plural and `{{placeholder}}` mismatches. To add a language, add it to `Lang` and `LANGUAGES` in
+`web/src/i18n.ts` and create `web/src/locales/<id>/`.
 ## Status
 
 Early prototype. Not yet built:

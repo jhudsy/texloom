@@ -5,8 +5,10 @@ import { dialog, h } from '../dom'
 import { aiPrefs, listModels, PRESETS, type ProviderConfig } from './providers'
 import { createSession, explainError, type LlmSession } from './llm'
 import { ASSISTANT, runTool, toolsFor, type Change, type ToolCtx } from './tools'
+import { t, tn } from '../i18n'
 
 const MAX_STEPS = 40 // tool round-trips per request
+const EFFORTS: [value: string, label: string][] = [['low', t('low')], ['medium', t('medium')], ['high', t('high')], ['xhigh', t('xhigh')], ['max', t('max')]]
 
 const SYSTEM = `You are a LaTeX writing assistant built into texloom, a collaborative LaTeX editor. You work directly on the user's project through tools; other people may be editing the same files at the same time, so their text can change between your reads and edits.
 
@@ -47,16 +49,16 @@ function diffView(before: string | null, after: string | null): HTMLElement {
   while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++
   const C = 3
   const rows: HTMLElement[] = []
-  const line = (cls: string, n: string, t: string) => rows.push(h('div', { class: `dl ${cls}` }, h('span', { class: 'ln' }, n), t || ' '))
-  if (p > C) rows.push(h('div', { class: 'dl skip' }, `… ${p - C} unchanged lines`))
+  const line = (cls: string, n: string, text: string) => rows.push(h('div', { class: `dl ${cls}` }, h('span', { class: 'ln' }, n), text || ' '))
+  if (p > C) rows.push(h('div', { class: 'dl skip' }, tn(p - C, '… {{n}} unchanged line', '… {{n}} unchanged lines')))
   for (let i = Math.max(0, p - C); i < p; i++) line('ctx', String(i + 1), a[i])
   for (let i = p; i < a.length - s; i++) line('del', String(i + 1), a[i])
   for (let i = p; i < b.length - s; i++) line('add', String(i + 1), b[i])
   const shift = b.length - a.length // trailing context is numbered as in the new text
   for (let i = a.length - s; i < Math.min(a.length, a.length - s + C); i++) line('ctx', String(i + shift + 1), a[i])
-  if (s > C) rows.push(h('div', { class: 'dl skip' }, `… ${s - C} unchanged lines`))
+  if (s > C) rows.push(h('div', { class: 'dl skip' }, tn(s - C, '… {{n}} unchanged line', '… {{n}} unchanged lines')))
   const shown = rows.slice(0, 400)
-  if (rows.length > 400) shown.push(h('div', { class: 'dl skip' }, `… ${rows.length - 400} more lines`))
+  if (rows.length > 400) shown.push(h('div', { class: 'dl skip' }, tn(rows.length - 400, '… {{n}} more line', '… {{n}} more lines')))
   return h('div', { class: 'diff' }, ...shown)
 }
 
@@ -70,14 +72,14 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   let lastUndoBtn: HTMLButtonElement | null = null
 
   // ---- elements ----
-  const providerSel = h('select', { title: 'Provider', onchange: (e: any) => switchProvider(e.target.value) },
+  const providerSel = h('select', { title: t('Provider'), onchange: (e: any) => switchProvider(e.target.value) },
     ...Object.entries(PRESETS).map(([id, p]) => h('option', { value: id, ...(id === providerId ? { selected: true } : {}) }, p.label))) as HTMLSelectElement
   const modelList = h('datalist', { id: 'ai-models' })
-  const modelIn = h('input', { class: 'model', list: 'ai-models', placeholder: 'model', title: 'Model', onchange: (e: any) => { cfg.model = e.target.value.trim(); aiPrefs.save(providerId, { model: cfg.model }); newChat() } }) as HTMLInputElement
+  const modelIn = h('input', { class: 'model', list: 'ai-models', placeholder: t('model'), title: t('Model'), onchange: (e: any) => { cfg.model = e.target.value.trim(); aiPrefs.save(providerId, { model: cfg.model }); newChat() } }) as HTMLInputElement
   const log = h('div', { class: 'ai-log' })
-  const input = h('textarea', { rows: 3, placeholder: host.writable ? 'Ask, or tell it what to change… (Enter to send, Shift+Enter for a new line)' : 'Ask about this project… (read-only link: no edits)' }) as HTMLTextAreaElement
-  const sendBtn = h('button', { class: 'primary', onclick: () => (abort ? stop() : send()) }, 'Send') as HTMLButtonElement
-  const reviewChk = h('input', { type: 'checkbox', 'aria-label': 'Ask before applying edits', checked: aiPrefs.reviewEdits, onchange: (e: any) => (aiPrefs.reviewEdits = e.target.checked) }) as HTMLInputElement
+  const input = h('textarea', { rows: 3, placeholder: host.writable ? t('Ask, or tell it what to change… (Enter to send, Shift+Enter for a new line)') : t('Ask about this project… (read-only link: no edits)') }) as HTMLTextAreaElement
+  const sendBtn = h('button', { class: 'primary', onclick: () => (abort ? stop() : send()) }, t('Send')) as HTMLButtonElement
+  const reviewChk = h('input', { type: 'checkbox', 'aria-label': t('Ask before applying edits'), checked: aiPrefs.reviewEdits, onchange: (e: any) => (aiPrefs.reviewEdits = e.target.checked) }) as HTMLInputElement
   const ctxChip = h('span', { class: 'ctx muted' })
 
   const refreshModels = () => {
@@ -93,18 +95,18 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
 
   const panel = h('div', { class: 'assistant' },
     h('div', { class: 'ai-bar' }, providerSel, modelIn, modelList,
-      h('button', { title: 'Assistant settings', onclick: () => configDialog() }, '⚙'),
-      h('button', { title: 'Start a new conversation', onclick: () => newChat(true) }, 'New')),
+      h('button', { title: t('Assistant settings'), onclick: () => configDialog() }, '⚙'),
+      h('button', { title: t('Start a new conversation'), onclick: () => newChat(true) }, t('New'))),
     log,
     h('div', { class: 'ai-compose' },
       h('div', { class: 'row' }, ctxChip, h('span', { class: 'spacer' }),
-        host.writable ? h('label', { class: 'check small' }, reviewChk, 'Ask before applying edits') : ''),
+        host.writable ? h('label', { class: 'check small' }, reviewChk, t('Ask before applying edits')) : ''),
       h('div', { class: 'row' }, input, sendBtn)),
   )
 
   function renderCtx() {
     const c = host.editorContext()
-    ctxChip.textContent = !c?.file ? '' : c.selection ? `Context: ${c.file}, lines ${c.fromLine}–${c.toLine} selected` : `Context: ${c.file}`
+    ctxChip.textContent = !c?.file ? '' : c.selection ? t('Context: {{file}}, lines {{from}}–{{to}} selected', { file: c.file, from: c.fromLine, to: c.toLine }) : t('Context: {{file}}', { file: c.file })
   }
 
   function hint(text: string, cls = 'note') {
@@ -113,9 +115,12 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   }
 
   function intro() {
-    log.replaceChildren(h('div', { class: 'ai-note' },
-      `Assistant using ${cfg.label}${cfg.model ? ` · ${cfg.model}` : ''}. It can read, search and ${host.writable ? 'edit files and compile' : 'compile'} this project. ` +
-      `Edits appear for collaborators like anyone else’s.` + (cfg.kind === 'anthropic' || cfg.apiKey || !/^https:/.test(cfg.baseUrl) ? '' : ' Set an API key in ⚙.')))
+    log.replaceChildren(h('div', { class: 'ai-note' }, [
+      t('Assistant using {{provider}}.', { provider: cfg.label + (cfg.model ? ` · ${cfg.model}` : '') }),
+      host.writable ? t('It can read, search and edit files and compile this project.') : t('It can read, search and compile this project.'),
+      t('Edits appear for collaborators like anyone else’s.'),
+      cfg.kind === 'anthropic' || cfg.apiKey || !/^https:/.test(cfg.baseUrl) ? '' : t('Set an API key in ⚙.'),
+    ].filter(Boolean).join(' ')))
   }
   intro()
 
@@ -131,7 +136,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     if (abort) stop()
     session = null
     if (clear) intro()
-    else hint('Model changed: starting a new conversation.')
+    else hint(t('Model changed: starting a new conversation.'))
   }
 
   function stop() {
@@ -144,15 +149,15 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     return new Promise((resolve) => {
       const done = (ok: boolean) => {
         card.classList.add(ok ? 'accepted' : 'rejected')
-        btns.replaceChildren(h('span', { class: 'muted' }, ok ? 'Applied' : 'Rejected'))
+        btns.replaceChildren(h('span', { class: 'muted' }, ok ? t('Applied') : t('Rejected')))
         abort?.signal.removeEventListener('abort', onAbort)
         resolve(ok)
       }
       const onAbort = () => done(false)
       abort?.signal.addEventListener('abort', onAbort)
       const btns = h('div', { class: 'row end' },
-        h('button', { onclick: () => done(false) }, 'Reject'),
-        h('button', { class: 'primary', onclick: () => done(true) }, 'Apply'))
+        h('button', { onclick: () => done(false) }, t('Reject')),
+        h('button', { class: 'primary', onclick: () => done(true) }, t('Apply')))
       const card = h('div', { class: 'ai-review' }, h('div', { class: 'title' }, c.summary), diffView(c.before, c.after), btns)
       turnEl.append(card)
       log.scrollTop = log.scrollHeight
@@ -163,8 +168,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   async function send() {
     const text = input.value.trim()
     if (!text) return
-    if (!cfg.model) return configDialog('Choose a model first.')
-    if (cfg.kind === 'anthropic' && !cfg.apiKey) return configDialog('Add your Anthropic API key first.')
+    if (!cfg.model) return configDialog(t('Choose a model first.'))
+    if (cfg.kind === 'anthropic' && !cfg.apiKey) return configDialog(t('Add your Anthropic API key first.'))
     input.value = ''
     const c = host.editorContext()
     const ctxLines = [`Project: ${r.meta.get('name') || 'untitled'}; main file: ${r.meta.get('main') || 'auto'}; user: ${host.userName()}`]
@@ -181,7 +186,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     session ??= createSession(cfg, tools, SYSTEM)
     session.addUser(message)
     abort = new AbortController()
-    sendBtn.textContent = 'Stop'
+    sendBtn.textContent = t('Stop')
     undo.stopCapturing() // this request's edits become one undo step
     const stackBefore = undo.undoStack.length
     lastUndoBtn?.remove(); lastUndoBtn = null
@@ -207,7 +212,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
           thinking: (d) => {
             if (!thinkEl) {
               thinkEl = h('pre')
-              turnEl.append(h('details', { class: 'ai-think' }, h('summary', {}, 'Thinking'), thinkEl))
+              turnEl.append(h('details', { class: 'ai-think' }, h('summary', {}, t('Thinking')), thinkEl))
             }
             thinkEl.textContent += d
           },
@@ -237,7 +242,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
         }
         session.addToolResults(results)
         if (abort.signal.aborted) break
-        if (step === MAX_STEPS - 1) hint(`Stopped after ${MAX_STEPS} steps.`, 'warn')
+        if (step === MAX_STEPS - 1) hint(t('Stopped after {{n}} steps.', { n: MAX_STEPS }), 'warn')
       }
     } catch (e) {
       if (!abort.signal.aborted) {
@@ -246,13 +251,13 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       }
     } finally {
       if (abort.signal.aborted) {
-        hint('Stopped.', 'note')
+        hint(t('Stopped.'), 'note')
         session = null // an interrupted tool round leaves the history incomplete
       }
       abort = null
-      sendBtn.textContent = 'Send'
+      sendBtn.textContent = t('Send')
       if (undo.undoStack.length > stackBefore) {
-        const btn = h('button', { class: 'small', onclick: () => { undo.undo(); btn.replaceWith(h('span', { class: 'muted small' }, 'Changes undone')) } }, 'Undo these changes') as HTMLButtonElement
+        const btn = h('button', { class: 'small', onclick: () => { undo.undo(); btn.replaceWith(h('span', { class: 'muted small' }, t('Changes undone'))) } }, t('Undo these changes')) as HTMLButtonElement
         turnEl.append(h('div', { class: 'row end' }, btn))
         lastUndoBtn = btn
       }
@@ -261,18 +266,18 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   }
 
   function describe(name: string, input: any): string {
-    const p = input?.path ? ` ${input.path}` : ''
+    const v = { path: input?.path ? String(input.path) : '' }
     switch (name) {
-      case 'list_files': return '📂 Listing files'
-      case 'read_file': return `📖 Reading${p}`
-      case 'search': return `🔎 Searching for “${String(input?.pattern ?? '').slice(0, 40)}”`
-      case 'edit_file': return `✎ Editing${p}`
-      case 'write_file': return `✎ Writing${p}`
-      case 'suggest_edit': return `✎ Suggesting a change in${p}`
-      case 'add_comment': return `💬 Commenting on${p}`
-      case 'delete_file': return `🗑 Deleting${p}`
-      case 'compile': return '⚙ Compiling'
-      case 'get_compile_log': return '📄 Reading compile log'
+      case 'list_files': return t('📂 Listing files')
+      case 'read_file': return t('📖 Reading {{path}}', v).trimEnd()
+      case 'search': return t('🔎 Searching for “{{pattern}}”', { pattern: String(input?.pattern ?? '').slice(0, 40) })
+      case 'edit_file': return t('✎ Editing {{path}}', v).trimEnd()
+      case 'write_file': return t('✎ Writing {{path}}', v).trimEnd()
+      case 'suggest_edit': return t('✎ Suggesting a change in {{path}}', v).trimEnd()
+      case 'add_comment': return t('💬 Commenting on {{path}}', v).trimEnd()
+      case 'delete_file': return t('🗑 Deleting {{path}}', v).trimEnd()
+      case 'compile': return t('⚙ Compiling')
+      case 'get_compile_log': return t('📄 Reading compile log')
       default: return name
     }
   }
@@ -282,36 +287,36 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     const c = aiPrefs.get(providerId)
     const status = h('span', { class: 'muted small' })
     const base = h('input', { value: c.baseUrl }) as HTMLInputElement
-    const key = h('input', { type: 'password', value: c.apiKey, placeholder: c.kind === 'anthropic' ? 'sk-ant-…' : 'optional for local servers', autocomplete: 'off' }) as HTMLInputElement
+    const key = h('input', { type: 'password', value: c.apiKey, placeholder: c.kind === 'anthropic' ? 'sk-ant-…' : t('optional for local servers'), autocomplete: 'off' }) as HTMLInputElement
     const model = h('input', { value: c.model, list: 'ai-models-dlg' }) as HTMLInputElement
     const dl = h('datalist', { id: 'ai-models-dlg' }, ...c.models.map((m) => h('option', { value: m })))
-    const effort = h('select', {}, ...['low', 'medium', 'high', 'xhigh', 'max'].map((e) => h('option', { value: e, ...(e === c.effort ? { selected: true } : {}) }, e))) as HTMLSelectElement
+    const effort = h('select', {}, ...EFFORTS.map(([e, label]) => h('option', { value: e, ...(e === c.effort ? { selected: true } : {}) }, label))) as HTMLSelectElement
     const load = h('button', {
       onclick: async () => {
-        status.textContent = 'Loading…'
+        status.textContent = t('Loading…')
         try {
           const models = await listModels({ ...c, baseUrl: base.value.trim(), apiKey: key.value.trim() })
           dl.replaceChildren(...models.map((m) => h('option', { value: m })))
           aiPrefs.save(providerId, { models })
-          status.textContent = `${models.length} models found`
+          status.textContent = tn(models.length, '{{n}} model found', '{{n}} models found')
           if (!model.value && models[0]) model.value = models[0]
         } catch (e) { status.textContent = explainError(e, { ...c, baseUrl: base.value }) }
       },
-    }, 'Load models')
+    }, t('Load models'))
     const dlg = dialog('settings',
-      h('h3', {}, `Assistant — ${c.label}`),
+      h('h3', {}, t('Assistant — {{provider}}', { provider: c.label })),
       message ? h('p', { class: 'err' }, message) : '',
       c.help ? Object.assign(h('p', { class: 'muted' }), { innerHTML: md(c.help) }) : '',
       h('div', { class: 'grid' },
-        h('span', {}, 'Endpoint'), base,
-        h('span', {}, 'API key'), key,
-        h('span', {}, 'Model'), h('div', { class: 'row' }, model, dl, c.kind === 'openai' ? load : ''),
-        ...(c.kind === 'anthropic' ? [h('span', {}, 'Effort'), effort] : []),
+        h('span', {}, t('Endpoint')), base,
+        h('span', {}, t('API key')), key,
+        h('span', {}, t('Model')), h('div', { class: 'row' }, model, dl, c.kind === 'openai' ? load : ''),
+        ...(c.kind === 'anthropic' ? [h('span', {}, t('Effort')), effort] : []),
       ),
       status,
-      h('p', { class: 'muted small' }, 'Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to the endpoint above.'),
+      h('p', { class: 'muted small' }, t('Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to the endpoint above.')),
       h('div', { class: 'row end' },
-        h('button', { onclick: () => dlg.close() }, 'Cancel'),
+        h('button', { onclick: () => dlg.close() }, t('Cancel')),
         h('button', {
           class: 'primary', onclick: () => {
             aiPrefs.save(providerId, { baseUrl: base.value.trim(), apiKey: key.value.trim(), model: model.value.trim(), effort: effort.value as any })
@@ -320,7 +325,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
             newChat(true)
             dlg.close()
           },
-        }, 'Save')),
+        }, t('Save'))),
     )
   }
 

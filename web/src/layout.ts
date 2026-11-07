@@ -1,5 +1,6 @@
 // Resizable, collapsible three-pane layout: files | editor | PDF/assistant.
 // Widths are remembered per browser. The editor takes whatever space is left.
+import { t } from './i18n'
 
 const KEY = 'texloom.layout'
 const MIN_LEFT = 140, MIN_RIGHT = 260, MIN_EDITOR = 280
@@ -97,9 +98,9 @@ export function setupLayout(main: HTMLElement, splitL: HTMLElement, splitR: HTML
   }
   drag(splitL, 'left')
   drag(splitR, 'right')
-  splitL.setAttribute('role', 'separator'); splitL.setAttribute('aria-label', 'Resize file list')
-  splitR.setAttribute('role', 'separator'); splitR.setAttribute('aria-label', 'Resize PDF and assistant panel')
-  splitL.title = splitR.title = 'Drag to resize · double-click to reset'
+  splitL.setAttribute('role', 'separator'); splitL.setAttribute('aria-label', t('Resize file list'))
+  splitR.setAttribute('role', 'separator'); splitR.setAttribute('aria-label', t('Resize PDF and assistant panel'))
+  splitL.title = splitR.title = t('Drag to resize · double-click to reset')
   addEventListener('resize', apply)
 
   const layout: Layout = {

@@ -2,6 +2,7 @@
 import * as Y from 'yjs'
 import type { Replica } from './replica'
 import { h } from './dom'
+import { t, tn } from './i18n'
 import { allFiles, allFolders, cleanPath, deletePath, exists, mainFile, movePath, newFolder, putFile } from './projectfiles'
 
 export interface FileTree {
@@ -26,13 +27,13 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
   const where = h('div', { class: 'where muted small' })
   const el = h('div', { class: 'filetree' },
     writable ? h('div', { class: 'tools' },
-      h('button', { title: 'New file in the selected folder', onclick: () => newFile(folder) }, '+ File'),
-      h('button', { title: 'New folder in the selected folder', onclick: () => makeFolder(folder) }, '+ Folder'),
-      h('button', { title: 'Upload files into the selected folder', onclick: () => uploadIn.click() }, 'Upload'),
+      h('button', { title: t('New file in the selected folder'), onclick: () => newFile(folder) }, t('+ File')),
+      h('button', { title: t('New folder in the selected folder'), onclick: () => makeFolder(folder) }, t('+ Folder')),
+      h('button', { title: t('Upload files into the selected folder'), onclick: () => uploadIn.click() }, t('Upload')),
       uploadIn) : null,
     where,
     list,
-    h('div', { class: 'hint muted' }, writable ? 'Drag to move · drop files from your computer onto a folder to upload · ★ = main file' : ''),
+    h('div', { class: 'hint muted' }, writable ? t('Drag to move · drop files from your computer onto a folder to upload · ★ = main file') : ''),
   )
 
   // ---- rendering ------------------------------------------------------------
@@ -56,7 +57,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     }
     walk('', 0)
     list.replaceChildren(...rows)
-    where.textContent = writable && folder ? `Adding to: ${folder}/` : ''
+    where.textContent = writable && folder ? t('Adding to: {{folder}}/', { folder }) : ''
     if (!current || !files.includes(current)) {
       const pick = main ?? files[0] ?? null
       if (pick !== current) openFile(pick)
@@ -83,12 +84,12 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
       h('span', { class: 'path' }, base(path)))
     if (writable) {
       const act = (title: string, label: string, fn: () => void) =>
-        h('button', { title, 'aria-label': `${title}: ${path}`, onclick: (e: Event) => { e.stopPropagation(); fn() } }, label)
+        h('button', { title, 'aria-label': t('{{action}}: {{path}}', { action: title, path }), onclick: (e: Event) => { e.stopPropagation(); fn() } }, label)
       li.append(h('span', { class: 'acts' },
-        isDir ? act('New file here', '+', () => newFile(path)) : null,
-        !isDir && !isBin && path.endsWith('.tex') ? act('Set as main file', '★', () => r.meta.set('main', path)) : null,
-        act('Rename or move', '✎', () => rename(path, isDir)),
-        act('Delete', '✕', () => remove(path, isDir))))
+        isDir ? act(t('New file here'), '+', () => newFile(path)) : null,
+        !isDir && !isBin && path.endsWith('.tex') ? act(t('Set as main file'), '★', () => r.meta.set('main', path)) : null,
+        act(t('Rename or move'), '✎', () => rename(path, isDir)),
+        act(t('Delete'), '✕', () => remove(path, isDir))))
       // drag to move; drop files from the computer onto folders
       li.addEventListener('dragstart', (e) => { e.dataTransfer?.setData('application/x-texloom-path', path); e.stopPropagation() })
       if (isDir) {
@@ -111,7 +112,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     if (moved) {
       if (moved === dir || dir.startsWith(moved + '/') || parent(moved) === dir) return
       const to = join(dir, base(moved))
-      if (exists(r, to)) return alert(`${to} already exists.`)
+      if (exists(r, to)) return alert(t('{{path}} already exists.', { path: to }))
       movePath(r, moved, to)
       if (current === moved) current = to
       return
@@ -132,33 +133,33 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     const v = prompt(label, def)
     if (v === null) return null
     const p = cleanPath(v)
-    if (!p) { alert('That isn’t a valid path. Use letters, numbers, - _ . and / between folders.'); return null }
+    if (!p) { alert(t('That isn’t a valid path. Use letters, numbers, - _ . and / between folders.')); return null }
     return p
   }
 
   function newFile(dir: string) {
-    const p = ask('New file name (you can include folders, e.g. sections/intro.tex)', join(dir, ''))
+    const p = ask(t('New file name (you can include folders, e.g. sections/intro.tex)'), join(dir, ''))
     if (!p) return
-    if (exists(r, p)) return alert(`${p} already exists.`)
+    if (exists(r, p)) return alert(t('{{path}} already exists.', { path: p }))
     r.files.set(p, new Y.Text(''))
     collapsed.delete(parent(p)); saveCollapsed()
     openFile(p)
   }
 
   function makeFolder(dir: string) {
-    const p = ask('New folder name', join(dir, ''))
+    const p = ask(t('New folder name'), join(dir, ''))
     if (!p) return
-    if (exists(r, p)) return alert(`${p} already exists.`)
+    if (exists(r, p)) return alert(t('{{path}} already exists.', { path: p }))
     newFolder(r, p)
     folder = p
     render()
   }
 
   function rename(path: string, isDir: boolean) {
-    const q = ask(isDir ? 'Rename or move folder to' : 'Rename or move file to', path)
+    const q = ask(isDir ? t('Rename or move folder to') : t('Rename or move file to'), path)
     if (!q || q === path) return
-    if (isDir && q.startsWith(path + '/')) return alert('A folder can’t be moved into itself.')
-    if (exists(r, q)) return alert(`${q} already exists.`)
+    if (isDir && q.startsWith(path + '/')) return alert(t('A folder can’t be moved into itself.'))
+    if (exists(r, q)) return alert(t('{{path}} already exists.', { path: q }))
     movePath(r, path, q)
     if (current === path) current = q
     else if (current?.startsWith(path + '/')) current = q + current.slice(path.length)
@@ -167,8 +168,10 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
 
   function remove(path: string, isDir: boolean) {
     const count = isDir ? allFiles(r).filter((f) => f.startsWith(path + '/')).length : 1
-    const what = isDir ? `the folder ${path}${count ? ` and the ${count} file${count === 1 ? '' : 's'} in it` : ''}` : path
-    if (!confirm(`Delete ${what}? (It stays in history.)`)) return
+    const question = !isDir ? t('Delete {{path}}? (It stays in history.)', { path })
+      : count ? tn(count, 'Delete the folder {{path}} and the {{n}} file in it? (It stays in history.)', 'Delete the folder {{path}} and the {{n}} files in it? (It stays in history.)', { path })
+      : t('Delete the folder {{path}}? (It stays in history.)', { path })
+    if (!confirm(question)) return
     deletePath(r, path)
     if (folder === path || folder.startsWith(path + '/')) folder = parent(path)
   }
@@ -177,7 +180,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     for (const f of files) {
       const rel = (f as any).webkitRelativePath || f.name
       const path = cleanPath(join(dir, rel))
-      if (!path) { alert(`Skipped ${f.name}: unsupported name.`); continue }
+      if (!path) { alert(t('Skipped {{name}}: unsupported name.', { name: f.name })); continue }
       await putFile(r, path, new Uint8Array(await f.arrayBuffer()))
     }
   }

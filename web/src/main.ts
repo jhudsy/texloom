@@ -3,11 +3,12 @@ import * as Y from 'yjs'
 import { Keys } from './crypto'
 import { Replica } from './replica'
 import { projects, projectCode, latexTitle, whenOpened } from './projects'
-import { prefs, setupDialog, settingsDialog, type Device } from './settings'
+import { prefs, setupDialog, settingsDialog, languagePicker, type Device } from './settings'
 import { createAssistantPanel } from './assistant/panel'
 import { setupLayout } from './layout'
 import { chooseNewProject, riskBanner, SAFARI_NOTE } from './storagenotice'
 import { $, h, saveFile } from './dom'
+import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
 import { createEditorPane } from './editor'
@@ -29,6 +30,7 @@ import './style.css'
 const APP = 'TeXLoom'
 const server = location.origin
 const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#469990', '#9a6324']
+const UNTITLED = 'Untitled project' // stored in the shared document (and compared in templates.ts): kept in English
 const brand = () => h('span', { class: 'logo', 'aria-label': APP }, 'T', h('span', { class: 'e' }, 'e'), 'XLoom')
 
 // Offline app: a service worker caches the app itself (projects already live in IndexedDB).
@@ -47,12 +49,13 @@ function landing() {
   document.title = APP
   const app = $('#app')
   app.className = 'landing'
-  const nameIn = h('input', { value: prefs.name, placeholder: 'Your name (shown to collaborators)', oninput: (e: any) => (prefs.name = e.target.value) })
-  const linkIn = h('input', { placeholder: 'Paste a project link…', 'aria-label': 'Project link' })
+  const nameIn = h('input', { value: prefs.name, placeholder: t('Your name (shown to collaborators)'), oninput: (e: any) => (prefs.name = e.target.value) })
+  const linkIn = h('input', { placeholder: t('Paste a project link…'), 'aria-label': t('Project link') })
   app.append(
     h('h1', {}, brand()),
-    h('p', { class: 'sub' }, 'Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.'),
-    h('label', {}, 'Name', nameIn),
+    h('p', { class: 'sub' }, t('Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.')),
+    h('label', {}, t('Name'), nameIn),
+    languagePicker(),
     h('div', { class: 'row' },
       h('button', { class: 'primary', onclick: async () => {
         const template = await chooseTemplate()
@@ -65,47 +68,46 @@ function landing() {
           localStorage.setItem(`texloom.newTemplate.${k.project}`, template)
         } catch {}
         location.hash = k.fragment()
-      } }, 'New project'),
+      } }, t('New project')),
       linkIn,
-      h('button', { onclick: () => { const i = linkIn.value.indexOf('#'); if (i >= 0) location.hash = linkIn.value.slice(i) } }, 'Open'),
+      h('button', { onclick: () => { const i = linkIn.value.indexOf('#'); if (i >= 0) location.hash = linkIn.value.slice(i) } }, t('Open')),
     ),
-    h('h2', {}, 'Your projects', h('small', { class: 'muted' }, ' — opened in this browser')),
+    h('h2', {}, t('Your projects'), h('small', { class: 'muted' }, ' ' + t('— opened in this browser'))),
     h('p', { class: 'muted small' },
-      `These are kept in this browser. Clearing this site’s data (or the browser’s history and site data) deletes them here.${SAFARI_NOTE} ` +
-      'Keep the links somewhere safe: a project stored on the server can always be reopened from its link. Projects marked “not on server” exist only on devices.'),
+      t('These are kept in this browser. Clearing this site’s data (or the browser’s history and site data) deletes them here.{{safari}} Keep the links somewhere safe: a project stored on the server can always be reopened from its link. Projects marked “not on server” exist only on devices.', { safari: SAFARI_NOTE })),
     projectList(),
   )
 }
 
 function projectList(): HTMLElement {
   const list = projects.list()
-  if (!list.length) return h('p', { class: 'muted' }, 'None yet. Projects you create or open from a link appear here.')
-  const shown = (r: { nick?: string; name: string }) => r.nick || r.name || 'Untitled project'
+  if (!list.length) return h('p', { class: 'muted' }, t('None yet. Projects you create or open from a link appear here.'))
+  const shown = (r: { nick?: string; name: string }) => r.nick || (r.name && r.name !== UNTITLED ? r.name : t('Untitled project'))
   const dupes = new Set(list.map(shown).filter((n, i, all) => all.indexOf(n) !== i))
   return h('ul', { class: 'recent' }, ...list.map((r) => {
     const label = shown(r)
     const details: string[] = []
-    if (r.nick && r.name) details.push(`shared name “${r.name}”`)
-    if (r.docTitle && r.docTitle !== label && r.docTitle !== r.name) details.push(`title “${r.docTitle}”`)
-    if (r.createdBy) details.push(`started by ${r.createdBy}`)
-    if (r.people?.length) details.push(`with ${r.people.slice(0, 4).join(', ')}${r.people.length > 4 ? ` +${r.people.length - 4}` : ''}`)
-    if (r.files) details.push(`${r.files} file${r.files === 1 ? '' : 's'}`)
-    details.push(`opened ${whenOpened(r.at)}`)
+    if (r.nick && r.name) details.push(t('shared name “{{name}}”', { name: r.name }))
+    if (r.docTitle && r.docTitle !== label && r.docTitle !== r.name) details.push(t('title “{{title}}”', { title: r.docTitle }))
+    if (r.createdBy) details.push(t('started by {{name}}', { name: r.createdBy }))
+    if (r.people?.length) details.push(t('with {{names}}', { names: `${r.people.slice(0, 4).join(', ')}${r.people.length > 4 ? ` +${r.people.length - 4}` : ''}` }))
+    if (r.files) details.push(tn(r.files, '{{n}} file', '{{n}} files'))
+    details.push(t('opened {{when}}', { when: whenOpened(r.at) }))
     return h('li', { class: dupes.has(label) ? 'dupe' : '' },
       h('div', { class: 'top' },
         h('a', { href: '#' + r.fragment, class: 'pname' }, label),
-        h('code', { class: 'pcode', title: 'Project code: derived from this project’s unique ID. Two projects with the same name always have different codes.' }, projectCode(r.project)),
-        h('span', { class: `tag ${r.writable ? '' : 'ro'}` }, r.writable ? 'edit' : 'read-only'),
-        r.atRisk || r.storage === 'relay' ? h('span', { class: 'tag warn', title: 'The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.' }, 'not on server') : null,
+        h('code', { class: 'pcode', title: t('Project code: derived from this project’s unique ID. Two projects with the same name always have different codes.') }, projectCode(r.project)),
+        h('span', { class: `tag ${r.writable ? '' : 'ro'}` }, r.writable ? t('edit') : t('read-only')),
+        r.atRisk || r.storage === 'relay' ? h('span', { class: 'tag warn', title: t('The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.') }, t('not on server')) : null,
         h('span', { class: 'spacer' }),
-        h('button', { class: 'icon', title: 'Private label (only you see it)', 'aria-label': `Label ${label}`, onclick: () => {
-          const v = prompt(`Private label for “${r.name || 'this project'}” (${projectCode(r.project)}).\nOnly you see it, in this browser. Leave empty to use the shared name.`, r.nick ?? '')
+        h('button', { class: 'icon', title: t('Private label (only you see it)'), 'aria-label': t('Label {{name}}', { name: label }), onclick: () => {
+          const v = prompt(t('Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.', { name: r.name || t('this project'), code: projectCode(r.project) }), r.nick ?? '')
           if (v === null) return
           projects.update(r.project, { nick: v.trim() })
           location.reload()
         } }, '✎'),
-        h('button', { class: 'icon forget', title: 'Remove from this browser', 'aria-label': `Remove ${label} from this browser`, onclick: async () => {
-          if (!confirm(`Remove “${label}” (${projectCode(r.project)}) from this browser?\n\nOnly this browser’s copy is deleted. Unsynced changes made here would be lost. Collaborators, folder copies and the server’s copy are not affected.`)) return
+        h('button', { class: 'icon forget', title: t('Remove from this browser'), 'aria-label': t('Remove {{name}} from this browser', { name: label }), onclick: async () => {
+          if (!confirm(t('Remove “{{name}}” ({{code}}) from this browser?\n\nOnly this browser’s copy is deleted. Unsynced changes made here would be lost. Collaborators, folder copies and the server’s copy are not affected.', { name: label, code: projectCode(r.project) }))) return
           await projects.forget(r.project); location.reload()
         } }, '✕')),
       h('div', { class: 'details muted' }, details.join(' · ')))
@@ -132,7 +134,7 @@ async function openProject(keys: Keys) {
   r.awareness.setLocalStateField('user', { ...me, colorLight: me.color + '33' })
   if (writable && r.clients.get(String(r.doc.clientID)) !== me.name) r.clients.set(String(r.doc.clientID), me.name) // for "who wrote this"
   autoSave(r, () => me.name)
-  if (writable && !r.meta.get('name')) r.meta.set('name', 'Untitled project')
+  if (writable && !r.meta.get('name')) r.meta.set('name', UNTITLED)
   try {
     if (writable && localStorage.getItem(`texloom.newRelay.${keys.project}`)) {
       localStorage.removeItem(`texloom.newRelay.${keys.project}`)
@@ -176,14 +178,14 @@ async function openProject(keys: Keys) {
   })
 
   // "Import" (zip / arXiv) and "+ Reference" (DOI / arXiv): in the file tools
-  if (writable) tree.el.querySelector('.tools')?.append(h('button', { title: 'Import files from a .zip (e.g. Overleaf) or an arXiv paper', onclick: () => importDialog(r) }, 'Import'))
+  if (writable) tree.el.querySelector('.tools')?.append(h('button', { title: t('Import files from a .zip (e.g. Overleaf) or an arXiv paper'), onclick: () => importDialog(r) }, t('Import')))
   if (writable) tree.el.querySelector('.tools')?.append(h('button', {
-    title: 'Add a bibliography entry from a DOI or arXiv id',
+    title: t('Add a bibliography entry from a DOI or arXiv id'),
     onclick: () => referenceDialog(r, index, (key) => {
       const v = editor.view(), f = editor.current()
       if (v && f?.endsWith('.tex')) v.dispatch(v.state.replaceSelection(`\\cite{${key}}`))
     }),
-  }, '+ Reference'))
+  }, t('+ Reference')))
 
   /** Jump to a collaborator: open their file at their cursor. */
   function jumpTo(clientId: number) {
@@ -204,11 +206,11 @@ async function openProject(keys: Keys) {
     if (!c?.file || !v) return
     if (layout.rightHidden) layout.showRight()
     showTab('pdf')
-    if (!output.showInPdf(c.file, v.state.doc.lineAt(v.state.selection.main.head).number)) alert('Compile first: the PDF has no SyncTeX data yet.')
+    if (!output.showInPdf(c.file, v.state.doc.lineAt(v.state.selection.main.head).number)) alert(t('Compile first: the PDF has no SyncTeX data yet.'))
   }
   output.syncRequest = syncToPdf
   function syncToSource() {
-    if (!output.showInSource()) alert('Compile first: the PDF has no SyncTeX data yet.')
+    if (!output.showInSource()) alert(t('Compile first: the PDF has no SyncTeX data yet.'))
   }
   output.onProblems.push(() => editor.relint())
   // right-hand panel tabs; panels other than the PDF are created on first use
@@ -238,16 +240,16 @@ async function openProject(keys: Keys) {
     }),
   }
   const tabBtns = {
-    pdf: h('button', { class: 'tab active', onclick: () => showTab('pdf') }, 'PDF'),
-    ai: h('button', { class: 'tab', onclick: () => showTab('ai') }, 'Assistant'),
-    review: h('button', { class: 'tab', title: 'Comments and suggested changes', onclick: () => showTab('review') }, 'Review'),
-    history: h('button', { class: 'tab', onclick: () => showTab('history') }, 'History'),
+    pdf: h('button', { class: 'tab active', onclick: () => showTab('pdf') }, t('PDF')),
+    ai: h('button', { class: 'tab', onclick: () => showTab('ai') }, t('Assistant')),
+    review: h('button', { class: 'tab', title: t('Comments and suggested changes'), onclick: () => showTab('review') }, t('Review')),
+    history: h('button', { class: 'tab', onclick: () => showTab('history') }, t('History')),
   }
   // the Review tab shows how many comments and suggestions are open
   const countOpen = () => {
     let n = 0
     r.review.forEach((m) => { if (m instanceof Y.Map && !m.get('resolved')) n++ })
-    tabBtns.review.textContent = n ? `Review (${n})` : 'Review'
+    tabBtns.review.textContent = n ? t('Review ({{n}})', { n }) : t('Review')
   }
   r.review.observeDeep(countOpen)
   setTimeout(countOpen, 0)
@@ -274,9 +276,9 @@ async function openProject(keys: Keys) {
     outline: h('div', { class: 'lpane', hidden: true }, outlinePanel.el),
   }
   const leftBtns: Record<LeftTab, HTMLButtonElement> = {
-    files: h('button', { class: 'tab active', onclick: () => showLeft('files') }, 'Files'),
-    search: h('button', { class: 'tab', title: 'Search all files (⌘⇧F / Ctrl+Shift+F)', onclick: () => showLeft('search') }, 'Search'),
-    outline: h('button', { class: 'tab', title: 'Sections and word count', onclick: () => showLeft('outline') }, 'Outline'),
+    files: h('button', { class: 'tab active', onclick: () => showLeft('files') }, t('Files')),
+    search: h('button', { class: 'tab', title: t('Search all files (⌘⇧F / Ctrl+Shift+F)'), onclick: () => showLeft('search') }, t('Search')),
+    outline: h('button', { class: 'tab', title: t('Sections and word count'), onclick: () => showLeft('outline') }, t('Outline')),
   }
   function showLeft(t: LeftTab) {
     for (const k of Object.keys(leftPanes) as LeftTab[]) { leftPanes[k].hidden = k !== t; leftBtns[k].classList.toggle('active', k === t) }
@@ -290,8 +292,8 @@ async function openProject(keys: Keys) {
   const folderBtn = h('button', { class: 'folder', hidden: true, onclick: () => folderMenu() })
   const showFolder = () => {
     folderBtn.hidden = !folder && !pendingFolder
-    folderBtn.textContent = folder ? `📁 ${folder.name}` : '📁 Reconnect folder'
-    folderBtn.title = folder ? `Synced with the folder “${folder.name}” while this tab is open. ${folder.status()}` : 'Click to allow syncing with your folder again.'
+    folderBtn.textContent = folder ? `📁 ${folder.name}` : `📁 ${t('Reconnect folder')}`
+    folderBtn.title = folder ? t('Synced with the folder “{{name}}” while this tab is open. {{status}}', { name: folder.name, status: folder.status() }) : t('Click to allow syncing with your folder again.')
   }
   // A collaborator's change wrote lines into the folder that ask to run programs. Harmless
   // for compiles here (TeX never runs programs in the browser), but local LaTeX tools
@@ -304,13 +306,13 @@ async function openProject(keys: Keys) {
     for (const l of fresh) toldPrograms.add(`${l.path}\0${l.text}`)
     programsNote.replaceChildren(
       h('div', {},
-        h('b', {}, '⚠ Lines that run programs were written to your folder. '),
-        'If you compile that folder with your own LaTeX tools, check them first:',
+        h('b', {}, `⚠ ${t('Lines that run programs were written to your folder.')} `),
+        t('If you compile that folder with your own LaTeX tools, check them first:'),
         h('ul', {}, ...fresh.slice(0, 6).map((l) => h('li', {},
           h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); gotoSource(l.path, l.line, true) } }, `${l.path}:${l.line}`),
-          ` ${l.what}: `, h('code', {}, l.text)))),
-        fresh.length > 6 ? h('div', { class: 'muted small' }, `…and ${fresh.length - 6} more.`) : null),
-      h('button', { onclick: () => { programsNote.hidden = true } }, 'Dismiss'))
+          ` ${t('{{what}}:', { what: l.what })} `, h('code', {}, l.text)))),
+        fresh.length > 6 ? h('div', { class: 'muted small' }, t('…and {{n}} more.', { n: fresh.length - 6 })) : null),
+      h('button', { onclick: () => { programsNote.hidden = true } }, t('Dismiss')))
     programsNote.hidden = false
   }
   let pendingFolder: FileSystemDirectoryHandle | null = null
@@ -318,7 +320,10 @@ async function openProject(keys: Keys) {
     if (fresh) {
       const there = await folderFiles(dir)
       const extra = there.filter((p) => !r.files.has(p) && !r.bin.has(p))
-      if (extra.length && !confirm(`“${dir.name}” has ${extra.length} file${extra.length === 1 ? '' : 's'} that aren’t in the project (e.g. ${extra.slice(0, 3).join(', ')}). They’ll be added to the project, and the project’s files written into the folder. Continue?`)) return
+      if (extra.length && !confirm(tn(extra.length,
+        '“{{name}}” has {{n}} file that isn’t in the project (e.g. {{examples}}). It’ll be added to the project, and the project’s files written into the folder. Continue?',
+        '“{{name}}” has {{n}} files that aren’t in the project (e.g. {{examples}}). They’ll be added to the project, and the project’s files written into the folder. Continue?',
+        { name: dir.name, examples: extra.slice(0, 3).join(', ') }))) return
     }
     folder?.stop()
     folder = await startFolderSync(r, dir)
@@ -333,7 +338,7 @@ async function openProject(keys: Keys) {
       if ((await folderPermission(pendingFolder, true)) === 'granted') await linkFolder(pendingFolder, false)
       return
     }
-    if (folder && confirm(`Stop syncing with “${folder.name}”? The folder keeps its files.`)) {
+    if (folder && confirm(t('Stop syncing with “{{name}}”? The folder keeps its files.', { name: folder.name }))) {
       folder.stop(); folder = null; await rememberFolder(keys.project, null); showFolder()
     }
   }
@@ -349,9 +354,9 @@ async function openProject(keys: Keys) {
   // ---- header ----
   const status = h('span', { class: 'status', role: 'status' })
   const peers = h('span', { class: 'peers' })
-  const title = h('input', { class: 'title', readonly: !writable, 'aria-label': 'Project name', onchange: (e: any) => r.meta.set('name', e.target.value) })
-  const syncBtn = h('button', { onclick: async () => { syncBtn.setAttribute('disabled', ''); await r.syncNow(); syncBtn.removeAttribute('disabled') } }, 'Sync now')
-  const zipBtn = h('button', { title: 'Download all files as a .zip', onclick: () => downloadZip() }, '⤓ Source')
+  const title = h('input', { class: 'title', readonly: !writable, 'aria-label': t('Project name'), onchange: (e: any) => r.meta.set('name', e.target.value) })
+  const syncBtn = h('button', { onclick: async () => { syncBtn.setAttribute('disabled', ''); await r.syncNow(); syncBtn.removeAttribute('disabled') } }, t('Sync now'))
+  const zipBtn = h('button', { title: t('Download all files as a .zip'), onclick: () => downloadZip() }, `⤓ ${t('Source')}`)
   const leftBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleLeft() }, '☰')
   const rightBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleRight() }, '▥')
   const splitL = h('div', { class: 'split' })
@@ -361,8 +366,8 @@ async function openProject(keys: Keys) {
     onpointerdown: (e: Event) => e.stopPropagation(), ondblclick: (e: Event) => e.stopPropagation(), onclick: run,
   }, label)
   const syncArrows = h('div', { class: 'syncarrows' },
-    arrow('→', 'Show the cursor’s line in the PDF (⌘⌥→ / Ctrl+Alt+→)', () => syncToPdf()),
-    arrow('←', 'Go to the source of the spot you last clicked in the PDF, or the middle of the view (⌘⌥← / Ctrl+Alt+←). Double-click or right-click the PDF also works.', () => syncToSource()))
+    arrow('→', t('Show the cursor’s line in the PDF (⌘⌥→ / Ctrl+Alt+→)'), () => syncToPdf()),
+    arrow('←', t('Go to the source of the spot you last clicked in the PDF, or the middle of the view (⌘⌥← / Ctrl+Alt+←). Double-click or right-click the PDF also works.'), () => syncToSource()))
   const splitR = h('div', { class: 'split' }, syncArrows)
   const mainEl = h('main', {})
   const risk = riskBanner(r, writable, () => openSettings())
@@ -372,14 +377,14 @@ async function openProject(keys: Keys) {
   app.append(
     h('header', {},
       leftBtn,
-      h('a', { href: '/', class: 'brand', title: 'All projects', onclick: (e: Event) => { e.preventDefault(); location.href = '/' } }, brand()),
-      title, writable ? null : h('span', { class: 'badge' }, 'read-only'),
+      h('a', { href: '/', class: 'brand', title: t('All projects'), onclick: (e: Event) => { e.preventDefault(); location.href = '/' } }, brand()),
+      title, writable ? null : h('span', { class: 'badge' }, t('read-only')),
       h('span', { class: 'spacer' }), peers, status,
       syncBtn,
       zipBtn,
       folderBtn,
-      h('button', { onclick: () => shareDialog(r, server, me.name) }, 'Share'),
-      h('button', { title: 'Settings', onclick: () => openSettings() }, '⚙'),
+      h('button', { onclick: () => shareDialog(r, server, me.name) }, t('Share')),
+      h('button', { title: t('Settings'), onclick: () => openSettings() }, '⚙'),
       output.compileBtn,
       rightBtn,
     ),
@@ -395,8 +400,8 @@ async function openProject(keys: Keys) {
   )
   const layout = setupLayout(mainEl, splitL, splitR)
   layout.onChange = () => {
-    leftBtn.title = layout.leftHidden ? 'Show the file list' : 'Hide the file list'
-    rightBtn.title = layout.rightHidden ? 'Show the PDF and assistant' : 'Hide the PDF and assistant'
+    leftBtn.title = layout.leftHidden ? t('Show the file list') : t('Hide the file list')
+    rightBtn.title = layout.rightHidden ? t('Show the PDF and assistant') : t('Hide the PDF and assistant')
     leftBtn.classList.toggle('off', layout.leftHidden)
     rightBtn.classList.toggle('off', layout.rightHidden)
     leftBtn.setAttribute('aria-pressed', String(!layout.leftHidden))
@@ -456,7 +461,7 @@ async function openProject(keys: Keys) {
     try {
       const { zip, missing } = await projectZip(r)
       saveFile(`${fileBase(r)}.zip`, zip, 'application/zip')
-      if (missing.length) alert(`These files weren’t included because their content isn’t available yet (offline, and no collaborator online has them):\n\n${missing.join('\n')}`)
+      if (missing.length) alert(t('These files weren’t included because their content isn’t available yet (offline, and no collaborator online has them):\n\n{{files}}', { files: missing.join('\n') }))
     } finally { zipBtn.removeAttribute('disabled') }
   }
 
@@ -464,18 +469,18 @@ async function openProject(keys: Keys) {
   let lastRisk: boolean | null = null
   const renderStatus = () => {
     status.className = `status ${r.status}`
-    const unsent = r.pending ? ` · ${r.pending} unsent` : ''
-    const relay = r.storage === 'relay' ? ` · relay-only, ${r.peers} peer${r.peers === 1 ? '' : 's'} online` : ''
+    const unsent = r.pending ? ` · ${tn(r.pending, '{{n}} unsent', '{{n}} unsent')}` : ''
+    const relay = r.storage === 'relay' ? ` · ${tn(r.peers, 'relay-only, {{n}} peer online', 'relay-only, {{n}} peers online')}` : ''
     status.textContent =
-      r.status === 'online' ? (r.pending ? `syncing ${r.pending}…` : 'saved') + relay
-      : r.status === 'connecting' ? 'connecting…'
-      : r.status === 'paused' ? `manual sync${unsent}`
-      : `offline${unsent} (changes kept locally)`
-    status.title = r.storage === 'relay' ? 'The server keeps no copy: changes reach collaborators only while you are both online.' : 'Changes are stored encrypted on the server.'
+      r.status === 'online' ? (r.pending ? t('syncing {{n}}…', { n: r.pending }) : t('saved')) + relay
+      : r.status === 'connecting' ? t('connecting…')
+      : r.status === 'paused' ? t('manual sync') + unsent
+      : t('offline{{unsent}} (changes kept locally)', { unsent })
+    status.title = r.storage === 'relay' ? t('The server keeps no copy: changes reach collaborators only while you are both online.') : t('Changes are stored encrypted on the server.')
     if (r.storeProblem && r.storage !== 'relay' && r.status === 'online') {
-      status.textContent = 'not saved on server'
+      status.textContent = t('not saved on server')
       status.className = 'status warn'
-      status.title = 'Changes reach collaborators who are online, and stay in this browser, but the server isn’t storing them. See the warning above.'
+      status.title = t('Changes reach collaborators who are online, and stay in this browser, but the server isn’t storing them. See the warning above.')
     }
     risk.render()
     const atRisk = !!r.storeProblem || r.storage === 'relay'
@@ -488,7 +493,7 @@ async function openProject(keys: Keys) {
     const at = m && typeof m === 'object' && keys.ownerSigned(`moved:${m.at}`, m.s) ? Number(m.at) : 0
     movedNote.hidden = !at
     if (at) movedNote.replaceChildren(h('span', {}, h('b', {}, '⚠ '),
-      `The owner moved this project to new keys on ${new Date(at).toLocaleDateString()}. This copy no longer receives their changes: ask them for the new link.`))
+      t('The owner moved this project to new keys on {{date}}. This copy no longer receives their changes: ask them for the new link.', { date: new Date(at).toLocaleDateString(locale) })))
   }
   risk.el.after(movedNote)
   movedNote.after(programsNote)
@@ -499,12 +504,12 @@ async function openProject(keys: Keys) {
     clashNote.hidden = !clashes.length
     const open = (p: string) => h('button', { onclick: () => tree.open(p) }, p)
     clashNote.replaceChildren(
-      h('span', {}, h('b', {}, '⚠ '), clashes.length > 1 ? 'Files were created under the same names on two devices while apart. Both versions are kept: '
-        : 'A file was created under the same name on two devices while apart. Both versions are kept: ',
-        ...clashes.flatMap((c, i) => [i ? '; ' : '', open(c.path), ` (${c.by ?? 'the other device'}’s) and `, open(c.copy), ' (this device’s)']),
-        '. Merge them and delete the copy when you’re done.'),
+      h('span', {}, h('b', {}, '⚠ '), clashes.length > 1 ? t('Files were created under the same names on two devices while apart. Both versions are kept:')
+        : t('A file was created under the same name on two devices while apart. Both versions are kept:'), ' ',
+        ...clashes.flatMap((c, i) => [i ? '; ' : '', ...tNodes('{{path}} ({{who}}’s) and {{copy}} (this device’s)', { path: open(c.path), who: c.by ?? t('the other device'), copy: open(c.copy) })]),
+        '. ', t('Merge them and delete the copy when you’re done.')),
       h('span', { class: 'actions' },
-        h('button', { title: 'Hide', 'aria-label': 'Hide this warning', onclick: () => { clashes.length = 0; renderClashes() } }, '✕')))
+        h('button', { title: t('Hide'), 'aria-label': t('Hide this warning'), onclick: () => { clashes.length = 0; renderClashes() } }, '✕')))
   }
   programsNote.after(clashNote)
   watchClashes(r, (c) => { clashes.push(c); renderClashes() })
@@ -513,7 +518,7 @@ async function openProject(keys: Keys) {
     renderStatus()
     if (r.withdrawn && !toldWithdrawn) {
       toldWithdrawn = true
-      alert('The owner has revoked your edit link. The project will reopen read-only.')
+      alert(t('The owner has revoked your edit link. The project will reopen read-only.'))
       location.reload()
     }
   }
@@ -527,7 +532,7 @@ async function openProject(keys: Keys) {
       const name = String(s.user.name).slice(0, 64)
       const where = typeof s.file === 'string' ? ` · ${String(s.file).slice(0, 100)}` : ''
       return h('button', { class: 'peer', style: `background:${/^#[0-9a-f]{6}$/i.test(s.user.color) ? s.user.color : '#888'}`,
-        title: `${name}${where} — click to go to where they are`, 'aria-label': `Go to ${name}`, onclick: () => jumpTo(id) }, name.slice(0, 2))
+        title: t('{{name}}{{where}} — click to go to where they are', { name, where }), 'aria-label': t('Go to {{name}}', { name }), onclick: () => jumpTo(id) }, name.slice(0, 2))
     }))
     if (!removing) projects.sawPeople(keys.project, others.map(([, s]) => String(s.user.name)), me.name)
   })
@@ -545,13 +550,14 @@ async function openProject(keys: Keys) {
   r.files.observeDeep(summarize); r.bin.observe(summarize); summarize()
 
   const renderMeta = () => {
-    title.value = r.meta.get('name') || ''
+    const name: string = r.meta.get('name') || ''
+    title.value = name === UNTITLED ? t('Untitled project') : name
     document.title = `${title.value} — ${APP}`
     if (!removing) projects.update(keys.project, {
-      fragment: keys.fragment(), writable, at: Date.now(), name: title.value,
+      fragment: keys.fragment(), writable, at: Date.now(), name,
       createdBy: r.meta.get('createdBy'), storage: r.storage,
     })
-    title.title = `Project name (shared with collaborators) · code ${projectCode(keys.project)}`
+    title.title = t('Project name (shared with collaborators) · code {{code}}', { code: projectCode(keys.project) })
   }
   r.meta.observe(renderMeta); renderMeta()
 

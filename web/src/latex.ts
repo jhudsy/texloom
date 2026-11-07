@@ -11,6 +11,7 @@ import { parseId } from './references'
 import type { Replica } from './replica'
 import type { Problem } from './latexlog'
 import { IMAGE_RE } from './projectfiles'
+import { t } from './i18n'
 
 /** Dispatch to re-run the linters now (after a compile, or a settings change): the lint
  *  package's forceLinting only runs a check that is already pending. */
@@ -85,21 +86,21 @@ export class ProjectIndex {
 type Env = [name: string, body: string, info: string]
 // Bodies use CodeMirror snippet syntax: ${} fields, Tab to move between them.
 const ENVS: Env[] = [
-  ['itemize', '\t\\item ${}', 'bulleted list'],
-  ['enumerate', '\t\\item ${}', 'numbered list'],
-  ['description', '\t\\item[${term}] ${}', 'description list'],
-  ['figure', '\t\\centering\n\t\\includegraphics[width=0.8\\linewidth]{${file}}\n\t\\caption{${caption}}\n\t\\label{fig:${label}}', 'figure with image, caption, label'],
-  ['table', '\t\\centering\n\t\\begin{tabular}{${ll}}\n\t\t${} \\\\\n\t\\end{tabular}\n\t\\caption{${caption}}\n\t\\label{tab:${label}}', 'table with tabular, caption, label'],
-  ['tabular', '\t${} \\\\', 'columns in {…}'],
-  ['equation', '\t${}', 'numbered equation'],
-  ['equation*', '\t${}', 'unnumbered equation'],
-  ['align', '\t${} &= ${} \\\\', 'aligned equations (amsmath)'],
-  ['align*', '\t${} &= ${} \\\\', 'aligned equations, unnumbered'],
-  ['gather', '\t${}', 'centred equations (amsmath)'],
-  ['multline', '\t${}', 'long equation (amsmath)'],
-  ['cases', '\t${} & ${} \\\\', 'piecewise (amsmath)'],
-  ['matrix', '\t${} & ${} \\\\', 'matrix (amsmath)'],
-  ['pmatrix', '\t${} & ${} \\\\', 'matrix in ( )'],
+  ['itemize', '\t\\item ${}', t('bulleted list')],
+  ['enumerate', '\t\\item ${}', t('numbered list')],
+  ['description', '\t\\item[${term}] ${}', t('description list')],
+  ['figure', '\t\\centering\n\t\\includegraphics[width=0.8\\linewidth]{${file}}\n\t\\caption{${caption}}\n\t\\label{fig:${label}}', t('figure with image, caption, label')],
+  ['table', '\t\\centering\n\t\\begin{tabular}{${ll}}\n\t\t${} \\\\\n\t\\end{tabular}\n\t\\caption{${caption}}\n\t\\label{tab:${label}}', t('table with tabular, caption, label')],
+  ['tabular', '\t${} \\\\', t('columns in {…}')],
+  ['equation', '\t${}', t('numbered equation')],
+  ['equation*', '\t${}', t('unnumbered equation')],
+  ['align', '\t${} &= ${} \\\\', t('aligned equations (amsmath)')],
+  ['align*', '\t${} &= ${} \\\\', t('aligned equations, unnumbered')],
+  ['gather', '\t${}', t('centred equations (amsmath)')],
+  ['multline', '\t${}', t('long equation (amsmath)')],
+  ['cases', '\t${} & ${} \\\\', t('piecewise (amsmath)')],
+  ['matrix', '\t${} & ${} \\\\', t('matrix (amsmath)')],
+  ['pmatrix', '\t${} & ${} \\\\', t('matrix in ( )')],
   ['abstract', '\t${}', ''],
   ['quote', '\t${}', ''],
   ['quotation', '\t${}', ''],
@@ -107,18 +108,18 @@ const ENVS: Env[] = [
   ['center', '\t${}', ''],
   ['flushleft', '\t${}', ''],
   ['flushright', '\t${}', ''],
-  ['minipage', '\t${}', 'needs {width}'],
+  ['minipage', '\t${}', t('needs {width}')],
   ['theorem', '\t${}', ''],
   ['lemma', '\t${}', ''],
   ['proof', '\t${}', ''],
   ['definition', '\t${}', ''],
   ['example', '\t${}', ''],
-  ['frame', '\t\\frametitle{${title}}\n\t${}', 'beamer slide'],
-  ['columns', '\t\\column{0.5\\textwidth}\n\t${}\n\t\\column{0.5\\textwidth}\n\t${}', 'beamer columns'],
-  ['tikzpicture', '\t${}', 'TikZ drawing'],
-  ['lstlisting', '${}', 'code listing (listings)'],
-  ['minted', '${}', 'code listing (minted); needs {language}'],
-  ['thebibliography', '\t\\bibitem{${key}} ${}', 'manual bibliography; needs {99}'],
+  ['frame', '\t\\frametitle{${title}}\n\t${}', t('beamer slide')],
+  ['columns', '\t\\column{0.5\\textwidth}\n\t${}\n\t\\column{0.5\\textwidth}\n\t${}', t('beamer columns')],
+  ['tikzpicture', '\t${}', t('TikZ drawing')],
+  ['lstlisting', '${}', t('code listing (listings)')],
+  ['minted', '${}', t('code listing (minted); needs {language}')],
+  ['thebibliography', '\t\\bibitem{${key}} ${}', t('manual bibliography; needs {99}')],
   ['document', '${}', ''],
 ]
 const ENV_ARGS: Record<string, string> = { minipage: '{${0.45\\textwidth}}', minted: '{${python}}', thebibliography: '{${99}}', tabular: '{${ll}}' }
@@ -130,11 +131,11 @@ type Cmd = [label: string, template: string, info?: string]
 const COMMANDS: Cmd[] = [
   ['\\section', '\\section{${}}'], ['\\section*', '\\section*{${}}'], ['\\subsection', '\\subsection{${}}'],
   ['\\subsubsection', '\\subsubsection{${}}'], ['\\paragraph', '\\paragraph{${}}'], ['\\chapter', '\\chapter{${}}'],
-  ['\\textbf', '\\textbf{${}}', 'bold'], ['\\textit', '\\textit{${}}', 'italic'], ['\\emph', '\\emph{${}}', 'emphasis'],
-  ['\\texttt', '\\texttt{${}}', 'monospace'], ['\\textsc', '\\textsc{${}}', 'small caps'], ['\\underline', '\\underline{${}}'],
+  ['\\textbf', '\\textbf{${}}', t('bold')], ['\\textit', '\\textit{${}}', t('italic')], ['\\emph', '\\emph{${}}', t('emphasis')],
+  ['\\texttt', '\\texttt{${}}', t('monospace')], ['\\textsc', '\\textsc{${}}', t('small caps')], ['\\underline', '\\underline{${}}'],
   ['\\label', '\\label{${}}'], ['\\ref', '\\ref{${}}'], ['\\eqref', '\\eqref{${}}'], ['\\autoref', '\\autoref{${}}'], ['\\cref', '\\cref{${}}'],
   ['\\cite', '\\cite{${}}'], ['\\citep', '\\citep{${}}'], ['\\citet', '\\citet{${}}'], ['\\parencite', '\\parencite{${}}'], ['\\textcite', '\\textcite{${}}'],
-  ['\\includegraphics', '\\includegraphics[width=${0.8}\\linewidth]{${}}', 'image'],
+  ['\\includegraphics', '\\includegraphics[width=${0.8}\\linewidth]{${}}', t('image')],
   ['\\input', '\\input{${}}'], ['\\include', '\\include{${}}'], ['\\usepackage', '\\usepackage{${}}'],
   ['\\item', '\\item ${}'], ['\\caption', '\\caption{${}}'], ['\\centering', '\\centering'],
   ['\\footnote', '\\footnote{${}}'], ['\\url', '\\url{${}}'], ['\\href', '\\href{${url}}{${text}}'],
@@ -164,7 +165,7 @@ const REF_CMDS = /^(ref|eqref|autoref|[cC]ref|pageref|nameref|vref|Vref|cpageref
 export type AddReference = (seed: string, insert: (key: string) => void) => void
 
 function completionSource(index: ProjectIndex, addReference?: AddReference) {
-  const envOptions: Completion[] = ENVS.map((e) => snippetCompletion(envSnippet(e), { label: `\\begin{${e[0]}}`, detail: e[2] || 'environment', type: 'keyword', boost: 2 }))
+  const envOptions: Completion[] = ENVS.map((e) => snippetCompletion(envSnippet(e), { label: `\\begin{${e[0]}}`, detail: e[2] || t('environment'), type: 'keyword', boost: 2 }))
   const cmdOptions: Completion[] = COMMANDS.map(([label, tpl, info]) => snippetCompletion(tpl, { label, detail: info, type: 'function' }))
 
   return (ctx: CompletionContext): CompletionResult | null => {
@@ -198,15 +199,15 @@ function completionSource(index: ProjectIndex, addReference?: AddReference) {
         }
       }
       if (cmd === 'includegraphics')
-        return list(idx.images.map((p) => ({ label: p, type: 'variable', detail: 'image' })))
+        return list(idx.images.map((p) => ({ label: p, type: 'variable', detail: t('image') })))
       if (CITE_CMDS.test(cmd)) {
         const fetchRef = (seed: string, label: string): Completion => ({ label, type: 'text', boost: -50, apply: (view, _c, f, t) => {
           addReference!(seed, (key) => view.dispatch({ changes: { from: f, to: t, insert: key + close }, selection: { anchor: f + key.length }, userEvent: 'input.complete' }))
         } })
         // typing a DOI or arXiv id offers to fetch it
-        if (addReference && parseId(word)) return { from, to: ctx.pos, filter: false, options: [fetchRef(word, `Fetch reference for ${word}`)] }
+        if (addReference && parseId(word)) return { from, to: ctx.pos, filter: false, options: [fetchRef(word, t('Fetch reference for {{id}}', { id: word }))] }
         const res = list(idx.bib.map((b) => ({ label: b.key, type: 'constant', detail: b.title ? truncate(b.title, 60) : b.type, info: b.title ? `${b.title} (${b.file})` : b.file })))
-        return addReference && !word ? { ...res, options: [...res.options, fetchRef('', '+ Add from DOI / arXiv…')] } : res
+        return addReference && !word ? { ...res, options: [...res.options, fetchRef('', t('+ Add from DOI / arXiv…'))] } : res
       }
       if (REF_CMDS.test(cmd))
         return list(idx.labels.map((l) => ({ label: l.key, type: 'property', detail: `${l.file}:${l.line}` })))
@@ -222,7 +223,7 @@ function completionSource(index: ProjectIndex, addReference?: AddReference) {
     // a command being typed: \partial
     const m = /\\[A-Za-z]*\*?$/.exec(before)
     if (!m || (m[0].length < 2 && !ctx.explicit)) return null
-    const project = index.get().macros.map((name): Completion => ({ label: `\\${name}`, type: 'function', detail: 'defined in project' }))
+    const project = index.get().macros.map((name): Completion => ({ label: `\\${name}`, type: 'function', detail: t('defined in project') }))
     return { from: ctx.pos - m[0].length, options: [...envOptions, ...cmdOptions, ...project], validFor: /^\\[A-Za-z]*\*?$/ }
   }
 }
@@ -325,7 +326,7 @@ function referenceLinter(index: ProjectIndex, compileProblems: () => Problem[]) 
       if (!p.line || p.line > doc.lines) continue
       const l = doc.line(p.line)
       out.push({ from: l.from, to: Math.max(l.from, l.to), severity: p.severity === 'error' ? 'error' : p.severity === 'warning' ? 'warning' : 'info',
-        message: `${p.severity === 'box' ? 'Layout' : 'Compile'}: ${p.message}`, source: 'LaTeX' })
+        message: p.severity === 'box' ? t('Layout: {{message}}', { message: p.message }) : t('Compile: {{message}}', { message: p.message }), source: 'LaTeX' })
     }
     const keys = new Set(idx.bib.map((b) => b.key))
     const labels = new Set(idx.labels.map((l) => l.key))
@@ -338,14 +339,14 @@ function referenceLinter(index: ProjectIndex, compileProblems: () => Problem[]) 
       if (cmd === 'includegraphics') {
         const a = argRaw.trim()
         if (a && !a.includes('#') && !a.includes('\\') && !idx.hasImage(a))
-          out.push({ from: argFrom, to: argFrom + argRaw.length, severity: 'warning', message: `No image “${a}” in this project.` })
+          out.push({ from: argFrom, to: argFrom + argRaw.length, severity: 'warning', message: t('No image “{{name}}” in this project.', { name: a }) })
       } else if (CITE_CMDS.test(cmd) && idx.bibFiles.length) {
         let off = 0
         for (const part of argRaw.split(',')) {
           const k = part.trim()
           const start = argFrom + off + part.indexOf(k)
           if (k && k !== '*' && !keys.has(k) && !k.includes('\\') && !k.includes('#'))
-            out.push({ from: start, to: start + k.length, severity: 'warning', message: `No bibliography entry “${k}” in ${idx.bibFiles.join(', ')}.` })
+            out.push({ from: start, to: start + k.length, severity: 'warning', message: t('No bibliography entry “{{key}}” in {{files}}.', { key: k, files: idx.bibFiles.join(', ') }) })
           off += part.length + 1
         }
       } else if (REF_CMDS.test(cmd)) {
@@ -353,7 +354,7 @@ function referenceLinter(index: ProjectIndex, compileProblems: () => Problem[]) 
           const k = part.trim()
           if (k && !labels.has(k) && !k.includes('#') && !k.includes('\\')) {
             const start = argFrom + argRaw.indexOf(k)
-            out.push({ from: start, to: start + k.length, severity: 'warning', message: `No \\label{${k}} in this project.` })
+            out.push({ from: start, to: start + k.length, severity: 'warning', message: t('No {{label}} in this project.', { label: `\\label{${k}}` }) })
           }
         }
       }
@@ -391,9 +392,9 @@ function mistakeLinter(enabled: () => boolean) {
   return linter((view) => {
     if (!enabled()) return []
     return checkLatex(view.state.doc.toString()).map((c): Diagnostic => ({
-      from: c.from, to: c.to, severity: c.severity, message: c.message, source: 'Check',
+      from: c.from, to: c.to, severity: c.severity, message: c.message, source: t('Check'),
       actions: c.fix === undefined || view.state.readOnly ? undefined : [{
-        name: c.fixLabel ?? 'Fix',
+        name: c.fixLabel ?? t('Fix'),
         apply: (v, from, to) => v.dispatch({ changes: { from, to, insert: c.fix! }, userEvent: 'input' }),
       }],
     }))

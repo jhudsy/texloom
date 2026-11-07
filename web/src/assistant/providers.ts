@@ -1,6 +1,8 @@
 // LLM provider configuration. Stored only in this browser (localStorage) and never
 // synced into the project: API keys must not travel with a share link.
 
+import { t } from '../i18n'
+
 export type Kind = 'anthropic' | 'openai'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -20,26 +22,26 @@ export const PRESETS: Record<string, ProviderConfig> = {
     kind: 'anthropic', label: 'Anthropic (Claude)', baseUrl: 'https://api.anthropic.com', apiKey: '',
     model: 'claude-opus-5-5', effort: 'high',
     models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
-    help: 'Get a key at console.anthropic.com. The key is sent straight from this browser to Anthropic.',
+    help: t('Get a key at console.anthropic.com. The key is sent straight from this browser to Anthropic.'),
   },
   openai: {
     kind: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: '', effort: 'high', models: [],
-    help: 'Any model with tool (function) calling. Use “Load models” to list them.',
+    help: t('Any model with tool (function) calling. Use “Load models” to list them.'),
   },
   openrouter: {
     kind: 'openai', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: '', effort: 'high', models: [],
   },
   lmstudio: {
-    kind: 'openai', label: 'LM Studio (local)', baseUrl: 'http://localhost:1234/v1', apiKey: '', model: '', effort: 'high', models: [],
-    help: 'Start the server with CORS enabled: `lms server start --cors` (or Developer → Settings → Enable CORS). Pick a model that supports tool use.',
+    kind: 'openai', label: t('LM Studio (local)'), baseUrl: 'http://localhost:1234/v1', apiKey: '', model: '', effort: 'high', models: [],
+    help: t('Start the server with CORS enabled: `lms server start --cors` (or Developer → Settings → Enable CORS). Pick a model that supports tool use.'),
   },
   ollama: {
-    kind: 'openai', label: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', apiKey: '', model: '', effort: 'high', models: [],
-    help: 'Works from localhost out of the box. From another origin, set OLLAMA_ORIGINS to this site’s address. Pick a model that supports tools (e.g. qwen2.5, llama3.1).',
+    kind: 'openai', label: t('Ollama (local)'), baseUrl: 'http://localhost:11434/v1', apiKey: '', model: '', effort: 'high', models: [],
+    help: t('Works from localhost out of the box. From another origin, set OLLAMA_ORIGINS to this site’s address. Pick a model that supports tools (e.g. qwen2.5, llama3.1).'),
   },
   custom: {
-    kind: 'openai', label: 'Other (OpenAI-compatible)', baseUrl: 'http://localhost:8000/v1', apiKey: '', model: '', effort: 'high', models: [],
-    help: 'vLLM, llama.cpp server, LiteLLM, or any /v1/chat/completions endpoint with tool calling.',
+    kind: 'openai', label: t('Other (OpenAI-compatible)'), baseUrl: 'http://localhost:8000/v1', apiKey: '', model: '', effort: 'high', models: [],
+    help: t('vLLM, llama.cpp server, LiteLLM, or any /v1/chat/completions endpoint with tool calling.'),
   },
 }
 

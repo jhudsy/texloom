@@ -1,5 +1,6 @@
 // Tiny DOM helpers shared by the UI modules. Children are added as text nodes or
 // elements, never parsed as HTML, so user-controlled strings can't inject markup.
+import { t } from './i18n'
 
 type Kid = Node | string | null | undefined | false
 export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs?: Record<string, any>, ...kids: Kid[]): HTMLElementTagNameMap[K]
@@ -48,7 +49,7 @@ export function verticalResizer(handle: HTMLElement, target: HTMLElement, key: s
   handle.setAttribute('role', 'separator')
   handle.setAttribute('aria-orientation', 'horizontal')
   handle.tabIndex = 0
-  handle.title = 'Drag to resize · double-click to reset'
+  handle.title = t('Drag to resize · double-click to reset')
   handle.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return
     e.preventDefault()

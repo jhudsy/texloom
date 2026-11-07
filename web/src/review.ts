@@ -6,6 +6,7 @@ import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import type { Replica } from './replica'
 import { h } from './dom'
+import { t, locale } from './i18n'
 
 export type Kind = 'comment' | 'suggestion'
 export interface Item {
@@ -75,9 +76,9 @@ export function setResolved(r: Replica, id: string, resolved: boolean, outcome?:
 export function accept(r: Replica, id: string): string | null {
   const it = itemOf(r, id), rg = rangeOf(r, id)
   const yt = it && r.files.get(it.file)
-  if (!it || !yt || !rg) return 'The text this suggestion refers to no longer exists.'
+  if (!it || !yt || !rg) return t('The text this suggestion refers to no longer exists.')
   const current = yt.toString().slice(rg.from, rg.to)
-  if (current !== it.quote && !confirm(`The text has changed since this was suggested.\n\nNow: “${current.slice(0, 200)}”\nSuggested replacement: “${it.text.slice(0, 200)}”\n\nApply anyway?`)) return 'cancelled'
+  if (current !== it.quote && !confirm(t('The text has changed since this was suggested.\n\nNow: “{{now}}”\nSuggested replacement: “{{suggested}}”\n\nApply anyway?', { now: current.slice(0, 200), suggested: it.text.slice(0, 200) }))) return 'cancelled'
   r.doc.transact(() => {
     yt.delete(rg.from, rg.to - rg.from)
     if (it.text) yt.insert(rg.from, it.text)
@@ -91,7 +92,7 @@ export function accept(r: Replica, id: string): string | null {
 class InsertWidget extends WidgetType {
   constructor(readonly text: string, readonly id: string) { super() }
   eq(o: InsertWidget) { return o.text === this.text && o.id === this.id }
-  toDOM() { return h('span', { class: 'cm-suggest-ins', 'data-review': this.id, title: 'Suggested replacement' }, this.text || '⌫') }
+  toDOM() { return h('span', { class: 'cm-suggest-ins', 'data-review': this.id, title: t('Suggested replacement') }, this.text || '⌫') }
 }
 
 const setDecos = StateEffect.define<DecorationSet>()
@@ -114,7 +115,7 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
       if (i.kind === 'comment') {
         if (to > from) ranges.push(Decoration.mark({ class: 'cm-comment', attributes: { 'data-review': i.id, title: `${i.by}: ${i.text.slice(0, 200)}` } }).range(from, to))
       } else {
-        if (to > from) ranges.push(Decoration.mark({ class: 'cm-suggest-del', attributes: { 'data-review': i.id, title: `${i.by} suggests a change` } }).range(from, to))
+        if (to > from) ranges.push(Decoration.mark({ class: 'cm-suggest-del', attributes: { 'data-review': i.id, title: t('{{name}} suggests a change', { name: i.by }) } }).range(from, to))
         ranges.push(Decoration.widget({ widget: new InsertWidget(i.text, i.id), side: 1 }).range(to))
       }
     }
@@ -158,20 +159,20 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   let showResolved = false
   let focused: string | null = null
   const list = h('div', { class: 'review-list' })
-  const resolvedChk = h('input', { type: 'checkbox', 'aria-label': 'Show resolved', onchange: (e: any) => { showResolved = e.target.checked; render() } })
+  const resolvedChk = h('input', { type: 'checkbox', 'aria-label': t('Show resolved'), onchange: (e: any) => { showResolved = e.target.checked; render() } })
   const el = h('div', { class: 'review' },
     h('div', { class: 'ai-bar' },
-      host.writable ? h('button', { title: 'Comment on the selected text (⌘⌥M / Ctrl+Alt+M)', onclick: () => add('comment') }, '💬 Comment') : null,
-      host.writable ? h('button', { title: 'Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)', onclick: () => add('suggestion') }, '✎ Suggest') : null,
+      host.writable ? h('button', { title: t('Comment on the selected text (⌘⌥M / Ctrl+Alt+M)'), onclick: () => add('comment') }, t('💬 Comment')) : null,
+      host.writable ? h('button', { title: t('Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)'), onclick: () => add('suggestion') }, t('✎ Suggest')) : null,
       h('span', { class: 'spacer' }),
-      h('label', { class: 'check small' }, resolvedChk, 'Show resolved')),
+      h('label', { class: 'check small' }, resolvedChk, t('Show resolved'))),
     list)
 
   function add(kind: Kind) {
     const sel = host.selection()
-    if (!sel) return alert('Open a text file and select some text first.')
-    if (kind === 'comment' && sel.from === sel.to) return alert('Select the text you want to comment on.')
-    const text = prompt(kind === 'comment' ? 'Comment:' : `Replace “${sel.text.slice(0, 80)}${sel.text.length > 80 ? '…' : ''}” with:`, kind === 'suggestion' ? sel.text : '')
+    if (!sel) return alert(t('Open a text file and select some text first.'))
+    if (kind === 'comment' && sel.from === sel.to) return alert(t('Select the text you want to comment on.'))
+    const text = prompt(kind === 'comment' ? t('Comment:') : t('Replace “{{text}}” with:', { text: sel.text.slice(0, 80) + (sel.text.length > 80 ? '…' : '') }), kind === 'suggestion' ? sel.text : '')
     if (text === null || (kind === 'comment' && !text.trim())) return
     const id = addItem(r, kind, sel.file, sel.from, sel.to, text, host.userName())
     if (id) focus(id)
@@ -183,36 +184,36 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     list.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest' })
   }
 
-  const when = (t: number) => new Date(t).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+  const when = (at: number) => new Date(at).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })
 
   function card(it: Item): HTMLElement {
     const rg = rangeOf(r, it.id)
     const go = () => { if (rg) host.reveal(it.file, rg.from, rg.to) }
-    const replyIn = h('input', { placeholder: 'Reply…', 'aria-label': 'Reply' })
+    const replyIn = h('input', { placeholder: t('Reply…'), 'aria-label': t('Reply') })
     replyIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && replyIn.value.trim()) { reply(r, it.id, replyIn.value, host.userName()); replyIn.value = '' } })
     return h('div', { class: `rcard ${it.kind} ${it.resolved ? 'resolved' : ''} ${it.id === focused ? 'focused' : ''}`, 'data-id': it.id },
-      h('div', { class: 'rhead', onclick: go, title: rg ? 'Show in the editor' : 'The text it referred to was deleted' },
+      h('div', { class: 'rhead', onclick: go, title: rg ? t('Show in the editor') : t('The text it referred to was deleted') },
         h('span', { class: 'rkind' }, it.kind === 'comment' ? '💬' : '✎'),
         h('span', { class: 'rloc' }, it.file), h('span', { class: 'muted small' }, ` · ${it.by} · ${when(it.at)}`)),
       it.kind === 'comment'
         ? h('div', {}, h('div', { class: 'rquote' }, it.quote.slice(0, 300)), h('div', { class: 'rtext' }, it.text))
-        : h('div', { class: 'rsuggest' }, h('del', {}, it.quote.slice(0, 500) || '(insert here)'), ' → ', h('ins', {}, it.text.slice(0, 500) || '(delete)')),
-      it.resolved ? h('div', { class: 'muted small' }, it.outcome ? `Suggestion ${it.outcome}` : 'Resolved') : null,
+        : h('div', { class: 'rsuggest' }, h('del', {}, it.quote.slice(0, 500) || t('(insert here)')), ' → ', h('ins', {}, it.text.slice(0, 500) || t('(delete)'))),
+      it.resolved ? h('div', { class: 'muted small' }, it.outcome ? (it.outcome === 'accepted' ? t('Suggestion accepted') : t('Suggestion rejected')) : t('Resolved')) : null,
       ...it.replies.map((rp) => h('div', { class: 'rreply' }, h('b', {}, String(rp.by).slice(0, 64)), ` ${rp.text}`, h('span', { class: 'muted small' }, ` · ${when(rp.at)}`))),
       host.writable ? h('div', { class: 'ractions' },
-        it.resolved ? h('button', { onclick: () => setResolved(r, it.id, false) }, 'Reopen') : replyIn,
-        !it.resolved && it.kind === 'suggestion' ? h('button', { class: 'primary', onclick: () => { const m = accept(r, it.id); if (m && m !== 'cancelled') alert(m) } }, 'Accept') : null,
-        !it.resolved && it.kind === 'suggestion' ? h('button', { onclick: () => setResolved(r, it.id, true, 'rejected') }, 'Reject') : null,
-        !it.resolved && it.kind === 'comment' ? h('button', { onclick: () => setResolved(r, it.id, true) }, 'Resolve') : null,
-        h('button', { class: 'icon', title: 'Delete', 'aria-label': 'Delete', onclick: () => { if (confirm('Delete this for everyone?')) r.review.delete(it.id) } }, '✕')) : null)
+        it.resolved ? h('button', { onclick: () => setResolved(r, it.id, false) }, t('Reopen')) : replyIn,
+        !it.resolved && it.kind === 'suggestion' ? h('button', { class: 'primary', onclick: () => { const m = accept(r, it.id); if (m && m !== 'cancelled') alert(m) } }, t('Accept')) : null,
+        !it.resolved && it.kind === 'suggestion' ? h('button', { onclick: () => setResolved(r, it.id, true, 'rejected') }, t('Reject')) : null,
+        !it.resolved && it.kind === 'comment' ? h('button', { onclick: () => setResolved(r, it.id, true) }, t('Resolve')) : null,
+        h('button', { class: 'icon', title: t('Delete'), 'aria-label': t('Delete'), onclick: () => { if (confirm(t('Delete this for everyone?'))) r.review.delete(it.id) } }, '✕')) : null)
   }
 
   function render() {
     const items = allItems(r).filter((i) => showResolved || !i.resolved).sort((a, b) => a.file.localeCompare(b.file) || (rangeOf(r, a.id)?.from ?? 0) - (rangeOf(r, b.id)?.from ?? 0))
     list.replaceChildren(...(items.length ? items.map(card)
       : [h('p', { class: 'muted small', style: 'padding: 8px 10px' }, host.writable
-        ? 'No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.'
-        : 'No open comments or suggestions.')]))
+        ? t('No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.')
+        : t('No open comments or suggestions.'))]))
   }
 
   r.review.observeDeep(() => render())

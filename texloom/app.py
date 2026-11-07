@@ -34,6 +34,7 @@ from . import __version__, autostart, registry
 from .cli import DEFAULT_CONFIG, clone_project, load_config, new_project, peek, run, update_config
 from .crypto import Keys
 from .daemon import CURRENT, FOLDER, Daemon, FolderProblem, FolderTag
+from .i18n import _, ngettext
 
 log = logging.getLogger("texloom")
 ICON = Path(__file__).with_name("assets") / "icon.png"
@@ -110,29 +111,33 @@ class Activity(logging.Handler):
 GREEN, AMBER, RED, GREY = "#2e7d32", "#b26a00", "#b3261e", "#75736c"
 
 
+def red(text: str) -> str:
+    return f"<span style='color:{RED}'>{text}</span>"
+
+
 def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
     """(short status, colour, longer explanation) for a folder."""
     st = engine.daemon.states.get(d)
     if engine.daemon.paused:
-        return "Paused", GREY, "Syncing is paused for all folders."
+        return _("Paused"), GREY, _("Syncing is paused for all folders.")
     if st is None:
-        return "Starting…", GREY, ""
+        return _("Starting…"), GREY, ""
     if st.problem:
-        return "Not syncing", RED, st.problem
+        return _("Not syncing"), RED, st.problem
     r = st.replica
     if r is None:
-        return "Starting…", GREY, ""
+        return _("Starting…"), GREY, ""
     if not r.connected.is_set():
-        return "Offline", AMBER, "Can't reach the server. Changes here are kept and sent when it's back."
+        return _("Offline"), AMBER, _("Can't reach the server. Changes here are kept and sent when it's back.")
     if not r.synced.is_set():
-        return "Catching up…", AMBER, ""
+        return _("Catching up…"), AMBER, ""
     blobs = r.dir / "blobs-pending"
-    pending = len(r.outbox) + (sum(1 for _ in blobs.iterdir()) if blobs.is_dir() else 0)
+    pending = len(r.outbox) + (sum(1 for _f in blobs.iterdir()) if blobs.is_dir() else 0)
     if pending:
-        return f"Sending {pending} change{'s' if pending != 1 else ''}…", AMBER, ""
+        return ngettext(pending, "Sending {n} change…", "Sending {n} changes…", n=pending), AMBER, ""
     if not r.keys.writable:
-        return "Up to date (read-only)", GREEN, "This link can read but not change the project: edits here aren't shared."
-    return "Up to date", GREEN, ""
+        return _("Up to date (read-only)"), GREEN, _("This link can read but not change the project: edits here aren't shared.")
+    return _("Up to date"), GREEN, ""
 
 
 def project_name(d: Path, engine: Engine) -> str:
@@ -192,25 +197,25 @@ class ProgramsDialog(QtWidgets.QDialog):
     def __init__(self, engine: Engine, d: Path, parent=None) -> None:
         super().__init__(parent)
         self.engine, self.d, self.found = engine, d, []
-        self.setWindowTitle("Lines that run programs")
+        self.setWindowTitle(_("Lines that run programs"))
         self.setMinimumSize(640, 360)
         lay = QtWidgets.QVBoxLayout(self)
-        intro = QtWidgets.QLabel("With “Anything the document asks”, these lines run programs on this computer when "
-                                 "it compiles. Only lines you allow here run; a new or changed line waits for you "
-                                 "(that compile runs without it, and the log says so).")
+        intro = QtWidgets.QLabel(_("With “Anything the document asks”, these lines run programs on this computer when "
+                                   "it compiles. Only lines you allow here run; a new or changed line waits for you "
+                                   "(that compile runs without it, and the log says so)."))
         intro.setWordWrap(True)
         lay.addWidget(intro)
         self.view = QtWidgets.QTreeWidget()
-        self.view.setHeaderLabels(["", "Where", "What", "Line"])
+        self.view.setHeaderLabels(["", _("Where"), _("What"), _("Line")])
         self.view.setRootIsDecorated(False)
         lay.addWidget(self.view, 1)
-        warn = QtWidgets.QLabel("Anyone with an edit link can change these lines, and TeX macros can hide a command "
-                                "from this list, so allow this only for projects whose editors you trust.")
+        warn = QtWidgets.QLabel(_("Anyone with an edit link can change these lines, and TeX macros can hide a command "
+                                  "from this list, so allow this only for projects whose editors you trust."))
         warn.setWordWrap(True)
         warn.setStyleSheet(f"color: {AMBER}")
         lay.addWidget(warn)
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
-        self.ok = bb.addButton("Allow these lines", QtWidgets.QDialogButtonBox.AcceptRole)
+        self.ok = bb.addButton(_("Allow these lines"), QtWidgets.QDialogButtonBox.AcceptRole)
         self.ok.setEnabled(False)
         self.ok.clicked.connect(self.allow)
         bb.rejected.connect(self.reject)
@@ -219,17 +224,17 @@ class ProgramsDialog(QtWidgets.QDialog):
 
     def loaded(self, res, err) -> None:
         if err:
-            self.view.addTopLevelItem(QtWidgets.QTreeWidgetItem(["", "", f"Couldn’t read the project: {err}", ""]))
+            self.view.addTopLevelItem(QtWidgets.QTreeWidgetItem(["", "", _("Couldn’t read the project: {err}", err=err), ""]))
             return
         self.found, allowed_keys = res
         for f in self.found:
             new = f.key not in allowed_keys
-            it = QtWidgets.QTreeWidgetItem(["new" if new else "allowed", f"{f.path}:{f.line}", f.what, f.text])
+            it = QtWidgets.QTreeWidgetItem([_("new") if new else _("allowed"), f"{f.path}:{f.line}", f.what, f.text])
             if new:
                 it.setForeground(0, QtGui.QColor(AMBER))
             self.view.addTopLevelItem(it)
         if not self.found:
-            self.view.addTopLevelItem(QtWidgets.QTreeWidgetItem(["", "", "No lines in this project ask to run programs.", ""]))
+            self.view.addTopLevelItem(QtWidgets.QTreeWidgetItem(["", "", _("No lines in this project ask to run programs."), ""]))
         for i in range(3):
             self.view.resizeColumnToContents(i)
         self.ok.setEnabled(bool(self.found))
@@ -258,7 +263,7 @@ async def create_personal(engine: Engine, d: Path, name: str) -> str:
     st = engine.daemon.states.get(d)
     r = st.replica if st else None
     if r is None or not r.connected.is_set():
-        raise FolderProblem("this folder isn't connected right now: try again in a moment")
+        raise FolderProblem(_("this folder isn't connected right now: try again in a moment"))
     pub, grant, personal = r.keys.personal(name)
     at = int(time.time() * 1000)
     me = load_config(d).get("name") or f"TeXLoom app on {platform.node().split('.')[0]}"
@@ -272,9 +277,11 @@ async def create_personal(engine: Engine, d: Path, name: str) -> str:
 
 
 def mailto(link: str, project: str, who: str) -> QtCore.QUrl:
-    body = (f"Hi {who},\n\nYou’re invited to edit “{project}” on TeXLoom. Open this link in your browser:\n\n{link}\n\n"
-            "This link is for you only: please don’t forward it. Anyone who has it can read the project and change it as you.")
-    return QtCore.QUrl(f"mailto:?subject={quote(f'Invitation to edit “{project}” on TeXLoom')}&body={quote(body)}")
+    body = _("Hi {who},\n\nYou’re invited to edit “{project}” on TeXLoom. Open this link in your browser:\n\n{link}\n\n"
+             "This link is for you only: please don’t forward it. Anyone who has it can read the project and change it as you.",
+             who=who, project=project, link=link)
+    subject = _("Invitation to edit “{project}” on TeXLoom", project=project)
+    return QtCore.QUrl(f"mailto:?subject={quote(subject)}&body={quote(body)}")
 
 
 class LinksDialog(QtWidgets.QDialog):
@@ -282,7 +289,7 @@ class LinksDialog(QtWidgets.QDialog):
 
     def __init__(self, d: Path, parent=None, engine: Engine | None = None, project: str = "") -> None:
         super().__init__(parent)
-        self.setWindowTitle("Links")
+        self.setWindowTitle(_("Links"))
         self.setMinimumWidth(600)
         keys, server = Keys.from_link(load_config(d)["link"])
         lay = QtWidgets.QVBoxLayout(self)
@@ -293,8 +300,8 @@ class LinksDialog(QtWidgets.QDialog):
             field = QtWidgets.QLineEdit(text)
             field.setReadOnly(True)
             field.setCursorPosition(0)
-            copy = QtWidgets.QPushButton("Copy")
-            copy.clicked.connect(lambda: (QtWidgets.QApplication.clipboard().setText(text), copy.setText("Copied")))
+            copy = QtWidgets.QPushButton(_("Copy"))
+            copy.clicked.connect(lambda: (QtWidgets.QApplication.clipboard().setText(text), copy.setText(_("Copied"))))
             r.addWidget(field, 1)
             r.addWidget(copy)
             lay.addLayout(r)
@@ -304,20 +311,20 @@ class LinksDialog(QtWidgets.QDialog):
                 n.setStyleSheet(f"color: {GREY}")
                 lay.addWidget(n)
 
-        row("Read-only link", keys.link(server, write=False), "Anyone with it can read the project.")
+        row(_("Read-only link"), keys.link(server, write=False), _("Anyone with it can read the project."))
         if keys.seed:
-            row("Your owner link", keys.link(server, write=True),
-                "Full control, including making and revoking people’s links: keep it to yourself.")
-            lay.addWidget(QtWidgets.QLabel("<b>Edit links for others</b>"))
-            hint = QtWidgets.QLabel("Each person (or group) gets their own link, so you can later revoke one without "
-                                    "affecting the others (revoking is in the web app: Open in browser → Share).")
+            row(_("Your owner link"), keys.link(server, write=True),
+                _("Full control, including making and revoking people’s links: keep it to yourself."))
+            lay.addWidget(QtWidgets.QLabel(f"<b>{_('Edit links for others')}</b>"))
+            hint = QtWidgets.QLabel(_("Each person (or group) gets their own link, so you can later revoke one without "
+                                      "affecting the others (revoking is in the web app: Open in browser → Share)."))
             hint.setWordWrap(True)
             hint.setStyleSheet(f"color: {GREY}")
             lay.addWidget(hint)
             make = QtWidgets.QHBoxLayout()
             who = QtWidgets.QLineEdit()
-            who.setPlaceholderText("Name, e.g. Alice, or Lab group")
-            create = QtWidgets.QPushButton("Create link")
+            who.setPlaceholderText(_("Name, e.g. Alice, or Lab group"))
+            create = QtWidgets.QPushButton(_("Create link"))
             make.addWidget(who, 1)
             make.addWidget(create)
             lay.addLayout(make)
@@ -327,9 +334,9 @@ class LinksDialog(QtWidgets.QDialog):
             def show(name: str, link: str) -> None:
                 r = QtWidgets.QHBoxLayout()
                 r.addWidget(QtWidgets.QLabel(name), 1)
-                c = QtWidgets.QPushButton("Copy link")
-                c.clicked.connect(lambda: (QtWidgets.QApplication.clipboard().setText(link), c.setText("Copied")))
-                m = QtWidgets.QPushButton("Email…")
+                c = QtWidgets.QPushButton(_("Copy link"))
+                c.clicked.connect(lambda: (QtWidgets.QApplication.clipboard().setText(link), c.setText(_("Copied"))))
+                m = QtWidgets.QPushButton(_("Email…"))
                 m.clicked.connect(lambda: QtGui.QDesktopServices.openUrl(mailto(link, project or d.name, name)))
                 r.addWidget(c)
                 r.addWidget(m)
@@ -348,7 +355,7 @@ class LinksDialog(QtWidgets.QDialog):
             def done(name: str, link, err) -> None:
                 create.setEnabled(True)
                 if err:
-                    QtWidgets.QMessageBox.warning(self, "Create link", f"Couldn’t create it: {err}")
+                    QtWidgets.QMessageBox.warning(self, _("Create link"), _("Couldn’t create it: {err}", err=err))
                     return
                 who.clear()
                 show(name[:60], link)
@@ -356,8 +363,8 @@ class LinksDialog(QtWidgets.QDialog):
             create.clicked.connect(go)
             who.returnPressed.connect(go)
         elif keys.member:
-            row(f"Your personal edit link (as {keys.member[2]})", keys.link(server, write=True),
-                "Yours only: don’t pass it on. For others, ask the project’s owner for a link.")
+            row(_("Your personal edit link (as {name})", name=keys.member[2]), keys.link(server, write=True),
+                _("Yours only: don’t pass it on. For others, ask the project’s owner for a link."))
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
@@ -368,19 +375,19 @@ class JoinDialog(QtWidgets.QDialog):
     def __init__(self, engine: Engine, parent=None, link: str = "", from_web: bool = False) -> None:
         super().__init__(parent)
         self.engine, self.info = engine, None
-        self.setWindowTitle("Join a project")
+        self.setWindowTitle(_("Join a project"))
         self.setMinimumWidth(560)
         lay = QtWidgets.QVBoxLayout(self)
         if from_web:
-            warn = QtWidgets.QLabel("A web page asked TeXLoom to add this project. Join only if you expected it.")
+            warn = QtWidgets.QLabel(_("A web page asked TeXLoom to add this project. Join only if you expected it."))
             warn.setWordWrap(True)
             warn.setStyleSheet(f"color: {AMBER}")
             lay.addWidget(warn)
-        lay.addWidget(QtWidgets.QLabel("Project link (from the Share dialog, or an email):"))
+        lay.addWidget(QtWidgets.QLabel(_("Project link (from the Share dialog, or an email):")))
         row = QtWidgets.QHBoxLayout()
         self.link = QtWidgets.QLineEdit(link)
         self.link.setPlaceholderText("https://…/#p=…")
-        self.check = QtWidgets.QPushButton("Check")
+        self.check = QtWidgets.QPushButton(_("Check"))
         self.check.clicked.connect(self.do_peek)
         row.addWidget(self.link, 1)
         row.addWidget(self.check)
@@ -388,24 +395,24 @@ class JoinDialog(QtWidgets.QDialog):
         self.what = QtWidgets.QLabel("")
         self.what.setWordWrap(True)
         lay.addWidget(self.what)
-        lay.addWidget(QtWidgets.QLabel("Folder on this computer:"))
+        lay.addWidget(QtWidgets.QLabel(_("Folder on this computer:")))
         frow = QtWidgets.QHBoxLayout()
         self.folder = QtWidgets.QLineEdit("")
-        choose = QtWidgets.QPushButton("Choose…")
+        choose = QtWidgets.QPushButton(_("Choose…"))
         choose.clicked.connect(self.choose)
         frow.addWidget(self.folder, 1)
         frow.addWidget(choose)
         lay.addLayout(frow)
-        self.compile = QtWidgets.QCheckBox("Compile with my own TeX (latexmk) when files change")
+        self.compile = QtWidgets.QCheckBox(_("Compile with my own TeX (latexmk) when files change"))
         lay.addWidget(self.compile)
-        note = QtWidgets.QLabel("Collaborators’ files will be written to this folder. TeXLoom won’t write files that "
-                                "LaTeX tools run as programs, but compile it with your own tools only if you trust "
-                                "everyone who can edit the project.")
+        note = QtWidgets.QLabel(_("Collaborators’ files will be written to this folder. TeXLoom won’t write files that "
+                                  "LaTeX tools run as programs, but compile it with your own tools only if you trust "
+                                  "everyone who can edit the project."))
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {GREY}")
         lay.addWidget(note)
         self.buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
-        self.join = self.buttons.addButton("Join", QtWidgets.QDialogButtonBox.AcceptRole)
+        self.join = self.buttons.addButton(_("Join"), QtWidgets.QDialogButtonBox.AcceptRole)
         self.join.setEnabled(False)
         self.join.clicked.connect(self.do_join)
         self.buttons.rejected.connect(self.reject)
@@ -416,7 +423,7 @@ class JoinDialog(QtWidgets.QDialog):
 
     def choose(self) -> None:
         start = str(Path(self.folder.text()).parent if self.folder.text() else default_parent())
-        d = QtWidgets.QFileDialog.getExistingDirectory(self, "Put the project in…", start)
+        d = QtWidgets.QFileDialog.getExistingDirectory(self, _("Put the project in…"), start)
         if d:
             name = Path(self.folder.text()).name if self.folder.text() else slug(self.info["name"] if self.info else "project")
             self.folder.setText(str(Path(d) / name))
@@ -426,20 +433,23 @@ class JoinDialog(QtWidgets.QDialog):
         try:
             Keys.from_link(link)
         except Exception as e:  # noqa: BLE001
-            self.what.setText(f"<span style='color:{RED}'>That isn't a TeXLoom project link ({e}).</span>")
+            self.what.setText(red(_("That isn't a TeXLoom project link ({e}).", e=e)))
             return
-        self.what.setText("Looking it up…")
+        self.what.setText(_("Looking it up…"))
         self.check.setEnabled(False)
         self.engine.submit(peek(link), self.peeked)
 
     def peeked(self, info, err) -> None:
         self.check.setEnabled(True)
         if err:
-            self.what.setText(f"<span style='color:{RED}'>{err}</span>")
+            self.what.setText(red(str(err)))
             return
         self.info = info
-        access = (f"edit access as {info['member']}" if info["member"] else "edit access") if info["writable"] else "read-only"
-        self.what.setText(f"<b>“{info['name'] or 'Untitled'}”</b> — {access}, {info['files']} file(s), on {info['server']}")
+        access = ((_("edit access as {member}", member=info["member"]) if info["member"] else _("edit access"))
+                  if info["writable"] else _("read-only"))
+        self.what.setText(ngettext(info["files"], "<b>“{name}”</b> — {access}, {n} file(s), on {server}",
+                                   "<b>“{name}”</b> — {access}, {n} file(s), on {server}",
+                                   name=info["name"] or _("Untitled"), access=access, n=info["files"], server=info["server"]))
         if not self.folder.text():
             self.folder.setText(str(default_parent() / slug(info["name"] or "project")))
         self.join.setEnabled(True)
@@ -449,10 +459,10 @@ class JoinDialog(QtWidgets.QDialog):
         if not d.is_absolute():
             d = default_parent() / d
         if d.exists() and (not d.is_dir() or any(d.iterdir())):
-            QtWidgets.QMessageBox.warning(self, "Join", f"{d} isn't empty. Choose a new or empty folder.")
+            QtWidgets.QMessageBox.warning(self, _("Join"), _("{d} isn't empty. Choose a new or empty folder.", d=d))
             return
         self.join.setEnabled(False)
-        self.what.setText("Downloading the project…")
+        self.what.setText(_("Downloading the project…"))
         link, compile_ = self.link.text().strip(), self.compile.isChecked()
 
         async def go():
@@ -464,7 +474,7 @@ class JoinDialog(QtWidgets.QDialog):
 
     def joined(self, d: Path, err) -> None:
         if err:
-            self.what.setText(f"<span style='color:{RED}'>Couldn’t join: {err}</span>")
+            self.what.setText(red(_("Couldn’t join: {err}", err=err)))
             self.join.setEnabled(True)
             return
         self.engine.call(self.engine.daemon.poke)
@@ -477,35 +487,35 @@ class ShareFolderDialog(QtWidgets.QDialog):
     def __init__(self, engine: Engine, parent=None) -> None:
         super().__init__(parent)
         self.engine = engine
-        self.setWindowTitle("Share a folder as a new project")
+        self.setWindowTitle(_("Share a folder as a new project"))
         self.setMinimumWidth(560)
         lay = QtWidgets.QFormLayout(self)
         row = QtWidgets.QHBoxLayout()
         self.folder = QtWidgets.QLineEdit()
-        choose = QtWidgets.QPushButton("Choose…")
+        choose = QtWidgets.QPushButton(_("Choose…"))
         choose.clicked.connect(self.choose)
         row.addWidget(self.folder, 1)
         row.addWidget(choose)
-        lay.addRow("Folder", row)
+        lay.addRow(_("Folder"), row)
         self.name = QtWidgets.QLineEdit()
-        lay.addRow("Project name", self.name)
+        lay.addRow(_("Project name"), self.name)
         self.server = QtWidgets.QLineEdit(known_server())
         self.server.setPlaceholderText("https://your.server")
-        lay.addRow("Server", self.server)
+        lay.addRow(_("Server"), self.server)
         self.code = QtWidgets.QLineEdit()
-        self.code.setPlaceholderText("only if the server asks for one")
-        lay.addRow("Creation code", self.code)
+        self.code.setPlaceholderText(_("only if the server asks for one"))
+        lay.addRow(_("Creation code"), self.code)
         self.msg = QtWidgets.QLabel("")
         self.msg.setWordWrap(True)
         lay.addRow(self.msg)
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
-        self.go = bb.addButton("Share", QtWidgets.QDialogButtonBox.AcceptRole)
+        self.go = bb.addButton(_("Share"), QtWidgets.QDialogButtonBox.AcceptRole)
         self.go.clicked.connect(self.do_share)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
 
     def choose(self) -> None:
-        d = QtWidgets.QFileDialog.getExistingDirectory(self, "Folder to share", str(Path.home()))
+        d = QtWidgets.QFileDialog.getExistingDirectory(self, _("Folder to share"), str(Path.home()))
         if d:
             self.folder.setText(d)
             if not self.name.text():
@@ -514,19 +524,19 @@ class ShareFolderDialog(QtWidgets.QDialog):
     def do_share(self) -> None:
         d, server = Path(self.folder.text()).expanduser(), self.server.text().strip().rstrip("/")
         if not d.is_dir():
-            self.msg.setText(f"<span style='color:{RED}'>Choose an existing folder.</span>")
+            self.msg.setText(red(_("Choose an existing folder.")))
             return
         if not server.startswith(("https://", "http://")):
-            self.msg.setText(f"<span style='color:{RED}'>The server address starts with https://</span>")
+            self.msg.setText(red(_("The server address starts with https://")))
             return
         self.go.setEnabled(False)
-        self.msg.setText("Uploading…")
+        self.msg.setText(_("Uploading…"))
         self.engine.submit(new_project(d, server, self.name.text().strip(), self.code.text().strip()),
                            lambda keys, err: self.done_(err))
 
     def done_(self, err) -> None:
         if err:
-            self.msg.setText(f"<span style='color:{RED}'>Couldn’t share it: {err}</span>")
+            self.msg.setText(red(_("Couldn’t share it: {err}", err=err)))
             self.go.setEnabled(True)
             return
         self.engine.call(self.engine.daemon.poke)
@@ -554,15 +564,15 @@ class Window(QtWidgets.QMainWindow):
         tb = self.addToolBar("main")
         tb.setMovable(False)
         tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        tb.addAction("Join project…", self.join)
-        tb.addAction("Share a folder…", self.share_folder)
-        tb.addAction("Add existing folder…", self.add_existing)
+        tb.addAction(_("Join project…"), self.join)
+        tb.addAction(_("Share a folder…"), self.share_folder)
+        tb.addAction(_("Add existing folder…"), self.add_existing)
         tb.addSeparator()
-        self.pause_act = tb.addAction("Pause syncing", self.toggle_pause)
+        self.pause_act = tb.addAction(_("Pause syncing"), self.toggle_pause)
         spacer = QtWidgets.QWidget()
         spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         tb.addWidget(spacer)
-        self.login_box = QtWidgets.QCheckBox("Start at login")
+        self.login_box = QtWidgets.QCheckBox(_("Start at login"))
         self.login_box.setChecked(autostart.status() != "off")
         self.login_box.toggled.connect(self.set_autostart)
         tb.addWidget(self.login_box)
@@ -598,39 +608,39 @@ class Window(QtWidgets.QMainWindow):
         for x in (self.title, self.path_lbl, self.status_lbl):
             lay.addWidget(x)
         btns = QtWidgets.QHBoxLayout()
-        self.b_open = QtWidgets.QPushButton("Open folder")
+        self.b_open = QtWidgets.QPushButton(_("Open folder"))
         self.b_open.clicked.connect(lambda: self.current() and open_path(self.current()))
-        self.b_web = QtWidgets.QPushButton("Open in browser")
+        self.b_web = QtWidgets.QPushButton(_("Open in browser"))
         self.b_web.clicked.connect(self.open_web)
-        self.b_ro = QtWidgets.QPushButton("Links…")
+        self.b_ro = QtWidgets.QPushButton(_("Links…"))
         self.b_ro.clicked.connect(lambda: self.current() and LinksDialog(
             self.current(), self, self.engine, project_name(self.current(), self.engine)).exec())
-        self.b_leave = QtWidgets.QPushButton("Leave…")
+        self.b_leave = QtWidgets.QPushButton(_("Leave…"))
         self.b_leave.clicked.connect(self.leave)
         for b in (self.b_open, self.b_web, self.b_ro):
             btns.addWidget(b)
         btns.addStretch(1)
         btns.addWidget(self.b_leave)
         lay.addLayout(btns)
-        self.c_compile = QtWidgets.QCheckBox("Compile with my own TeX (latexmk) when files change")
+        self.c_compile = QtWidgets.QCheckBox(_("Compile with my own TeX (latexmk) when files change"))
         self.c_compile.clicked.connect(lambda on: self.set_option("compile", on))
-        self.c_git = QtWidgets.QCheckBox("Keep this folder’s git repository in step (commit, pull, push)")
+        self.c_git = QtWidgets.QCheckBox(_("Keep this folder’s git repository in step (commit, pull, push)"))
         self.c_git.clicked.connect(lambda on: self.set_option("git", on))
         lay.addWidget(self.c_compile)
         lay.addWidget(self.c_git)
         prow = QtWidgets.QHBoxLayout()
-        prow.addWidget(QtWidgets.QLabel("Running programs when compiling:"))
+        prow.addWidget(QtWidgets.QLabel(_("Running programs when compiling:")))
         self.p_mode = QtWidgets.QComboBox()
-        self.p_mode.addItem("Never (safest)", False)
-        self.p_mode.addItem("TeX Live’s safe list only (e.g. epstopdf)", "restricted")
-        self.p_mode.addItem("Anything the document asks, once I allow it (e.g. minted)", True)
+        self.p_mode.addItem(_("Never (safest)"), False)
+        self.p_mode.addItem(_("TeX Live’s safe list only (e.g. epstopdf)"), "restricted")
+        self.p_mode.addItem(_("Anything the document asks, once I allow it (e.g. minted)"), True)
         self.p_mode.activated.connect(self.set_programs)
-        self.p_review = QtWidgets.QPushButton("Review lines…")
+        self.p_review = QtWidgets.QPushButton(_("Review lines…"))
         self.p_review.clicked.connect(lambda: self.current() and ProgramsDialog(self.engine, self.current(), self).exec())
         prow.addWidget(self.p_mode, 1)
         prow.addWidget(self.p_review)
         lay.addLayout(prow)
-        lay.addWidget(QtWidgets.QLabel("Activity"))
+        lay.addWidget(QtWidgets.QLabel(_("Activity")))
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(300)
@@ -662,7 +672,7 @@ class Window(QtWidgets.QMainWindow):
             self.list.setCurrentRow(idx)
         problems = 0
         for i, d in enumerate(fs):
-            short, colour, _ = describe(d, self.engine)
+            short, colour, _longer = describe(d, self.engine)
             problems += colour == RED
             it = self.list.item(i)
             name = project_name(d, self.engine)
@@ -671,10 +681,11 @@ class Window(QtWidgets.QMainWindow):
             it.setToolTip(str(d))
         self.detail.setVisible(bool(fs))
         self.statusBar().showMessage(
-            "Paused" if self.engine.daemon.paused else
-            f"{len(fs)} folder{'s' if len(fs) != 1 else ''}" + (f" · {problems} not syncing" if problems else "") if fs else
-            "No folders yet: Join project… or Share a folder…")
-        self.pause_act.setText("Resume syncing" if self.engine.daemon.paused else "Pause syncing")
+            _("Paused") if self.engine.daemon.paused else
+            ngettext(len(fs), "{n} folder", "{n} folders", n=len(fs))
+            + (" · " + ngettext(problems, "{n} not syncing", "{n} not syncing", n=problems) if problems else "") if fs else
+            _("No folders yet: Join project… or Share a folder…"))
+        self.pause_act.setText(_("Resume syncing") if self.engine.daemon.paused else _("Pause syncing"))
         self.show_detail()
 
     def show_detail(self) -> None:
@@ -697,7 +708,7 @@ class Window(QtWidgets.QMainWindow):
         is_git = (d / ".git").exists()
         self.c_git.setEnabled(is_git)
         self.c_git.setChecked(bool(cfg.get("git")) and is_git)
-        self.c_git.setToolTip("" if is_git else "This folder isn't a git repository (run `git init` in it first).")
+        self.c_git.setToolTip("" if is_git else _("This folder isn't a git repository (run `git init` in it first)."))
         text = "\n".join(self.activity.lines.get(str(d), []))
         if text != self.log.toPlainText():
             self.log.setPlainText(text)
@@ -711,30 +722,32 @@ class Window(QtWidgets.QMainWindow):
 
     def add_existing(self) -> None:
         """A folder already set up with texloom (e.g. left earlier, or cloned on the command line)."""
-        d = QtWidgets.QFileDialog.getExistingDirectory(self, "A texloom folder", str(default_parent()))
+        d = QtWidgets.QFileDialog.getExistingDirectory(self, _("A texloom folder"), str(default_parent()))
         if not d:
             return
         d = Path(d)
         if not (d / ".texloom" / "config.json").is_file():
-            QtWidgets.QMessageBox.warning(self, "Add folder", f"{d} isn’t a TeXLoom folder. To join a project, use "
-                                          "Join project…; to share this folder as a new project, Share a folder….")
+            QtWidgets.QMessageBox.warning(self, _("Add folder"), _(
+                "{d} isn’t a TeXLoom folder. To join a project, use "
+                "Join project…; to share this folder as a new project, Share a folder….", d=d))
             return
         if not registry.add(d):
-            self.statusBar().showMessage("That folder is already on the list.", 4000)
+            self.statusBar().showMessage(_("That folder is already on the list."), 4000)
         self.engine.call(self.engine.daemon.poke)
         self.refresh()
 
     def share_folder(self) -> None:
         if ShareFolderDialog(self.engine, self).exec():
             self.refresh()
-            QtWidgets.QMessageBox.information(self, "Shared", "The folder is now a TeXLoom project. Open it in the "
-                                              "browser and use Share there to invite people.")
+            QtWidgets.QMessageBox.information(self, _("Shared"), _("The folder is now a TeXLoom project. Open it in the "
+                                                                "browser and use Share there to invite people."))
 
     def leave(self) -> None:
         d = self.current()
         if d and QtWidgets.QMessageBox.question(
-                self, "Leave", f"Stop syncing “{project_name(d, self.engine)}”?\n\nThe folder and its files stay "
-                f"where they are ({d}); you can delete them yourself.") == QtWidgets.QMessageBox.Yes:
+                self, _("Leave"), _("Stop syncing “{project}”?\n\nThe folder and its files stay "
+                                    "where they are ({d}); you can delete them yourself.",
+                                    project=project_name(d, self.engine), d=d)) == QtWidgets.QMessageBox.Yes:
             registry.remove(d)
             self.engine.call(self.engine.daemon.poke)
             self.refresh()
@@ -751,9 +764,9 @@ class Window(QtWidgets.QMainWindow):
             return
         mode = self.p_mode.itemData(index)
         if mode is True and QtWidgets.QMessageBox.question(
-                self, "Running programs", "Compiles may then run programs that the document asks for, on this "
+                self, _("Running programs"), _("Compiles may then run programs that the document asks for, on this "
                 "computer, once you allow each line (Review lines…).\n\nAnyone with an edit link writes the "
-                "document. Turn this on only for projects whose editors you trust.") != QtWidgets.QMessageBox.Yes:
+                "document. Turn this on only for projects whose editors you trust.")) != QtWidgets.QMessageBox.Yes:
             self.show_detail()
             return
         self.set_option("shell_escape", mode)
@@ -776,7 +789,7 @@ class Window(QtWidgets.QMainWindow):
             msg = autostart.enable(app=True) if on else autostart.disable()
             self.statusBar().showMessage(msg, 6000)
         except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(self, "Start at login", f"Couldn’t change it: {e}")
+            QtWidgets.QMessageBox.warning(self, _("Start at login"), _("Couldn’t change it: {e}", e=e))
 
     def show_window(self) -> None:
         self.show()
@@ -895,12 +908,12 @@ def main(argv: list[str] | None = None) -> None:
     if QtWidgets.QSystemTrayIcon.isSystemTrayAvailable():
         tray = QtWidgets.QSystemTrayIcon(QtGui.QIcon(str(ICON)))
         menu = QtWidgets.QMenu()
-        menu.addAction("Open TeXLoom", win.show_window)
-        menu.addAction("Join project…", lambda: win.join())
+        menu.addAction(_("Open TeXLoom"), win.show_window)
+        menu.addAction(_("Join project…"), lambda: win.join())
         menu.addSeparator()
-        pause = menu.addAction("Pause syncing", win.toggle_pause)
-        menu.aboutToShow.connect(lambda: pause.setText("Resume syncing" if engine.daemon.paused else "Pause syncing"))
-        menu.addAction("Quit TeXLoom", app.quit)
+        pause = menu.addAction(_("Pause syncing"), win.toggle_pause)
+        menu.aboutToShow.connect(lambda: pause.setText(_("Resume syncing") if engine.daemon.paused else _("Pause syncing")))
+        menu.addAction(_("Quit TeXLoom"), app.quit)
         tray.setContextMenu(menu)
         tray.setToolTip("TeXLoom")
         tray.activated.connect(lambda reason: win.show_window() if reason == QtWidgets.QSystemTrayIcon.Trigger else None)

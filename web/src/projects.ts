@@ -3,6 +3,7 @@
 import { forgetLocalCopy } from './replica'
 import { b64d } from './crypto'
 import { rememberFolder } from './foldersync'
+import { t, locale } from './i18n'
 
 export interface Recent {
   project: string // unique id (from the link)
@@ -89,11 +90,11 @@ export function latexTitle(src: string): string | undefined {
 
 export function whenOpened(at: number): string {
   const d = new Date(at), now = new Date()
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
   const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
   const diff = Math.round((day(now) - day(d)) / 86400000)
-  if (diff === 0) return `today ${time}`
-  if (diff === 1) return `yesterday ${time}`
-  if (diff < 7) return d.toLocaleDateString([], { weekday: 'long' })
-  return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })
+  if (diff === 0) return t('today {{time}}', { time })
+  if (diff === 1) return t('yesterday {{time}}', { time })
+  if (diff < 7) return d.toLocaleDateString(locale, { weekday: 'long' })
+  return d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })
 }

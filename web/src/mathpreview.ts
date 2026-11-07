@@ -6,6 +6,7 @@ import { StateField, type EditorState, type Extension, type Text } from '@codemi
 import { EditorView, showTooltip, type Tooltip } from '@codemirror/view'
 import type * as Y from 'yjs'
 import { COMMENT, envClose, envOpen, INLINE_MATH, MATH_OPEN, mathClose, spans } from './texscan'
+import { t } from './i18n'
 
 export interface MathSpan { from: number; to: number; tex: string; display: boolean }
 
@@ -129,7 +130,7 @@ let katex: Promise<KaTeX> | null = null
 const loadKatex = () => (katex ??= Promise.all([import('katex'), import('katex/dist/katex.min.css')]).then(([k]) => k.default))
 
 function render(k: KaTeX, el: HTMLElement, s: MathSpan, macros: Record<string, string>) {
-  if (s.tex.length > MAX_TEX) { el.textContent = 'Too long to preview.'; return }
+  if (s.tex.length > MAX_TEX) { el.textContent = t('Too long to preview.'); return }
   try {
     k.render(s.tex, el, {
       displayMode: s.display, throwOnError: false, trust: false, strict: 'ignore', output: 'html',
@@ -163,7 +164,7 @@ export function mathPreview(files: Y.Map<Y.Text>): Extension {
       const dom = document.createElement('div')
       dom.className = 'cm-math-preview'
       const body = dom.appendChild(document.createElement('div'))
-      loadKatex().then((k) => render(k, body, s, macros()), () => { body.textContent = 'Preview unavailable offline until loaded once.' })
+      loadKatex().then((k) => render(k, body, s, macros()), () => { body.textContent = t('Preview unavailable offline until loaded once.') })
       return { dom }
     },
   })

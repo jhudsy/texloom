@@ -3,6 +3,7 @@
 import type { Replica } from './replica'
 import { h } from './dom'
 import { mainFile } from './projectfiles'
+import { t, tn, locale } from './i18n'
 import { COMMENT, envClose, envOpen, INLINE_MATH, MATH_OPEN, mathClose, spans } from './texscan'
 
 export type Reveal = (file: string, from: number, to: number) => void
@@ -91,7 +92,7 @@ export function outline(r: Replica): Outline {
         pos = g?.end ?? re.lastIndex
         re.lastIndex = pos
         for (let i = text.indexOf('\n', lineAt); i >= 0 && i < m.index; i = text.indexOf('\n', i + 1)) { line++; lineAt = i + 1 }
-        headings.push({ level: LEVELS[m[1]], title: title || '(untitled)', file, offset: m.index, line, words: 0, total: 0 })
+        headings.push({ level: LEVELS[m[1]], title: title || t('(untitled)'), file, offset: m.index, line, words: 0, total: 0 })
         add(countWords(blankNonProse(g?.content ?? '')))
       } else {
         pos = re.lastIndex
@@ -123,14 +124,15 @@ export function createOutlinePanel(r: Replica, reveal: Reveal, selectionWords: (
   function refresh() {
     const o = outline(r)
     const sel = selectionWords()
-    count.textContent = `${o.words.toLocaleString()} words${sel ? ` · ${sel.toLocaleString()} selected` : ''}`
-    count.title = `Words of text in ${o.files.length} file${o.files.length === 1 ? '' : 's'} (from the main file through \\input/\\include). Maths, comments, code and labels aren’t counted.`
+    count.textContent = tn(o.words, '{{n}} word', '{{n}} words', { n: o.words.toLocaleString(locale) }) + (sel ? ` · ${tn(sel, '{{n}} selected', '{{n}} selected', { n: sel.toLocaleString(locale) })}` : '')
+    count.title = tn(o.files.length, 'Words of text in {{n}} file (from the main file through \\input/\\include). Maths, comments, code and labels aren’t counted.',
+      'Words of text in {{n}} files (from the main file through \\input/\\include). Maths, comments, code and labels aren’t counted.')
     const min = Math.min(...o.headings.map((x) => x.level))
     list.replaceChildren(...(o.headings.length ? o.headings.map((x) => h('li', {
       style: `padding-left: ${8 + (x.level - min) * 12}px`, class: `lvl${x.level - min}`, title: `${x.file}:${x.line}`,
       onclick: () => reveal(x.file, x.offset, x.offset),
-    }, h('span', { class: 'otitle' }, x.title), h('span', { class: 'muted small' }, x.total.toLocaleString())))
-      : [h('li', { class: 'muted small' }, 'No sections yet. \\section{…}, \\chapter{…} etc. appear here.')]))
+    }, h('span', { class: 'otitle' }, x.title), h('span', { class: 'muted small' }, x.total.toLocaleString(locale))))
+      : [h('li', { class: 'muted small' }, t('No sections yet. \\section{…}, \\chapter{…} etc. appear here.'))]))
   }
   const later = () => { clearTimeout(timer); timer = setTimeout(() => { if (el.isConnected && el.offsetParent) refresh() }, 600) }
   r.files.observeDeep(later)
@@ -144,16 +146,16 @@ export function createOutlinePanel(r: Replica, reveal: Reveal, selectionWords: (
 interface Hit { file: string; from: number; to: number; line: number; before: string; match: string; after: string }
 
 export function createSearchPanel(r: Replica, writable: boolean, reveal: Reveal): { el: HTMLElement; focus(seed?: string): void } {
-  const q = h('input', { type: 'search', placeholder: 'Search all files', 'aria-label': 'Search all files' })
-  const rep = h('input', { placeholder: 'Replace with', 'aria-label': 'Replace with', hidden: !writable })
+  const q = h('input', { type: 'search', placeholder: t('Search all files'), 'aria-label': t('Search all files') })
+  const rep = h('input', { placeholder: t('Replace with'), 'aria-label': t('Replace with'), hidden: !writable })
   const opt = (label: string, title: string) => {
     const b = h('button', { class: 'opt', title, 'aria-pressed': 'false', onclick: () => { b.classList.toggle('on'); b.setAttribute('aria-pressed', String(b.classList.contains('on'))); run() } }, label)
     return b
   }
-  const caseBtn = opt('Aa', 'Match case'), wordBtn = opt('ab', 'Whole words'), reBtn = opt('.*', 'Regular expression')
+  const caseBtn = opt('Aa', t('Match case')), wordBtn = opt('ab', t('Whole words')), reBtn = opt('.*', t('Regular expression'))
   const info = h('div', { class: 'muted small searchinfo' })
   const results = h('ul', { class: 'results' })
-  const replaceAllBtn = h('button', { hidden: !writable, onclick: () => replaceAll() }, 'Replace all')
+  const replaceAllBtn = h('button', { hidden: !writable, onclick: () => replaceAll() }, t('Replace all'))
   const el = h('div', { class: 'navpanel search' },
     h('div', { class: 'searchrow' }, q, caseBtn, wordBtn, reBtn),
     writable ? h('div', { class: 'searchrow' }, rep, replaceAllBtn) : null,
@@ -173,7 +175,7 @@ export function createSearchPanel(r: Replica, writable: boolean, reveal: Reveal)
     const re = pattern()
     hits = []
     q.classList.toggle('bad', !!q.value && !re)
-    if (!re) { results.replaceChildren(); info.textContent = q.value ? 'Invalid regular expression.' : ''; return }
+    if (!re) { results.replaceChildren(); info.textContent = q.value ? t('Invalid regular expression.') : ''; return }
     const files = [...r.files.keys()].sort()
     let capped = false
     for (const f of files) {
@@ -191,14 +193,16 @@ export function createSearchPanel(r: Replica, writable: boolean, reveal: Reveal)
       if (capped) break
     }
     const nFiles = new Set(hits.map((x) => x.file)).size
-    info.textContent = hits.length ? `${hits.length}${capped ? '+' : ''} match${hits.length === 1 ? '' : 'es'} in ${nFiles} file${nFiles === 1 ? '' : 's'}` : 'No matches.'
+    info.textContent = hits.length
+      ? tn(hits.length, '{{n}} match in {{files}}', '{{n}} matches in {{files}}', { n: `${hits.length}${capped ? '+' : ''}`, files: tn(nFiles, '{{n}} file', '{{n}} files') })
+      : t('No matches.')
     const rows: HTMLElement[] = []
     let last = ''
     for (const x of hits) {
       if (x.file !== last) { rows.push(h('li', { class: 'rfile' }, x.file)); last = x.file }
       rows.push(h('li', { class: 'hit', title: `${x.file}:${x.line}`, onclick: () => reveal(x.file, x.from, x.to) },
         h('span', { class: 'ln muted' }, String(x.line)), h('span', { class: 'ctx' }, x.before, h('mark', {}, x.match), x.after),
-        writable ? h('button', { class: 'icon', title: 'Replace this one', onclick: (e: Event) => { e.stopPropagation(); replaceOne(x) } }, '↺') : null))
+        writable ? h('button', { class: 'icon', title: t('Replace this one'), onclick: (e: Event) => { e.stopPropagation(); replaceOne(x) } }, '↺') : null))
     }
     results.replaceChildren(...rows)
   }
@@ -220,7 +224,8 @@ export function createSearchPanel(r: Replica, writable: boolean, reveal: Reveal)
   function replaceAll() {
     if (!hits.length) return
     const nFiles = new Set(hits.map((x) => x.file)).size
-    if (!confirm(`Replace ${hits.length} match${hits.length === 1 ? '' : 'es'} in ${nFiles} file${nFiles === 1 ? '' : 's'}? (Undo with History if needed.)`)) return
+    if (!confirm(tn(hits.length, 'Replace {{n}} match in {{files}}? (Undo with History if needed.)', 'Replace {{n}} matches in {{files}}? (Undo with History if needed.)',
+      { files: tn(nFiles, '{{n}} file', '{{n}} files') }))) return
     r.doc.transact(() => {
       for (const x of [...hits].sort((a, b) => a.file.localeCompare(b.file) || b.from - a.from)) {
         const yt = r.files.get(x.file)

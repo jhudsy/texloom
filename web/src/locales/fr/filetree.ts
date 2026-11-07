@@ -1,0 +1,28 @@
+import type { Catalog } from '../../i18n'
+const fr: Catalog = {
+  'New file in the selected folder': 'Nouveau fichier dans le dossier sélectionné',
+  '+ File': '+ Fichier',
+  'New folder in the selected folder': 'Nouveau dossier dans le dossier sélectionné',
+  '+ Folder': '+ Dossier',
+  'Upload files into the selected folder': 'Ajouter des fichiers de votre ordinateur dans le dossier sélectionné',
+  'Upload': 'Ajouter des fichiers',
+  'Drag to move · drop files from your computer onto a folder to upload · ★ = main file': 'Glissez pour déplacer · déposez des fichiers de votre ordinateur sur un dossier pour les ajouter · ★ = fichier principal',
+  'Adding to: {{folder}}/': 'Ajout dans : {{folder}}/',
+  '{{action}}: {{path}}': '{{action}} : {{path}}',
+  'New file here': 'Nouveau fichier ici',
+  'Set as main file': 'Définir comme fichier principal',
+  'Rename or move': 'Renommer ou déplacer',
+  'Delete': 'Supprimer',
+  '{{path}} already exists.': '{{path}} existe déjà.',
+  'That isn’t a valid path. Use letters, numbers, - _ . and / between folders.': 'Ce chemin n’est pas valide. Utilisez des lettres, des chiffres, - _ . et / entre les dossiers.',
+  'New file name (you can include folders, e.g. sections/intro.tex)': 'Nom du nouveau fichier (vous pouvez inclure des dossiers, par ex. sections/intro.tex)',
+  'New folder name': 'Nom du nouveau dossier',
+  'Rename or move folder to': 'Renommer ou déplacer le dossier vers',
+  'Rename or move file to': 'Renommer ou déplacer le fichier vers',
+  'A folder can’t be moved into itself.': 'Un dossier ne peut pas être déplacé dans lui-même.',
+  'Delete {{path}}? (It stays in history.)': 'Supprimer {{path}} ? (Il reste dans l’historique.)',
+  'Delete the folder {{path}} and the {{n}} files in it? (It stays in history.)': ['Supprimer le dossier {{path}} et le fichier qu’il contient ? (Il reste dans l’historique.)', 'Supprimer le dossier {{path}} et les {{n}} fichiers qu’il contient ? (Il reste dans l’historique.)'],
+  'Delete the folder {{path}}? (It stays in history.)': 'Supprimer le dossier {{path}} ? (Il reste dans l’historique.)',
+  'Skipped {{name}}: unsupported name.': '{{name}} ignoré : nom non pris en charge.',
+}
+export default fr

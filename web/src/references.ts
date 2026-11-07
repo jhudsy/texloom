@@ -7,6 +7,7 @@ import type { ProjectIndex } from './latex'
 import { dialog, h } from './dom'
 import { cleanPath, mainFile } from './projectfiles'
 import { stripComments } from './texscan'
+import { t } from './i18n'
 
 /** The DOI for a pasted DOI, doi.org/arXiv URL or arXiv id, or null. */
 export function parseId(input: string): string | null {
@@ -25,11 +26,11 @@ export async function fetchBibtex(doi: string): Promise<string> {
   const res = await fetch(`https://doi.org/${doi.split('/').map(encodeURIComponent).join('/')}`, {
     headers: { Accept: 'application/x-bibtex; charset=utf-8' },
   })
-  if (res.status === 404) throw new Error(`No record found for ${doi}.`)
-  if (!res.ok) throw new Error(`doi.org answered ${res.status}.`)
+  if (res.status === 404) throw new Error(t('No record found for {{doi}}.', { doi }))
+  if (!res.ok) throw new Error(t('doi.org answered {{status}}.', { status: res.status }))
   const text = (await res.text()).trim()
-  if (!text.startsWith('@')) throw new Error('doi.org didn’t return BibTeX for this id.')
-  if (text.length > 50_000) throw new Error('The record is unexpectedly large.')
+  if (!text.startsWith('@')) throw new Error(t('doi.org didn’t return BibTeX for this id.'))
+  if (text.length > 50_000) throw new Error(t('The record is unexpectedly large.'))
   return text
 }
 
@@ -174,7 +175,7 @@ export function addBibliography(r: Replica, plan: BibPlan, file: string): boolea
 /** Fetch and append to `file` (created if needed); a DOI already in the document's bibliography is reused. */
 export async function addReference(r: Replica, index: ProjectIndex, input: string, file?: string): Promise<Added> {
   const doi = parseId(input)
-  if (!doi) throw new Error('That doesn’t look like a DOI (10.xxxx/…) or an arXiv id (e.g. 1706.03762).')
+  if (!doi) throw new Error(t('That doesn’t look like a DOI (10.xxxx/…) or an arXiv id (e.g. 1706.03762).'))
   const idx = index.get()
   const plan = bibPlan(r, index)
   file ??= plan.options[0]
@@ -190,7 +191,7 @@ export async function addReference(r: Replica, index: ProjectIndex, input: strin
   }
   const raw = await fetchBibtex(doi)
   const e = parseEntry(raw)
-  if (!e) throw new Error('Couldn’t read the BibTeX that came back.')
+  if (!e) throw new Error(t('Couldn’t read the BibTeX that came back.'))
   if (doi.startsWith('10.48550/')) { // arXiv: the eprint fields biblatex and natbib styles understand
     const id = doi.slice('10.48550/arXiv.'.length)
     e.fields = e.fields.filter(([k]) => k !== 'publisher' && k !== 'url')
@@ -210,13 +211,13 @@ export async function addReference(r: Replica, index: ProjectIndex, input: strin
 
 /** A small dialog: paste a DOI/arXiv id, get a key back (inserted by the caller). */
 export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: string) => void, seed = '') {
-  const input = h('input', { placeholder: '10.1145/361604.361612 or arXiv:1706.03762', value: seed, 'aria-label': 'DOI or arXiv id', style: 'width: 100%' })
-  const msg = h('p', { class: 'muted small' }, 'Paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.')
+  const input = h('input', { placeholder: t('10.1145/361604.361612 or arXiv:1706.03762'), value: seed, 'aria-label': t('DOI or arXiv id'), style: 'width: 100%' })
+  const msg = h('p', { class: 'muted small' }, t('Paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.'))
   const pre = h('pre', { class: 'bibpreview', hidden: true })
   const target = h('div', { class: 'reftarget' })
-  const go = h('button', { class: 'primary', onclick: () => run() }, 'Add reference')
-  const dlg = dialog('refdlg', h('h3', {}, 'Add a reference'), input, target, msg, pre,
-    h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, 'Close'), go))
+  const go = h('button', { class: 'primary', onclick: () => run() }, t('Add reference'))
+  const dlg = dialog('refdlg', h('h3', {}, t('Add a reference')), input, target, msg, pre,
+    h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Close')), go))
   const REMEMBER = `texloom.bibfile.${r.keys.project}`
   let plan = bibPlan(r, index)
   let select: HTMLSelectElement | null = null
@@ -227,16 +228,16 @@ export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: st
     plan = bibPlan(r, index)
     let prev = select?.value
     try { prev ??= localStorage.getItem(REMEMBER) ?? undefined } catch {}
-    const label = (f: string) => f + (plan.missing.has(f) ? ' (new file)' : '')
+    const label = (f: string) => (plan.missing.has(f) ? t('{{file}} (new file)', { file: f }) : f)
     const kids: (HTMLElement | string)[] = []
     if (plan.options.length > 1) {
-      select = h('select', { 'aria-label': 'Bibliography file', onchange: () => { try { localStorage.setItem(REMEMBER, select!.value) } catch {}; lineText() } },
+      select = h('select', { 'aria-label': t('Bibliography file'), onchange: () => { try { localStorage.setItem(REMEMBER, select!.value) } catch {}; lineText() } },
         ...plan.options.map((f) => h('option', { value: f }, label(f))))
       if (prev && plan.options.includes(prev)) select.value = prev
-      kids.push(h('div', { class: 'row' }, h('span', { class: 'small' }, 'Add to'), select))
+      kids.push(h('div', { class: 'row' }, h('span', { class: 'small' }, t('Add to')), select))
     } else {
       select = null
-      kids.push(h('p', { class: 'small' }, plan.missing.has(plan.options[0]) ? `Creates ${plan.options[0]} for the entry.` : `Adds to ${plan.options[0]}.`))
+      kids.push(h('p', { class: 'small' }, plan.missing.has(plan.options[0]) ? t('Creates {{file}} for the entry.', { file: plan.options[0] }) : t('Adds to {{file}}.', { file: plan.options[0] })))
     }
     addLine = null
     if (!plan.declared && plan.main) {
@@ -248,29 +249,31 @@ export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: st
   }
   function lineText() {
     const span = target.querySelector('.linetext')
-    if (span) span.textContent = ` Also add ${bibliographyLine(plan, chosen())}${plan.biblatex ? ' and \\printbibliography' : ''} to ${plan.main}, so the list is printed`
+    if (!span) return
+    const vars = { line: bibliographyLine(plan, chosen()), main: plan.main, print: '\\printbibliography' }
+    span.textContent = ' ' + (plan.biblatex ? t('Also add {{line}} and {{print}} to {{main}}, so the list is printed', vars) : t('Also add {{line}} to {{main}}, so the list is printed', vars))
   }
 
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run() } })
   render()
   input.focus()
   async function run() {
-    go.setAttribute('disabled', ''); msg.className = 'muted small'; msg.textContent = 'Fetching…'
+    go.setAttribute('disabled', ''); msg.className = 'muted small'; msg.textContent = t('Fetching…')
     try {
       const file = chosen()
       const a = await addReference(r, index, input.value, file)
       onKey(a.key)
-      msg.textContent = a.existed ? `Already in ${a.file} as “${a.key}”; cited it.` : `Added to ${a.file} as “${a.key}”.`
+      msg.textContent = a.existed ? t('Already in {{file}} as “{{key}}”; cited it.', { file: a.file, key: a.key }) : t('Added to {{file}} as “{{key}}”.', { file: a.file, key: a.key })
       if (a.entry) { pre.textContent = a.entry; pre.hidden = false }
       if (!plan.declared) {
-        if (addLine?.checked && addBibliography(r, plan, a.file)) msg.textContent += ` Added ${bibliographyLine(plan, a.file)} to ${plan.main}.`
-        else msg.textContent += ` Add ${bibliographyLine(plan, a.file)} to your document to print it.`
+        if (addLine?.checked && addBibliography(r, plan, a.file)) msg.textContent += ' ' + t('Added {{line}} to {{main}}.', { line: bibliographyLine(plan, a.file), main: plan.main })
+        else msg.textContent += ' ' + t('Add {{line}} to your document to print it.', { line: bibliographyLine(plan, a.file) })
       }
       input.value = ''
       render()
     } catch (e) {
       msg.className = 'err small'
-      msg.textContent = String(e instanceof Error ? e.message : e).replace(/^(TypeError: )?(Failed to fetch|Load failed|NetworkError.*)$/, 'Couldn’t reach doi.org (offline?).')
+      msg.textContent = String(e instanceof Error ? e.message : e).replace(/^(TypeError: )?(Failed to fetch|Load failed|NetworkError.*)$/, t('Couldn’t reach doi.org (offline?).'))
     } finally { go.removeAttribute('disabled') }
   }
 }

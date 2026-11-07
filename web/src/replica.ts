@@ -10,6 +10,7 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import { Keys, b64d, b64e, canonicalPub, revokeMsg, signer } from './crypto'
+import { t } from './i18n'
 
 const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
@@ -446,8 +447,8 @@ export class Replica {
 
   /** Change where the project lives. 'relay' deletes the server's copy. */
   async setStorage(mode: StorageMode) {
-    if (!this.keys.writable) throw new Error('read-only')
-    if (mode === 'relay' && !this.keys.owner) throw new Error('only the owner can remove the server’s copy')
+    if (!this.keys.writable) throw new Error(t('read-only'))
+    if (mode === 'relay' && !this.keys.owner) throw new Error(t('only the owner can remove the server’s copy'))
     this.meta.set('storage', mode)
     await idbPut(this.db, 'kv', 'pendingMode', mode)
     await this.sendMode(mode)
@@ -545,7 +546,7 @@ export class Replica {
   }
 
   async getBlob(id: string): Promise<Uint8Array> {
-    if (!BLOB_ID.test(id)) throw new Error('not a file id') // ids come from the shared document
+    if (!BLOB_ID.test(id)) throw new Error(t('not a file id')) // ids come from the shared document
     const cached = await idbGet<Uint8Array>(this.db, 'blobs', id)
     if (cached) return cached
     if (this.serverMode === 'server') {
@@ -564,7 +565,7 @@ export class Replica {
     const got = new Promise<Uint8Array>((res) => this.blobWaiters.set(id, [...(this.blobWaiters.get(id) ?? []), res]))
     await this.p2p({ k: 'breq', id })
     const r = await Promise.race([got, sleep(20000).then(() => null)])
-    if (!r) throw new Error(`file content not available yet (${id.slice(0, 8)}): no online peer has it`)
+    if (!r) throw new Error(t('file content not available yet ({{id}}): no online peer has it', { id: id.slice(0, 8) }))
     return r
   }
 
@@ -581,7 +582,7 @@ export class Replica {
 function cleanPresence(st: any) {
   const u = st?.user
   if (!u || typeof u !== 'object') return
-  if (typeof u.name !== 'string') u.name = 'Someone'
+  if (typeof u.name !== 'string') u.name = t('Someone')
   u.name = u.name.slice(0, 60)
   for (const k of ['color', 'colorLight']) if (k in u && (typeof u[k] !== 'string' || !COLOR.test(u[k]))) u[k] = '#888888'
 }

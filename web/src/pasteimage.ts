@@ -4,6 +4,7 @@ import { EditorView } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 import type { Replica } from './replica'
 import { allFolders, cleanPath } from './projectfiles'
+import { t } from './i18n'
 
 const GRAPHIC = /\.(png|jpe?g|pdf|eps|svg|gif|webp)$/i
 const MAX = 25 * 1024 * 1024
@@ -28,7 +29,7 @@ async function addImages(r: Replica, view: EditorView, files: File[], pos: numbe
   const dir = folderFor(r)
   const paths: string[] = []
   for (const f of files) {
-    if (f.size > MAX) { alert(`${f.name} is larger than 25 MB; skipped.`); continue }
+    if (f.size > MAX) { alert(t('{{name}} is larger than 25 MB; skipped.', { name: f.name })); continue }
     const path = cleanPath(nameFor(r, dir, f))
     if (!path) continue
     const data = new Uint8Array(await f.arrayBuffer())
@@ -66,7 +67,7 @@ export function imageDropExtension(r: Replica, writable: boolean): Extension {
       const files = images(e.clipboardData?.files)
       if (!files.length) return false
       e.preventDefault()
-      addImages(r, view, files, view.state.selection.main.head).catch((err) => alert(`Couldn’t add the image: ${err}`))
+      addImages(r, view, files, view.state.selection.main.head).catch((err) => alert(t('Couldn’t add the image: {{error}}', { error: err })))
       return true
     },
     drop(e, view) {
@@ -74,7 +75,7 @@ export function imageDropExtension(r: Replica, writable: boolean): Extension {
       if (!files.length) return false
       e.preventDefault()
       const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.selection.main.head
-      addImages(r, view, files, pos).catch((err) => alert(`Couldn’t add the image: ${err}`))
+      addImages(r, view, files, pos).catch((err) => alert(t('Couldn’t add the image: {{error}}', { error: err })))
       return true
     },
   })

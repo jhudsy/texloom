@@ -4,6 +4,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { ProviderConfig } from './providers'
 import { jsonSchema, type ToolDef } from './tools'
+import { t } from '../i18n'
 
 export interface ToolCall { id: string; name: string; input: unknown; rawInput?: string }
 export type Stop = 'end' | 'tool_use' | 'max_tokens' | 'refusal'
@@ -25,12 +26,12 @@ export function createSession(cfg: ProviderConfig, tools: ToolDef[], system: str
 
 /** Human-readable explanation for network/API failures. */
 export function explainError(e: unknown, cfg: ProviderConfig): string {
-  if (e instanceof Anthropic.AuthenticationError) return 'Anthropic rejected the API key. Check it in assistant settings.'
-  if (e instanceof Anthropic.RateLimitError) return 'Rate limited by Anthropic. Wait a moment and try again.'
+  if (e instanceof Anthropic.AuthenticationError) return t('Anthropic rejected the API key. Check it in assistant settings.')
+  if (e instanceof Anthropic.RateLimitError) return t('Rate limited by Anthropic. Wait a moment and try again.')
   if (e instanceof Anthropic.APIConnectionError || (e instanceof TypeError && /fetch/i.test(e.message)))
-    return `Couldn’t reach ${cfg.baseUrl}. Is it running, and does it allow requests from this page (CORS)?` +
-      (cfg.baseUrl.includes(':1234') ? ' For LM Studio: `lms server start --cors`.' : cfg.baseUrl.includes(':11434') ? ' For Ollama: set OLLAMA_ORIGINS.' : '')
-  if (e instanceof Anthropic.APIError) return `Anthropic API error ${e.status}: ${e.message}`
+    return t('Couldn’t reach {{url}}. Is it running, and does it allow requests from this page (CORS)?', { url: cfg.baseUrl }) +
+      (cfg.baseUrl.includes(':1234') ? ' ' + t('For LM Studio: `lms server start --cors`.') : cfg.baseUrl.includes(':11434') ? ' ' + t('For Ollama: set OLLAMA_ORIGINS.') : '')
+  if (e instanceof Anthropic.APIError) return t('Anthropic API error {{status}}: {{message}}', { status: e.status, message: e.message })
   return String(e instanceof Error ? e.message : e)
 }
 
@@ -105,21 +106,21 @@ class AnthropicSession implements LlmSession {
       } catch (err) {
         // Only an unparseable streamed tool input is worth re-issuing; API errors propagate.
         if (err instanceof Anthropic.APIError || signal.aborted || attempt >= 2) throw err
-        ev.text('\n_(retrying: the model produced malformed tool input)_\n')
+        ev.text(`\n_(${t('retrying: the model produced malformed tool input')})_\n`)
       }
     }
 
     if (message.stop_reason === 'refusal') {
       // Discard the partial turn: it is not appended, so history stays valid.
-      const why = message.stop_details?.category ? ` (${message.stop_details.category})` : ''
-      return { stop: 'refusal', toolCalls: [], note: `The model declined this request${why}.` }
+      const category = message.stop_details?.category
+      return { stop: 'refusal', toolCalls: [], note: category ? t('The model declined this request ({{category}}).', { category }) : t('The model declined this request.') }
     }
     const toolCalls = message.content
       .filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use')
       .map((b) => ({ id: b.id, name: b.name, input: b.input }))
     if (message.stop_reason === 'max_tokens' && toolCalls.length) {
       // A truncated tool input can still parse; never run it, and don't append the turn.
-      return { stop: 'max_tokens', toolCalls: [], note: 'The response was cut off mid tool call (max_tokens).' }
+      return { stop: 'max_tokens', toolCalls: [], note: t('The response was cut off mid tool call (max_tokens).') }
     }
     this.messages.push({ role: 'assistant', content: echoable(message.content) })
     if (message.stop_reason === 'pause_turn') return this.turn(ev, signal)
@@ -166,7 +167,7 @@ class OpenAISession implements LlmSession {
     })
     if (!res.ok || !res.body) {
       const body = await res.text().catch(() => '')
-      throw new Error(`${this.cfg.label} returned HTTP ${res.status}: ${body.slice(0, 400)}`)
+      throw new Error(t('{{provider}} returned HTTP {{status}}: {{body}}', { provider: this.cfg.label, status: res.status, body: body.slice(0, 400) }))
     }
     let text = ''
     let finish = ''
@@ -204,7 +205,7 @@ class OpenAISession implements LlmSession {
       }
     }
     const done = calls.filter(Boolean)
-    if (finish === 'length' && done.length) return { stop: 'max_tokens', toolCalls: [], note: 'The response was cut off mid tool call.' }
+    if (finish === 'length' && done.length) return { stop: 'max_tokens', toolCalls: [], note: t('The response was cut off mid tool call.') }
     this.messages.push({
       role: 'assistant',
       content: text || null,

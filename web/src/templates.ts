@@ -6,6 +6,7 @@ import type { Replica } from './replica'
 import { dialog, h } from './dom'
 import { cleanPath, detectMain, isText, putBinary, putText } from './projectfiles'
 import { latexTitle } from './projects'
+import { t, tn } from './i18n'
 
 export interface Template { id: string; name: string; info: string; main: string; files: Record<string, string> }
 
@@ -25,7 +26,7 @@ const BIB = `@book{knuth1984texbook,
 `
 
 export const TEMPLATES: Template[] = [
-  { id: 'blank', name: 'Blank article', info: 'A minimal article.', main: 'main.tex', files: {
+  { id: 'blank', name: t('Blank article'), info: t('A minimal article.'), main: 'main.tex', files: {
     'main.tex': `\\documentclass{article}
 \\usepackage[utf8]{inputenc}
 \\usepackage[T1]{fontenc}
@@ -41,7 +42,7 @@ Hello, world.
 
 \\end{document}
 ` } },
-  { id: 'paper', name: 'Paper with references', info: 'Article with sections, figures, maths and a .bib file.', main: 'main.tex', files: {
+  { id: 'paper', name: t('Paper with references'), info: t('Article with sections, figures, maths and a .bib file.'), main: 'main.tex', files: {
     'main.tex': `\\documentclass[11pt]{article}
 \\usepackage[utf8]{inputenc}
 \\usepackage[T1]{fontenc}
@@ -85,7 +86,7 @@ What was shown, and what comes next.
 
 \\end{document}
 `, 'references.bib': BIB } },
-  { id: 'beamer', name: 'Slides (Beamer)', info: 'A presentation with title page and sections.', main: 'main.tex', files: {
+  { id: 'beamer', name: t('Slides (Beamer)'), info: t('A presentation with title page and sections.'), main: 'main.tex', files: {
     'main.tex': `\\documentclass{beamer}
 \\usetheme{default}
 \\setbeamertemplate{navigation symbols}{}
@@ -125,7 +126,7 @@ What was shown, and what comes next.
 
 \\end{document}
 ` } },
-  { id: 'thesis', name: 'Report or thesis', info: 'Chapters in separate files, included from main.tex.', main: 'main.tex', files: {
+  { id: 'thesis', name: t('Report or thesis'), info: t('Chapters in separate files, included from main.tex.'), main: 'main.tex', files: {
     'main.tex': `\\documentclass[12pt,a4paper]{report}
 \\usepackage[utf8]{inputenc}
 \\usepackage[T1]{fontenc}
@@ -169,7 +170,7 @@ Prior work \\citep{knuth1984texbook}.
 Summary and future work.
 `,
     'references.bib': BIB } },
-  { id: 'letter', name: 'Letter', info: 'A formal letter.', main: 'main.tex', files: {
+  { id: 'letter', name: t('Letter'), info: t('A formal letter.'), main: 'main.tex', files: {
     'main.tex': `\\documentclass[11pt]{letter}
 \\usepackage[utf8]{inputenc}
 \\usepackage[T1]{fontenc}
@@ -192,10 +193,10 @@ The body of the letter.
 ]
 
 /** Fill an empty project from a template. */
-export function applyTemplate(r: Replica, t: Template, by: string) {
+export function applyTemplate(r: Replica, tpl: Template, by: string) {
   r.doc.transact(() => {
-    for (const [p, text] of Object.entries(t.files)) if (!r.files.has(p)) r.files.set(p, new Y.Text(text))
-    r.meta.set('main', t.main); r.meta.set('seeded', true)
+    for (const [p, text] of Object.entries(tpl.files)) if (!r.files.has(p)) r.files.set(p, new Y.Text(text))
+    r.meta.set('main', tpl.main); r.meta.set('seeded', true)
     if (!r.meta.get('createdBy')) r.meta.set('createdBy', by)
   })
 }
@@ -259,7 +260,7 @@ export function arxivId(input: string): string | null {
 
 export async function fetchArxivZip(id: string): Promise<Uint8Array> {
   const res = await fetch(`/api/arxiv/${encodeURIComponent(id.replace('/', '_'))}`)
-  if (!res.ok) throw new Error((await res.text().catch(() => '')) || `The server answered ${res.status}.`)
+  if (!res.ok) throw new Error((await res.text().catch(() => '')) || t('The server answered {{status}}.', { status: res.status }))
   return new Uint8Array(await res.arrayBuffer())
 }
 
@@ -267,43 +268,44 @@ export async function fetchArxivZip(id: string): Promise<Uint8Array> {
 export function importDialog(r: Replica, opts: { onDone?: () => void; fresh?: boolean } = {}) {
   const msg = h('p', { class: 'muted small' })
   const fileIn = h('input', { type: 'file', accept: '.zip,application/zip', hidden: true })
-  const arxivIn = h('input', { placeholder: 'arXiv id or link, e.g. 1706.03762', 'aria-label': 'arXiv id or link' })
-  const replace = h('input', { type: 'checkbox', 'aria-label': 'Replace current files' })
+  const arxivIn = h('input', { placeholder: t('arXiv id or link, e.g. 1706.03762'), 'aria-label': t('arXiv id or link') })
+  const replace = h('input', { type: 'checkbox', 'aria-label': t('Replace current files') })
   const busy = (on: boolean) => dlg.querySelectorAll('button').forEach((b) => (on ? b.setAttribute('disabled', '') : b.removeAttribute('disabled')))
   const finish = (n: { added: number; skipped: string[] }, from: string) => {
     msg.className = 'small'
-    msg.textContent = `Imported ${n.added} file${n.added === 1 ? '' : 's'} from ${from}.${n.skipped.length ? ` Skipped ${n.skipped.length} (build files or unsupported names).` : ''}`
+    msg.textContent = tn(n.added, 'Imported {{n}} file from {{from}}.', 'Imported {{n}} files from {{from}}.', { from }) +
+      (n.skipped.length ? ' ' + tn(n.skipped.length, 'Skipped {{n}} (build files or unsupported names).', 'Skipped {{n}} (build files or unsupported names).') : '')
     opts.onDone?.()
   }
   const fail = (e: unknown) => { msg.className = 'err small'; msg.textContent = String(e instanceof Error ? e.message : e) }
   const nonEmpty = r.files.size + r.bin.size > 0 && !opts.fresh
   const dlg = dialog('settings importdlg',
-    h('h3', {}, 'Import'),
-    h('h5', {}, 'From a .zip file'),
-    h('p', { class: 'muted small' }, 'For example an Overleaf download (Menu → Download → Source), a GitHub “Download ZIP”, or any folder you zipped.'),
-    h('div', { class: 'row' }, h('button', { onclick: () => fileIn.click() }, 'Choose .zip…'), fileIn),
-    h('h5', {}, 'From arXiv'),
-    h('p', { class: 'muted small' }, 'The paper’s LaTeX source, fetched through this server.'),
-    h('div', { class: 'row' }, arxivIn, h('button', { onclick: () => fromArxiv() }, 'Import')),
-    nonEmpty ? h('label', { class: 'check small' }, replace, 'Replace the project’s current files (they stay in History)') : null,
+    h('h3', {}, t('Import')),
+    h('h5', {}, t('From a .zip file')),
+    h('p', { class: 'muted small' }, t('For example an Overleaf download (Menu → Download → Source), a GitHub “Download ZIP”, or any folder you zipped.')),
+    h('div', { class: 'row' }, h('button', { onclick: () => fileIn.click() }, t('Choose .zip…')), fileIn),
+    h('h5', {}, t('From arXiv')),
+    h('p', { class: 'muted small' }, t('The paper’s LaTeX source, fetched through this server.')),
+    h('div', { class: 'row' }, arxivIn, h('button', { onclick: () => fromArxiv() }, t('Import'))),
+    nonEmpty ? h('label', { class: 'check small' }, replace, t('Replace the project’s current files (they stay in History)')) : null,
     msg,
-    h('p', { class: 'muted small' }, 'From git: clone the repository, then run “texloom new <folder>” in it, or open this project in a folder with “texloom run” and copy the files in.'),
-    h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => dlg.close() }, 'Done')))
+    h('p', { class: 'muted small' }, t('From git: clone the repository, then run “texloom new <folder>” in it, or open this project in a folder with “texloom run” and copy the files in.')),
+    h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => dlg.close() }, t('Done'))))
   fileIn.addEventListener('change', async () => {
     const f = fileIn.files?.[0]
     fileIn.value = ''
     if (!f) return
-    if (f.size > 200 * 1024 * 1024) return fail('That file is over 200 MB.')
-    busy(true); msg.className = 'muted small'; msg.textContent = `Reading ${f.name}…`
+    if (f.size > 200 * 1024 * 1024) return fail(t('That file is over 200 MB.'))
+    busy(true); msg.className = 'muted small'; msg.textContent = t('Reading {{name}}…', { name: f.name })
     try {
       const entries = unzipSync(new Uint8Array(await f.arrayBuffer()))
       finish(await importEntries(r, entries, { replaceAll: replace.checked }), f.name)
-    } catch (e) { fail(e instanceof Error && /invalid zip|unexpected EOF/i.test(e.message) ? 'That isn’t a readable .zip file.' : e) } finally { busy(false) }
+    } catch (e) { fail(e instanceof Error && /invalid zip|unexpected EOF/i.test(e.message) ? t('That isn’t a readable .zip file.') : e) } finally { busy(false) }
   })
   async function fromArxiv() {
     const id = arxivId(arxivIn.value)
-    if (!id) return fail('That doesn’t look like an arXiv id (e.g. 1706.03762 or hep-th/9901001).')
-    busy(true); msg.className = 'muted small'; msg.textContent = `Fetching arXiv:${id}…`
+    if (!id) return fail(t('That doesn’t look like an arXiv id (e.g. 1706.03762 or hep-th/9901001).'))
+    busy(true); msg.className = 'muted small'; msg.textContent = t('Fetching arXiv:{{id}}…', { id })
     try {
       const entries = unzipSync(await fetchArxivZip(id))
       finish(await importEntries(r, entries, { replaceAll: replace.checked }), `arXiv:${id}`)
@@ -319,11 +321,11 @@ export function chooseTemplate(): Promise<string | null> {
     let choice: string | null = null
     const pick = (id: string) => { choice = id; dlg.close() }
     const dlg = dialog('settings templates',
-      h('h3', {}, 'New project'),
+      h('h3', {}, t('New project')),
       h('div', { class: 'tgrid' },
-        ...TEMPLATES.map((t) => h('button', { class: 'radio choice', onclick: () => pick(t.id) }, h('span', {}, h('b', {}, t.name), h('small', { class: 'muted' }, t.info)))),
-        h('button', { class: 'radio choice', onclick: () => pick('import') }, h('span', {}, h('b', {}, 'Import…'), h('small', { class: 'muted' }, 'From a .zip (e.g. Overleaf, GitHub) or an arXiv paper.')))),
-      h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, 'Cancel')))
+        ...TEMPLATES.map((tpl) => h('button', { class: 'radio choice', onclick: () => pick(tpl.id) }, h('span', {}, h('b', {}, tpl.name), h('small', { class: 'muted' }, tpl.info)))),
+        h('button', { class: 'radio choice', onclick: () => pick('import') }, h('span', {}, h('b', {}, t('Import…')), h('small', { class: 'muted' }, t('From a .zip (e.g. Overleaf, GitHub) or an arXiv paper.'))))),
+      h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Cancel'))))
     dlg.addEventListener('close', () => resolve(choice))
   })
 }

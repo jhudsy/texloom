@@ -4,6 +4,7 @@
 import type { Replica } from './replica'
 import { cleanPath, isText, mainFile, putBinary, putText } from './projectfiles'
 import { addedProgramLines, type ProgramLine } from './texscan'
+import { tn, t, locale } from './i18n'
 
 const DB = 'texloom-folders'
 const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycache__', '.idea', '.vscode'])
@@ -133,7 +134,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       } catch {}
       delete known[p]; n++
     }
-    if (n) { await save(); note(`↓ ${n} file${n === 1 ? '' : 's'} · ${new Date().toLocaleTimeString()}`) }
+    if (n) { await save(); note(tn(n, '↓ {{n}} file · {{time}}', '↓ {{n}} files · {{time}}', { time: new Date().toLocaleTimeString(locale) })) }
   }
 
   /** A file's current text in the folder, or null. */
@@ -191,7 +192,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       r.doc.transact(() => { r.files.delete(p); r.bin.delete(p) }) // deleted on disk
       delete known[p]; n++
     }
-    if (n) { await save(); note(`↑ ${n} file${n === 1 ? '' : 's'} · ${new Date().toLocaleTimeString()}`) }
+    if (n) { await save(); note(tn(n, '↑ {{n}} file · {{time}}', '↑ {{n}} files · {{time}}', { time: new Date().toLocaleTimeString(locale) })) }
   }
 
   async function round(dir: 'in' | 'out' | 'both') {
@@ -202,7 +203,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       if (dir !== 'in') await writeOut()
       errors = 0
     } catch (e) {
-      if (++errors >= 3) { note(`stopped: ${e}`); stop() }
+      if (++errors >= 3) { note(t('stopped: {{error}}', { error: e })); stop() }
     } finally { busy = false }
   }
 
@@ -216,7 +217,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     r.files.unobserveDeep(onDoc as any); r.bin.unobserve(onDoc as any); r.dirs.unobserve(onDoc as any)
   }
   await round('both')
-  if (!last) note('in sync')
+  if (!last) note(t('in sync'))
   return sync
 }
 

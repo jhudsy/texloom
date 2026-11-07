@@ -2,6 +2,7 @@
 // position across re-renders so recompiling doesn't jump you back to page 1.
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { t } from './i18n'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 export { pdfjs }
@@ -21,12 +22,12 @@ export class PdfView {
     this.el = document.createElement('div')
     this.el.className = 'pdf'
     // Re-render at the new width after the pane is resized (canvases scale via CSS meanwhile).
-    let t: ReturnType<typeof setTimeout> | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
     new ResizeObserver(() => {
       const w = this.el.clientWidth
       if (!this.last || !w || Math.abs(w - this.renderedWidth) < 24) return
-      clearTimeout(t)
-      t = setTimeout(() => { if (this.last) this.show(this.last).catch(() => {}) }, 250)
+      clearTimeout(timer)
+      timer = setTimeout(() => { if (this.last) this.show(this.last).catch(() => {}) }, 250)
     }).observe(this.el)
     this.el.addEventListener('pointerdown', (e) => { if (e.button === 0) this.lastClick = this.pointAt(e) ?? this.lastClick })
     this.el.addEventListener('dblclick', (e) => {
@@ -39,7 +40,7 @@ export class PdfView {
       if (!at || !this.onPick) return
       e.preventDefault()
       this.lastClick = at
-      this.openMenu(e.clientX, e.clientY, [['Go to source here', () => this.onPick?.(at.page, at.x, at.y)]])
+      this.openMenu(e.clientX, e.clientY, [[t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)]])
     })
     this.el.addEventListener('scroll', () => this.closeMenu(), { passive: true })
   }

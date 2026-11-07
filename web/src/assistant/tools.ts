@@ -7,6 +7,7 @@ import { z } from 'zod'
 import type { Replica } from '../replica'
 import { cleanPath } from '../projectfiles'
 import { addItem } from '../review'
+import { t } from '../i18n'
 
 export const ASSISTANT = Symbol('assistant') // Yjs transaction origin for assistant edits
 
@@ -155,7 +156,7 @@ export const TOOLS: ToolDef[] = [
       if (!hits.length) throw new ToolError(`old_string not found in ${p}. Re-read the file; it may have changed.`)
       if (hits.length > 1 && !replace_all) throw new ToolError(`old_string occurs ${hits.length} times in ${p}. Add surrounding context to make it unique, or set replace_all.`)
       const after = replace_all ? before.split(old_string).join(new_string) : before.slice(0, hits[0]) + new_string + before.slice(hits[0] + old_string.length)
-      if (!(await ctx.review({ path: p, before, after, summary: `Edit ${p}` }))) return 'The user rejected this edit. Ask what they would like instead, or try a different approach.'
+      if (!(await ctx.review({ path: p, before, after, summary: t('Edit {{path}}', { path: p }) }))) return 'The user rejected this edit. Ask what they would like instead, or try a different approach.'
       // A collaborator may have typed while the user was reviewing: re-locate the text now.
       const yt = textOf(ctx.replica, p)
       const now = occurrences(yt.toString(), old_string)
@@ -179,7 +180,7 @@ export const TOOLS: ToolDef[] = [
       const r = ctx.replica
       if (r.bin.has(p)) throw new ToolError(`${p} is a binary file; choose another name.`)
       const before = r.files.get(p)?.toString() ?? null
-      if (!(await ctx.review({ path: p, before, after: content, summary: before === null ? `Create ${p}` : `Rewrite ${p}` })))
+      if (!(await ctx.review({ path: p, before, after: content, summary: before === null ? t('Create {{path}}', { path: p }) : t('Rewrite {{path}}', { path: p }) })))
         return 'The user rejected this change.'
       r.doc.transact(() => {
         const yt = r.files.get(p)
@@ -198,8 +199,8 @@ export const TOOLS: ToolDef[] = [
       const p = validPath(path)
       const r = ctx.replica
       if (!r.files.has(p) && !r.bin.has(p)) throw new ToolError(`No file named ${p}.`)
-      const before = r.files.get(p)?.toString() ?? '(binary file)'
-      if (!(await ctx.review({ path: p, before, after: null, summary: `Delete ${p}` }))) return 'The user rejected the deletion.'
+      const before = r.files.get(p)?.toString() ?? t('(binary file)')
+      if (!(await ctx.review({ path: p, before, after: null, summary: t('Delete {{path}}', { path: p }) }))) return 'The user rejected the deletion.'
       r.doc.transact(() => { r.files.delete(p); r.bin.delete(p) }, ASSISTANT)
       return `Deleted ${p}.`
     },
