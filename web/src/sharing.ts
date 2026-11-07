@@ -6,9 +6,37 @@ import { Replica } from './replica'
 import { dialog, h } from './dom'
 import { projects } from './projects'
 
-function copyRow(text: string) {
+function copyRow(text: string, mail?: { subject: string; body: string }) {
   const inp = h('input', { value: text, readonly: true, onfocus: (e: any) => e.target.select() })
-  return h('div', { class: 'row' }, inp, h('button', { onclick: (e: any) => { navigator.clipboard.writeText(text); e.target.textContent = 'Copied' } }, 'Copy'))
+  return h('div', { class: 'row' }, inp,
+    h('button', { onclick: (e: any) => { navigator.clipboard.writeText(text); e.target.textContent = 'Copied' } }, 'Copy'),
+    mail ? h('a', { class: 'button mail', href: mailto(mail.subject, mail.body), title: 'Opens your own email app with the link filled in' }, 'Email…') : null)
+}
+
+/** A message for the user's own mail app. The link travels in that email, never through
+ *  the TeXLoom server, which mustn't see the keys in it. */
+const mailto = (subject: string, body: string) =>
+  `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+
+/** The invitation text for a link. `who`: the person it's for (personal links). */
+function invitation(r: Replica, link: string, access: 'edit' | 'read', me: string, who?: string) {
+  const name = String(r.meta.get('name') ?? '').trim().slice(0, 80) || 'a LaTeX project'
+  return {
+    subject: `${access === 'edit' ? 'Invitation to edit' : 'Read-only link to'} “${name}” on TeXLoom`,
+    body: [
+      `${who ? `Hi ${who},` : 'Hi,'}`,
+      '',
+      access === 'edit'
+        ? `${me ? `${me} has` : 'I have'} invited you to edit “${name}” on TeXLoom. Open this link in your browser:`
+        : `Here is a read-only link to “${name}” on TeXLoom. Open it in your browser:`,
+      '',
+      link,
+      '',
+      access === 'edit' && who
+        ? 'This link is for you only: please don’t forward it. Anyone who has it can read the project and change it as you.'
+        : 'Anyone who has this link can read the project, so please don’t forward it.',
+    ].join('\n'),
+  }
 }
 
 const when = (t: number) => new Date(t).toLocaleDateString([], { dateStyle: 'medium' })
@@ -70,7 +98,8 @@ export function shareDialog(r: Replica, server: string, me: string) {
     const at = Date.now(), granted = personal.member!.name
     r.members.set(pub, { name: granted, at, by: me, g: grant }) // g: the owner's grant, so the entry can be checked
     saveIssued(keys.project, { ...loadIssued(keys.project), [pub]: { name: granted, at } })
-    newLink.replaceChildren(h('label', {}, `Edit link for ${name} — send it to them only`), copyRow(personal.link(server, true)))
+    const link = personal.link(server, true)
+    newLink.replaceChildren(h('label', {}, `Edit link for ${name} — send it to them only`), copyRow(link, invitation(r, link, 'edit', me, granted)))
     nameIn.value = ''
   }
 
@@ -102,7 +131,8 @@ export function shareDialog(r: Replica, server: string, me: string) {
   const dlg = dialog('share',
     h('h3', {}, 'Share this project'),
     ...ownerPart,
-    h('h4', {}, 'Read-only link'), copyRow(keys.link(server, false)),
+    h('h4', {}, 'Read-only link'), copyRow(keys.link(server, false), invitation(r, keys.link(server, false), 'read', me)),
+    h('p', { class: 'muted small' }, '“Email…” opens your own email app. The link travels in that email (not through this server), so anyone who can read the email can open the project.'),
     h('p', { class: 'muted small' }, 'Keys stay in the part after “#”, which is never sent to the server.' +
       (keys.owner ? ' To shut someone out completely, revoke their link and move the project to new keys.' : '')),
     keys.owner ? h('details', {}, h('summary', {}, 'Move to new keys…'),

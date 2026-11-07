@@ -84,6 +84,11 @@ project (with history and comments) is copied into a new project with new keys, 
 are re-encrypted, the old server copy is deleted, and you send new links to the people
 who should keep access. The plain **read-only link** works as before.
 
+**Email…** next to a personal or read-only link opens your own email app with an
+invitation and the link filled in. The link travels in that email, never through the
+TeXLoom server (which must not see its keys), so anyone who can read the email can open
+the project. A personal link is shown, and can be emailed, only when you create it.
+
 ### Editor
 
 | | |
