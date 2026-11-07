@@ -87,6 +87,8 @@ if [ "$(cat tex-assets/.version 2>/dev/null)" != "$BUSYTEX_VERSION" ]; then
   chown -R root:root tex-assets.new && chmod -R u=rwX,go=rX tex-assets.new
   rm -rf tex-assets && mv tex-assets.new tex-assets
 fi
+# fixes to the engine (e.g. biber and .bib files in folders); idempotent, on every deploy
+python3 deploy/patch-busytex.py tex-assets
 
 # storage allowances: without a code nothing is stored (default 0); print the owner's code
 install -d -o root -g texloom -m 750 /etc/texloom
@@ -227,6 +229,12 @@ server {
         proxy_set_header Host \$host;
     }
 
+    # the in-browser engine's scripts: revalidated (deploys can patch them; cheap with ETags)
+    location ~ ^/core/(.+\.js)\$ {
+        alias $APP_DIR/tex-assets/\$1;
+        add_header Cache-Control "no-cache";
+        add_header X-Content-Type-Options nosniff always;
+    }
     # in-browser TeX engine and packages: big, immutable per version
     location /core/ {
         alias $APP_DIR/tex-assets/;
@@ -253,9 +261,9 @@ else
   # was first written, before the catch-all /api/ location (certbot's lines stay as they are).
   cp "$SITE" "/root/texloom-backups/nginx-$DOMAIN.bak"
   sed -i "s#$OLD/#$APP_DIR/#g" "$SITE"
-  python3 - "$SITE" <<'PY'
+  python3 - "$SITE" "$APP_DIR" <<'PY'
 import sys
-path = sys.argv[1]
+path, app_dir = sys.argv[1], sys.argv[2]
 site = open(path).read()
 blocks = {
     "location /api/arxiv/": """    # importing an arXiv paper's source: the relay fetches it (rate-limited there too)
@@ -274,6 +282,13 @@ blocks = {
         proxy_read_timeout 60s;
     }
 """,
+    "location ~ ^/core/": """    # the in-browser engine's scripts: revalidated (deploys can patch them; cheap with ETags)
+    location ~ ^/core/(.+\\.js)$ {
+        alias APP_DIR/tex-assets/$1;
+        add_header Cache-Control "no-cache";
+        add_header X-Content-Type-Options nosniff always;
+    }
+""".replace("APP_DIR", app_dir),
     "location = /admin": """    # read-only admin page (HTTP basic auth against /etc/texloom/admin-token)
     location = /admin {
         limit_req zone=texloom_code burst=5 nodelay;

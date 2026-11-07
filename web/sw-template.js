@@ -46,8 +46,10 @@ self.addEventListener('fetch', (event) => {
 
   // In-browser TeX: engine scripts/WebAssembly cached on first use. Its large package
   // data (*.data) is cached by the engine itself in IndexedDB, so it's left alone here.
+  // The small scripts are checked with the server first (deploys can patch them), the
+  // large WebAssembly is taken from the cache.
   if (p.startsWith('/core/') && !p.endsWith('.data')) {
-    event.respondWith(cacheFirst(req, TEX))
+    event.respondWith(p.endsWith('.js') ? networkFirst(req, TEX) : cacheFirst(req, TEX))
     return
   }
 
@@ -61,6 +63,17 @@ self.addEventListener('fetch', (event) => {
   // Hashed build output and static files: cache first.
   event.respondWith(cacheFirst(req, CACHE))
 })
+
+/** The server's current copy (revalidated, so cheap when unchanged); the cached one offline. */
+async function networkFirst(req, name) {
+  try {
+    const res = await fetch(req, { cache: 'no-cache' })
+    if (res.ok && res.type === 'basic') (await caches.open(name)).put(req, res.clone())
+    return res
+  } catch {
+    return (await caches.match(req)) || Response.error()
+  }
+}
 
 async function cacheFirst(req, name) {
   const hit = await caches.match(req)
