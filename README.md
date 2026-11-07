@@ -191,10 +191,10 @@ The server can't see what it stores, and making a project needs no account, so s
 is governed by **allowances** in a small text file (`--codes-file`):
 
 ```
-# <code|default>  <allowance>  [label]
-default          0             # projects created without a code: not stored on the server
-A3F7-9KQ2-XM4P   unlimited     owner
-K7P2-QX4M-9H3D   2G            alice
+# <code|default>  <allowance>  [until=YYYY-MM-DD]  [label]
+default          0                               # projects created without a code: not stored on the server
+A3F7-9KQ2-XM4P   unlimited                       owner
+K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
 ```
 
 - A code's allowance is the total stored across **all** projects created with it.
@@ -207,12 +207,28 @@ K7P2-QX4M-9H3D   2G            alice
   `.texloom/config.json`, or the `TEXLOOM_CODE` environment variable.
 - The file is re-read when it changes. Deleting a line revokes a code: its projects stay
   stored, but new changes then count against `default`.
+- `until=` (optional) is the last day, in UTC, that a code is valid. After that it counts as
+  revoked: new changes to its projects aren't stored and it can't store new projects.
+  Renewing (changing the date) restores it, with no restart. Projects stay tied to the
+  code they were created with, so renew a code rather than issuing a new one.
+- `--purge-expired-after DAYS` deletes the stored copies of projects whose code expired
+  more than DAYS days ago (checked hourly; skipped while someone has the project open).
+  As with idle eviction, the files stay on people's devices and the projects carry on
+  relay-only; renewing the code later stores them again on their next sync.
+  `--purge-code CODE` does the same at once for one expired or deleted code.
 - Projects stored before allowances existed are grandfathered as unlimited.
 
 ```bash
-texloom-server --codes-file /etc/texloom/codes.txt --add-code alice --allowance 2G   # prints a new code
-texloom-server --codes-file /etc/texloom/codes.txt --list-codes --db /var/lib/texloom/texloom.db
+texloom-server --codes-file /etc/texloom/codes.txt --add-code alice --allowance 2G --months 12   # prints a new code
+texloom-server --codes-file /etc/texloom/codes.txt --renew-code K7P2-QX4M-9H3D --months 12          # or --until 2028-01-31, --allowance 10G
+texloom-server --codes-file /etc/texloom/codes.txt --list-codes --db /var/lib/texloom/texloom.db   # usage, expiry, deleted codes
+texloom-server --codes-file /etc/texloom/codes.txt --purge-code K7P2-QX4M-9H3D --db /var/lib/texloom/texloom.db
 ```
+
+A renewal with `--months` counts from the later of today and the code's current expiry,
+so renewing early loses nothing. `--purge-code` refuses a code that is still valid; run it
+with the server stopped, or restart the server afterwards so its storage totals are
+current (`--purge-expired-after`, inside the server, needs neither).
 
 The server also refuses to store anything when free disk drops below `--min-free`
 (default 2G), which protects other sites on the machine. Two more limits are

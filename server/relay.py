@@ -7,12 +7,17 @@ can't write.
 Storage. The server can't see what it stores and making a project needs no account,
 so storage is governed by *allowances*:
 
-  --codes-file FILE   one rule per line:   <code|default>  <allowance>  [label]
+  --codes-file FILE   one rule per line:   <code|default>  <allowance>  [until=YYYY-MM-DD]  [label]
                       allowance: 0 (store nothing), a size (500M, 5G) or "unlimited".
                       A code's allowance is the total stored across every project
                       created with it; "default" applies to projects created without
                       a code (default 0 = such projects aren't stored on the server).
+                      until= is the last day (UTC) a code is valid; after it, the code
+                      counts as removed (its projects fall back to "default").
                       The file is re-read whenever it changes.
+  --purge-expired-after DAYS
+                      delete the stored copies of projects whose code expired more
+                      than DAYS days ago (default: never)
   --max-bytes         total the server stores                (default unlimited)
   --min-free          keep this much disk free                (default 2G)
   --project-max-bytes cap per project, except for unlimited allowances (default 200M)
@@ -22,8 +27,10 @@ refused write is still relayed live to collaborators online but not acknowledged
 the sender keeps it and retries later: nobody loses work.
 
 Run:              texloom-server --port 8787 --db data/texloom.db --codes-file data/codes.txt
-Add a code:       texloom-server --codes-file data/codes.txt --add-code alice --allowance 2G
+Add a code:       texloom-server --codes-file data/codes.txt --add-code alice --allowance 2G [--months 12]
+Renew a code:     texloom-server --codes-file data/codes.txt --renew-code CODE --months 12 [--allowance 10G]
 List codes/usage: texloom-server --codes-file data/codes.txt --list-codes --db data/texloom.db
+Purge one code:   texloom-server --codes-file data/codes.txt --purge-code CODE --db data/texloom.db
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ import argparse
 import asyncio
 import base64
 import binascii
+import datetime as dt
 import hashlib
 import hmac
 import json
@@ -117,6 +125,31 @@ def fmt_size(n: float) -> str:
     return str(int(n))
 
 
+UNTIL_RE = re.compile(r"^until=(\S*)$", re.IGNORECASE)
+
+
+def today() -> dt.date:
+    """Today in UTC: codes expire at the end of their `until` day, the same everywhere."""
+    return dt.datetime.now(dt.UTC).date()
+
+
+def parse_date(v: str) -> dt.date:
+    """'2027-11-07' -> a date."""
+    try:
+        return dt.date.fromisoformat(v.strip())
+    except ValueError:
+        raise ValueError(f"not a date (YYYY-MM-DD): {v!r}") from None
+
+
+def add_months(d: dt.date, months: int) -> dt.date:
+    """The same day `months` later, or the end of that month when it is shorter (31 Jan + 1 = 28/29 Feb)."""
+    y, m = divmod(d.month - 1 + months, 12)
+    year, month = d.year + y, m + 1
+    nxt = dt.date(year + (month == 12), month % 12 + 1, 1)
+    return min(d.replace(year=year, month=month, day=1) + dt.timedelta(days=d.day - 1),
+               nxt - dt.timedelta(days=1))
+
+
 @dataclass
 class Limits:
     max_bytes: float = UNLIMITED
@@ -133,6 +166,7 @@ class CodeBook:
         self.path = path
         self._mtime = -1.0
         self.codes: dict[str, tuple[float, str]] = {}  # normalized code -> (allowance, label)
+        self.until: dict[str, dt.date] = {}  # normalized code -> last day it is valid (if it expires)
         self.default: float = UNLIMITED if path is None else 0
 
     @staticmethod
@@ -149,11 +183,19 @@ class CodeBook:
             return
         if mtime == self._mtime:
             return
-        codes, default = {}, 0.0
+        codes, until, default = {}, {}, 0.0
         for n, line in enumerate(self.path.read_text().splitlines(), 1):
             parts = line.split("#", 1)[0].split()
             if not parts:
                 continue
+            # an optional "until=YYYY-MM-DD" anywhere after the code: the last day the code is valid
+            expires = None
+            for p in [p for p in parts[1:] if UNTIL_RE.match(p)]:
+                parts.remove(p)
+                try:
+                    expires = parse_date(UNTIL_RE.match(p)[1])
+                except ValueError as e:
+                    log.warning("codes file line %d: %s (ignored: the code doesn't expire)", n, e)
             try:
                 allowance = parse_size(parts[1]) if len(parts) > 1 else UNLIMITED
                 label = " ".join(parts[2:])
@@ -162,9 +204,24 @@ class CodeBook:
             if parts[0].lower() == "default":
                 default = allowance
             else:
-                codes[self.normalize(parts[0])] = (allowance, label)
-        self.codes, self.default, self._mtime = codes, default, mtime
-        log.info("codes file: %d code(s), default allowance %s", len(codes), fmt_size(default))
+                c = self.normalize(parts[0])
+                codes[c] = (allowance, label)
+                if expires:
+                    until[c] = expires
+        self.codes, self.until, self.default, self._mtime = codes, until, default, mtime
+        expired = sum(1 for c in codes if self.expired(c))
+        log.info("codes file: %d code(s)%s, default allowance %s", len(codes),
+                 f" ({expired} expired)" if expired else "", fmt_size(default))
+
+    def expired(self, code: str) -> bool:
+        """True once a code's `until` day has passed. An expired code counts as removed: its
+        projects fall back to the default allowance and it can't store new projects."""
+        u = self.until.get(code)
+        return u is not None and today() > u
+
+    def lapsed_since(self, code: str) -> int | None:
+        """Whole days since an expired code's last valid day (None if it hasn't expired)."""
+        return (today() - self.until[code]).days if self.expired(code) else None
 
     @property
     def open_creation(self) -> bool:
@@ -181,21 +238,21 @@ class CodeBook:
         for c in self.codes:
             if hmac.compare_digest(c, given):
                 found = c
-        return found
+        return None if found is None or self.expired(found) else found
 
     def allowance(self, owner: str) -> float:
         """Allowance for an owner: a code, 'default', or 'existing' (grandfathered)."""
         self._load()
         if owner == "existing" or self.path is None:
             return UNLIMITED
-        if owner in self.codes:
+        if owner in self.codes and not self.expired(owner):
             return self.codes[owner][0]
-        return self.default  # 'default', or a code that has since been removed
+        return self.default  # 'default', or a code that has since been removed or has expired
 
     def label(self, owner: str) -> str:
         return self.codes.get(owner, (0, owner))[1] or owner
 
-    def add(self, label: str, allowance: str) -> str:
+    def add(self, label: str, allowance: str, until: dt.date | None = None) -> str:
         assert self.path
         parse_size(allowance)
         raw = "".join(secrets.choice(self.ALPHABET) for _ in range(12))  # 60 bits
@@ -205,10 +262,59 @@ class CodeBook:
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o640)
         with os.fdopen(fd, "a") as f:
             if new:
-                f.write("# TeXLoom storage allowances:  <code|default>  <0|size|unlimited>  [label]\n"
+                f.write("# TeXLoom storage allowances:  <code|default>  <0|size|unlimited>  [until=YYYY-MM-DD]  [label]\n"
                         "default  0\n")
-            f.write(f"{code}  {allowance}  {label}\n")
+            fields = [code, allowance, *([f"until={until.isoformat()}"] if until else []), *([label] if label else [])]
+            f.write("  ".join(fields) + "\n")
         return code
+
+    def renew(self, code: str, until: dt.date | None = None, months: int = 0,
+              allowance: str | None = None) -> tuple[str, dt.date | None, str]:
+        """Set a code's expiry (`until`, or `months` after the later of today and its current
+        expiry) and optionally its allowance, rewriting its line in place. Returns the label,
+        the new expiry and the allowance as written."""
+        assert self.path
+        if allowance is not None:
+            parse_size(allowance)
+        want = self.normalize(code)
+        lines = self.path.read_text().splitlines(keepends=True)
+        for i, line in enumerate(lines):
+            body, hash_, comment = line.rstrip("\n").partition("#")
+            parts = body.split()
+            if not parts or parts[0].lower() == "default" or self.normalize(parts[0]) != want:
+                continue
+            old = [p for p in parts[1:] if UNTIL_RE.match(p)]
+            rest = [p for p in parts[1:] if not UNTIL_RE.match(p)]
+            try:
+                current = parse_date(UNTIL_RE.match(old[-1])[1]) if old else None
+            except ValueError:
+                current = None
+            if months:
+                until = add_months(max(today(), current or today()), months)
+            elif until is None:
+                until = current
+            try:
+                parse_size(rest[0]) if rest else None
+                size, label = (rest[0], rest[1:]) if rest else ("unlimited", [])
+            except ValueError:  # old format "code label": unlimited
+                size, label = "unlimited", rest
+            size = allowance or size
+            new = "  ".join([parts[0], size, *([f"until={until.isoformat()}"] if until else []), *([" ".join(label)] if label else [])])
+            lines[i] = new + (f"  {hash_}{comment}" if hash_ else "") + "\n"
+            # written beside it and renamed over it, keeping its mode and owner (the install
+            # script makes it root:texloom 640, so that the server can read it)
+            st = self.path.stat()
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, st.st_mode & 0o777)
+            with os.fdopen(fd, "w") as f:
+                f.writelines(lines)
+            try:
+                os.chown(tmp, st.st_uid, st.st_gid)
+            except (PermissionError, AttributeError):  # AttributeError: no chown on Windows
+                pass  # not root: the file stays the current user's, as it was if they could write it
+            os.replace(tmp, self.path)
+            return " ".join(label), until, size
+        raise KeyError(f"no such code: {code}")
 
 
 class Store:
@@ -327,6 +433,10 @@ class Store:
 
     def owner_usage(self, owner: str) -> int:
         return sum(self.usage.get(p, 0) for p, o in self.owners.items() if o == owner)
+
+    def stored_by(self, owner: str) -> list[str]:
+        """Projects registered to this owner that have something stored."""
+        return [p for p, o in self.owners.items() if o == owner and self.usage.get(p, 0) > 0]
 
     def _recount(self, project: str) -> None:
         n = self.db.execute("SELECT COALESCE(SUM(length(data) + length(sig)), 0) FROM log WHERE project=?",
@@ -535,6 +645,31 @@ class Relay:
         if self.store.owner(project) is None:
             self.store.register(project, owner, self.codes.label(owner) if code else "default")
         return None
+
+    def purge(self, owner: str) -> tuple[int, int, int]:
+        """Drop the stored copies of every project created with `owner` (a creation code), as
+        idle eviction does. Writers' re-uploads are refused while the code is expired or
+        removed, so the projects carry on relay-only, on people's devices. Projects someone
+        has open are skipped (and picked up next time). Returns (purged, bytes freed, skipped)."""
+        purged = freed = skipped = 0
+        for p in self.store.stored_by(owner):
+            if self.rooms.get(p):
+                skipped += 1
+                continue
+            freed += self.store.evict(p)
+            purged += 1
+        return purged, freed, skipped
+
+    def purge_expired(self, after_days: float) -> None:
+        """Purge the projects of codes that expired more than `after_days` ago."""
+        self.codes._load()
+        for c in list(self.codes.until):
+            days = self.codes.lapsed_since(c)
+            if days is None or days <= after_days or not self.store.stored_by(c):
+                continue
+            n, freed, skipped = self.purge(c)
+            log.info("purged %d project(s) of code %s… (%s), expired %d day(s) ago%s", n, c[:4],
+                     fmt_size(freed), days, f"; {skipped} open, left for later" if skipped else "")
 
     def store_status(self, project: str, conn: Conn) -> dict:
         owner = self.store.owner(project)
@@ -843,7 +978,8 @@ async def headers(request: web.Request, handler):
 def make_app(db: Path, static: Path | None, tex: Path | None = None,
              limits: Limits | None = None, codes: CodeBook | None = None, arxiv: bool = True,
              admin_token: str = "", evict_days: float = 0, texlive: Path | None = None,
-             texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None) -> web.Application:
+             texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None,
+             purge_days: float | None = None) -> web.Application:
     relay = Relay(Store(db), limits, codes)
     if texlive:  # TeX Live files on demand for the in-browser engine
         from .texlive import TexLive
@@ -855,21 +991,24 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
     app = web.Application(middlewares=[headers], client_max_size=MAX_BLOB + 1024)
     if admin_token:
         from .admin import Admin
-        app.router.add_get("/admin", Admin(relay, admin_token, evict_days).page)
-    if evict_days > 0:
-        async def evict_idle(_app: web.Application):
+        app.router.add_get("/admin", Admin(relay, admin_token, evict_days, purge_days).page)
+    if evict_days > 0 or purge_days is not None:
+        async def maintenance(_app: web.Application):
             async def loop():
                 while True:
-                    for p in relay.store.idle(evict_days):
-                        if relay.rooms.get(p):
-                            continue  # someone is connected right now
-                        freed = relay.store.evict(p)
-                        log.info("evicted idle project %s… (%s, unopened for %g days)", p[:8], fmt_size(freed), evict_days)
-                    await asyncio.sleep(min(3600, max(60, evict_days * 8640)))
+                    if evict_days > 0:
+                        for p in relay.store.idle(evict_days):
+                            if relay.rooms.get(p):
+                                continue  # someone is connected right now
+                            freed = relay.store.evict(p)
+                            log.info("evicted idle project %s… (%s, unopened for %g days)", p[:8], fmt_size(freed), evict_days)
+                    if purge_days is not None:
+                        relay.purge_expired(purge_days)
+                    await asyncio.sleep(min(3600, max(60, evict_days * 8640)) if evict_days > 0 else 3600)
             task = asyncio.create_task(loop())
             yield
             task.cancel()
-        app.cleanup_ctx.append(evict_idle)
+        app.cleanup_ctx.append(maintenance)
     app.router.add_get("/ws/{project}", relay.ws_handler)
     app.router.add_put("/blob/{project}/{id}", relay.put_blob)
     app.router.add_get("/blob/{project}/{id}", relay.get_blob)
@@ -906,8 +1045,21 @@ def main() -> None:
     p.add_argument("--project-max-bytes", type=parse_size, default=200 * MiB, help="per-project cap, e.g. 200M")
     p.add_argument("--codes-file", type=Path, help="storage allowances per creation code (see above)")
     p.add_argument("--add-code", metavar="LABEL", help="create a creation code with this label, print it, exit")
-    p.add_argument("--allowance", default="1G", help="allowance for --add-code: 0, a size, or unlimited (default 1G)")
-    p.add_argument("--list-codes", action="store_true", help="list codes, allowances and usage, then exit")
+    p.add_argument("--allowance", help="allowance for --add-code (default 1G) or --renew-code (default: unchanged): "
+                                       "0, a size, or unlimited")
+    p.add_argument("--until", type=parse_date, metavar="YYYY-MM-DD",
+                   help="for --add-code / --renew-code: the last day the code is valid")
+    p.add_argument("--months", type=int, default=0,
+                   help="for --add-code / --renew-code: valid for this many months (a renewal counts from the "
+                        "later of today and the code's current expiry)")
+    p.add_argument("--renew-code", metavar="CODE", help="change a code's expiry (--until/--months) and/or allowance, then exit")
+    p.add_argument("--purge-code", metavar="CODE",
+                   help="delete the stored copies of every project created with this code (expired or removed "
+                        "codes only), then exit. Prefer --purge-expired-after, which does it inside the server")
+    p.add_argument("--list-codes", action="store_true", help="list codes, allowances, expiry and usage, then exit")
+    p.add_argument("--purge-expired-after", type=float, metavar="DAYS",
+                   help="delete the stored copies of projects whose creation code expired more than DAYS days "
+                        "ago (checked hourly; default: never). Their files stay on people's devices")
     p.add_argument("--no-arxiv", action="store_true", help="disable importing arXiv sources through this server")
     p.add_argument("--evict-idle-days", type=float, default=0,
                    help="drop the stored copy of projects nobody opened for this many days (0 = never); "
@@ -932,20 +1084,51 @@ def main() -> None:
         asyncio.run(tl.build_index(tl.index_sources() if tl.ready or tl.extra_mirrors else None))
         return
     codes = CodeBook(a.codes_file)
-    if a.add_code is not None or a.list_codes:
+    if a.until and a.months:
+        sys.exit("give --until or --months, not both")
+    if any(x is not None for x in (a.add_code, a.renew_code, a.purge_code)) or a.list_codes:
         if not a.codes_file:
             sys.exit("--codes-file is required")
         if a.add_code is not None:
-            print(codes.add(a.add_code, a.allowance))
+            until = add_months(today(), a.months) if a.months else a.until
+            print(codes.add(a.add_code, a.allowance or "1G", until))
+            return
+        if a.renew_code is not None:
+            if not (a.until or a.months or a.allowance):
+                sys.exit("--renew-code needs --until, --months and/or --allowance")
+            try:
+                label, until, size = codes.renew(a.renew_code, a.until, a.months, a.allowance)
+            except (KeyError, FileNotFoundError):
+                sys.exit(f"no such code in {a.codes_file}: {a.renew_code}")
+            print(f"{label or a.renew_code}: {size}, {f'valid until {until}' if until else 'no expiry'}")
             return
         codes._load()
         store = Store(a.db)
+        if a.purge_code is not None:
+            c = CodeBook.normalize(a.purge_code)
+            if c in codes.codes and not codes.expired(c):
+                sys.exit(f"{a.purge_code} is still valid{f' (until {codes.until[c]})' if c in codes.until else ''}: "
+                         "let it expire, or delete its line, first")
+            n, freed, _ = Relay(store, codes=codes).purge(c)
+            print(f"purged {n} project(s), {fmt_size(freed)} freed. If the server is running, restart it so its "
+                  "storage totals are up to date.")
+            return
+        def expiry(c: str) -> str:
+            if c not in codes.until:
+                return ""
+            days = codes.lapsed_since(c)
+            return f"  EXPIRED {codes.until[c]} ({days} day{'s' * (days != 1)} ago)" if days is not None else f"  until {codes.until[c]}"
         print(f"{'default':16}  {fmt_size(codes.default):>9}  used {fmt_size(store.owner_usage('default')):>7}  "
               f"{sum(1 for o in store.owners.values() if o == 'default')} project(s)")
         for c, (allowance, label) in codes.codes.items():
             n = sum(1 for o in store.owners.values() if o == c)
             print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {fmt_size(allowance):>9}  used {fmt_size(store.owner_usage(c)):>7}  "
-                  f"{n} project(s)  {label}")
+                  f"{n} project(s){expiry(c)}  {label}")
+        removed = sorted({o for o in store.owners.values() if o not in codes.codes and o not in ("default", "existing")})
+        for c in removed:
+            if store.owner_usage(c):
+                print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {'removed':>9}  used {fmt_size(store.owner_usage(c)):>7}  "
+                      f"{len(store.stored_by(c))} stored project(s)  (--purge-code to delete them)")
         print(f"{'existing':16}  {'unlimited':>9}  used {fmt_size(store.owner_usage('existing')):>7}  (stored before allowances)")
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -959,7 +1142,8 @@ def main() -> None:
              f"allowances from {a.codes_file}" if codes.path else "no codes file: every project may be stored")
     web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv,
                         admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
-                        texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror), host=a.host, port=a.port)
+                        texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
+                        purge_days=a.purge_expired_after), host=a.host, port=a.port)
 
 
 if __name__ == "__main__":

@@ -159,10 +159,15 @@ command only when its user *changes* the setting, queuing it if offline; it neve
 switch. Switching back to `server` re-uploads a full snapshot and all blobs.
 
 **Storage allowances.** The server can't inspect content and project ids are free to
-mint, so storage is governed by allowances in a codes file: `<code|default> <0|size|unlimited>`.
+mint, so storage is governed by allowances in a codes file: `<code|default> <0|size|unlimited>
+[until=YYYY-MM-DD] [label]`.
 - **Owner:** the first stored write to a project registers it to the creation code sent
   in `hello` or `X-Create-Code`, or to `default`.
 - **Allowance:** an owner's allowance is the sum over all its projects.
+- **Expiry:** after its `until` day (UTC) a code counts as removed: its projects fall back to
+  `default`, and it no longer registers new projects. `--purge-expired-after DAYS` evicts
+  (as idle eviction does) the stored projects of codes expired longer than that; re-uploads
+  are then refused until the code is renewed. The owner of a project never changes.
 - **Refusals:** `needs-code` (default allowance 0), `quota-full`, `project-full`
   (`--project-max-bytes`, not applied to unlimited owners) and `server-full`
   (`--max-bytes`, `--min-free`).

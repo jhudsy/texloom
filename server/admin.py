@@ -53,10 +53,11 @@ details summary{cursor:pointer;list-style:none} details[open] summary{display:no
 
 
 class Admin:
-    def __init__(self, relay: Relay, token: str, evict_days: float):
+    def __init__(self, relay: Relay, token: str, evict_days: float, purge_days: float | None = None):
         self.relay = relay
         self.token = token.encode()
         self.evict_days = evict_days
+        self.purge_days = purge_days
 
     def _authorized(self, request: web.Request) -> bool:
         auth = request.headers.get("Authorization", "")
@@ -83,7 +84,15 @@ class Admin:
         label.update({"default": "default (no code)", "existing": "stored before allowances"})
 
         def code_name(c: str) -> str:
-            return label.get(c, f"{c[:4]}… (code removed)")
+            name = label.get(c, f"{c[:4]}… (code removed)")
+            return f"{name} (expired)" if r.codes.expired(c) else name
+
+        def expiry_cell(c: str) -> str:
+            u = r.codes.until.get(c)
+            if u is None:
+                return "<td class=muted>—</td>"
+            days = r.codes.lapsed_since(c)
+            return f"<td>{u.isoformat()}</td>" if days is None else f"<td><b>expired</b> {days} day{'s' * (days != 1)} ago</td>"
 
         projects = sorted(rows, key=lambda x: -st.usage.get(x[0], 0))
         prow = "".join(
@@ -102,7 +111,7 @@ class Admin:
             return f"<td><details><summary><code>{e(full[:4])}-…</code></summary><code>{e(full)}</code></details></td>"
 
         crow = "".join(
-            f"<tr><td>{e(code_name(c))}</td>{code_cell(c)}<td class=n>{_size(r.codes.allowance(c))}</td>"
+            f"<tr><td>{e(code_name(c))}</td>{code_cell(c)}{expiry_cell(c)}<td class=n>{_size(r.codes.allowance(c))}</td>"
             f"<td class=n>{_size(st.owner_usage(c))}</td><td class=n>{len(owners.get(c, []))}</td></tr>"
             for c in ["default", *r.codes.codes.keys(), *(["existing"] if "existing" in owners else [])])
         lim = r.limits
@@ -120,10 +129,12 @@ class Admin:
 <span>New projects</span><span>{"anyone" if r.codes.open_creation else "creation code needed"}</span>
 </div>
 <h2>Creation codes</h2>
-<table><tr><th>Label</th><th>Code</th><th class=n>Allowance</th><th class=n>Used</th><th class=n>Projects</th></tr>{crow}</table>
+<table><tr><th>Label</th><th>Code</th><th>Valid until</th><th class=n>Allowance</th><th class=n>Used</th><th class=n>Projects</th></tr>{crow}</table>
 <p class=muted>Click a code to show it all. A code lets people store new projects here up to its allowance; it doesn't
-open anyone's project. To withdraw one, delete its line from the codes file.</p>
-<p class=muted>Add a code: <code>texloom-server --codes-file … --add-code LABEL --allowance 1G</code></p>
+open anyone's project. To withdraw one, delete its line from the codes file or let it expire: its projects then fall back to
+the default allowance. Purging expired codes' stored copies: {f"after {self.purge_days:g} days" if self.purge_days is not None else "off"}.</p>
+<p class=muted>Add a code: <code>texloom-server --codes-file … --add-code LABEL --allowance 1G --months 12</code>;
+renew one: <code>--renew-code CODE --months 12</code>.</p>
 <h2>Projects (largest first{", first 500" if len(rows) > 500 else ""})</h2>
 <table><tr><th>Project id</th><th>Created with</th><th class=n>Stored</th><th>State</th><th>Created</th><th>Last opened</th><th class=n>Online</th></tr>{prow}</table>
 <p class=muted>Contents and names are end-to-end encrypted: the server can’t see them.</p>
