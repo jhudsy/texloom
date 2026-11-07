@@ -4,6 +4,7 @@
   texloom clone <link> <dir>                      check a project out into a folder
   texloom run   <dir> [--compile]                 keep folder and project in sync
   texloom links <dir>                             print the edit / read-only links
+  texloom run   <dir> --git                       also keep the folder's git repository in step (e.g. GitHub)
   texloom allow <dir>                             review lines that run programs; allow them with --shell-escape
   texloom mcp   <dir|link> [--name NAME]          MCP server: an agent edits/comments as a collaborator
 """
@@ -44,6 +45,7 @@ DEFAULT_CONFIG = {
     "compile": False,          # run latexmk after changes (same as --compile)
     "engine": None,            # override the project's engine on this machine
     "latexmk_args": [],        # extra arguments, e.g. ["-pdfxe"]
+    "git": False,              # true, or {"interval": 60, "quiet": 120, "push": true}: see `run --git`
     "shell_escape": False,     # false, "restricted" (TeX Live's safe programs only) or true (minted etc.;
                                # lines that run programs must be approved with `texloom allow`)
     "label": "",               # how your compiles are labelled for others
@@ -68,7 +70,7 @@ def print_links(keys: Keys, server: str) -> None:
     print("Anyone with a link has that access. Keep the edit link private.")
 
 
-async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | str = False) -> None:
+async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | str = False, git: bool = False) -> None:
     cfg = {**DEFAULT_CONFIG, **load_config(d)}
     keys, server = load(d)
     code = cfg["create_code"] or os.environ.get("TEXLOOM_CODE", "")
@@ -78,6 +80,12 @@ async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | 
             "shell_escape": cfg["shell_escape"] or shell_escape,
             "label": cfg["label"] or f"latexmk on {platform.node().split('.')[0]}"}
     fs = FolderSync(d, replica, compile_ or cfg["compile"], opts)
+    bridge = None
+    if git or cfg.get("git"):
+        from .gitsync import GitBridge
+        bridge = GitBridge(d, fs, cfg["git"] if isinstance(cfg.get("git"), dict) else None)
+        if why := await bridge.check():
+            sys.exit(f"--git: {why}")
     async with replica.lock:
         await fs.ingest_all()  # local edits made while we were stopped
         await fs.write_out()
@@ -95,11 +103,20 @@ async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | 
     if once:
         await asyncio.wait_for(replica.synced.wait(), 30)
         await asyncio.sleep(3)  # let acks and peers' replies (relay-only projects) arrive
+        if bridge:
+            async with replica.lock:
+                await fs.write_out()
+            await bridge.cycle(force=True)
+            await asyncio.sleep(3)  # let what came in from git reach the server
         conn.cancel()
         return
     print(f"Syncing {d.resolve()} ⇄ {server} ({'edit' if keys.writable else 'read-only'}). Ctrl-C to stop.")
+    if bridge:
+        up = await bridge.upstream()
+        print(f"Git: committing project changes after {bridge.quiet:g}s of quiet"
+              + (f", fetching {up} every {bridge.interval:g}s and pushing to it." if up else " (no upstream: commits stay local)."))
     try:
-        await asyncio.gather(conn, fs.watch())
+        await asyncio.gather(conn, fs.watch(), *([bridge.loop()] if bridge else []))
     finally:
         replica.save()
 
@@ -145,6 +162,9 @@ def main() -> None:
     p = sub.add_parser("run", help="sync a folder continuously")
     p.add_argument("dir", type=Path, nargs="?", default=Path("."))
     p.add_argument("--compile", action="store_true", help="compile with latexmk on changes")
+    p.add_argument("--git", action="store_true",
+                   help="also commit project changes to the folder's git repository, push them, and merge "
+                        "new upstream commits into the project")
     p.add_argument("--shell-restricted", action="store_true",
                    help="let TeX run only TeX Live's list of safe programs (e.g. for epstopdf)")
     p.add_argument("--shell-escape", action="store_true",
@@ -154,6 +174,7 @@ def main() -> None:
     p.add_argument("-y", "--yes", action="store_true", help="don't ask")
     p = sub.add_parser("sync", help="sync once and exit")
     p.add_argument("dir", type=Path, nargs="?", default=Path("."))
+    p.add_argument("--git", action="store_true", help="also commit, merge upstream commits and push, once")
     p = sub.add_parser("storage", help="server storage: 'server' keeps an encrypted copy; 'relay' keeps nothing")
     p.add_argument("dir", type=Path)
     p.add_argument("mode", choices=["server", "relay"])
@@ -191,13 +212,14 @@ def main() -> None:
               "tools only if you trust everyone who can edit this project.")
     elif a.cmd == "run":
         try:
-            asyncio.run(run(a.dir, a.compile, shell_escape=True if a.shell_escape else "restricted" if a.shell_restricted else False))
+            asyncio.run(run(a.dir, a.compile, shell_escape=True if a.shell_escape else "restricted" if a.shell_restricted else False,
+                            git=a.git))
         except KeyboardInterrupt:
             pass
     elif a.cmd == "allow":
         allow_programs(a.dir, a.yes)
     elif a.cmd == "sync":
-        asyncio.run(run(a.dir, False, once=True))
+        asyncio.run(run(a.dir, False, once=True, git=a.git))
     elif a.cmd == "storage":
         keys, server = load(a.dir)
         r = Replica(a.dir / STATE, keys, server)

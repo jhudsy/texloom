@@ -246,7 +246,8 @@ collaborators type in their browsers. With `--compile`:
 | `texloom new <dir> --server URL [--code C]` | share an existing folder as a new project; prints both links |
 | `texloom clone <link> <dir>` | check out a project |
 | `texloom run <dir> [--compile] [--shell-restricted \| --shell-escape]` | keep the folder in sync, live |
-| `texloom sync <dir>` | sync once and exit (manual sync) |
+| `texloom run <dir> --git` | also keep the folder's git repository in step with the project (below) |
+| `texloom sync <dir> [--git]` | sync once and exit (manual sync) |
 | `texloom storage <dir> server\|relay` | keep an encrypted copy on the server, or nothing |
 | `texloom links <dir>` | print the project code and the edit / read-only links |
 | `texloom allow <dir>` | review lines that run programs; allow them for `--shell-escape` compiles |
@@ -314,6 +315,36 @@ sees the rewritten files as your edits and shares them. (History can undo it.) S
   when nobody is typing in the same paragraph.
 - Do rebases and conflict resolution in the separate checkout: collaborators' edits can
   arrive in the synced folder mid-operation and look like unexpected changes to git.
+
+**Keeping a GitHub repository in step automatically** (like Overleaf's GitHub sync, but
+continuous): run the helper with `--git` on a folder that is also a git clone, on any
+computer that stays on (a desktop, a server, a Raspberry Pi).
+
+```bash
+texloom run ~/papers/demo --git
+```
+
+- **Project → git:** once the project's files have been quiet for 2 minutes, they are
+  committed (only project files: no build output, no `.texloom`) and pushed to the
+  branch's upstream.
+- **git → project:** every minute it fetches. New commits are merged into the folder and
+  shared with collaborators.
+- **Clashes:** if the same lines changed on both sides, nothing is merged and the project
+  stays as it is; the helper prints the commands to combine them in a separate worktree.
+  A pushed "resolution" that still contains conflict markers is refused too, so they
+  never reach collaborators.
+- **Credentials:** git uses your own setup (SSH key or credential helper). The TeXLoom
+  server isn't involved, so the project stays end-to-end encrypted.
+- **Options** in `.texloom/config.json`: `"git": {"interval": 60, "quiet": 120, "push": true}`.
+  `texloom sync <dir> --git` does one round and exits (e.g. from cron).
+
+To set it up from an existing repository: `git clone <repo> ~/papers/demo`, then
+`texloom new ~/papers/demo --server https://your.server` and share its links. From an
+existing project: `texloom clone '<link>' ~/papers/demo`, then in that folder `git init`,
+`git add -A`, `git commit`, `git remote add origin <repo>` and `git push -u origin main`.
+(To join an existing project with an existing, different repository, combine them by hand
+once.) Lines that ask to run programs, arriving from git, are pointed out as they are for
+collaborators' changes.
 
 ### Agents (MCP)
 
