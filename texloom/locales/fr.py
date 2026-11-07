@@ -6,6 +6,28 @@ uses the singular for 0 and 1 (see PLURAL_RULES in texloom/i18n.py). Spaces befo
 """
 
 CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
+    # -- what a line that runs programs does (texloom/scan.py)
+    'runs a shell command (\\write18)': 'exécute une commande shell (\\write18)',
+    'runs a shell command (\\ShellEscape)': 'exécute une commande shell (\\ShellEscape)',
+    'reads the output of a command (\\input|)': 'lit la sortie d’une commande (\\input|)',
+    'runs a program from Lua': 'exécute un programme depuis Lua',
+    'loads a package that runs programs': 'charge un paquet qui exécute des programmes',
+    'TikZ externalisation runs LaTeX as a command': 'l’externalisation TikZ lance LaTeX comme commande',
+    'tells arara which programs to run': 'indique à arara quels programmes exécuter',
+    'sets the program your LaTeX editor runs': 'choisit le programme que lance votre éditeur LaTeX',
+
+    # -- compile from scratch
+    "Compile from scratch": "Recompiler de zéro",
+    "Delete LaTeX’s working files (.aux, .bbl, …) in .texloom/build and compile again": "Supprimer les fichiers de travail de LaTeX (.aux, .bbl, …) dans .texloom/build et recompiler",
+    "This folder isn’t running yet: try again in a moment.": "Ce dossier n’est pas encore synchronisé : réessayez dans un instant.",
+    "Compiling {name} from scratch…": "Recompilation de {name} depuis zéro…",
+
+    # -- language menu
+    "Language of this app (takes effect when it restarts)": "Langue de l’application (prise en compte au prochain démarrage)",
+    "Language: automatic": "Langue : automatique",
+    "Language": "Langue",
+    "The new language is used the next time TeXLoom starts. Quit TeXLoom (from its menu) and open it again.": "La nouvelle langue sera utilisée au prochain démarrage de TeXLoom. Quittez TeXLoom (depuis son menu) et rouvrez-le.",
+
     # -- server refusals
     "Change refused": "Modification refusée",
     "The server refused a change from this folder: {reason}": "Le serveur a refusé une modification de ce dossier : {reason}",

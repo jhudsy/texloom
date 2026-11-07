@@ -34,7 +34,8 @@ from . import __version__, autostart, registry
 from .cli import DEFAULT_CONFIG, clone_project, load_config, new_project, peek, run, update_config
 from .crypto import Keys
 from .daemon import CURRENT, FOLDER, Daemon, FolderProblem, FolderTag
-from .i18n import _, ngettext
+from .i18n import _, lang_pref, ngettext, set_lang_pref
+from .locales import NAMES
 
 log = logging.getLogger("texloom")
 ICON = Path(__file__).with_name("assets") / "icon.png"
@@ -109,6 +110,20 @@ class Activity(logging.Handler):
 
 # ---- what a folder is doing ---------------------------------------------------------------
 GREEN, AMBER, RED, GREY = "#2e7d32", "#b26a00", "#b3261e", "#75736c"
+
+
+def program_what(en: str) -> str:
+    """A description from texloom/scan.py (kept in English there: it is also data), translated."""
+    return {
+        'runs a shell command (\\write18)': _('runs a shell command (\\write18)'),
+        'runs a shell command (\\ShellEscape)': _('runs a shell command (\\ShellEscape)'),
+        'reads the output of a command (\\input|)': _('reads the output of a command (\\input|)'),
+        'runs a program from Lua': _('runs a program from Lua'),
+        'loads a package that runs programs': _('loads a package that runs programs'),
+        'TikZ externalisation runs LaTeX as a command': _('TikZ externalisation runs LaTeX as a command'),
+        'tells arara which programs to run': _('tells arara which programs to run'),
+        'sets the program your LaTeX editor runs': _('sets the program your LaTeX editor runs'),
+    }.get(en, en)
 
 
 def red(text: str) -> str:
@@ -238,7 +253,7 @@ class ProgramsDialog(QtWidgets.QDialog):
         self.found, allowed_keys = res
         for f in self.found:
             new = f.key not in allowed_keys
-            it = QtWidgets.QTreeWidgetItem([_("new") if new else _("allowed"), f"{f.path}:{f.line}", f.what, f.text])
+            it = QtWidgets.QTreeWidgetItem([_("new") if new else _("allowed"), f"{f.path}:{f.line}", program_what(f.what), f.text])
             if new:
                 it.setForeground(0, QtGui.QColor(AMBER))
             self.view.addTopLevelItem(it)
@@ -585,6 +600,14 @@ class Window(QtWidgets.QMainWindow):
         self.login_box.setChecked(autostart.status() != "off")
         self.login_box.toggled.connect(self.set_autostart)
         tb.addWidget(self.login_box)
+        self.lang_box = QtWidgets.QComboBox()
+        self.lang_box.setToolTip(_("Language of this app (takes effect when it restarts)"))
+        self.lang_box.addItem(_("Language: automatic"), "auto")
+        for code, name in NAMES.items():
+            self.lang_box.addItem(name, code)
+        self.lang_box.setCurrentIndex(max(0, self.lang_box.findData(lang_pref())))
+        self.lang_box.currentIndexChanged.connect(self.set_language)
+        tb.addWidget(self.lang_box)
 
         split = QtWidgets.QSplitter()
         self.list = QtWidgets.QListWidget()
@@ -635,7 +658,15 @@ class Window(QtWidgets.QMainWindow):
         self.c_compile.clicked.connect(lambda on: self.set_option("compile", on))
         self.c_git = QtWidgets.QCheckBox(_("Keep this folder’s git repository in step (commit, pull, push)"))
         self.c_git.clicked.connect(lambda on: self.set_option("git", on))
-        lay.addWidget(self.c_compile)
+        crow = QtWidgets.QHBoxLayout()
+        crow.addWidget(self.c_compile)
+        crow.addStretch(1)
+        self.b_scratch = QtWidgets.QPushButton(_("Compile from scratch"))
+        self.b_scratch.setToolTip(_("Delete LaTeX’s working files (.aux, .bbl, …) in .texloom/build and compile again"))
+        self.b_scratch.clicked.connect(self.compile_from_scratch)
+        self.b_scratch.setEnabled(False)  # until a folder that compiles is selected
+        crow.addWidget(self.b_scratch)
+        lay.addLayout(crow)
         lay.addWidget(self.c_git)
         prow = QtWidgets.QHBoxLayout()
         prow.addWidget(QtWidgets.QLabel(_("Running programs when compiling:")))
@@ -710,6 +741,7 @@ class Window(QtWidgets.QMainWindow):
         except (OSError, ValueError):
             cfg = DEFAULT_CONFIG
         self.c_compile.setChecked(bool(cfg.get("compile")))
+        self.b_scratch.setEnabled(bool(cfg.get("compile")))
         mode = cfg.get("shell_escape")
         self.p_mode.setCurrentIndex(2 if mode is True else 1 if mode == "restricted" else 0)
         self.p_mode.setEnabled(bool(cfg.get("compile")))
@@ -761,6 +793,15 @@ class Window(QtWidgets.QMainWindow):
             self.engine.call(self.engine.daemon.poke)
             self.refresh()
 
+    def compile_from_scratch(self) -> None:
+        d = self.current()
+        st = self.engine.daemon.states.get(d) if d else None
+        if st is None or st.fs is None:
+            self.statusBar().showMessage(_("This folder isn’t running yet: try again in a moment."), 5000)
+            return
+        self.engine.call(st.fs.compile_from_scratch)
+        self.statusBar().showMessage(_("Compiling {name} from scratch…", name=d.name), 5000)
+
     def set_option(self, key: str, on: bool) -> None:
         d = self.current()
         if d:
@@ -792,6 +833,10 @@ class Window(QtWidgets.QMainWindow):
         dm.paused = not dm.paused
         self.engine.call(dm.poke)
         self.refresh()
+
+    def set_language(self, _i: int) -> None:
+        set_lang_pref(self.lang_box.currentData())
+        QtWidgets.QMessageBox.information(self, _("Language"), _("The new language is used the next time TeXLoom starts. Quit TeXLoom (from its menu) and open it again."))
 
     def set_autostart(self, on: bool) -> None:
         try:

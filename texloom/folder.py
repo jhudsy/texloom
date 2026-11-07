@@ -408,6 +408,11 @@ class FolderSync:
     def main_file(self) -> str | None:
         return main_file(self.r.files, self.r.meta)
 
+    def compile_from_scratch(self) -> None:
+        """Compile now, without the previous run's .aux, .bbl and other working files."""
+        self._clean_build = True
+        self.schedule_compile(delay=0)
+
     def schedule_compile(self, delay: float = 1.5) -> None:
         if not self.compile:
             return
@@ -427,8 +432,9 @@ class FolderSync:
         self._last_request = now
         await self.r.p2p({"k": "cack", "by": self.opts["label"]}, frm)
         if clean:
-            self._clean_build = True
-        self.schedule_compile(delay=0)
+            self.compile_from_scratch()
+        else:
+            self.schedule_compile(delay=0)
 
     async def _compile(self, delay: float) -> None:
         await asyncio.sleep(delay)

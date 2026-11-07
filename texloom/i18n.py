@@ -3,11 +3,13 @@
 `_("English text", name=value)` returns the text in the app's language, then fills `{name}`
 placeholders; `ngettext(n, one, other, ...)` picks the form for the count. The English
 strings are the catalogue keys, so a string missing from a catalogue shows in English.
-The language is TEXLOOM_LANG if set, else the system's. No Qt here.
+The language is TEXLOOM_LANG if set, else the one chosen in the app (app.json in the
+config folder), else the system's. No Qt here.
 """
 
 from __future__ import annotations
 
+import json
 import locale
 import os
 import re
@@ -88,11 +90,44 @@ def _match(code: str) -> str:
     return "en"
 
 
+def _prefs_file():
+    from .registry import config_dir
+    return config_dir() / "app.json"
+
+
+def lang_pref() -> str:
+    """The language chosen in the app: 'auto' (the system's), 'en', or a key of CATALOGS."""
+    try:
+        v = json.loads(_prefs_file().read_text(encoding="utf-8")).get("lang", "auto")
+    except (OSError, ValueError, AttributeError):
+        return "auto"
+    return v if v == "en" or v in CATALOGS else "auto"
+
+
+def set_lang_pref(v: str) -> None:
+    """Remember the language for the next start (the running app keeps its language)."""
+    f = _prefs_file()
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+    if v == "auto":
+        data.pop("lang", None)
+    else:
+        data["lang"] = v
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def lang() -> str:
     """The app's language ('en' or a key of CATALOGS), decided once."""
     global _LANG
     if _LANG is None:
-        _LANG = _match(os.environ.get("TEXLOOM_LANG", "").strip() or _system_lang())
+        forced = os.environ.get("TEXLOOM_LANG", "").strip()
+        pref = lang_pref()
+        _LANG = _match(forced or (pref if pref != "auto" else _system_lang()))
     return _LANG
 
 

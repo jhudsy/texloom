@@ -44,6 +44,19 @@ const keys = (() => { try { return Keys.fromFragment(location.hash) } catch (e) 
 if (keys) openProject(keys)
 else landing()
 
+/** A description from texscan.ts (kept in English there: it is also data), translated. */
+const PROGRAM_WHAT: Record<string, () => string> = {
+  'runs a shell command (\\write18)': () => t('runs a shell command (\\write18)'),
+  'runs a shell command (\\ShellEscape)': () => t('runs a shell command (\\ShellEscape)'),
+  'reads the output of a command (\\input|)': () => t('reads the output of a command (\\input|)'),
+  'runs a program from Lua': () => t('runs a program from Lua'),
+  'loads a package that runs programs': () => t('loads a package that runs programs'),
+  'TikZ externalisation runs LaTeX as a command': () => t('TikZ externalisation runs LaTeX as a command'),
+  'tells arara which programs to run': () => t('tells arara which programs to run'),
+  'sets the program your LaTeX editor runs': () => t('sets the program your LaTeX editor runs'),
+}
+const programWhat = (en: string) => PROGRAM_WHAT[en]?.() ?? en
+
 // ---- start page ---------------------------------------------------------------
 function landing() {
   document.title = APP
@@ -310,7 +323,7 @@ async function openProject(keys: Keys) {
         t('If you compile that folder with your own LaTeX tools, check them first:'),
         h('ul', {}, ...fresh.slice(0, 6).map((l) => h('li', {},
           h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); gotoSource(l.path, l.line, true) } }, `${l.path}:${l.line}`),
-          ` ${t('{{what}}:', { what: l.what })} `, h('code', {}, l.text)))),
+          ` ${t('{{what}}:', { what: programWhat(l.what) })} `, h('code', {}, l.text)))),
         fresh.length > 6 ? h('div', { class: 'muted small' }, t('…and {{n}} more.', { n: fresh.length - 6 })) : null),
       h('button', { onclick: () => { programsNote.hidden = true } }, t('Dismiss')))
     programsNote.hidden = false

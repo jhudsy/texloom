@@ -40,8 +40,8 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const logSplit = h('div', { class: 'hsplit' })
   const probTab = h('button', { class: 'ltab on', onclick: () => showLogView(false) }, t('Problems'))
   const rawTab = h('button', { class: 'ltab', onclick: () => showLogView(true) }, t('Raw log'))
-  const scratchBtn = h('button', { class: 'ltab scratch', title: t('Delete LaTeX’s working files (.aux, .bbl, …) and compile again. In-browser compiles always start from scratch; this matters when compiling with your own TeX.'),
-    onclick: () => compile(true, true) }, t('Compile from scratch'))
+  const scratchBtn = h('button', { class: 'scratch', title: t('Delete LaTeX’s working files (.aux, .bbl, …) and compile again. In-browser compiles always start from scratch; this matters when compiling with your own TeX.'),
+    onclick: () => compile(true, true) }, '↻ ', t('Compile from scratch'))
   const logBox = h('div', { class: 'logbox' }, logSplit, h('div', { class: 'ltabs' }, probTab, rawTab, h('span', { class: 'spacer' }), scratchBtn), problemList, logPre)
   const showLogView = (raw: boolean) => {
     logPre.hidden = !raw; problemList.hidden = raw

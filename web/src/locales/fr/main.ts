@@ -1,5 +1,14 @@
 import type { Catalog } from '../../i18n'
 const fr: Catalog = {
+  'runs a shell command (\\write18)': 'exécute une commande shell (\\write18)',
+  'runs a shell command (\\ShellEscape)': 'exécute une commande shell (\\ShellEscape)',
+  'reads the output of a command (\\input|)': 'lit la sortie d’une commande (\\input|)',
+  'runs a program from Lua': 'exécute un programme depuis Lua',
+  'loads a package that runs programs': 'charge un paquet qui exécute des programmes',
+  'TikZ externalisation runs LaTeX as a command': 'l’externalisation TikZ lance LaTeX comme commande',
+  'tells arara which programs to run': 'indique à arara quels programmes exécuter',
+  'sets the program your LaTeX editor runs': 'choisit le programme que lance votre éditeur LaTeX',
+
   'Your name (shown to collaborators)': 'Votre nom (visible par les collaborateurs)',
   'Paste a project link…': 'Collez un lien de projet…',
   'Project link': 'Lien du projet',

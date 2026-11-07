@@ -248,6 +248,7 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 .ltabs { display: flex; gap: 2px; padding: 3px 6px 0; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
 .ltab { border: none; background: transparent; color: var(--muted); font-size: 12px; padding: 2px 8px; border-radius: 4px 4px 0 0; }
 .ltab.on { color: var(--fg); background: var(--bg); }
+.ltabs button.scratch { font-size: 12px; padding: 1px 8px; margin: 0 0 3px; align-self: center; border-radius: 5px; }
 .problems { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 0; font-size: 12px; background: var(--bg); }
 .problems[hidden] { display: none; }
 .problems li { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }

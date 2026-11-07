@@ -27,7 +27,7 @@ no copy at all. No accounts: you share a link. (The command-line tools are calle
   one-click fixes; spell check that skips LaTeX; search and replace across files; an outline with
   word counts; paste or drop images; add references from a DOI or arXiv id.
 - In English or French: the browser's language is used, or choose one in Settings (the
-  desktop app follows the system language, or `TEXLOOM_LANG=fr`).
+  desktop app follows the system language, or the language menu in its toolbar).
 - Start from templates, or import a `.zip` (e.g. from Overleaf) or an arXiv paper's source.
 - Read-only links, and personal edit links that can be revoked one by one.
 - The server is a single Python process with SQLite, small enough for a Raspberry Pi.
@@ -259,14 +259,15 @@ browser restart, click **📁 Reconnect folder** once.
 - **Share a folder…** turns an existing folder into a new project; **Add existing folder…**
   brings back one set up earlier (e.g. left, or cloned on the command line).
 - Each folder shows whether it is up to date, offline or sending changes, with its recent
-  activity, and switches for compiling with your own TeX and for keeping its git repository
-  in step. **Running programs when compiling** is *Never* (default), *TeX Live's safe list*,
+  activity, and switches for compiling with your own TeX (with **Compile from scratch**,
+  which first deletes LaTeX's working files) and for keeping its git repository in step. **Running programs when compiling** is *Never* (default), *TeX Live's safe list*,
   or *Anything the document asks, once I allow it*, with **Review lines…** to see and allow
   them (as `texloom allow`). **Leave…** stops syncing a folder (its files stay).
 - **Links…** shows the read-only link and your own edit link. Owners can create **edit
   links for others** there: one per person, or one for a group, to copy or email. Revoking
   one is in the web app's Share dialog.
-- **Start at login** keeps it running in the menu bar or tray.
+- **Start at login** keeps it running in the menu bar or tray; the language menu next to it
+  takes effect when the app restarts (`TEXLOOM_LANG=fr` or `en` overrides it).
 
 The downloads aren't signed with paid certificates yet. On macOS, the first time,
 right-click the app → **Open** (or System Settings → Privacy & Security → **Open Anyway**);
