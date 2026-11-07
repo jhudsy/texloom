@@ -241,6 +241,15 @@ On Windows, quote paths with spaces: `texloom run "C:\Users\Bob Smith\Desktop\pa
 `texloom run` prints the full path of the folder it syncs. (From a source checkout, prefix
 the commands with `uv run`.)
 
+**Several folders, and starting at login.** `clone` and `new` add the folder to this
+computer's folder list. One `texloom start` then keeps every folder on the list in sync:
+each with its own settings (`.texloom/config.json`: compile, git, …), log lines labelled
+with the folder's name, and folders added or left while it runs picked up within seconds.
+`texloom autostart on` starts it at login (a launchd agent on macOS, a systemd user
+service on Linux, a hidden script in the Startup folder on Windows) and writes a log
+(`texloom autostart status` says where). A folder is only ever synced by one texloom at a
+time: a second `texloom run` on it says so and stops.
+
 While `run` is going, edits to the files are merged character by character with what
 collaborators type in their browsers. With `--compile`:
 - it runs `latexmk` after changes and shares the PDF with everyone;
@@ -248,6 +257,9 @@ collaborators type in their browsers. With `--compile`:
 
 | command | |
 |---|---|
+| `texloom start` | sync every folder on this computer's list, in one process |
+| `texloom autostart on\|off\|status` | run `texloom start` at login (macOS, Linux, Windows) |
+| `texloom list` / `add <dir>` / `leave <dir>` | the folder list (`clone` and `new` add to it; leaving keeps the files) |
 | `texloom new <dir> --server URL [--code C]` | share an existing folder as a new project; prints both links |
 | `texloom clone <link> <dir>` | check out a project |
 | `texloom run <dir> [--compile] [--shell-restricted \| --shell-escape]` | keep the folder in sync, live |
