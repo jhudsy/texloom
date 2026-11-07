@@ -920,7 +920,8 @@ def main() -> None:
     p.add_argument("--texlive-init", action="store_true", help="download/refresh TeX Live's package index into --texlive, then exit")
     p.add_argument("--texlive-max", type=parse_size, default=4 * GiB, help="disk the TeX Live cache may use (default 4G)")
     p.add_argument("--texlive-mirror", action="append", default=[], metavar="URL",
-                   help="extra TeX Live mirror (…/systems/texlive/tlnet/) to try if the others fail; repeatable")
+                   help="TeX Live mirror to use first (…/systems/texlive/tlnet/), e.g. one in your country; "
+                        "repeatable. Without it, mirror.ctan.org picks one near the server")
     a = p.parse_args()
     if a.texlive_init:
         if not a.texlive:
@@ -928,7 +929,7 @@ def main() -> None:
         from .texlive import TexLive
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
         tl = TexLive(a.texlive, extra_mirrors=a.texlive_mirror)
-        asyncio.run(tl.build_index(tl.index_sources() if tl.ready else None))
+        asyncio.run(tl.build_index(tl.index_sources() if tl.ready or tl.extra_mirrors else None))
         return
     codes = CodeBook(a.codes_file)
     if a.add_code is not None or a.list_codes:

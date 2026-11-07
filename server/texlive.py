@@ -144,24 +144,25 @@ class TexLive:
         return self.db is not None
 
     def mirrors(self) -> list[str]:
-        """The pinned mirror first, then others: the CTAN redirector three times (it sends each
-        request to a different mirror, and mirrors update at different times), or the other
-        historic archives; then any configured."""
+        """Mirrors to fetch from, in order: the ones configured (--texlive-mirror), the pinned
+        one (chosen when the index was built: the CTAN redirector picks one near the server),
+        then the CTAN redirector three times (each request lands on a different mirror, and
+        mirrors update at different times), or the other historic archives."""
         pinned = self.meta.get("mirror")
-        if self.meta.get("historic"):
-            rest = [h.format(year=YEAR) for h in HISTORIC]
-        else:
-            rest = [CTAN] * 3
-        out = [pinned] if pinned else []
-        for m in [*rest, *self.extra_mirrors]:
-            if m != pinned and (m == CTAN or m not in out):
+        rest = [h.format(year=YEAR) for h in HISTORIC] if self.meta.get("historic") else [CTAN] * 3
+        out: list[str] = []
+        for m in [*self.extra_mirrors, *([pinned] if pinned else []), *rest]:
+            if m == CTAN or m not in out:
                 out.append(m)
         return out
 
     def index_sources(self) -> list[str]:
-        """Where to refresh the index from: not the pinned mirror first (it may be mid-update)."""
-        others = [m for m in self.mirrors() if m != self.meta.get("mirror")]
-        return list(dict.fromkeys(others)) + [m for m in [self.meta.get("mirror")] if m]
+        """Where to (re)build the index from: configured mirrors first, then the redirector
+        (so the pin follows the server if it moves), the pinned mirror last (it may be
+        mid-update when a refresh is needed)."""
+        pinned = self.meta.get("mirror")
+        rest = [h.format(year=YEAR) for h in HISTORIC] if self.meta.get("historic") else [CTAN]
+        return list(dict.fromkeys([*self.extra_mirrors, *rest, *([pinned] if pinned else [])]))
 
     @staticmethod
     async def _download(session: ClientSession, url: str, limit: int) -> tuple[bytes, str]:

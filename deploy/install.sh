@@ -17,6 +17,9 @@ TARGET=${1:?usage: deploy/install.sh user@host domain}
 DOMAIN=${2:?usage: deploy/install.sh user@host domain}
 SSH_OPTS=${SSH_OPTS:-}
 APP_DIR=${TEXLOOM_DIR:-/var/www/texloom}
+# TeX Live mirror to use first, e.g. https://mirror.example.ac.uk/ctan/systems/texlive/tlnet/
+# (default: mirror.ctan.org picks one near the server)
+TEXLIVE_MIRROR=${TEXLIVE_MIRROR:-}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 BUSYTEX_VERSION=$(node -p "require('$HERE/web/node_modules/texlyre-busytex/package.json').version")
 # sha256 of busytex-assets.tar.gz per release; set BUSYTEX_SHA256 for a version not listed here
@@ -44,7 +47,7 @@ rsync -az --delete -e "ssh $SSH_OPTS" \
   "$HERE/" "$TARGET:$APP_DIR/"
 
 echo "==> Installing on the server"
-ssh_ DOMAIN="$DOMAIN" APP_DIR="$APP_DIR" BUSYTEX_VERSION="$BUSYTEX_VERSION" BUSYTEX_SHA256="$BUSYTEX_SHA256" SKIP_CERT="${SKIP_CERT:-}" bash -s <<'REMOTE'
+ssh_ DOMAIN="$DOMAIN" APP_DIR="$APP_DIR" TEXLIVE_MIRROR="$TEXLIVE_MIRROR" BUSYTEX_VERSION="$BUSYTEX_VERSION" BUSYTEX_SHA256="$BUSYTEX_SHA256" SKIP_CERT="${SKIP_CERT:-}" bash -s <<'REMOTE'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1  # leave no caches behind
@@ -101,7 +104,8 @@ chown root:texloom /etc/texloom/admin-token && chmod 640 /etc/texloom/admin-toke
 # TeX Live files on demand for the in-browser engine: the package index (refreshed on each
 # deploy; ~2 s), packages fetched from mirrors when first asked for, into this folder
 install -d -o texloom -g texloom -m 750 /var/lib/texloom/texlive
-runuser -u texloom -- .venv/bin/texloom-server --texlive /var/lib/texloom/texlive --texlive-init \
+MIRROR_ARG=${TEXLIVE_MIRROR:+--texlive-mirror $TEXLIVE_MIRROR}
+runuser -u texloom -- .venv/bin/texloom-server --texlive /var/lib/texloom/texlive --texlive-init $MIRROR_ARG \
   || echo "    couldn't refresh the TeX Live index; keeping the one there is (if any)"
 
 # systemd service
@@ -114,7 +118,7 @@ Wants=network-online.target
 [Service]
 User=texloom
 WorkingDirectory=$APP_DIR
-ExecStart=$APP_DIR/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static $APP_DIR/web/dist --tex-assets $APP_DIR/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M --texlive /var/lib/texloom/texlive --texlive-max 3G
+ExecStart=$APP_DIR/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static $APP_DIR/web/dist --tex-assets $APP_DIR/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M --texlive /var/lib/texloom/texlive --texlive-max 3G $MIRROR_ARG
 Restart=on-failure
 UMask=0077
 MemoryMax=768M
