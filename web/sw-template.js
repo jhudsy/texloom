@@ -5,6 +5,7 @@ const VERSION = __VERSION__
 const SHELL = __SHELL__ // every built asset, so parts not yet opened also work offline
 const CACHE = `texloom-${VERSION}`
 const TEX = 'texloom-tex' // in-browser TeX engine scripts and WebAssembly (kept across versions)
+const TEXLIVE = 'texloom-texlive' // TeX Live files fetched on demand (URLs name the release; kept across versions)
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()))
@@ -12,7 +13,7 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    for (const key of await caches.keys()) if (key !== CACHE && key !== TEX) await caches.delete(key)
+    for (const key of await caches.keys()) if (key !== CACHE && key !== TEX && key !== TEXLIVE) await caches.delete(key)
     await self.clients.claim()
   })())
 })
@@ -47,6 +48,13 @@ self.addEventListener('fetch', (event) => {
   // data (*.data) is cached by the engine itself in IndexedDB, so it's left alone here.
   if (p.startsWith('/core/') && !p.endsWith('.data')) {
     event.respondWith(cacheFirst(req, TEX))
+    return
+  }
+
+  // TeX Live files on demand (/texlive/<year>/<format>/<name>): never change, so cache first;
+  // also lets compiles that used them work offline.
+  if (p.startsWith('/texlive/')) {
+    event.respondWith(cacheFirst(req, TEXLIVE))
     return
   }
 

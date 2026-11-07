@@ -147,6 +147,15 @@ npm run download-tex                        # in-browser TeX (~685 MB, into ../t
 cd .. && uv run texloom-server --port 8787
 ```
 
+For TeX Live files on demand (every TeX Live package available to in-browser compiles;
+otherwise only the bundles in `tex-assets` are), build the package index once and start
+the server with it:
+
+```bash
+uv run texloom-server --texlive data/texlive --texlive-init   # ~2 s; re-run to refresh
+uv run texloom-server --port 8787 --texlive data/texlive       # --texlive-max 3G caps its disk use
+```
+
 On your own machine, that's enough: open http://localhost:8787. Browsers treat
 `localhost` as secure. To let other people in, the server needs **HTTPS**, because
 browsers only allow the encryption the editor relies on over secure connections. Pick one:

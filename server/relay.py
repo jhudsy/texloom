@@ -512,6 +512,7 @@ class Relay:
         self.rooms: dict[str, set[web.WebSocketResponse]] = defaultdict(set)
         self.conns: dict[web.WebSocketResponse, Conn] = {}
         self._next_id = 1
+        self.texlive = None  # TexLive, when serving TeX Live files on demand
         self.inflight = 0  # bytes of large frames being handled right now
         self.blob_reads = asyncio.Semaphore(4)  # concurrent blob uploads being read
 
@@ -792,6 +793,7 @@ class Relay:
             "creation": "open" if self.codes.open_creation else "code",
             "defaultAllowance": None if d == UNLIMITED else d,
             "projectMaxBytes": self.limits.project_max,
+            "texlive": self.texlive.info() if self.texlive else None,
         })
 
     async def check_code(self, request: web.Request) -> web.Response:
@@ -840,8 +842,16 @@ async def headers(request: web.Request, handler):
 
 def make_app(db: Path, static: Path | None, tex: Path | None = None,
              limits: Limits | None = None, codes: CodeBook | None = None, arxiv: bool = True,
-             admin_token: str = "", evict_days: float = 0) -> web.Application:
+             admin_token: str = "", evict_days: float = 0, texlive: Path | None = None,
+             texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None) -> web.Application:
     relay = Relay(Store(db), limits, codes)
+    if texlive:  # TeX Live files on demand for the in-browser engine
+        from .texlive import TexLive
+        tl = TexLive(texlive, texlive_max, (limits or Limits()).min_free, texlive_mirrors)
+        if tl.ready:
+            relay.texlive = tl
+        else:
+            log.warning("--texlive %s has no index yet: run with --texlive-init first", texlive)
     app = web.Application(middlewares=[headers], client_max_size=MAX_BLOB + 1024)
     if admin_token:
         from .admin import Admin
@@ -866,6 +876,8 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
     app.router.add_delete("/blob/{project}/{id}", relay.delete_blob)
     app.router.add_route("OPTIONS", "/blob/{project}/{id}", lambda r: web.Response())
     app.router.add_get("/api/info", relay.info)
+    if relay.texlive:
+        app.router.add_get("/texlive/{year}/{fmt}/{name}", relay.texlive.handle)
     app.router.add_post("/api/code", relay.check_code)
     if arxiv:  # importing a paper's source (arXiv has no CORS, so the relay fetches it)
         from .arxiv import ArxivFetcher
@@ -903,7 +915,21 @@ def main() -> None:
     p.add_argument("--admin-token-file", type=Path,
                    help="enable /admin (read-only usage page); password = this file's content "
                         "(or set TEXLOOM_ADMIN_TOKEN)")
+    p.add_argument("--texlive", type=Path, metavar="DIR",
+                   help="serve TeX Live files on demand to the in-browser engine, cached in DIR")
+    p.add_argument("--texlive-init", action="store_true", help="download/refresh TeX Live's package index into --texlive, then exit")
+    p.add_argument("--texlive-max", type=parse_size, default=4 * GiB, help="disk the TeX Live cache may use (default 4G)")
+    p.add_argument("--texlive-mirror", action="append", default=[], metavar="URL",
+                   help="extra TeX Live mirror (…/systems/texlive/tlnet/) to try if the others fail; repeatable")
     a = p.parse_args()
+    if a.texlive_init:
+        if not a.texlive:
+            sys.exit("--texlive-init needs --texlive DIR")
+        from .texlive import TexLive
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+        tl = TexLive(a.texlive, extra_mirrors=a.texlive_mirror)
+        asyncio.run(tl.build_index(tl.index_sources() if tl.ready else None))
+        return
     codes = CodeBook(a.codes_file)
     if a.add_code is not None or a.list_codes:
         if not a.codes_file:
@@ -931,7 +957,8 @@ def main() -> None:
              fmt_size(limits.max_bytes), fmt_size(limits.min_free), fmt_size(limits.project_max),
              f"allowances from {a.codes_file}" if codes.path else "no codes file: every project may be stored")
     web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv,
-                        admin_token=admin_token, evict_days=a.evict_idle_days), host=a.host, port=a.port)
+                        admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
+                        texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror), host=a.host, port=a.port)
 
 
 if __name__ == "__main__":

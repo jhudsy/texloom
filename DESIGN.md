@@ -250,11 +250,26 @@ related-work section"`. Edits appear live in collaborators' browsers.
 
 1. **In browser:** [texlyre-busytex] (TeX Live 2026 compiled to WebAssembly, AGPL):
    pdfLaTeX, XeLaTeX and LuaLaTeX, plus bibtex8, biber and makeindex. Runs in a Web
-   Worker. The engine is about 32 MB plus the 93 MB basic package set, preloaded. The
-   recommended (200 MB) and extra (340 MB) sets are catalogued and fetched only if a
-   document needs them. Everything is cached in IndexedDB per site, so it's shared by
-   all projects and downloaded once per browser, with a progress bar. They are static
-   files under `/core/`, so the server (or a CDN) can host them.
+   Worker. The engine is about 32 MB plus the 93 MB basic package set, preloaded and cached
+   in IndexedDB per site (downloaded once per browser). **Everything else in TeX Live comes
+   on demand** (`server/texlive.py`): the engine asks for any file it lacks as
+   `GET /texlive/<year>/<kpathsea format>/<name>` (200 = the file, 404 = a miss it
+   remembers). The server keeps TeX Live's package index (`texlive.tlpdb`, ~187,000 run
+   files) in SQLite, maps the request to a path the way kpathsea would (per-format folders
+   and suffixes), and the first time a file is wanted downloads its package from a mirror,
+   checks it against the index's SHA-512, and unpacks only that package's run files under
+   `/var/lib/texloom/texlive` (capped by `--texlive-max`). Files are served with a one-year
+   immutable cache (the URL names the release), and the service worker keeps them for
+   offline use. The year must be the engine's: its formats are built from that release, so
+   the index comes from that year's repository (the live tlnet while current, the
+   historic `tlnet-final` afterwards). **Mirrors:** one is pinned when the index is built;
+   if it fails or holds another version of a package (checksum mismatch), the CTAN
+   redirector is tried (three times, a different mirror each), then any `--texlive-mirror`;
+   if all differ, the index is refreshed from another mirror (at most every 10 minutes).
+   A request waits up to 25 s for a first install (the engine gives up after 30); a
+   bigger package answers 503 and is there for the next compile. Servers without
+   `--texlive` keep the old behaviour: the recommended (200 MB) and extra (340 MB) bundles,
+   fetched when a document needs them.
 2. **Native:** a daemon with `--compile` runs `latexmk`. Full TeX Live: shell-escape,
    minted, etc.
 

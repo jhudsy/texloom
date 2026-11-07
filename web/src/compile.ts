@@ -37,6 +37,23 @@ export async function clearEngineCache() {
 
 let progressCb: ((p: Progress) => void) | undefined
 
+// TeX Live files on demand: when the server offers it (/api/info → texlive), the engine asks
+// it for any file it lacks (GET <endpoint>/<kpathsea format>/<name>), so the basic bundle is
+// enough to start and every TeX Live package works; the big recommended/extra bundles
+// aren't downloaded at all. Remembered for offline use (fetched files stay cached).
+const ENDPOINT_KEY = 'texloom.texliveEndpoint'
+let endpoint: Promise<string | null> | null = null
+export function texliveEndpoint(): Promise<string | null> {
+  return (endpoint ??= fetch('/api/info', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((j) => {
+      const e = typeof j?.texlive?.endpoint === 'string' && j.texlive.endpoint.startsWith('/') ? new URL(j.texlive.endpoint, location.origin).href : null
+      try { if (e) localStorage.setItem(ENDPOINT_KEY, e); else localStorage.removeItem(ENDPOINT_KEY) } catch {}
+      return e
+    })
+    .catch(() => { try { return localStorage.getItem(ENDPOINT_KEY) } catch { return null } }))
+}
+
 // The TeX bundles are nested: basic ⊂ recommended ⊂ extra, and each carries its own file
 // index (ls-R). Loaded together, whichever finishes last hides the other's extra files
 // (e.g. nicefrac.sty "not found" although extra was loaded). So a runner gets basic plus at
@@ -80,6 +97,7 @@ export function requestedFiles(files: Map<string, string | Uint8Array>): string[
 
 /** The one optional bundle this project needs. */
 async function levelFor(files: Map<string, string | Uint8Array>): Promise<Level | null> {
+  if (await texliveEndpoint()) return null // basic, plus single files from the server
   const have = await bundles()
   if (!have.extra) return have.recommended ? 'recommended' : null
   if (!have.recommended || runnerLevel === 'extra') return 'extra' // extra covers everything recommended has
@@ -139,6 +157,7 @@ export async function compileInBrowser(
       [...files].map(([path, content]) => ({ path, content })),
       main, bibtex, biber, makeindex, true, 'silent',
       DRIVERS[(opts.engine ?? 'pdflatex') as keyof typeof DRIVERS] ?? DRIVERS.pdflatex,
+      null, (await texliveEndpoint()) ?? undefined,
     )
     return { pdf: res.success && res.pdf ? res.pdf : null, log: res.log, synctex: res.synctex ?? null }
   } finally {

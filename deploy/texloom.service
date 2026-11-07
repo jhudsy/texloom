@@ -8,7 +8,7 @@ Wants=network-online.target
 [Service]
 User=texloom
 WorkingDirectory=/var/www/texloom
-ExecStart=/var/www/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static /var/www/texloom/web/dist --tex-assets /var/www/texloom/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M
+ExecStart=/var/www/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static /var/www/texloom/web/dist --tex-assets /var/www/texloom/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M --texlive /var/lib/texloom/texlive --texlive-max 3G
 Restart=on-failure
 UMask=0077
 MemoryMax=768M

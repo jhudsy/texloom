@@ -98,6 +98,12 @@ if [ ! -s /etc/texloom/admin-token ]; then
 fi
 chown root:texloom /etc/texloom/admin-token && chmod 640 /etc/texloom/admin-token
 
+# TeX Live files on demand for the in-browser engine: the package index (refreshed on each
+# deploy; ~2 s), packages fetched from mirrors when first asked for, into this folder
+install -d -o texloom -g texloom -m 750 /var/lib/texloom/texlive
+runuser -u texloom -- .venv/bin/texloom-server --texlive /var/lib/texloom/texlive --texlive-init \
+  || echo "    couldn't refresh the TeX Live index; keeping the one there is (if any)"
+
 # systemd service
 cat > /etc/systemd/system/texloom.service <<UNIT
 [Unit]
@@ -108,7 +114,7 @@ Wants=network-online.target
 [Service]
 User=texloom
 WorkingDirectory=$APP_DIR
-ExecStart=$APP_DIR/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static $APP_DIR/web/dist --tex-assets $APP_DIR/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M
+ExecStart=$APP_DIR/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static $APP_DIR/web/dist --tex-assets $APP_DIR/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M --texlive /var/lib/texloom/texlive --texlive-max 3G
 Restart=on-failure
 UMask=0077
 MemoryMax=768M
@@ -204,6 +210,12 @@ server {
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
     }
+    # TeX Live files on demand (a package is fetched from a mirror the first time)
+    location /texlive/ {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host \$host;
+        proxy_read_timeout 60s;
+    }
     # read-only admin page (HTTP basic auth against /etc/texloom/admin-token)
     location = /admin {
         limit_req zone=texloom_code burst=5 nodelay;
@@ -249,6 +261,13 @@ blocks = {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 120s;
+    }
+""",
+    "location /texlive/": """    # TeX Live files on demand (a package is fetched from a mirror the first time)
+    location /texlive/ {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;
+        proxy_read_timeout 60s;
     }
 """,
     "location = /admin": """    # read-only admin page (HTTP basic auth against /etc/texloom/admin-token)
