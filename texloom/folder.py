@@ -24,6 +24,7 @@ from .replica import BLOB_RE, Replica
 
 log = logging.getLogger("texloom")
 
+from .scan import SCANNED, added, allowed, scan
 from .paths import PROTECTED_DIRS, STATE, UNSAFE_NAMES, WIN_RESERVED, latexmk_command, main_file, safe_rel, tex_env  # noqa: F401
 IGNORE_DIRS = {STATE, ".git", ".svn", "node_modules", "__pycache__", ".idea", ".vscode"}
 IGNORE_NAMES = {".DS_Store", "Thumbs.db"}
@@ -121,6 +122,7 @@ class FolderSync:
         replica.before_remote = self.ingest_all
         replica.on_remote = self.on_remote
         replica.on_compile_request = self.on_compile_request
+        self._warned_shell: frozenset[str] = frozenset()
         self._last_request = 0.0
 
     # --- helpers -------------------------------------------------------------
@@ -380,12 +382,26 @@ class FolderSync:
         full = self.target(rel)
         if full is None:
             return
+        new_lines = self._program_lines(rel, full, data)
         full.parent.mkdir(parents=True, exist_ok=True)
         tmp = full.with_name(f".{full.name}.texloom-tmp")
         tmp.write_bytes(data)
         tmp.replace(full)
         self._remember(rel, h)
         log.info("↓ %s", rel)
+        for f in new_lines:
+            log.warning("⚠ %s — if you compile this folder with your own LaTeX tools, check it first.", f.describe())
+
+    @staticmethod
+    def _program_lines(rel: str, full: Path, data: bytes) -> list:
+        """Lines asking to run programs that this write brings into the folder."""
+        if not rel.lower().endswith(SCANNED):
+            return []
+        try:
+            old = full.read_text("utf-8", "replace") if full.is_file() else None
+        except OSError:
+            old = None
+        return added(rel, old, data.decode("utf-8", "replace"))
 
     # --- compile -------------------------------------------------------------
     def main_file(self) -> str | None:
@@ -421,7 +437,8 @@ class FolderSync:
         # (-no-shell-escape), may not read or write outside the project (openin/openout
         # "paranoid"), and latexmk ignores rc files (-norc; latexmkrc is Perl). An rc you
         # trust can be named in .texloom/config.json as "latexmk_rc".
-        extra.append("-shell-escape" if self.opts["shell_escape"] else "-no-shell-escape")
+        shell, note = self.shell_mode()
+        extra.append(shell)
         if self.opts.get("latexmk_rc"):
             extra += ["-r", str(Path(self.opts["latexmk_rc"]).expanduser())]
         build = self.root / STATE / "build"
@@ -445,6 +462,8 @@ class FolderSync:
         logf = build / f"{stem}.log"
         ok = proc.returncode == 0 and pdf.exists()
         log_text = logf.read_bytes() if logf.exists() else out
+        if note:  # collaborators see why minted & co. didn't run
+            log_text = f"texloom: {note}\n\n".encode() + log_text
         log.info("compiled %s in %.1fs: %s", main, time.time() - t0, "ok" if ok else "errors")
         out_pdf = self.target(main[:-4] + ".pdf")
         if pdf.exists() and out_pdf is not None:
@@ -465,6 +484,30 @@ class FolderSync:
                 "at": time.time(), "main": main, **({"synctex": stx_id} if stx_id else {}),
             }
         self.r.local_change(publish)
+
+    def shell_mode(self) -> tuple[str, str]:
+        """The latexmk shell-escape flag for this compile, and a note for the log.
+
+        Full shell escape runs only lines you have approved (`texloom allow`): when a line
+        that asks to run programs is new, this compile uses restricted mode instead."""
+        mode = self.opts["shell_escape"]
+        if mode == "restricted":
+            return "-shell-restricted", ""
+        if not mode:
+            return "-no-shell-escape", ""
+        files = {p: str(t) for p, t in self.r.files.items() if self.target(p) is not None}
+        new = [f for f in scan(files) if f.kind == "shell" and f.key not in allowed(self.root)]
+        if not new:
+            return "-shell-escape", ""
+        keys = frozenset(f.key for f in new)
+        if keys != self._warned_shell:
+            self._warned_shell = keys
+            log.warning("⚠ not running programs this time: %d line(s) asking to run them are new:\n  %s\n"
+                        "Check them, then run `texloom allow %s` to let them run.",
+                        len(new), "\n  ".join(f.describe() for f in new[:10]), self.root)
+        where = ", ".join(f"{f.path}:{f.line}" for f in new[:5]) + (" …" if len(new) > 5 else "")
+        return "-shell-restricted", (f"compiled without shell escape: new lines ask to run programs ({where}). "
+                                     f"The person running texloom there can allow them with `texloom allow`.")
 
     # --- main loop -------------------------------------------------------------
     async def watch(self) -> None:

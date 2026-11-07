@@ -189,6 +189,15 @@ The resolved path must stay inside the project folder (no writing through symlin
   their HMAC id.
 - **latexmk** runs with `-norc`, `-no-shell-escape` (unless opted in locally) and
   `openin_any=p`/`openout_any=p`; the main file is passed as `./name`.
+- **Lines that run programs** (`texloom/scan.py`, `programRequests` in `texscan.ts`):
+  `\write18`, `\ShellEscape`, `\input|`, Lua `os.execute`/`io.popen`, packages such as
+  minted or pythontex, TikZ externalisation ("shell"), and arara directives or editor
+  `% !TeX program` comments ("tools"). With full shell escape, a compile uses
+  `-shell-escape` only if every "shell" line is approved in `.texloom/allowed.json`
+  (keyed by file and line text, set by `texloom allow`), else `-shell-restricted` with a
+  note in the published log. Lines a remote change writes into a synced folder are
+  reported once (helper log, browser notice). Plainly written forms only: TeX macros can
+  build any command, so this is a tripwire, not a guarantee.
 - **Malformed frames** are logged and dropped.
 
 **Manual sync (per device):** the replica doesn't keep a connection open. Local edits

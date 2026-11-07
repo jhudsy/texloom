@@ -3,6 +3,7 @@
 // Works while the tab is open; the texloom helper does the same without a browser.
 import type { Replica } from './replica'
 import { cleanPath, isText, mainFile, putBinary, putText } from './projectfiles'
+import { addedProgramLines, type ProgramLine } from './texscan'
 
 const DB = 'texloom-folders'
 const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycache__', '.idea', '.vscode'])
@@ -64,30 +65,40 @@ export async function folderFiles(dir: Dir): Promise<string[]> {
   return [...(await walk(dir)).keys()]
 }
 
-export interface FolderSync { name: string; stop(): void; status: () => string; onChange: (() => void) | null }
+export interface FolderSync {
+  name: string; stop(): void; status: () => string; onChange: (() => void) | null
+  /** Lines that ask to run programs, newly written into the folder (from collaborators). */
+  onPrograms: ((lines: ProgramLine[]) => void) | null
+}
 
 /** Start syncing `root` with the project. Disk wins for files changed on both sides. */
 export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync> {
   const KEY = `known.${r.keys.project}`
-  const known: Known = (await kv<Known>(KEY)) ?? {}
   const DKEY = `dirs.known.${r.keys.project}`
-  const knownDirs = new Set<string>((await kv<string[]>(DKEY)) ?? []) // folders mirrored both ways
+  // What was in sync is remembered for the folder last linked. For any other folder, start
+  // afresh: otherwise every project file missing from it would count as deleted on disk.
+  const prev = await savedFolder(r.keys.project)
+  const same = !!prev && (await (prev as any).isSameEntry(root).catch(() => false))
+  const known: Known = (same && (await kv<Known>(KEY))) || {}
+  const knownDirs = new Set<string>((same && (await kv<string[]>(DKEY))) || []) // folders mirrored both ways
   let busy = false, stopped = false, last = '', errors = 0
   const save = () => Promise.all([kv(KEY, known), kv(DKEY, [...knownDirs])]).catch(() => {})
-  const sync: FolderSync = { name: root.name, stop, status: () => last, onChange: null }
+  const sync: FolderSync = { name: root.name, stop, status: () => last, onChange: null, onPrograms: null }
   const note = (s: string) => { last = s; sync.onChange?.() }
 
   async function writeOut() {
     let n = 0
-    const want = new Set<string>()
+    const want = new Set<string>(), programs: ProgramLine[] = []
     for (const [p, yt] of r.files) {
       if (!cleanPath(p) || BUILD.test(p)) continue
       want.add(p)
-      const data = new TextEncoder().encode(yt.toString())
+      const text = yt.toString(), data = new TextEncoder().encode(text)
       const h = await sha(data)
       if (known[p]?.h === h) continue
-      if (await put(p, data, h)) n++
+      const prev = await readText(p)
+      if (await put(p, data, h)) { n++; programs.push(...addedProgramLines(p, prev, text)) }
     }
+    if (programs.length) sync.onPrograms?.(programs)
     for (const [p, b] of r.bin) {
       if (!cleanPath(p) || BUILD.test(p) || !b?.h) continue
       want.add(p)
@@ -123,6 +134,12 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       delete known[p]; n++
     }
     if (n) { await save(); note(`↓ ${n} file${n === 1 ? '' : 's'} · ${new Date().toLocaleTimeString()}`) }
+  }
+
+  /** A file's current text in the folder, or null. */
+  async function readText(p: string): Promise<string | null> {
+    const fh = await fileHandle(root, p, false)
+    try { return fh ? await (await fh.getFile()).text() : null } catch { return null }
   }
 
   async function put(p: string, data: Uint8Array, h: string): Promise<boolean> {

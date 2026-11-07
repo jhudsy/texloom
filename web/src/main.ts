@@ -14,6 +14,7 @@ import { createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
 import { SyncTex } from './synctex'
+import type { ProgramLine } from './texscan'
 import { ProjectIndex } from './latex'
 import { autoSave, createHistoryPanel } from './history'
 import { referenceDialog } from './references'
@@ -288,6 +289,26 @@ async function openProject(keys: Keys) {
     folderBtn.textContent = folder ? `📁 ${folder.name}` : '📁 Reconnect folder'
     folderBtn.title = folder ? `Synced with the folder “${folder.name}” while this tab is open. ${folder.status()}` : 'Click to allow syncing with your folder again.'
   }
+  // A collaborator's change wrote lines into the folder that ask to run programs. Harmless
+  // for compiles here (TeX never runs programs in the browser), but local LaTeX tools
+  // may follow them, so say so once per line.
+  const programsNote = h('div', { class: 'risk', role: 'status', hidden: true })
+  const toldPrograms = new Set<string>()
+  function showPrograms(lines: ProgramLine[]) {
+    const fresh = lines.filter((l) => !toldPrograms.has(`${l.path}\0${l.text}`))
+    if (!fresh.length) return
+    for (const l of fresh) toldPrograms.add(`${l.path}\0${l.text}`)
+    programsNote.replaceChildren(
+      h('div', {},
+        h('b', {}, '⚠ Lines that run programs were written to your folder. '),
+        'If you compile that folder with your own LaTeX tools, check them first:',
+        h('ul', {}, ...fresh.slice(0, 6).map((l) => h('li', {},
+          h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); gotoSource(l.path, l.line, true) } }, `${l.path}:${l.line}`),
+          ` ${l.what}: `, h('code', {}, l.text)))),
+        fresh.length > 6 ? h('div', { class: 'muted small' }, `…and ${fresh.length - 6} more.`) : null),
+      h('button', { onclick: () => { programsNote.hidden = true } }, 'Dismiss'))
+    programsNote.hidden = false
+  }
   let pendingFolder: FileSystemDirectoryHandle | null = null
   async function linkFolder(dir: FileSystemDirectoryHandle, fresh: boolean) {
     if (fresh) {
@@ -298,6 +319,7 @@ async function openProject(keys: Keys) {
     folder?.stop()
     folder = await startFolderSync(r, dir)
     folder.onChange = showFolder
+    folder.onPrograms = showPrograms
     pendingFolder = null
     await rememberFolder(keys.project, dir)
     showFolder()
@@ -464,6 +486,7 @@ async function openProject(keys: Keys) {
       `The owner moved this project to new keys on ${new Date(at).toLocaleDateString()}. This copy no longer receives their changes: ask them for the new link.`))
   }
   risk.el.after(movedNote)
+  movedNote.after(programsNote)
   r.meta.observe(renderMoved); renderMoved()
   r.onStatus = () => {
     renderStatus()

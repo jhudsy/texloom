@@ -67,7 +67,7 @@ def latexmk_command(engine: object, bib: object, main_name: str, *extra: str) ->
     """latexmk for a document collaborators wrote: no rc files (latexmkrc is Perl), no shell
     escape unless `extra` asks for it."""
     flag = ENGINE_FLAGS.get(str(engine), "-pdf")
-    shell = [] if any(a in ("-shell-escape", "-no-shell-escape") for a in extra) else ["-no-shell-escape"]
+    shell = [] if any(a in ("-shell-escape", "-no-shell-escape", "-shell-restricted") for a in extra) else ["-no-shell-escape"]
     return ["latexmk", "-norc", flag, "-interaction=nonstopmode", "-file-line-error", *shell,
             *(["-bibtex-"] if bib == "none" else []), *extra, f"./{main_name}"]
 

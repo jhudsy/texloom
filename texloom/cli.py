@@ -4,6 +4,7 @@
   texloom clone <link> <dir>                      check a project out into a folder
   texloom run   <dir> [--compile]                 keep folder and project in sync
   texloom links <dir>                             print the edit / read-only links
+  texloom allow <dir>                             review lines that run programs; allow them with --shell-escape
   texloom mcp   <dir|link> [--name NAME]          MCP server: an agent edits/comments as a collaborator
 """
 
@@ -20,6 +21,7 @@ from pathlib import Path
 from . import __version__
 from .crypto import Keys
 from .folder import STATE, FolderSync
+from .paths import safe_rel
 from .replica import Replica
 
 log = logging.getLogger("texloom")
@@ -42,7 +44,8 @@ DEFAULT_CONFIG = {
     "compile": False,          # run latexmk after changes (same as --compile)
     "engine": None,            # override the project's engine on this machine
     "latexmk_args": [],        # extra arguments, e.g. ["-pdfxe"]
-    "shell_escape": False,     # allow \write18 (minted etc.). Runs code from collaborators!
+    "shell_escape": False,     # false, "restricted" (TeX Live's safe programs only) or true (minted etc.;
+                               # lines that run programs must be approved with `texloom allow`)
     "label": "",               # how your compiles are labelled for others
     "create_code": "",         # creation code, if the server requires one for new projects
 }
@@ -65,7 +68,7 @@ def print_links(keys: Keys, server: str) -> None:
     print("Anyone with a link has that access. Keep the edit link private.")
 
 
-async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool = False) -> None:
+async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | str = False) -> None:
     cfg = {**DEFAULT_CONFIG, **load_config(d)}
     keys, server = load(d)
     code = cfg["create_code"] or os.environ.get("TEXLOOM_CODE", "")
@@ -101,6 +104,29 @@ async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool = 
         replica.save()
 
 
+def allow_programs(d: Path, yes: bool) -> None:
+    """Show every line that asks to run programs; on confirmation, allow exactly those."""
+    from .scan import allow, allowed, scan
+    keys, server = load(d)
+    r = Replica(d / STATE, keys, server)  # the local copy, as last synced
+    found = [f for f in scan({p: str(t) for p, t in r.files.items() if safe_rel(p)}) if f.kind == "shell"]
+    if not found:
+        allow(d, set())
+        print("No lines in this project ask to run programs.")
+        return
+    before = allowed(d)
+    print("With shell escape, these lines run programs on this computer:\n")
+    for f in found:
+        print(("  " if f.key in before else "* ") + f.describe())
+    print("\n(* = new since you last allowed.) Anyone with an edit link can change them; macros can")
+    print("also hide commands, so only allow this for projects whose editors you trust.")
+    if not yes and input("Allow these lines to run? [y/N] ").strip().lower() not in ("y", "yes"):
+        print("Nothing changed.")
+        return
+    allow(d, {f.key for f in found})
+    print(f"Allowed {len(found)} line(s). A running `texloom run` uses them from its next compile.")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="texloom", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -119,8 +145,13 @@ def main() -> None:
     p = sub.add_parser("run", help="sync a folder continuously")
     p.add_argument("dir", type=Path, nargs="?", default=Path("."))
     p.add_argument("--compile", action="store_true", help="compile with latexmk on changes")
+    p.add_argument("--shell-restricted", action="store_true",
+                   help="let TeX run only TeX Live's list of safe programs (e.g. for epstopdf)")
     p.add_argument("--shell-escape", action="store_true",
                    help="allow shell-escape (minted etc.); runs code collaborators write")
+    p = sub.add_parser("allow", help="review the lines that run programs, and let them run in shell-escape compiles")
+    p.add_argument("dir", type=Path, nargs="?", default=Path("."))
+    p.add_argument("-y", "--yes", action="store_true", help="don't ask")
     p = sub.add_parser("sync", help="sync once and exit")
     p.add_argument("dir", type=Path, nargs="?", default=Path("."))
     p = sub.add_parser("storage", help="server storage: 'server' keeps an encrypted copy; 'relay' keeps nothing")
@@ -155,11 +186,16 @@ def main() -> None:
         save(a.dir, a.link)
         asyncio.run(run(a.dir, False, once=True))
         print(f"Cloned into {a.dir}. Run `texloom run {a.dir}` to keep it in sync.")
+        print("Collaborators' files are written there. texloom won't write files that LaTeX tools run as\n"
+              "programs and warns about lines that ask to run one, but compile the folder with your own\n"
+              "tools only if you trust everyone who can edit this project.")
     elif a.cmd == "run":
         try:
-            asyncio.run(run(a.dir, a.compile, shell_escape=a.shell_escape))
+            asyncio.run(run(a.dir, a.compile, shell_escape=True if a.shell_escape else "restricted" if a.shell_restricted else False))
         except KeyboardInterrupt:
             pass
+    elif a.cmd == "allow":
+        allow_programs(a.dir, a.yes)
     elif a.cmd == "sync":
         asyncio.run(run(a.dir, False, once=True))
     elif a.cmd == "storage":

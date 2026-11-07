@@ -58,7 +58,7 @@ export async function setupDialog(r: Replica, link: string): Promise<Device> {
       h('h4', {}, 'Where do the files live?'),
       radios('where', 'browser', [
         ['browser', 'Only in this browser', 'Works offline. Nothing to install. Note: clearing this browser’s data deletes this copy; keep the link so it can be reopened from the server’s copy.'],
-        ['folder', 'In this browser and in a folder on this computer', 'For editing with other tools or agents, and compiling with your own TeX. The folder is a separate copy: delete it like any folder.'],
+        ['folder', 'In this browser and in a folder on this computer', 'For editing with other tools or agents, and compiling with your own TeX. The folder is a separate copy: delete it like any folder. Choose this only for projects whose editors you trust: your own LaTeX tools may run programs the files ask for.'],
       ], (v) => (folderBox.hidden = v !== 'folder')),
       folderBox,
       h('h4', {}, 'Compiling'),
@@ -146,6 +146,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     h('details', {}, h('summary', {}, 'Keep a copy in a folder on this computer'),
       chooseFolder ? h('div', {},
         h('p', { class: 'muted small' }, 'This browser can sync a folder itself while this tab is open: nothing to install. Changes go both ways; files changed on both sides take the folder’s version (it stays in History).'),
+        h('p', { class: 'muted small' }, 'Collaborators’ files are written there. TeXLoom won’t write files that LaTeX tools run as programs, and points out lines that ask to run one, but compile the folder with your own tools only if you trust everyone who can edit this project.'),
         h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => { dlg.close(); await chooseFolder() } }, 'Choose a folder…'))) : null,
       chooseFolder ? h('p', { class: 'muted small' }, 'Or, to keep it in sync without a browser (and compile with your own TeX):') : null,
       folderHelp(r, link)),

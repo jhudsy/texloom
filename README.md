@@ -267,8 +267,21 @@ Collaborators write the document, so compiling is locked down by default:
   writes files such as `latexmkrc` or `texmf.cnf`, anything in `.git`, `.vscode` or
   `.idea` (however it's capitalised), nor any path outside the folder.
 
-`shell_escape` (needed for minted and similar) lets the document run programs on *your*
-machine: turn it on only for projects whose editors you trust.
+**Running programs.** Some packages need TeX to run programs (shell escape). Choose how
+much with `"shell_escape"` in `.texloom/config.json`, or on the command line:
+- `false` (default): nothing runs. Browser compiles are always like this.
+- `"restricted"` / `--shell-restricted`: only TeX Live's list of safe programs (enough for
+  e.g. `epstopdf`, not for minted).
+- `true` / `--shell-escape`: anything the document asks for, e.g. minted. Because anyone
+  with an edit link writes the document, lines that run programs must be approved first:
+  `texloom allow <dir>` lists them (`\write18`, minted, pythontex, Lua `os.execute`, …) and
+  allows exactly those. When a line is new or changed, that compile runs in restricted
+  mode instead, and the log says which line is waiting. The check sees commands written
+  out plainly; macros can hide one, so use `true` only for projects whose editors you trust.
+
+When a collaborator's change writes such a line into your folder, or an `% arara:`
+directive or `% !TeX program` comment (which your own LaTeX editor may follow), the helper
+and the browser's folder sync point it out once.
 
 ### Agents (MCP)
 
