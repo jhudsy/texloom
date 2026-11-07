@@ -107,6 +107,20 @@ class Keys:
         pub = Ed25519PrivateKey.from_private_bytes(self.member[0]).public_key()
         return b64e(pub.public_bytes(Encoding.Raw, PublicFormat.Raw))
 
+    def personal(self, name: str) -> tuple[str, str, "Keys"]:
+        """Owner only: a personal edit link for `name` (as Keys.personal in web/src/crypto.ts):
+        returns (public key, owner's grant, the link's Keys)."""
+        if not self.seed:
+            raise PermissionError("only the owner can create personal links")
+        clean = name.strip()[:60] or "collaborator"
+        if len(clean.encode()) > 200:
+            raise ValueError("name too long")
+        sk = Ed25519PrivateKey.generate()
+        mseed = sk.private_bytes_raw()
+        pub = sk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        grant = Ed25519PrivateKey.from_private_bytes(self.seed).sign(grant_msg(pub, clean))
+        return b64e(pub), b64e(grant), Keys(self.project, self.key, None, member=(mseed, grant, clean))
+
     # --- links -----------------------------------------------------------
     def link(self, server: str, write: bool = True) -> str:
         frag = f"p={self.project}&k={b64e(self.key)}"

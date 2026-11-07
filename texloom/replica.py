@@ -45,6 +45,7 @@ class Replica:
         self.clients: Map = self.doc.get("clients", type=Map)  # client id -> name (who wrote what)
         self.meta: Map = self.doc.get("meta", type=Map)
         self.out: Map = self.doc.get("out", type=Map)
+        self.members: Map = self.doc.get("members", type=Map)  # personal links the owner issued (see sharing.ts)
         self.since = 0
         self.outbox: dict[str, bytes] = {}
         self._seen: set[int] = set()  # seqs received above `since` (out of order)

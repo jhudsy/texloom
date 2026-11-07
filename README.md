@@ -232,10 +232,16 @@ browser restart, click **📁 Reconnect folder** once.
   name and your access, and puts it in a folder you choose (`~/TeXLoom/<name>` by default).
   In the web app, Settings → *Keep a copy in a folder* → **Open in the TeXLoom app** does
   the same in one click; the app asks before joining.
-- **Share a folder…** turns an existing folder into a new project.
+- **Share a folder…** turns an existing folder into a new project; **Add existing folder…**
+  brings back one set up earlier (e.g. left, or cloned on the command line).
 - Each folder shows whether it is up to date, offline or sending changes, with its recent
   activity, and switches for compiling with your own TeX and for keeping its git repository
-  in step. **Leave…** stops syncing a folder (its files stay).
+  in step. **Running programs when compiling** is *Never* (default), *TeX Live's safe list*,
+  or *Anything the document asks, once I allow it*, with **Review lines…** to see and allow
+  them (as `texloom allow`). **Leave…** stops syncing a folder (its files stay).
+- **Links…** shows the read-only link and your own edit link. Owners can create **edit
+  links for others** there: one per person, or one for a group, to copy or email. Revoking
+  one is in the web app's Share dialog.
 - **Start at login** keeps it running in the menu bar or tray.
 
 The downloads aren't signed with paid certificates yet. On macOS, the first time,

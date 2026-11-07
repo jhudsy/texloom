@@ -14,15 +14,18 @@ from __future__ import annotations
 import asyncio
 import collections
 import getpass
+import json
 import logging
+import platform
 import os
 import re
 import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
@@ -30,7 +33,7 @@ from PySide6.QtCore import Qt
 from . import __version__, autostart, registry
 from .cli import DEFAULT_CONFIG, clone_project, load_config, new_project, peek, run, update_config
 from .crypto import Keys
-from .daemon import CURRENT, FOLDER, Daemon, FolderTag
+from .daemon import CURRENT, FOLDER, Daemon, FolderProblem, FolderTag
 
 log = logging.getLogger("texloom")
 ICON = Path(__file__).with_name("assets") / "icon.png"
@@ -46,11 +49,20 @@ class Engine:
         self.loop = asyncio.new_event_loop()
         self.daemon = Daemon(lambda d: run(d, False))
         self.thread = threading.Thread(target=self._main, name="texloom-sync", daemon=True)
+        self.names: dict[Path, str] = {}  # project names, read on the sync thread (documents aren't shared across threads)
 
     def _main(self) -> None:
         asyncio.set_event_loop(self.loop)
         self.loop.create_task(self.daemon.loop())
+        self.loop.create_task(self._names())
         self.loop.run_forever()
+
+    async def _names(self) -> None:
+        while True:
+            for d, st in list(self.daemon.states.items()):
+                if st.replica is not None:
+                    self.names[d] = str(st.replica.meta.get("name") or "")
+            await asyncio.sleep(1)
 
     def start(self) -> None:
         self.thread.start()
@@ -124,12 +136,7 @@ def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
 
 
 def project_name(d: Path, engine: Engine) -> str:
-    st = engine.daemon.states.get(d)
-    try:
-        name = str(st.replica.meta.get("name") or "") if st and st.replica else ""
-    except Exception:  # noqa: BLE001 - read from another thread; a stale value is fine
-        name = ""
-    return name or d.name
+    return engine.names.get(d) or d.name
 
 
 def dot(colour: str) -> QtGui.QIcon:
@@ -166,7 +173,195 @@ def link_from_url(url: str) -> str | None:
     return link if link.startswith(("https://", "http://")) and "#" in link else None
 
 
+async def program_lines(engine: Engine, d: Path) -> tuple[list, set[str]]:
+    """Lines in a folder's project that ask to run programs (shell escape), and those allowed."""
+    from .cli import STATE, load
+    from .paths import safe_rel
+    from .replica import Replica
+    from .scan import allowed, scan
+    st = engine.daemon.states.get(d)
+    r = st.replica if st and st.replica is not None else Replica(d / STATE, *load(d))
+    found = [f for f in scan({p: str(t) for p, t in r.files.items() if safe_rel(p)}) if f.kind == "shell"]
+    return found, allowed(d)
+
+
 # ---- dialogs ----------------------------------------------------------------------------
+class ProgramsDialog(QtWidgets.QDialog):
+    """`texloom allow` in a window: see the lines that run programs, allow exactly those."""
+
+    def __init__(self, engine: Engine, d: Path, parent=None) -> None:
+        super().__init__(parent)
+        self.engine, self.d, self.found = engine, d, []
+        self.setWindowTitle("Lines that run programs")
+        self.setMinimumSize(640, 360)
+        lay = QtWidgets.QVBoxLayout(self)
+        intro = QtWidgets.QLabel("With “Anything the document asks”, these lines run programs on this computer when "
+                                 "it compiles. Only lines you allow here run; a new or changed line waits for you "
+                                 "(that compile runs without it, and the log says so).")
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+        self.view = QtWidgets.QTreeWidget()
+        self.view.setHeaderLabels(["", "Where", "What", "Line"])
+        self.view.setRootIsDecorated(False)
+        lay.addWidget(self.view, 1)
+        warn = QtWidgets.QLabel("Anyone with an edit link can change these lines, and TeX macros can hide a command "
+                                "from this list, so allow this only for projects whose editors you trust.")
+        warn.setWordWrap(True)
+        warn.setStyleSheet(f"color: {AMBER}")
+        lay.addWidget(warn)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+        self.ok = bb.addButton("Allow these lines", QtWidgets.QDialogButtonBox.AcceptRole)
+        self.ok.setEnabled(False)
+        self.ok.clicked.connect(self.allow)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        engine.submit(program_lines(engine, d), self.loaded)
+
+    def loaded(self, res, err) -> None:
+        if err:
+            self.view.addTopLevelItem(QtWidgets.QTreeWidgetItem(["", "", f"Couldn’t read the project: {err}", ""]))
+            return
+        self.found, allowed_keys = res
+        for f in self.found:
+            new = f.key not in allowed_keys
+            it = QtWidgets.QTreeWidgetItem(["new" if new else "allowed", f"{f.path}:{f.line}", f.what, f.text])
+            if new:
+                it.setForeground(0, QtGui.QColor(AMBER))
+            self.view.addTopLevelItem(it)
+        if not self.found:
+            self.view.addTopLevelItem(QtWidgets.QTreeWidgetItem(["", "", "No lines in this project ask to run programs.", ""]))
+        for i in range(3):
+            self.view.resizeColumnToContents(i)
+        self.ok.setEnabled(bool(self.found))
+
+    def allow(self) -> None:
+        from .scan import allow
+        allow(self.d, {f.key for f in self.found})
+        self.engine.call(self.engine.daemon.restart, self.d)  # the next compile uses them
+        self.accept()
+
+
+def issued_file(d: Path) -> Path:
+    return d / ".texloom" / "issued.json"
+
+
+def load_issued(d: Path) -> dict:
+    """Personal links made from this folder's app, kept so they can be copied again (owner only)."""
+    try:
+        return json.loads(issued_file(d).read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+async def create_personal(engine: Engine, d: Path, name: str) -> str:
+    """Owner only: a personal edit link for `name`, recorded in the project like the web app does."""
+    st = engine.daemon.states.get(d)
+    r = st.replica if st else None
+    if r is None or not r.connected.is_set():
+        raise FolderProblem("this folder isn't connected right now: try again in a moment")
+    pub, grant, personal = r.keys.personal(name)
+    at = int(time.time() * 1000)
+    me = load_config(d).get("name") or f"TeXLoom app on {platform.node().split('.')[0]}"
+    r.local_change(lambda: r.members.__setitem__(pub, {"name": personal.member[2], "at": at, "by": me, "g": grant}))
+    link = personal.link(r.server)
+    issued = {**load_issued(d), pub: {"name": personal.member[2], "at": at, "link": link}}
+    fd = os.open(issued_file(d), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # these links are keys
+    with os.fdopen(fd, "w") as f:
+        json.dump(issued, f, indent=2)
+    return link
+
+
+def mailto(link: str, project: str, who: str) -> QtCore.QUrl:
+    body = (f"Hi {who},\n\nYou’re invited to edit “{project}” on TeXLoom. Open this link in your browser:\n\n{link}\n\n"
+            "This link is for you only: please don’t forward it. Anyone who has it can read the project and change it as you.")
+    return QtCore.QUrl(f"mailto:?subject={quote(f'Invitation to edit “{project}” on TeXLoom')}&body={quote(body)}")
+
+
+class LinksDialog(QtWidgets.QDialog):
+    """This folder's links: read-only, your own edit link, and (owners) edit links for others."""
+
+    def __init__(self, d: Path, parent=None, engine: Engine | None = None, project: str = "") -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Links")
+        self.setMinimumWidth(600)
+        keys, server = Keys.from_link(load_config(d)["link"])
+        lay = QtWidgets.QVBoxLayout(self)
+
+        def row(label: str, text: str, note: str = "") -> None:
+            lay.addWidget(QtWidgets.QLabel(f"<b>{label}</b>"))
+            r = QtWidgets.QHBoxLayout()
+            field = QtWidgets.QLineEdit(text)
+            field.setReadOnly(True)
+            field.setCursorPosition(0)
+            copy = QtWidgets.QPushButton("Copy")
+            copy.clicked.connect(lambda: (QtWidgets.QApplication.clipboard().setText(text), copy.setText("Copied")))
+            r.addWidget(field, 1)
+            r.addWidget(copy)
+            lay.addLayout(r)
+            if note:
+                n = QtWidgets.QLabel(note)
+                n.setWordWrap(True)
+                n.setStyleSheet(f"color: {GREY}")
+                lay.addWidget(n)
+
+        row("Read-only link", keys.link(server, write=False), "Anyone with it can read the project.")
+        if keys.seed:
+            row("Your owner link", keys.link(server, write=True),
+                "Full control, including making and revoking people’s links: keep it to yourself.")
+            lay.addWidget(QtWidgets.QLabel("<b>Edit links for others</b>"))
+            hint = QtWidgets.QLabel("Each person (or group) gets their own link, so you can later revoke one without "
+                                    "affecting the others (revoking is in the web app: Open in browser → Share).")
+            hint.setWordWrap(True)
+            hint.setStyleSheet(f"color: {GREY}")
+            lay.addWidget(hint)
+            make = QtWidgets.QHBoxLayout()
+            who = QtWidgets.QLineEdit()
+            who.setPlaceholderText("Name, e.g. Alice, or Lab group")
+            create = QtWidgets.QPushButton("Create link")
+            make.addWidget(who, 1)
+            make.addWidget(create)
+            lay.addLayout(make)
+            made = QtWidgets.QVBoxLayout()
+            lay.addLayout(made)
+
+            def show(name: str, link: str) -> None:
+                r = QtWidgets.QHBoxLayout()
+                r.addWidget(QtWidgets.QLabel(name), 1)
+                c = QtWidgets.QPushButton("Copy link")
+                c.clicked.connect(lambda: (QtWidgets.QApplication.clipboard().setText(link), c.setText("Copied")))
+                m = QtWidgets.QPushButton("Email…")
+                m.clicked.connect(lambda: QtGui.QDesktopServices.openUrl(mailto(link, project or d.name, name)))
+                r.addWidget(c)
+                r.addWidget(m)
+                made.addLayout(r)
+
+            for v in sorted(load_issued(d).values(), key=lambda v: v.get("at", 0)):
+                if isinstance(v, dict) and isinstance(v.get("link"), str):
+                    show(str(v.get("name", "?")), v["link"])
+
+            def go() -> None:
+                if not who.text().strip() or engine is None:
+                    return who.setFocus()
+                create.setEnabled(False)
+                engine.submit(create_personal(engine, d, who.text()), lambda link, err: done(who.text().strip(), link, err))
+
+            def done(name: str, link, err) -> None:
+                create.setEnabled(True)
+                if err:
+                    QtWidgets.QMessageBox.warning(self, "Create link", f"Couldn’t create it: {err}")
+                    return
+                who.clear()
+                show(name[:60], link)
+
+            create.clicked.connect(go)
+            who.returnPressed.connect(go)
+        elif keys.member:
+            row(f"Your personal edit link (as {keys.member[2]})", keys.link(server, write=True),
+                "Yours only: don’t pass it on. For others, ask the project’s owner for a link.")
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
 class JoinDialog(QtWidgets.QDialog):
     """Paste a link → see what it is → choose a folder → join."""
 
@@ -361,6 +556,7 @@ class Window(QtWidgets.QMainWindow):
         tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
         tb.addAction("Join project…", self.join)
         tb.addAction("Share a folder…", self.share_folder)
+        tb.addAction("Add existing folder…", self.add_existing)
         tb.addSeparator()
         self.pause_act = tb.addAction("Pause syncing", self.toggle_pause)
         spacer = QtWidgets.QWidget()
@@ -406,8 +602,9 @@ class Window(QtWidgets.QMainWindow):
         self.b_open.clicked.connect(lambda: self.current() and open_path(self.current()))
         self.b_web = QtWidgets.QPushButton("Open in browser")
         self.b_web.clicked.connect(self.open_web)
-        self.b_ro = QtWidgets.QPushButton("Copy read-only link")
-        self.b_ro.clicked.connect(self.copy_readonly)
+        self.b_ro = QtWidgets.QPushButton("Links…")
+        self.b_ro.clicked.connect(lambda: self.current() and LinksDialog(
+            self.current(), self, self.engine, project_name(self.current(), self.engine)).exec())
         self.b_leave = QtWidgets.QPushButton("Leave…")
         self.b_leave.clicked.connect(self.leave)
         for b in (self.b_open, self.b_web, self.b_ro):
@@ -421,6 +618,18 @@ class Window(QtWidgets.QMainWindow):
         self.c_git.clicked.connect(lambda on: self.set_option("git", on))
         lay.addWidget(self.c_compile)
         lay.addWidget(self.c_git)
+        prow = QtWidgets.QHBoxLayout()
+        prow.addWidget(QtWidgets.QLabel("Running programs when compiling:"))
+        self.p_mode = QtWidgets.QComboBox()
+        self.p_mode.addItem("Never (safest)", False)
+        self.p_mode.addItem("TeX Live’s safe list only (e.g. epstopdf)", "restricted")
+        self.p_mode.addItem("Anything the document asks, once I allow it (e.g. minted)", True)
+        self.p_mode.activated.connect(self.set_programs)
+        self.p_review = QtWidgets.QPushButton("Review lines…")
+        self.p_review.clicked.connect(lambda: self.current() and ProgramsDialog(self.engine, self.current(), self).exec())
+        prow.addWidget(self.p_mode, 1)
+        prow.addWidget(self.p_review)
+        lay.addLayout(prow)
         lay.addWidget(QtWidgets.QLabel("Activity"))
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
@@ -481,6 +690,10 @@ class Window(QtWidgets.QMainWindow):
         except (OSError, ValueError):
             cfg = DEFAULT_CONFIG
         self.c_compile.setChecked(bool(cfg.get("compile")))
+        mode = cfg.get("shell_escape")
+        self.p_mode.setCurrentIndex(2 if mode is True else 1 if mode == "restricted" else 0)
+        self.p_mode.setEnabled(bool(cfg.get("compile")))
+        self.p_review.setEnabled(bool(cfg.get("compile")) and mode is True)
         is_git = (d / ".git").exists()
         self.c_git.setEnabled(is_git)
         self.c_git.setChecked(bool(cfg.get("git")) and is_git)
@@ -494,6 +707,21 @@ class Window(QtWidgets.QMainWindow):
     def join(self, link: str = "", from_web: bool = False) -> None:
         self.show_window()
         JoinDialog(self.engine, self, link, from_web).exec()
+        self.refresh()
+
+    def add_existing(self) -> None:
+        """A folder already set up with texloom (e.g. left earlier, or cloned on the command line)."""
+        d = QtWidgets.QFileDialog.getExistingDirectory(self, "A texloom folder", str(default_parent()))
+        if not d:
+            return
+        d = Path(d)
+        if not (d / ".texloom" / "config.json").is_file():
+            QtWidgets.QMessageBox.warning(self, "Add folder", f"{d} isn’t a TeXLoom folder. To join a project, use "
+                                          "Join project…; to share this folder as a new project, Share a folder….")
+            return
+        if not registry.add(d):
+            self.statusBar().showMessage("That folder is already on the list.", 4000)
+        self.engine.call(self.engine.daemon.poke)
         self.refresh()
 
     def share_folder(self) -> None:
@@ -517,17 +745,25 @@ class Window(QtWidgets.QMainWindow):
             update_config(d, **{key: on})
             self.engine.call(self.engine.daemon.restart, d)
 
+    def set_programs(self, index: int) -> None:
+        d = self.current()
+        if not d:
+            return
+        mode = self.p_mode.itemData(index)
+        if mode is True and QtWidgets.QMessageBox.question(
+                self, "Running programs", "Compiles may then run programs that the document asks for, on this "
+                "computer, once you allow each line (Review lines…).\n\nAnyone with an edit link writes the "
+                "document. Turn this on only for projects whose editors you trust.") != QtWidgets.QMessageBox.Yes:
+            self.show_detail()
+            return
+        self.set_option("shell_escape", mode)
+        if mode is True:
+            ProgramsDialog(self.engine, d, self).exec()
+
     def open_web(self) -> None:
         d = self.current()
         if d:
             QtGui.QDesktopServices.openUrl(QtCore.QUrl(load_config(d)["link"]))
-
-    def copy_readonly(self) -> None:
-        d = self.current()
-        if d:
-            keys, server = Keys.from_link(load_config(d)["link"])
-            QtWidgets.QApplication.clipboard().setText(keys.link(server, write=False))
-            self.statusBar().showMessage("Read-only link copied", 3000)
 
     def toggle_pause(self) -> None:
         dm = self.engine.daemon
