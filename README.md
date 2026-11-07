@@ -245,10 +245,11 @@ collaborators type in their browsers. With `--compile`:
 |---|---|
 | `texloom new <dir> --server URL [--code C]` | share an existing folder as a new project; prints both links |
 | `texloom clone <link> <dir>` | check out a project |
-| `texloom run <dir> [--compile] [--shell-escape]` | keep the folder in sync, live |
+| `texloom run <dir> [--compile] [--shell-restricted \| --shell-escape]` | keep the folder in sync, live |
 | `texloom sync <dir>` | sync once and exit (manual sync) |
 | `texloom storage <dir> server\|relay` | keep an encrypted copy on the server, or nothing |
 | `texloom links <dir>` | print the project code and the edit / read-only links |
+| `texloom allow <dir>` | review lines that run programs; allow them for `--shell-escape` compiles |
 
 Per-folder options are in `<dir>/.texloom/config.json`, which only you can read. They are
 never shared:
@@ -282,6 +283,37 @@ much with `"shell_escape"` in `.texloom/config.json`, or on the command line:
 When a collaborator's change writes such a line into your folder, or an `% arara:`
 directive or `% !TeX program` comment (which your own LaTeX editor may follow), the helper
 and the browser's folder sync point it out once.
+
+### Using TeXLoom with git
+
+A synced folder can also be a git repository: run `git init` in it (or clone your repo
+and run `texloom new` in it). The working files sync with collaborators as usual. With
+server storage (the default) they needn't be online at the same time: changes wait on
+the server until they next open the project.
+
+**What stays out of the project:**
+- `.git/` is never synced, and collaborators can't write into it.
+- `.texloom/` holds the project link, keys included, and has its own `.gitignore`, so git
+  won't commit it and the edit link can't end up on GitHub by accident.
+- Build files (`.aux`, `.log`, the compiled PDF, …) aren't synced; add them to your
+  `.gitignore` if you don't want them in git either. The `.gitignore` itself is a project
+  file and is shared.
+
+**Safe:** `git add`, `commit`, `diff`, `log`, `push`. They only read the working files.
+
+**Changes the project for everyone:** any git command that rewrites the working files:
+`git checkout <branch>`, `pull`, `merge`, `rebase`, `stash`, `reset --hard`. The helper
+sees the rewritten files as your edits and shares them. (History can undo it.) Stopping
+`texloom run` first doesn't help: it picks up the changed files when it starts again.
+
+**Recommended:**
+- Treat the synced folder as one branch: commit snapshots there and push them.
+- For other branches or experiments, use a separate checkout that isn't synced, e.g.
+  `git worktree add ../paper-experiment`, and merge back when you mean to share.
+- Pull others' commits into the synced folder only when you want them shared, ideally
+  when nobody is typing in the same paragraph.
+- Do rebases and conflict resolution in the separate checkout: collaborators' edits can
+  arrive in the synced folder mid-operation and look like unexpected changes to git.
 
 ### Agents (MCP)
 
