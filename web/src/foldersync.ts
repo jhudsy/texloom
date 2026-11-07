@@ -38,10 +38,14 @@ async function sha(data: Uint8Array): Promise<string> {
   return Array.from(d.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-async function walk(dir: Dir, prefix = '', out = new Map<string, FileSystemFileHandle>()) {
+async function walk(dir: Dir, prefix = '', out = new Map<string, FileSystemFileHandle>(), dirs?: Set<string>) {
   for await (const [name, handle] of (dir as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
     const rel = prefix + name
-    if (handle.kind === 'directory') { if (!SKIP_DIRS.has(name)) await walk(handle as Dir, rel + '/', out) }
+    if (handle.kind === 'directory') {
+      if (SKIP_DIRS.has(name) || name.startsWith('.')) continue
+      dirs?.add(rel)
+      await walk(handle as Dir, rel + '/', out, dirs)
+    }
     else if (!BUILD.test(rel) && !name.startsWith('.') ) out.set(rel, handle as FileSystemFileHandle)
   }
   return out
@@ -67,8 +71,10 @@ export interface FolderSync { name: string; stop(): void; status: () => string; 
 export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync> {
   const KEY = `known.${r.keys.project}`
   const known: Known = (await kv<Known>(KEY)) ?? {}
+  const DKEY = `dirs.known.${r.keys.project}`
+  const knownDirs = new Set<string>((await kv<string[]>(DKEY)) ?? []) // folders mirrored both ways
   let busy = false, stopped = false, last = '', errors = 0
-  const save = () => kv(KEY, known).catch(() => {})
+  const save = () => Promise.all([kv(KEY, known), kv(DKEY, [...knownDirs])]).catch(() => {})
   const sync: FolderSync = { name: root.name, stop, status: () => last, onChange: null }
   const note = (s: string) => { last = s; sync.onChange?.() }
 
@@ -88,6 +94,24 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       want.add(p)
       if (known[p]?.h === b.h) continue
       try { if (await put(p, await r.getBlob(b.h), b.h)) n++ } catch { /* not fetched yet: next round */ }
+    }
+    const dirs = new Set([...r.dirs.keys()])
+    for (const d of dirs) { // explicit (possibly empty) folders
+      if (!knownDirs.has(d) && cleanPath(d)) {
+        try { let h = root; for (const x of d.split('/')) h = await h.getDirectoryHandle(x, { create: true }); knownDirs.add(d); n++ } catch {}
+      }
+    }
+    for (const d of [...knownDirs].filter((x) => !dirs.has(x)).sort((a, b) => b.length - a.length)) { // deleted remotely
+      knownDirs.delete(d); n++
+      try {
+        const parts = d.split('/')
+        let h = root
+        for (const x of parts.slice(0, -1)) h = await h.getDirectoryHandle(x)
+        const sub = await h.getDirectoryHandle(parts[parts.length - 1])
+        let empty = true
+        for await (const _ of (sub as any).keys()) { empty = false; break }
+        if (empty) await h.removeEntry(parts[parts.length - 1])
+      } catch {}
     }
     for (const p of Object.keys(known)) {
       if (want.has(p)) continue
@@ -114,8 +138,21 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
 
   async function ingest() {
     if (!r.keys.writable) return
-    const disk = await walk(root)
+    const diskDirs = new Set<string>()
+    const disk = await walk(root, '', new Map(), diskDirs)
     let n = 0
+    const addDirs = [...diskDirs].filter((d) => cleanPath(d) && !knownDirs.has(d) && !r.dirs.has(d))
+    const goneDirs = [...knownDirs].filter((d) => !diskDirs.has(d))
+    if (addDirs.length || goneDirs.length) {
+      r.doc.transact(() => {
+        for (const d of addDirs) r.dirs.set(d, true)
+        for (const d of goneDirs) for (const k of [...r.dirs.keys()]) if (k === d || k.startsWith(d + '/')) r.dirs.delete(k)
+      })
+      for (const d of addDirs) knownDirs.add(d)
+      for (const d of goneDirs) knownDirs.delete(d)
+      n += addDirs.length + goneDirs.length
+    }
+    for (const d of diskDirs) if (r.dirs.has(d)) knownDirs.add(d)
     for (const [p, fh] of disk) {
       const path = cleanPath(p)
       if (!path) continue
@@ -161,12 +198,12 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
 
   let outTimer: ReturnType<typeof setTimeout> | undefined
   const onDoc = (_e: unknown, tr: { local: boolean }) => { clearTimeout(outTimer); outTimer = setTimeout(() => round('out'), tr?.local ? 1200 : 300) }
-  r.files.observeDeep(onDoc as any); r.bin.observe(onDoc as any)
+  r.files.observeDeep(onDoc as any); r.bin.observe(onDoc as any); r.dirs.observe(onDoc as any)
   const poll = setInterval(() => { if (document.visibilityState === 'visible') round('in') }, 2000)
   function stop() {
     stopped = true
     clearInterval(poll); clearTimeout(outTimer)
-    r.files.unobserveDeep(onDoc as any); r.bin.unobserve(onDoc as any)
+    r.files.unobserveDeep(onDoc as any); r.bin.unobserve(onDoc as any); r.dirs.unobserve(onDoc as any)
   }
   await round('both')
   if (!last) note('in sync')
@@ -180,7 +217,7 @@ export async function savedFolder(project: string): Promise<Dir | undefined> {
 
 export async function rememberFolder(project: string, dir: Dir | null) {
   await kv(`dir.${project}`, dir)
-  if (!dir) await kv(`known.${project}`, null)
+  if (!dir) { await kv(`known.${project}`, null); await kv(`dirs.known.${project}`, null) }
 }
 
 /** Permission to use a remembered folder: 'granted', or 'prompt' (needs a click). */

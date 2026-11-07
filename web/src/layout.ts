@@ -16,6 +16,8 @@ export interface Layout {
   toggleLeft(): void
   toggleRight(): void
   showRight(): void
+  /** Small windows: switch back from the PDF panel to the editor. */
+  showEditor(): void
   readonly leftHidden: boolean
   readonly rightHidden: boolean
   onChange: () => void
@@ -25,11 +27,16 @@ export function setupLayout(main: HTMLElement, splitL: HTMLElement, splitR: HTML
   const s = load()
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(s)) } catch {} }
 
+  let narrowRight = false // small windows: showing the PDF/assistant panel instead of the editor
   const apply = () => {
-    if (innerWidth < NARROW) { // small screens: no right panel, file list can still be hidden
+    if (innerWidth < NARROW) { // small windows: the editor OR the PDF/assistant panel, switched with ▥
+      const right = narrowRight
       main.classList.toggle('no-left', s.leftHidden)
-      main.classList.add('no-right')
-      main.style.gridTemplateColumns = `${s.leftHidden ? 0 : 160}px 0 minmax(0, 1fr) 0 0`
+      main.classList.toggle('no-right', !right)
+      main.classList.toggle('no-editor', right)
+      main.style.gridTemplateColumns = right
+        ? `${s.leftHidden ? 0 : 160}px 0 0 0 minmax(0, 1fr)`
+        : `${s.leftHidden ? 0 : 160}px 0 minmax(0, 1fr) 0 0`
       layout.onChange()
       return
     }
@@ -42,6 +49,7 @@ export function setupLayout(main: HTMLElement, splitL: HTMLElement, splitR: HTML
     main.classList.add('custom')
     main.classList.toggle('no-left', s.leftHidden)
     main.classList.toggle('no-right', s.rightHidden)
+    main.classList.remove('no-editor')
     main.style.gridTemplateColumns = `${leftW}px ${s.leftHidden ? 0 : 5}px minmax(0, 1fr) ${s.rightHidden ? 0 : 5}px ${rightW}px`
     layout.onChange()
   }
@@ -96,10 +104,17 @@ export function setupLayout(main: HTMLElement, splitL: HTMLElement, splitR: HTML
 
   const layout: Layout = {
     toggleLeft() { s.leftHidden = !s.leftHidden; apply(); save() },
-    toggleRight() { s.rightHidden = !s.rightHidden; apply(); save() },
-    showRight() { if (s.rightHidden) { s.rightHidden = false; apply(); save() } },
+    toggleRight() {
+      if (innerWidth < NARROW) { narrowRight = !narrowRight; apply(); return }
+      s.rightHidden = !s.rightHidden; apply(); save()
+    },
+    showRight() {
+      if (innerWidth < NARROW) { if (!narrowRight) { narrowRight = true; apply() } return }
+      if (s.rightHidden) { s.rightHidden = false; apply(); save() }
+    },
+    showEditor() { if (innerWidth < NARROW && narrowRight) { narrowRight = false; apply() } },
     get leftHidden() { return s.leftHidden },
-    get rightHidden() { return s.rightHidden },
+    get rightHidden() { return innerWidth < NARROW ? !narrowRight : s.rightHidden },
     onChange: () => {},
   }
   requestAnimationFrame(apply)

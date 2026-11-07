@@ -144,6 +144,10 @@ class FolderSync:
         self._known_file = self.root / STATE / "known.json"
         if self._known_file.exists():
             self.known = json.loads(self._known_file.read_text())
+        # folders mirrored between disk and the project's `dirs` (so empty folders and
+        # folder deletions sync too, not only files)
+        self._known_dirs_file = self.root / STATE / "known_dirs.json"
+        self.known_dirs: set[str] = set(json.loads(self._known_dirs_file.read_text())) if self._known_dirs_file.exists() else set()
         replica.before_remote = self.ingest_all
         replica.on_remote = self.on_remote
         replica.on_compile_request = self.on_compile_request
@@ -196,6 +200,44 @@ class FolderSync:
 
     def save_known(self) -> None:
         self._known_file.write_text(json.dumps(self.known))
+        self._known_dirs_file.write_text(json.dumps(sorted(self.known_dirs)))
+
+    def disk_dirs(self) -> set[str]:
+        out = set()
+        for dirpath, dirnames, _ in os.walk(self.root):
+            dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith(".")]
+            dirnames[:] = [d for d in dirnames if not (Path(dirpath) / d).is_symlink()]
+            for d in dirnames:
+                rel = (Path(dirpath) / d).relative_to(self.root).as_posix()
+                if safe_rel(rel) and not self.ignored(rel + "/x"):
+                    out.add(rel)
+        return out
+
+    def ingest_dirs(self) -> bool:
+        """Folders made or deleted on disk -> the project's folder list."""
+        if not self.r.keys.writable:
+            return False
+        disk = self.disk_dirs()
+        added = {d for d in disk if d not in self.known_dirs and d not in self.r.dirs}
+        removed = {d for d in self.known_dirs if d not in disk}
+        if not added and not removed:
+            self.known_dirs |= disk & set(self.r.dirs.keys())
+            return False
+
+        def apply():
+            for d in added:
+                self.r.dirs[d] = True
+            for d in removed:
+                for k in [k for k in self.r.dirs.keys() if k == d or k.startswith(d + "/")]:
+                    del self.r.dirs[k]
+        self.r.local_change(apply)
+        self.known_dirs = (self.known_dirs | added) - removed
+        for d in sorted(added):
+            log.info("↑ %s/", d)
+        for d in sorted(removed):
+            log.info("- %s/", d)
+        self.save_known()
+        return True
 
     def _stat_matches(self, rel: str) -> bool:
         k = self.known.get(rel)
@@ -212,6 +254,7 @@ class FolderSync:
     # --- disk -> CRDT ----------------------------------------------------------
     async def ingest_all(self) -> None:
         await self.ingest(set(self.disk_files()) | set(self.known))
+        self.ingest_dirs()
 
     async def ingest(self, paths: set[str]) -> None:
         """Push local disk changes for `paths` into the CRDT."""
@@ -318,10 +361,18 @@ class FolderSync:
                 # over the same connection that is delivering this update.
                 self._fetching.add(bid)
                 asyncio.get_running_loop().create_task(self._fetch(rel, bid))
-        for d in list(self.r.dirs.keys()):  # explicit (possibly empty) folders
+        dirs = set(self.r.dirs.keys())
+        for d in dirs:  # explicit (possibly empty) folders
             full = self.target(d)
             if full is not None and not full.exists():
                 attempt(lambda full=full: full.mkdir(parents=True, exist_ok=True) or True, d)
+            self.known_dirs.add(d)
+        for d in sorted(self.known_dirs - dirs, key=len, reverse=True):  # folders deleted remotely
+            full = self.target(d)
+            if full is not None and full.is_dir() and not any(full.iterdir()):
+                attempt(lambda full=full: full.rmdir() or True, d)
+            self.known_dirs.discard(d)
+            changed = True
         for rel in list(self.known):
             if rel not in wanted:  # deleted remotely
                 full = self.target(rel)
@@ -467,6 +518,7 @@ class FolderSync:
                     continue
                 if not self.ignored(rel) and ".texloom-tmp" not in rel:
                     paths.add(rel)
-            if paths:
-                async with self.r.lock:
+            async with self.r.lock:
+                if paths:
                     await self.ingest(paths)
+                self.ingest_dirs()

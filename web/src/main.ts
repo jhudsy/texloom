@@ -154,7 +154,7 @@ async function openProject(keys: Keys) {
 
   // ---- components ----
   const index = new ProjectIndex(r)
-  const gotoSource = (file: string, line: number) => { tree.open(file); setTimeout(() => editor.goto(line), 0) }
+  const gotoSource = (file: string, line: number) => { layout.showEditor(); tree.open(file); setTimeout(() => editor.goto(line), 0) }
   const output = createOutput(r, writable, () => device, () => me.name, gotoSource)
   const editor = createEditorPane(r, writable, index, {
     onCompile: () => output.compile(),
@@ -213,7 +213,7 @@ async function openProject(keys: Keys) {
   }
   let reviewPanel: ReviewPanel | null = null
   const review = () => reviewPanel
-  const revealAt = (file: string, from: number, to: number) => { tree.open(file); setTimeout(() => editor.reveal(from, to), 0) }
+  const revealAt = (file: string, from: number, to: number) => { layout.showEditor(); tree.open(file); setTimeout(() => editor.reveal(from, to), 0) }
   const openReview = () => { if (layout.rightHidden) layout.showRight(); showTab('review') }
   const makers: Partial<Record<Tab, () => HTMLElement>> = {
     ai: () => createAssistantPanel({

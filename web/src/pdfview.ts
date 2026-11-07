@@ -55,7 +55,7 @@ export class PdfView {
     const scrollFrac = this.el.scrollTop / Math.max(1, this.el.scrollHeight)
     if (!this.el.clientWidth) return // hidden: render when it becomes visible
     this.renderedWidth = this.el.clientWidth
-    const width = this.el.clientWidth - 24
+    const width = Math.max(160, this.el.clientWidth - 24) // a very narrow pane scrolls sideways instead of failing
     const pages = document.createDocumentFragment()
     const info: { wrap: HTMLDivElement; scale: number }[] = []
     for (let i = 1; i <= doc.numPages; i++) {
