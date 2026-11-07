@@ -216,8 +216,41 @@ server {
 }
 NGINX
   ln -sf "$SITE" "/etc/nginx/sites-enabled/$DOMAIN"
+else
+  # Updating: add routes introduced since the site was first written, before the
+  # catch-all /api/ location (certbot's lines are left as they are).
+  cp "$SITE" "/root/nginx-$DOMAIN.bak"
+  python3 - "$SITE" <<'PY'
+import sys
+path = sys.argv[1]
+site = open(path).read()
+blocks = {
+    "location /api/arxiv/": """    # importing an arXiv paper's source: the relay fetches it (rate-limited there too)
+    location /api/arxiv/ {
+        limit_req zone=texloom_code burst=3 nodelay;
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 120s;
+    }
+""",
+    "location = /admin": """    # read-only admin page (HTTP basic auth against /etc/texloom/admin-token)
+    location = /admin {
+        limit_req zone=texloom_code burst=5 nodelay;
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;
+    }
+""",
+}
+anchor = "    location /api/ {"
+missing = "".join(b for k, b in blocks.items() if k not in site)
+if missing and anchor in site:
+    site = site.replace(anchor, missing + anchor, 1)
+    open(path, "w").write(site)
+    print("    nginx: added", ", ".join(k for k in blocks if k in missing))
+PY
 fi
-nginx -t -q && systemctl reload nginx
+nginx -t -q && systemctl reload nginx || { cp "/root/nginx-$DOMAIN.bak" "$SITE"; systemctl reload nginx; echo "nginx update failed: restored"; exit 1; }
 
 # TLS certificate (uses the server's existing Let's Encrypt account if there is one)
 if [ -z "$SKIP_CERT" ] && [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
