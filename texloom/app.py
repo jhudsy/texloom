@@ -131,8 +131,17 @@ def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
         return _("Offline"), AMBER, _("Can't reach the server. Changes here are kept and sent when it's back.")
     if not r.synced.is_set():
         return _("Catching up…"), AMBER, ""
-    blobs = r.dir / "blobs-pending"
-    pending = len(r.outbox) + (sum(1 for _f in blobs.iterdir()) if blobs.is_dir() else 0)
+    if r.refused:
+        return _("Change refused"), RED, _("The server refused a change from this folder: {reason}", reason=r.refused)
+    if r.store_problem:
+        why = {
+            "needs-code": _("This server needs a creation code to store new projects: add it to the folder's .texloom/config.json as \"create_code\" and restart the app."),
+            "quota-full": _("The storage allowance of this project's creation code is used up."),
+            "project-full": _("This project has reached the server's size limit."),
+            "server-full": _("The server is out of space: changes are kept here and retried."),
+        }.get(r.store_problem, r.store_problem)
+        return _("Not saved on the server"), AMBER, why + " " + _("Collaborators who are online still get your changes.")
+    pending = r.pending_count()
     if pending:
         return ngettext(pending, "Sending {n} change…", "Sending {n} changes…", n=pending), AMBER, ""
     if not r.keys.writable:

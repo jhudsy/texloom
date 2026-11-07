@@ -1,22 +1,30 @@
 import { defineConfig, type Plugin } from 'vite'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { createHash } from 'node:crypto'
 
-/** Emit /sw.js with the list of built files and a version derived from them. */
+/** Write /sw.js with the list of built files and a version derived from them. The list is
+ *  taken from the files actually written: during generateBundle the bundle still holds
+ *  chunks Vite removes afterwards (the empty JS stub of a CSS-only import), and a listed
+ *  file that doesn't exist made the new service worker fail to install. */
 function serviceWorker(): Plugin {
   return {
     name: 'texloom-service-worker',
     apply: 'build',
-    generateBundle(_opts, bundle) {
+    writeBundle(opts) {
+      const out = opts.dir!
+      const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true })
+        .flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]))
       // KaTeX's fonts come in three formats: browsers that run this app use woff2, so the
       // older two aren't kept for offline use
-      const publicFiles = readdirSync(new URL('./public', import.meta.url)).map((f) => `/${f}`)
-      const shell = ['/', '/index.html', ...Object.keys(bundle).filter((f) => f !== 'index.html' && !/\.(woff|ttf)$/.test(f)).map((f) => `/${f}`), ...publicFiles]
-      const version = createHash('sha256').update(shell.sort().join('\n')).digest('hex').slice(0, 12)
+      const built = walk(out).map((f) => '/' + relative(out, f).split('\\').join('/'))
+        .filter((f) => f !== '/index.html' && f !== '/sw.js' && !/\.(woff|ttf)$/.test(f))
+      const shell = [...new Set(['/', '/index.html', ...built])].sort()
+      const version = createHash('sha256').update(shell.join('\n')).digest('hex').slice(0, 12)
       const src = readFileSync(new URL('./sw-template.js', import.meta.url), 'utf8')
         .replace('__VERSION__', JSON.stringify(version))
-        .replace('__SHELL__', JSON.stringify([...new Set(shell)]))
-      this.emitFile({ type: 'asset', fileName: 'sw.js', source: src })
+        .replace('__SHELL__', JSON.stringify(shell))
+      writeFileSync(join(out, 'sw.js'), src)
     },
   }
 }

@@ -55,6 +55,8 @@ class Replica:
         self.on_compile_request: Callable[[int, bool], Awaitable[None]] | None = None
         self.server_mode = "server"  # what the server says: "server" (stores) or "relay"
         self.pending_mode: str | None = None  # storage change not yet sent to the server
+        self.store_problem: str | None = None  # why the server isn't storing changes (needs-code, quota-full, …)
+        self.refused: str | None = None  # the server's reason for rejecting the last change sent
         self._blob_waiters: dict[str, list[asyncio.Future]] = {}
         self.before_remote: Callable[[], Awaitable[None]] | None = None
         self.lock = asyncio.Lock()  # serialises remote applies with local folder ingests
@@ -239,6 +241,7 @@ class Replica:
                         return
                     r.raise_for_status()
                 marker.unlink()
+                self.store_problem = None
             except aiohttp.ClientError as e:
                 log.warning("blob upload failed (%s); will retry", e)
                 return
@@ -367,7 +370,15 @@ class Replica:
         self.pending_mode = mode
         self.save()
 
+    def pending_count(self) -> int:
+        """Changes and files waiting for the server. Files of a project the server doesn't
+        store (relay mode) go to collaborators on request instead, so they don't count."""
+        blobs = self.dir / "blobs-pending"
+        relay = self.server_mode == "relay" or self.storage == "relay"
+        return len(self.outbox) + (0 if relay or not blobs.is_dir() else sum(1 for _f in blobs.iterdir()))
+
     def _storage_warning(self, code: str) -> None:
+        self.store_problem = code
         if code in self._warned:
             return
         self._warned.add(code)
@@ -459,10 +470,14 @@ class Replica:
         elif t == "ack":
             if m["q"]:
                 self._mark_seen(m["q"])
+                self.store_problem = None  # stored again
             self.outbox.pop(m.get("id"), None)
+            self.refused = None
             self.save()
         elif t == "err":
             if m.get("code") in ("needs-code", "quota-full", "project-full", "server-full"):
                 self._storage_warning(m["code"])  # kept in the outbox; retried on reconnect
             else:
                 log.warning("server: %s", m.get("m"))
+                if m.get("id") in self.outbox or "rejected update" in str(m.get("m")):
+                    self.refused = str(m.get("m") or "rejected")

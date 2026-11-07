@@ -7,8 +7,14 @@ const CACHE = `texloom-${VERSION}`
 const TEX = 'texloom-tex' // in-browser TeX engine scripts and WebAssembly (kept across versions)
 const TEXLIVE = 'texloom-texlive' // TeX Live files fetched on demand (URLs name the release; kept across versions)
 
+// Each file is cached on its own: one that fails (a stale list, a dropped connection)
+// mustn't stop the update, or the previous version would stay in charge indefinitely.
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()))
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE)
+    await Promise.allSettled(SHELL.map((p) => cache.add(p)))
+    await self.skipWaiting()
+  })())
 })
 
 self.addEventListener('activate', (event) => {

@@ -6,6 +6,16 @@ uses the singular for 0 and 1 (see PLURAL_RULES in texloom/i18n.py). Spaces befo
 """
 
 CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
+    # -- server refusals
+    "Change refused": "Modification refusée",
+    "The server refused a change from this folder: {reason}": "Le serveur a refusé une modification de ce dossier : {reason}",
+    "This server needs a creation code to store new projects: add it to the folder's .texloom/config.json as \"create_code\" and restart the app.": "Ce serveur demande un code de création pour stocker de nouveaux projets : ajoutez-le dans le fichier .texloom/config.json du dossier sous « create_code », puis redémarrez l’application.",
+    "The storage allowance of this project's creation code is used up.": "Le quota de stockage du code de création de ce projet est épuisé.",
+    "This project has reached the server's size limit.": "Ce projet a atteint la taille maximale autorisée par le serveur.",
+    "The server is out of space: changes are kept here and retried.": "Le serveur n’a plus d’espace : les modifications sont conservées ici et renvoyées plus tard.",
+    "Not saved on the server": "Non enregistré sur le serveur",
+    "Collaborators who are online still get your changes.": "Les collaborateurs en ligne reçoivent quand même vos modifications.",
+
     # -- folder status
     "Paused": "En pause",
     "Syncing is paused for all folders.": "La synchronisation est en pause pour tous les dossiers.",
