@@ -3,7 +3,7 @@
 import * as Y from 'yjs'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment, RangeSet, StateEffect, StateField } from '@codemirror/state'
-import { gutter, GutterMarker, ViewPlugin, type ViewUpdate } from '@codemirror/view'
+import { Decoration, gutter, GutterMarker, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { StreamLanguage } from '@codemirror/language'
 import { stex } from '@codemirror/legacy-modes/mode/stex'
 import { yCollab } from 'y-codemirror.next'
@@ -24,7 +24,8 @@ export interface EditorPane {
   el: HTMLElement
   open(path: string | null): void
   showAuthors(on: boolean): void
-  goto(line: number, col?: number): void
+  /** Move the cursor to a line; `flash` briefly highlights it (e.g. arriving from the PDF). */
+  goto(line: number, col?: number, flash?: boolean): void
   view(): EditorView | null
   current(): string | null
   relint(): void
@@ -34,6 +35,17 @@ export interface EditorPane {
   reveal(from: number, to: number): void
   refreshSpell(): void
 }
+
+// A line briefly highlighted after jumping to it (from the PDF, say).
+const setFlash = StateEffect.define<number>()
+const flashField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    for (const e of tr.effects) if (e.is(setFlash)) deco = e.value < 0 ? Decoration.none : Decoration.set([Decoration.line({ class: 'cm-flash' }).range(e.value)])
+    return deco.map(tr.changes)
+  },
+  provide: (f) => EditorView.decorations.from(f),
+})
 
 export interface EditorHooks {
   onCompile: () => void
@@ -114,6 +126,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             spellSlot.of(spellExt()),
             authorsSlot.of(authorsOn ? authorsExtension(yt) : []),
             hooks.review(path),
+            flashField,
             Prec.high(keymap.of([
               { key: 'Mod-Alt-m', run: () => { hooks.onReview('comment'); return true } },
               { key: 'Mod-Alt-e', run: () => { hooks.onReview('suggestion'); return true } },
@@ -161,13 +174,14 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     if (view && yt) view.dispatch({ effects: authorsSlot.reconfigure(on ? authorsExtension(yt) : []) })
   }
 
-  function goto(line: number, col = 0) {
+  function goto(line: number, col = 0, flash = false) {
     if (!view) return
     const doc = view.state.doc
     const l = doc.line(Math.max(1, Math.min(doc.lines, line)))
     const pos = Math.min(l.to, l.from + col)
-    view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: 'center' }) })
+    view.dispatch({ selection: { anchor: pos }, effects: [EditorView.scrollIntoView(pos, { y: 'center' }), ...(flash ? [setFlash.of(l.from)] : [])] })
     view.focus()
+    if (flash) { const v = view; setTimeout(() => { if (view === v) v.dispatch({ effects: setFlash.of(-1) }) }, 1600) }
   }
 
   function gotoOffset(pos: number) {

@@ -9,7 +9,8 @@ no copy at all. No accounts: you share a link. (The command-line tools are calle
 - Live editing with other people's cursors (click someone's avatar to jump to them);
   offline edits merge automatically on reconnect. Installs as an offline-capable app.
 - Compile in the browser (TeX Live 2026 in WebAssembly), or with your own TeX installation.
-  Errors are listed with clickable locations; SyncTeX jumps between source and PDF.
+  Errors are listed with clickable locations; SyncTeX jumps between source and PDF
+  (the → / ← arrows on the editor/PDF divider, ⌘⌥→ / ⌘⌥←, or double-click / right-click the PDF).
 - History without git: automatic and named versions, compare with now, restore a file or
   everything, and see who wrote each line.
 - Comments and suggested changes (tracked changes) that collaborators accept or reject.
@@ -95,7 +96,8 @@ who should keep access. The plain **read-only link** works as before.
 
 | **⌘⇧F** / **Ctrl+Shift+F** | search (and replace) across all files |
 | **⌘⌥M** / **Ctrl+Alt+M**, **⌘⌥E** / **Ctrl+Alt+E** | comment on the selection / suggest a change to it |
-| **⌘⌥→** / **Ctrl+Alt+→** | show the current line in the PDF (double-click the PDF to go back) |
+| **⌘⌥→** / **Ctrl+Alt+→** | show the current line in the PDF |
+| **⌘⌥←** / **Ctrl+Alt+←** | go to the source of the spot last clicked in the PDF (or the middle of the view); double-clicking or right-clicking the PDF does the same |
 | paste or drop an image | adds it to `figs/` and inserts `\includegraphics` (a whole `figure` on an empty line) |
 | `\cite{` + a DOI or arXiv id | fetches the BibTeX entry and adds it to your `.bib` |
 

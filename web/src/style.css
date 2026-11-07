@@ -104,6 +104,17 @@ main > * { min-width: 0; }
 .split { cursor: col-resize; background: var(--line); position: relative; touch-action: none; outline: none; }
 .split::after { content: ""; position: absolute; inset: 0 -4px; } /* wider grab area */
 .split:hover, .split:focus-visible, body.resizing .split:active { background: var(--accent); }
+/* jump between source and PDF: two small round buttons on the editor/PDF divider */
+.syncarrows { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; gap: 6px; z-index: 5; }
+.syncarrows[hidden], main.no-right .syncarrows { display: none; }
+.syncarrows button { width: 24px; height: 24px; padding: 0; border-radius: 50%; font-size: 13px; line-height: 1; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); color: var(--fg); box-shadow: 0 1px 3px rgb(0 0 0 / .25); }
+.syncarrows button:hover { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.ctxmenu { position: fixed; z-index: 100; min-width: 160px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / .3); display: flex; flex-direction: column; }
+.ctxmenu button { text-align: left; border: 0; background: none; padding: 6px 10px; border-radius: 4px; }
+.ctxmenu button:hover, .ctxmenu button:focus-visible { background: var(--accent); color: var(--accent-fg); outline: none; }
+.cm-flash { animation: cmflash 1.6s ease-out; }
+@keyframes cmflash { from { background: color-mix(in srgb, #ffd400 45%, transparent); } to { background: transparent; } }
 main.no-left > aside, main.no-left > .split:first-of-type { visibility: hidden; overflow: hidden; }
 main.no-right > .right, main.no-right > .split:last-of-type { visibility: hidden; overflow: hidden; }
 main.no-editor > .editor { visibility: hidden; overflow: hidden; }

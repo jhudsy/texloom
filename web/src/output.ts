@@ -20,12 +20,14 @@ export interface Output {
   problems(): Problem[]
   onProblems: (() => void)[]
   showInPdf(file: string, line: number): boolean
+  /** Jump to the source of the last-clicked PDF point (or the middle of the view); false without SyncTeX. */
+  showInSource(): boolean
   /** Set by the host: called by the ⇥ button to show the editor's current line. */
   syncRequest: (() => void) | null
 }
 
 export function createOutput(r: Replica, writable: boolean, device: () => Device, userName: () => string,
-  goto: (file: string, line: number) => void): Output {
+  goto: (file: string, line: number, flash?: boolean) => void): Output {
   const pdfView = new PdfView()
   const info = h('div', { class: 'pdfinfo muted' }, 'No PDF yet.')
   const progress = h('div', { class: 'progress', hidden: true }, h('div', { class: 'bar' }), h('span', {}))
@@ -65,11 +67,12 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   verticalResizer(logSplit, logBox, 'texloom.logHeight', 60, 180)
   setLogOpen(localStorage.getItem(LOG_KEY) === '1')
 
-  // double-click in the PDF: jump to the source line
+  // double-click or right-click → “Go to source” in the PDF: jump to the source line
   pdfView.onPick = async (page, x, y) => {
     const st = await syncTex()
     const hit = st?.toSource(page, x, y)
-    if (hit) goto(hit.file, hit.line)
+    if (hit) goto(hit.file, hit.line, true)
+    else info.textContent = st ? 'No source line for that spot.' : 'Compile first: the PDF has no SyncTeX data yet.'
   }
   async function syncTex(): Promise<SyncTex | null> {
     if (!synctex && synctexBytes) synctex = await SyncTex.load(synctexBytes, allFiles(r)).catch(() => null)
@@ -213,11 +216,18 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     })
     return true
   }
-  const out: Output = {
-    pane, compileBtn, compile, lastLog: () => lastLog, pdfView, problems: () => problems, onProblems, showInPdf, syncRequest: null,
+  function showInSource(): boolean {
+    const at = pdfView.focusPoint()
+    if (!synctexBytes || !at) return false
+    pdfView.onPick?.(at.page, at.x, at.y)
+    return true
   }
-  const syncBtn = h('button', { title: 'Show the editor’s line in the PDF (⌘⌥→ / Ctrl+Alt+→). Double-click the PDF to go back to the source.', onclick: () => out.syncRequest?.() }, '⇥')
-  dlBtn.before(syncBtn)
+  const out: Output = {
+    pane, compileBtn, compile, lastLog: () => lastLog, pdfView, problems: () => problems, onProblems, showInPdf, showInSource, syncRequest: null,
+  }
+  const backBtn = h('button', { title: 'Go to the source of the spot you last clicked in the PDF, or the middle of the view (⌘⌥← / Ctrl+Alt+←). Or double-click / right-click the PDF.', 'aria-label': 'Go to source', onclick: () => { if (!showInSource()) info.textContent = 'Compile first: the PDF has no SyncTeX data yet.' } }, '⇤')
+  const syncBtn = h('button', { title: 'Show the editor’s line in the PDF (⌘⌥→ / Ctrl+Alt+→)', 'aria-label': 'Show in PDF', onclick: () => out.syncRequest?.() }, '⇥')
+  dlBtn.before(backBtn, syncBtn)
   renderProblems()
   return out
 }

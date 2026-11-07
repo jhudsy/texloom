@@ -154,7 +154,7 @@ async function openProject(keys: Keys) {
 
   // ---- components ----
   const index = new ProjectIndex(r)
-  const gotoSource = (file: string, line: number) => { layout.showEditor(); tree.open(file); setTimeout(() => editor.goto(line), 0) }
+  const gotoSource = (file: string, line: number, flash = false) => { layout.showEditor(); tree.open(file); setTimeout(() => editor.goto(line, 0, flash), 0) }
   const output = createOutput(r, writable, () => device, () => me.name, gotoSource)
   const editor = createEditorPane(r, writable, index, {
     onCompile: () => output.compile(),
@@ -202,6 +202,9 @@ async function openProject(keys: Keys) {
     if (!output.showInPdf(c.file, v.state.doc.lineAt(v.state.selection.main.head).number)) alert('Compile first: the PDF has no SyncTeX data yet.')
   }
   output.syncRequest = syncToPdf
+  function syncToSource() {
+    if (!output.showInSource()) alert('Compile first: the PDF has no SyncTeX data yet.')
+  }
   output.onProblems.push(() => editor.relint())
   // right-hand panel tabs; panels other than the PDF are created on first use
   type Tab = 'pdf' | 'ai' | 'review' | 'history'
@@ -249,6 +252,7 @@ async function openProject(keys: Keys) {
       tabBtns[k].classList.toggle('active', k === t)
     }
     if (!panes[t].firstChild && makers[t]) panes[t].append(makers[t]!())
+    syncArrows.hidden = t !== 'pdf'
     try { localStorage.setItem('texloom.tab', t) } catch {}
   }
 
@@ -325,7 +329,15 @@ async function openProject(keys: Keys) {
   const leftBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleLeft() }, '☰')
   const rightBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleRight() }, '▥')
   const splitL = h('div', { class: 'split' })
-  const splitR = h('div', { class: 'split' })
+  // Overleaf-style arrows on the editor/PDF divider: jump between the source and the PDF
+  const arrow = (label: string, title: string, run: () => void) => h('button', {
+    title, 'aria-label': title.split(' (')[0],
+    onpointerdown: (e: Event) => e.stopPropagation(), ondblclick: (e: Event) => e.stopPropagation(), onclick: run,
+  }, label)
+  const syncArrows = h('div', { class: 'syncarrows' },
+    arrow('→', 'Show the cursor’s line in the PDF (⌘⌥→ / Ctrl+Alt+→)', () => syncToPdf()),
+    arrow('←', 'Go to the source of the spot you last clicked in the PDF, or the middle of the view (⌘⌥← / Ctrl+Alt+←). Double-click or right-click the PDF also works.', () => syncToSource()))
+  const splitR = h('div', { class: 'split' }, syncArrows)
   const mainEl = h('main', {})
   const risk = riskBanner(r, writable, () => openSettings())
 
@@ -377,6 +389,13 @@ async function openProject(keys: Keys) {
       showLeft('search')
       const sel = editor.selection()
       if (sel && sel.to > sel.from && !sel.text.includes('\n')) search.focus(sel.text)
+      return
+    }
+    if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      // ⌘⌥→ in the editor is handled there; from elsewhere (e.g. the PDF) both directions work
+      if (e.key === 'ArrowRight' && editor.view()?.hasFocus) return
+      e.preventDefault()
+      if (e.key === 'ArrowLeft') syncToSource(); else syncToPdf()
       return
     }
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
