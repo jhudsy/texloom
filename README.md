@@ -23,8 +23,8 @@ no copy at all. No accounts: you share a link. (The command-line tools are calle
   A built-in assistant does the same with Claude, any OpenAI-compatible API, or a local
   model (LM Studio, Ollama).
 - LaTeX-aware editor: completion of environments, commands, files, citation keys and
-  labels; a preview of the equation under the cursor; spell check that skips LaTeX; search
-  and replace across files; an outline with
+  labels; a preview of the equation under the cursor; a checker for common mistakes, with
+  one-click fixes; spell check that skips LaTeX; search and replace across files; an outline with
   word counts; paste or drop images; add references from a DOI or arXiv id.
 - Start from templates, or import a `.zip` (e.g. from Overleaf) or an arXiv paper's source.
 - Read-only links, and personal edit links that can be revoked one by one.
@@ -110,7 +110,12 @@ the project. A personal link is shown, and can be emailed, only when you create 
 | `\cite{` + a DOI or arXiv id | fetches the BibTeX entry and adds it to your `.bib` |
 
 Images, citation keys and labels that don't exist in the project are underlined, as are
-lines with compile errors. Spelling is checked with the browser's dictionary (language in
+lines with compile errors and common mistakes: environments that aren't closed or are closed
+by the wrong `\end`, stray or unclosed braces, `\label` before `\caption` in a figure (its
+`\ref` gives the section number), straight quotes, `...` for `\dots`, a space instead of `~`
+before `\ref`/`\cite`, `e.g.` followed by a sentence space, `$$…$$`, `sin` for `\sin`,
+repeated words, `\bf`-style font commands and `\cite{a}\cite{b}`. Most have a fix in the
+hint; Settings turns them off. Spelling is checked with the browser's dictionary (language in
 Settings), skipping commands, maths, labels and the preamble. With the cursor in maths
 (`$…$`, `\[…\]`, `equation`, `align`, …), a preview shows it typeset by KaTeX, using the
 project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turns it off).
@@ -521,7 +526,7 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | `web/src/assistant/` | assistant: provider adapters (`llm.ts`), tools (`tools.ts`), chat panel (`panel.ts`) |
 | `web/src/history.ts`, `diff.ts` | versions, compare, restore, line authors |
 | `web/src/review.ts` | comments and suggested changes |
-| `web/src/navigate.ts`, `spell.ts`, `mathpreview.ts` | search and replace, outline, word count; spell check; equation preview |
+| `web/src/navigate.ts`, `spell.ts`, `mathpreview.ts`, `checks.ts` | search and replace, outline, word count; spell check; equation preview; common mistakes |
 | `web/src/clashes.ts` | keeps both files when two people create the same name while apart |
 | `web/src/latexlog.ts`, `synctex.ts` | log parsing into problems; SyncTeX |
 | `web/src/templates.ts`, `references.ts`, `pasteimage.ts` | templates and import; DOI/arXiv references; pasted images |

@@ -1,14 +1,21 @@
 // LaTeX editing support for CodeMirror: completion (commands, environments with
 // their bodies, image paths, citation keys, labels, files, packages), automatic
-// \end{…}, formatting shortcuts, and warnings for missing images/citations/labels.
+// \end{…}, formatting shortcuts, warnings for missing images/citations/labels, and
+// common mistakes (checks.ts).
 import { autocompletion, snippetCompletion, type Completion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
 import { linter, type Diagnostic } from '@codemirror/lint'
-import { EditorSelection, Prec, type Extension } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
+import { checkLatex } from './checks'
+import { EditorSelection, Prec, StateEffect, type Extension } from '@codemirror/state'
+import { EditorView, keymap, type ViewUpdate } from '@codemirror/view'
 import { parseId } from './references'
 import type { Replica } from './replica'
 import type { Problem } from './latexlog'
 import { IMAGE_RE } from './projectfiles'
+
+/** Dispatch to re-run the linters now (after a compile, or a settings change): the lint
+ *  package's forceLinting only runs a check that is already pending. */
+export const recheck = StateEffect.define<null>()
+const rechecked = (u: ViewUpdate) => u.transactions.some((t) => t.effects.some((e) => e.is(recheck)))
 
 // ---------------------------------------------------------------------------
 // Project index: labels, bibliography keys, images, files and macros, rebuilt
@@ -352,7 +359,7 @@ function referenceLinter(index: ProjectIndex, compileProblems: () => Problem[]) 
       }
     }
     return out
-  }, { delay: 600 })
+  }, { delay: 600, needsRefresh: rechecked })
 }
 
 /** Is a position inside a % comment? Line starts are found once, so this stays linear
@@ -377,7 +384,23 @@ function commentedAt(text: string): (pos: number) => boolean {
 
 // ---------------------------------------------------------------------------
 /** All LaTeX editing support. `onCompile` runs on Mod-S. */
-export function latexSupport(index: ProjectIndex, opts: { onCompile: () => void; onSync: () => void; problems: () => Problem[]; addReference?: AddReference }): Extension {
+// ---------------------------------------------------------------------------
+// Common mistakes (checks.ts), with one-click fixes.
+// ---------------------------------------------------------------------------
+function mistakeLinter(enabled: () => boolean) {
+  return linter((view) => {
+    if (!enabled()) return []
+    return checkLatex(view.state.doc.toString()).map((c): Diagnostic => ({
+      from: c.from, to: c.to, severity: c.severity, message: c.message, source: 'Check',
+      actions: c.fix === undefined || view.state.readOnly ? undefined : [{
+        name: c.fixLabel ?? 'Fix',
+        apply: (v, from, to) => v.dispatch({ changes: { from, to, insert: c.fix! }, userEvent: 'input' }),
+      }],
+    }))
+  }, { delay: 800, needsRefresh: rechecked })
+}
+
+export function latexSupport(index: ProjectIndex, opts: { onCompile: () => void; onSync: () => void; problems: () => Problem[]; addReference?: AddReference; checks: () => boolean }): Extension {
   return [
     autocompletion({ override: [completionSource(index, opts.addReference)], activateOnTyping: true, icons: false }),
     Prec.highest(keymap.of([
@@ -388,5 +411,6 @@ export function latexSupport(index: ProjectIndex, opts: { onCompile: () => void;
     ])),
     Prec.high(autoEnd),
     referenceLinter(index, opts.problems),
+    mistakeLinter(opts.checks),
   ]
 }

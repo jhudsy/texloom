@@ -10,14 +10,13 @@ import { yCollab } from 'y-codemirror.next'
 import { oneDark } from '@codemirror/theme-one-dark'
 import type { Replica } from './replica'
 import { h, saveFile } from './dom'
-import { latexSupport, type AddReference, type ProjectIndex } from './latex'
+import { latexSupport, recheck, type AddReference, type ProjectIndex } from './latex'
 import { imageDropExtension } from './pasteimage'
 import { spellcheck } from './spell'
 import { mathPreview } from './mathpreview'
 import { PdfView } from './pdfview'
 import { lineAuthors } from './history'
 import type { Problem } from './latexlog'
-import { forceLinting } from '@codemirror/lint'
 import { keymap } from '@codemirror/view'
 import { Prec, type Extension } from '@codemirror/state'
 
@@ -57,6 +56,7 @@ export interface EditorHooks {
   addReference: AddReference // from \cite{ completion
   spell: () => { on: boolean; lang: string }
   mathPreview: () => boolean
+  checks: () => boolean
 }
 
 export function createEditorPane(r: Replica, writable: boolean, index: ProjectIndex, hooks: EditorHooks): EditorPane {
@@ -138,7 +138,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             EditorView.lineWrapping,
             dark ? oneDark : [],
             yCollab(yt, r.awareness, { undoManager: new Y.UndoManager(yt) }),
-            latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []), addReference: writable ? hooks.addReference : undefined }),
+            latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []), addReference: writable ? hooks.addReference : undefined, checks: () => hooks.checks() && !!current && /\.(tex|ltx)$/i.test(current) }),
             imageDropExtension(r, writable),
             spellSlot.of(spellExt()),
             mathSlot.of(mathExt()),
@@ -225,5 +225,5 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
 
   const refreshSpell = () => { if (view) view.dispatch({ effects: [spellSlot.reconfigure(spellExt()), mathSlot.reconfigure(mathExt())] }) }
 
-  return { el, open, context, selection, reveal, refreshSpell, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { if (view) forceLinting(view) } }
+  return { el, open, context, selection, reveal, refreshSpell, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { view?.dispatch({ effects: recheck.of(null) }) } }
 }

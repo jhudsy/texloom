@@ -167,6 +167,7 @@ async function openProject(keys: Keys) {
     addReference: (seed, insert) => referenceDialog(r, index, insert, seed),
     spell: () => ({ on: device.spell, lang: String(r.meta.get('lang') ?? '') }),
     mathPreview: () => device.mathPreview,
+    checks: () => device.checks,
     onReview: (kind) => { if (writable) { openReview(); review()?.add(kind) } },
   })
   const tree = createFileTree(r, writable, (p) => {
@@ -446,6 +447,7 @@ async function openProject(keys: Keys) {
     syncBtn.hidden = d.sync !== 'manual'
     output.compileBtn.hidden = d.compile === 'none'
     editor.refreshSpell()
+    editor.relint()
   }
   r.meta.observe((e) => { if (e.keysChanged.has('lang')) editor.refreshSpell() })
 
