@@ -10,12 +10,12 @@ function copyRow(text: string, mail?: { subject: string; body: string }) {
   const inp = h('input', { value: text, readonly: true, onfocus: (e: any) => e.target.select() })
   return h('div', { class: 'row' }, inp,
     h('button', { onclick: (e: any) => { navigator.clipboard.writeText(text); e.target.textContent = 'Copied' } }, 'Copy'),
-    mail ? h('a', { class: 'button mail', href: mailto(mail.subject, mail.body), title: 'Opens your own email app with the link filled in' }, 'Email…') : null)
+    mail ? h('a', { class: 'button mail', href: mailto(mail), title: 'Opens your own email app with the link filled in' }, 'Email…') : null)
 }
 
 /** A message for the user's own mail app. The link travels in that email, never through
  *  the TeXLoom server, which mustn't see the keys in it. */
-const mailto = (subject: string, body: string) =>
+const mailto = ({ subject, body }: { subject: string; body: string }) =>
   `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
 
 /** The invitation text for a link. `who`: the person it's for (personal links). */
@@ -43,7 +43,9 @@ const when = (t: number) => new Date(t).toLocaleDateString([], { dateStyle: 'med
 
 /** Links issued from this browser (pub -> name, time): the shared `members` map can be edited
  *  by any collaborator, so the owner's own record is what can't be hidden from them. */
-type Issued = Record<string, { name: string; at: number }>
+// Also keeps each personal link itself, so it can be copied or emailed again later. That's
+// no new exposure: this browser already holds the owner key, which can do more than any of them.
+type Issued = Record<string, { name: string; at: number; link?: string }>
 const issuedKey = (project: string) => `texloom.issued.${project}`
 function loadIssued(project: string): Issued {
   try { return JSON.parse(localStorage.getItem(issuedKey(project)) || '{}') } catch { return {} }
@@ -52,7 +54,7 @@ function saveIssued(project: string, v: Issued) {
   try { localStorage.setItem(issuedKey(project), JSON.stringify(v)) } catch {}
 }
 
-interface Person { pub: string; name: string; at: number; revoked?: number; verified: boolean }
+interface Person { pub: string; name: string; at: number; revoked?: number; verified: boolean; link?: string }
 
 /** Everyone holding a personal link, from what can be trusted: entries with a valid grant
  *  (shown with their granted name), this browser's own record, and keys seen signing edits. */
@@ -62,13 +64,13 @@ function people(r: Replica): Person[] {
     const c = canonicalPub(pub)
     if (!c) return
     const old = out.get(c)
-    out.set(c, { ...old, ...p, pub: c, verified: p.verified || !!old?.verified, revoked: p.revoked ?? old?.revoked, at: Math.min(old?.at ?? Infinity, p.at) })
+    out.set(c, { ...old, ...p, pub: c, verified: p.verified || !!old?.verified, revoked: p.revoked ?? old?.revoked, at: Math.min(old?.at ?? Infinity, p.at), link: p.link ?? old?.link })
   }
   for (const [pub, m] of r.members.entries()) {
     const name = String(m?.name ?? '')
     if (keys.grantValid(pub, name, m?.g)) add(pub, { name, at: Number(m?.at) || 0, revoked: Number(m?.revoked) || undefined, verified: true })
   }
-  for (const [pub, m] of Object.entries(loadIssued(keys.project))) add(pub, { name: m.name, at: m.at, verified: true })
+  for (const [pub, m] of Object.entries(loadIssued(keys.project))) add(pub, { name: m.name, at: m.at, verified: true, link: typeof m.link === 'string' ? m.link : undefined })
   for (const [pub, name] of keys.signers) add(pub, { name, at: out.get(canonicalPub(pub) ?? '')?.at ?? Date.now(), verified: true })
   for (const p of out.values()) if (keys.revoked.has(p.pub)) p.revoked ??= p.at
   return [...out.values()].sort((a, b) => a.at - b.at)
@@ -87,6 +89,8 @@ export function shareDialog(r: Replica, server: string, me: string) {
       h('code', { class: 'muted small', title: 'Start of this link’s key: tells apart people with the same name' }, ` ${p.pub.slice(0, 6)}`),
       h('span', { class: 'muted small' }, p.revoked ? ` revoked ${when(p.revoked)}` : p.at ? ` since ${when(p.at)}` : ''),
       h('span', { class: 'spacer' }),
+      keys.owner && !p.revoked && p.link ? h('button', { title: `Copy ${p.name}’s edit link`, onclick: (e: any) => { navigator.clipboard.writeText(p.link!); e.target.textContent = 'Copied' } }, 'Copy link') : null,
+      keys.owner && !p.revoked && p.link ? h('a', { class: 'button mail', href: mailto(invitation(r, p.link, 'edit', me, p.name)), title: 'Opens your own email app with the link filled in' }, 'Email…') : null,
       keys.owner && !p.revoked ? h('button', { onclick: () => revoke(p.pub, p.name) }, 'Revoke') : null))
       : [h('li', { class: 'muted small' }, 'No personal links yet.')]))
   }
@@ -97,9 +101,9 @@ export function shareDialog(r: Replica, server: string, me: string) {
     const { pub, grant, keys: personal } = keys.personal(name)
     const at = Date.now(), granted = personal.member!.name
     r.members.set(pub, { name: granted, at, by: me, g: grant }) // g: the owner's grant, so the entry can be checked
-    saveIssued(keys.project, { ...loadIssued(keys.project), [pub]: { name: granted, at } })
     const link = personal.link(server, true)
-    newLink.replaceChildren(h('label', {}, `Edit link for ${name} — send it to them only`), copyRow(link, invitation(r, link, 'edit', me, granted)))
+    saveIssued(keys.project, { ...loadIssued(keys.project), [pub]: { name: granted, at, link } })
+    newLink.replaceChildren(h('label', {}, `Edit link for ${name} — send it to them only (also kept in the list below, on this device)`), copyRow(link, invitation(r, link, 'edit', me, granted)))
     nameIn.value = ''
   }
 
@@ -118,7 +122,7 @@ export function shareDialog(r: Replica, server: string, me: string) {
     h('label', {}, 'Your owner link — full access, including creating and revoking personal links. Keep it to yourself.'),
     copyRow(keys.link(server, true)),
     h('h4', {}, 'Personal edit links'),
-    h('p', { class: 'muted small' }, 'Give each collaborator their own edit link, so you can later revoke one person without affecting the others. Their edits are signed with their own key.'),
+    h('p', { class: 'muted small' }, 'Give each collaborator their own edit link, so you can later revoke one person without affecting the others. Their edits are signed with their own key. For a group, one link named after the group works too (revoking it cuts off the whole group). Links you create are kept on this device, to copy or email again.'),
     h('div', { class: 'row' }, nameIn, h('button', { class: 'primary', onclick: create }, 'Create link')),
     newLink,
     list,
