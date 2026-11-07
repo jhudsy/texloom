@@ -216,6 +216,11 @@ K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
   As with idle eviction, the files stay on people's devices and the projects carry on
   relay-only; renewing the code later stores them again on their next sync.
   `--purge-code CODE` does the same at once for one expired or deleted code.
+  (`TEXLOOM_PURGE_EXPIRED_AFTER` sets it too, e.g. from a systemd drop-in.)
+- Several codes files can be combined: repeat `--codes-file`, or list extra files in
+  `TEXLOOM_CODES_FILES` (separated by `:`), for example one kept by hand and one kept by a
+  sales service. The first file that sets `default` decides it; `--add-code` writes to the
+  first file given; `--renew-code` finds the code in whichever file lists it.
 - Projects stored before allowances existed are grandfathered as unlimited.
 
 ```bash

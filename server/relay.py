@@ -8,6 +8,7 @@ Storage. The server can't see what it stores and making a project needs no accou
 so storage is governed by *allowances*:
 
   --codes-file FILE   one rule per line:   <code|default>  <allowance>  [until=YYYY-MM-DD]  [label]
+                      (repeatable, or listed in TEXLOOM_CODES_FILES: codes are combined)
                       allowance: 0 (store nothing), a size (500M, 5G) or "unlimited".
                       A code's allowance is the total stored across every project
                       created with it; "default" applies to projects created without
@@ -162,12 +163,16 @@ class CodeBook:
 
     ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-    def __init__(self, path: Path | None):
-        self.path = path
-        self._mtime = -1.0
+    def __init__(self, path: Path | list[Path] | None):
+        # Several files can be given (e.g. one kept by hand and one kept by a sales service):
+        # their codes are combined; "default" comes from the first file that sets it. New
+        # codes (--add-code) go into the first file.
+        self.paths: list[Path] = [] if path is None else list(path) if isinstance(path, list) else [path]
+        self.path = self.paths[0] if self.paths else None
+        self._mtime: tuple[float, ...] = ()
         self.codes: dict[str, tuple[float, str]] = {}  # normalized code -> (allowance, label)
         self.until: dict[str, dt.date] = {}  # normalized code -> last day it is valid (if it expires)
-        self.default: float = UNLIMITED if path is None else 0
+        self.default: float = UNLIMITED if self.path is None else 0
 
     @staticmethod
     def normalize(code: object) -> str:
@@ -176,15 +181,18 @@ class CodeBook:
     def _load(self) -> None:
         if not self.path:
             return
-        try:
-            mtime = self.path.stat().st_mtime
-        except FileNotFoundError:
-            self.codes, self.default, self._mtime = {}, 0, -1.0
+        def mtime(p: Path) -> float:
+            try:
+                return p.stat().st_mtime
+            except FileNotFoundError:
+                return -1.0
+        mtimes = tuple(mtime(p) for p in self.paths)
+        if mtimes == self._mtime:
             return
-        if mtime == self._mtime:
-            return
-        codes, until, default = {}, {}, 0.0
-        for n, line in enumerate(self.path.read_text().splitlines(), 1):
+        codes, until, default = {}, {}, None
+        lines = [(p, n, line) for p, m in zip(self.paths, mtimes, strict=True) if m >= 0
+                 for n, line in enumerate(p.read_text().splitlines(), 1)]
+        for path, n, line in lines:
             parts = line.split("#", 1)[0].split()
             if not parts:
                 continue
@@ -195,20 +203,23 @@ class CodeBook:
                 try:
                     expires = parse_date(UNTIL_RE.match(p)[1])
                 except ValueError as e:
-                    log.warning("codes file line %d: %s (ignored: the code doesn't expire)", n, e)
+                    log.warning("%s line %d: %s (ignored: the code doesn't expire)", path, n, e)
             try:
                 allowance = parse_size(parts[1]) if len(parts) > 1 else UNLIMITED
                 label = " ".join(parts[2:])
             except ValueError:  # old format "code label": unlimited
                 allowance, label = UNLIMITED, " ".join(parts[1:])
             if parts[0].lower() == "default":
-                default = allowance
+                default = allowance if default is None else default
             else:
                 c = self.normalize(parts[0])
+                if c in codes:
+                    continue  # the first file listing a code decides
                 codes[c] = (allowance, label)
                 if expires:
                     until[c] = expires
-        self.codes, self.until, self.default, self._mtime = codes, until, default, mtime
+        default = default or 0.0
+        self.codes, self.until, self.default, self._mtime = codes, until, default, mtimes
         expired = sum(1 for c in codes if self.expired(c))
         log.info("codes file: %d code(s)%s, default allowance %s", len(codes),
                  f" ({expired} expired)" if expired else "", fmt_size(default))
@@ -271,13 +282,22 @@ class CodeBook:
     def renew(self, code: str, until: dt.date | None = None, months: int = 0,
               allowance: str | None = None) -> tuple[str, dt.date | None, str]:
         """Set a code's expiry (`until`, or `months` after the later of today and its current
-        expiry) and optionally its allowance, rewriting its line in place. Returns the label,
-        the new expiry and the allowance as written."""
+        expiry) and optionally its allowance, rewriting its line in place (in whichever file
+        lists it). Returns the label, the new expiry and the allowance as written."""
         assert self.path
         if allowance is not None:
             parse_size(allowance)
+        for path in self.paths:
+            try:
+                return self._renew_in(path, code, until, months, allowance)
+            except (KeyError, FileNotFoundError):
+                continue
+        raise KeyError(f"no such code: {code}")
+
+    def _renew_in(self, path: Path, code: str, until: dt.date | None, months: int,
+                  allowance: str | None) -> tuple[str, dt.date | None, str]:
         want = self.normalize(code)
-        lines = self.path.read_text().splitlines(keepends=True)
+        lines = path.read_text().splitlines(keepends=True)
         for i, line in enumerate(lines):
             body, hash_, comment = line.rstrip("\n").partition("#")
             parts = body.split()
@@ -303,8 +323,8 @@ class CodeBook:
             lines[i] = new + (f"  {hash_}{comment}" if hash_ else "") + "\n"
             # written beside it and renamed over it, keeping its mode and owner (the install
             # script makes it root:texloom 640, so that the server can read it)
-            st = self.path.stat()
-            tmp = self.path.with_name(self.path.name + ".tmp")
+            st = path.stat()
+            tmp = path.with_name(path.name + ".tmp")
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, st.st_mode & 0o777)
             with os.fdopen(fd, "w") as f:
                 f.writelines(lines)
@@ -312,7 +332,7 @@ class CodeBook:
                 os.chown(tmp, st.st_uid, st.st_gid)
             except (PermissionError, AttributeError):  # AttributeError: no chown on Windows
                 pass  # not root: the file stays the current user's, as it was if they could write it
-            os.replace(tmp, self.path)
+            os.replace(tmp, path)
             return " ".join(label), until, size
         raise KeyError(f"no such code: {code}")
 
@@ -1043,7 +1063,9 @@ def main() -> None:
     p.add_argument("--max-bytes", type=parse_size, default=UNLIMITED, help="total storage cap, e.g. 20G")
     p.add_argument("--min-free", type=parse_size, default=2 * GiB, help="keep this much disk free, e.g. 2G")
     p.add_argument("--project-max-bytes", type=parse_size, default=200 * MiB, help="per-project cap, e.g. 200M")
-    p.add_argument("--codes-file", type=Path, help="storage allowances per creation code (see above)")
+    p.add_argument("--codes-file", type=Path, action="append",
+                   help="storage allowances per creation code (see above); repeatable, and more files can be "
+                        "listed in TEXLOOM_CODES_FILES (separated by ':'). --add-code writes to the first")
     p.add_argument("--add-code", metavar="LABEL", help="create a creation code with this label, print it, exit")
     p.add_argument("--allowance", help="allowance for --add-code (default 1G) or --renew-code (default: unchanged): "
                                        "0, a size, or unlimited")
@@ -1058,8 +1080,10 @@ def main() -> None:
                         "codes only), then exit. Prefer --purge-expired-after, which does it inside the server")
     p.add_argument("--list-codes", action="store_true", help="list codes, allowances, expiry and usage, then exit")
     p.add_argument("--purge-expired-after", type=float, metavar="DAYS",
+                   default=float(os.environ["TEXLOOM_PURGE_EXPIRED_AFTER"]) if os.environ.get("TEXLOOM_PURGE_EXPIRED_AFTER") else None,
                    help="delete the stored copies of projects whose creation code expired more than DAYS days "
-                        "ago (checked hourly; default: never). Their files stay on people's devices")
+                        "ago (checked hourly; default: never, or TEXLOOM_PURGE_EXPIRED_AFTER). Their files stay "
+                        "on people's devices")
     p.add_argument("--no-arxiv", action="store_true", help="disable importing arXiv sources through this server")
     p.add_argument("--evict-idle-days", type=float, default=0,
                    help="drop the stored copy of projects nobody opened for this many days (0 = never); "
@@ -1083,6 +1107,8 @@ def main() -> None:
         tl = TexLive(a.texlive, extra_mirrors=a.texlive_mirror)
         asyncio.run(tl.build_index(tl.index_sources() if tl.ready or tl.extra_mirrors else None))
         return
+    extra = [Path(x) for x in os.environ.get("TEXLOOM_CODES_FILES", "").split(os.pathsep) if x.strip()]
+    a.codes_file = [*(a.codes_file or []), *extra] or None
     codes = CodeBook(a.codes_file)
     if a.until and a.months:
         sys.exit("give --until or --months, not both")
@@ -1099,7 +1125,7 @@ def main() -> None:
             try:
                 label, until, size = codes.renew(a.renew_code, a.until, a.months, a.allowance)
             except (KeyError, FileNotFoundError):
-                sys.exit(f"no such code in {a.codes_file}: {a.renew_code}")
+                sys.exit(f"no such code in {', '.join(map(str, a.codes_file))}: {a.renew_code}")
             print(f"{label or a.renew_code}: {size}, {f'valid until {until}' if until else 'no expiry'}")
             return
         codes._load()
@@ -1139,7 +1165,7 @@ def main() -> None:
     limits = Limits(a.max_bytes, a.min_free, a.project_max_bytes)
     log.info("limits: total %s, keep %s free, %s per project; %s",
              fmt_size(limits.max_bytes), fmt_size(limits.min_free), fmt_size(limits.project_max),
-             f"allowances from {a.codes_file}" if codes.path else "no codes file: every project may be stored")
+             f"allowances from {', '.join(map(str, a.codes_file))}" if codes.path else "no codes file: every project may be stored")
     web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv,
                         admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
                         texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
