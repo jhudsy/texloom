@@ -8,8 +8,10 @@ function serviceWorker(): Plugin {
     name: 'texloom-service-worker',
     apply: 'build',
     generateBundle(_opts, bundle) {
+      // KaTeX's fonts come in three formats: browsers that run this app use woff2, so the
+      // older two aren't kept for offline use
       const publicFiles = readdirSync(new URL('./public', import.meta.url)).map((f) => `/${f}`)
-      const shell = ['/', '/index.html', ...Object.keys(bundle).filter((f) => f !== 'index.html').map((f) => `/${f}`), ...publicFiles]
+      const shell = ['/', '/index.html', ...Object.keys(bundle).filter((f) => f !== 'index.html' && !/\.(woff|ttf)$/.test(f)).map((f) => `/${f}`), ...publicFiles]
       const version = createHash('sha256').update(shell.sort().join('\n')).digest('hex').slice(0, 12)
       const src = readFileSync(new URL('./sw-template.js', import.meta.url), 'utf8')
         .replace('__VERSION__', JSON.stringify(version))

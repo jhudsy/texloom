@@ -25,6 +25,7 @@
     "@noble/curves": "^2.4.0",
     "codemirror": "^6.0.2",
     "fflate": "^0.8.3",
+    "katex": "0.19.1",
     "lib0": "^0.2.119",
     "pdfjs-dist": "^6.5.438",
     "texlyre-busytex": "^1.4.1",

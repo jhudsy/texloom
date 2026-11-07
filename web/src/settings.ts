@@ -5,9 +5,9 @@ import { h, dialog } from './dom'
 import { detectMain } from './projectfiles'
 
 export type CompileWhere = 'browser' | 'local' | 'none'
-export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean; spell: boolean }
+export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean; spell: boolean; mathPreview: boolean }
 
-const DEFAULTS: Device = { sync: 'live', compile: 'browser', autoCompile: false, setup: false, spell: true }
+const DEFAULTS: Device = { sync: 'live', compile: 'browser', autoCompile: false, setup: false, spell: true, mathPreview: true }
 
 export const prefs = {
   get name(): string { return localStorage.getItem('texloom.name') || '' },
@@ -22,8 +22,8 @@ export const prefs = {
   saveDevice(project: string, d: Device) {
     localStorage.setItem(`texloom.device.${project}`, JSON.stringify(d))
     // New projects default to the choices made most recently.
-    const { sync, compile, autoCompile, spell } = d
-    localStorage.setItem('texloom.device', JSON.stringify({ sync, compile, autoCompile, spell }))
+    const { sync, compile, autoCompile, spell, mathPreview } = d
+    localStorage.setItem('texloom.device', JSON.stringify({ sync, compile, autoCompile, spell, mathPreview }))
   },
 }
 
@@ -168,6 +168,9 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     h('label', { class: 'check' },
       h('input', { type: 'checkbox', 'aria-label': 'Check spelling', checked: d.spell, onchange: (e: any) => { d.spell = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
       'Check spelling (uses the browser’s dictionary; LaTeX commands, maths and labels are skipped)'),
+    h('label', { class: 'check' },
+      h('input', { type: 'checkbox', 'aria-label': 'Preview equations', checked: d.mathPreview, onchange: (e: any) => { d.mathPreview = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
+      'Preview the equation under the cursor'),
     h('div', { class: 'row' },
       h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, 'Creation code…'),
       h('span', { class: 'muted small' }, 'Needed only to store new projects on servers that ask for one.')),

@@ -166,6 +166,7 @@ async function openProject(keys: Keys) {
     review: (file) => reviewExtension(r, file, (id) => { openReview(); review()?.focus(id) }),
     addReference: (seed, insert) => referenceDialog(r, index, insert, seed),
     spell: () => ({ on: device.spell, lang: String(r.meta.get('lang') ?? '') }),
+    mathPreview: () => device.mathPreview,
     onReview: (kind) => { if (writable) { openReview(); review()?.add(kind) } },
   })
   const tree = createFileTree(r, writable, (p) => {

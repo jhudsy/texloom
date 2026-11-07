@@ -13,6 +13,7 @@ import { h, saveFile } from './dom'
 import { latexSupport, type AddReference, type ProjectIndex } from './latex'
 import { imageDropExtension } from './pasteimage'
 import { spellcheck } from './spell'
+import { mathPreview } from './mathpreview'
 import { PdfView } from './pdfview'
 import { lineAuthors } from './history'
 import type { Problem } from './latexlog'
@@ -55,6 +56,7 @@ export interface EditorHooks {
   onReview: (kind: 'comment' | 'suggestion') => void // ⌘⌥M / ⌘⌥E
   addReference: AddReference // from \cite{ completion
   spell: () => { on: boolean; lang: string }
+  mathPreview: () => boolean
 }
 
 export function createEditorPane(r: Replica, writable: boolean, index: ProjectIndex, hooks: EditorHooks): EditorPane {
@@ -64,6 +66,9 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
   const dark = matchMedia('(prefers-color-scheme: dark)').matches
   const authorsSlot = new Compartment()
   const spellSlot = new Compartment()
+  const mathSlot = new Compartment()
+  const mathExt = () => (hooks.mathPreview() && !!current && /\.(tex|ltx)$/i.test(current) ? (mathExtension ??= mathPreview(r.files)) : [])
+  let mathExtension: Extension | undefined
   const spellExt = () => { const sp = hooks.spell(); return spellcheck(sp.on, sp.lang, !!current && /\.(tex|ltx)$/i.test(current)) }
   let authorsOn = false
 
@@ -136,6 +141,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []), addReference: writable ? hooks.addReference : undefined }),
             imageDropExtension(r, writable),
             spellSlot.of(spellExt()),
+            mathSlot.of(mathExt()),
             authorsSlot.of(authorsOn ? authorsExtension(yt) : []),
             hooks.review(path),
             flashField,
@@ -217,7 +223,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     view.focus()
   }
 
-  const refreshSpell = () => { if (view) view.dispatch({ effects: spellSlot.reconfigure(spellExt()) }) }
+  const refreshSpell = () => { if (view) view.dispatch({ effects: [spellSlot.reconfigure(spellExt()), mathSlot.reconfigure(mathExt())] }) }
 
   return { el, open, context, selection, reveal, refreshSpell, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { if (view) forceLinting(view) } }
 }
