@@ -1,5 +1,8 @@
 import type { Catalog } from '../../i18n'
 const fr: Catalog = {
+  'The compile failed without a LaTeX error message: the raw log shows what happened.': 'La compilation a échoué sans message d’erreur LaTeX : le journal brut montre ce qui s’est passé.',
+  'Delete LaTeX’s working files (.aux, .bbl, …) and compile again. In-browser compiles always start from scratch; this matters when compiling with your own TeX.': 'Supprimer les fichiers de travail de LaTeX (.aux, .bbl, …) et recompiler. Les compilations dans le navigateur repartent toujours de zéro ; cela compte quand vous compilez avec votre propre TeX.',
+  'Compile from scratch': 'Recompiler de zéro',
   'No PDF yet.': 'Pas encore de PDF.',
   'Problems': 'Problèmes',
   'Raw log': 'Journal brut',

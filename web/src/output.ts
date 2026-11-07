@@ -40,7 +40,9 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const logSplit = h('div', { class: 'hsplit' })
   const probTab = h('button', { class: 'ltab on', onclick: () => showLogView(false) }, t('Problems'))
   const rawTab = h('button', { class: 'ltab', onclick: () => showLogView(true) }, t('Raw log'))
-  const logBox = h('div', { class: 'logbox' }, logSplit, h('div', { class: 'ltabs' }, probTab, rawTab), problemList, logPre)
+  const scratchBtn = h('button', { class: 'ltab scratch', title: t('Delete LaTeX’s working files (.aux, .bbl, …) and compile again. In-browser compiles always start from scratch; this matters when compiling with your own TeX.'),
+    onclick: () => compile(true, true) }, t('Compile from scratch'))
+  const logBox = h('div', { class: 'logbox' }, logSplit, h('div', { class: 'ltabs' }, probTab, rawTab, h('span', { class: 'spacer' }), scratchBtn), problemList, logPre)
   const showLogView = (raw: boolean) => {
     logPre.hidden = !raw; problemList.hidden = raw
     probTab.classList.toggle('on', !raw); rawTab.classList.toggle('on', raw)
@@ -113,8 +115,10 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     lastLog = log
     info.textContent = pdfError ?? text
     problems = parseLog(log, allFiles(r))
+    const unexplained = !ok && !problems.some((p) => p.severity === 'error')
+    if (unexplained) problems.unshift({ severity: 'error', file: null, line: null, message: t('The compile failed without a LaTeX error message: the raw log shows what happened.') })
     renderProblems()
-    if (!ok) { setLogOpen(true); showLogView(false) }
+    if (!ok) { setLogOpen(true); showLogView(unexplained) }
   }
 
   // collaborators' (or the folder helper's) latest published output
@@ -150,7 +154,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   /** Compile per this device's setting. `interactive` shows alerts (button, ⌘S) instead of returning them (assistant).
    *  A failure message is a function of the translator: alerts are in the interface language, while the
    *  returned log (read by the assistant) stays in English. */
-  async function compile(interactive = true): Promise<CompileOut> {
+  async function compile(interactive = true, fromScratch = false): Promise<CompileOut> {
     const fail: Fail = (msg) => {
       if (interactive) alert(msg(t))
       return { ok: false, log: msg(english) }
@@ -160,7 +164,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     const main = mainFile(r)
     if (!main) return fail((t) => t('No .tex file with \\documentclass found.'))
     if (compileBtn.hasAttribute('disabled')) return fail((t) => t('A compile is already running; try again in a moment.'))
-    if (d.compile === 'local') return compileLocally(fail)
+    if (d.compile === 'local') return compileLocally(fail, fromScratch)
     if (!(await browserCompileAvailable())) {
       return fail((t) => t('In-browser compilation is not installed on this server.\n\nChoose “Compile with my own TeX” in ⚙ Settings and run:\n  texloom run <folder> --compile'))
     }
@@ -186,8 +190,8 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     }
   }
 
-  async function compileLocally(fail: Fail): Promise<CompileOut> {
-    if (!(await r.requestCompile())) return fail((t) => t('Not connected, so no local helper can be reached.'))
+  async function compileLocally(fail: Fail, fromScratch = false): Promise<CompileOut> {
+    if (!(await r.requestCompile(fromScratch))) return fail((t) => t('Not connected, so no local helper can be reached.'))
     showProgress({ phase: 'compile' }, t('Asking your texloom helper to compile…'))
     let acked = false
     r.onCompileAck = (p) => { acked = true; showProgress({ phase: 'compile' }, t('Compiling with {{name}}…', { name: p.by })) }

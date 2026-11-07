@@ -131,6 +131,25 @@ const DRIVERS = {
   lualatex: 'luahbtex_bibtex8',
 } as const
 
+/** After a failed compile, LaTeX's own .log (and BibTeX's .blg) from the engine's files.
+ *  The engine keeps only the last step's log: when biber or BibTeX fails (a missing .bib,
+ *  say), that is its output, and LaTeX's log, which names the problem, would be lost. */
+async function withTexLog(r: BusyTexRunner, main: string, log: string): Promise<string> {
+  try {
+    const base = main.replace(/\.tex$/i, '')
+    const files = await r.readProjectFiles()
+    const text = (ext: string) => {
+      const f = files.find((x) => x.path === base + ext)
+      return f ? (typeof f.content === 'string' ? f.content : new TextDecoder().decode(f.content)) : ''
+    }
+    const tex = text('.log'), blg = text('.blg')
+    const extra = [tex && !log.includes(tex.slice(0, 200)) ? `TEX LOG (${base}.log):\n${tex}` : '', blg && !log.includes(blg.slice(0, 200)) ? `BIBTEX LOG (${base}.blg):\n${blg}` : '']
+    return [log, ...extra].filter(Boolean).join('\n\n======\n\n')
+  } catch {
+    return log
+  }
+}
+
 export async function compileInBrowser(
   files: Map<string, string | Uint8Array>,
   main: string,
@@ -159,7 +178,9 @@ export async function compileInBrowser(
       DRIVERS[(opts.engine ?? 'pdflatex') as keyof typeof DRIVERS] ?? DRIVERS.pdflatex,
       null, (await texliveEndpoint()) ?? undefined,
     )
-    return { pdf: res.success && res.pdf ? res.pdf : null, log: res.log, synctex: res.synctex ?? null }
+    let log = res.log ?? ''
+    if (!res.success) log = await withTexLog(r, main, log)
+    return { pdf: res.success && res.pdf ? res.pdf : null, log, synctex: res.synctex ?? null }
   } finally {
     progressCb = undefined
   }

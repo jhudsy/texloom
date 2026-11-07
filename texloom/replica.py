@@ -52,7 +52,7 @@ class Replica:
         self.ws: aiohttp.ClientWebSocketResponse | None = None
         self.http: aiohttp.ClientSession | None = None
         self.on_remote: Callable[[], Awaitable[None]] | None = None
-        self.on_compile_request: Callable[[int], Awaitable[None]] | None = None
+        self.on_compile_request: Callable[[int, bool], Awaitable[None]] | None = None
         self.server_mode = "server"  # what the server says: "server" (stores) or "relay"
         self.pending_mode: str | None = None  # storage change not yet sent to the server
         self._blob_waiters: dict[str, list[asyncio.Future]] = {}
@@ -340,7 +340,7 @@ class Replica:
                 if not fut.done():
                     fut.set_result(blob)
         elif k == "creq" and self.on_compile_request:
-            await self.on_compile_request(frm)
+            await self.on_compile_request(frm, p.get("clean") is True)
 
     async def send_mode(self, mode: str) -> None:
         if self.ws is None or not self.keys.writable:

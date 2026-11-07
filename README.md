@@ -127,7 +127,11 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **Right panel:** **PDF**, **Assistant**, **Review** (comments and suggestions: reply,
   resolve, accept, reject) and **History** (versions, compare, restore, "who wrote this").
 - **Problems:** after compiling, errors and warnings are listed under the PDF with their
-  file and line; click one to go there. **Raw log** shows the whole log.
+  file and line; click one to go there. Biber and BibTeX errors (a missing `.bib`, say) are
+  listed too. **Raw log** shows the whole log. **Compile from scratch** deletes LaTeX's
+  working files (`.aux`, `.bbl`, …) first: in-browser compiles always start from scratch,
+  so it matters when a texloom helper compiles with your own TeX (it keeps them in
+  `.texloom/build`).
 - **New projects** start from a template (article, paper with bibliography, Beamer, thesis
   with chapters, letter) or an import: a `.zip` (Overleaf: Menu → Download → Source; a
   GitHub "Download ZIP"; any zipped folder) or an arXiv paper's LaTeX source. **Import** in

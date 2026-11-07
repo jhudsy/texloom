@@ -53,6 +53,14 @@ export function parseLog(log: string, files: string[]): Problem[] {
         message: `${warn[1] ?? warn[2] ? `${warn[1] ?? warn[2]}: ` : ''}${msg.replace(/\s+/g, ' ').trim()}` })
     }
 
+    // biber ("ERROR - Cannot find 'refs.bib'!") and BibTeX ("I couldn't open database file refs.bib")
+    const biber = /\b(ERROR|WARN) - (.*)$/.exec(line)
+    if (biber) add({ severity: biber[1] === 'ERROR' ? 'error' : 'warning', file: null, line: null, message: `Biber: ${biber[2].trim()}` })
+    const bibtex = /^I (couldn't open (?:database|style|auxiliary) file .*|found no \\\w+ commands?.*)$/.exec(line)
+    if (bibtex) add({ severity: 'error', file: null, line: null, message: `BibTeX: I ${bibtex[1].replace(/---.*$/, '').trim()}` })
+    const bibwarn = /^Warning--(.*)$/.exec(line)
+    if (bibwarn) add({ severity: 'warning', file: null, line: null, message: `BibTeX: ${bibwarn[1].trim()}` })
+
     const box = /^((?:Over|Under)full \\[hv]box \([^)]*\)).*?(?:at lines? (\d+)|detected at line (\d+))/.exec(line)
     if (box) add({ severity: 'box', file: toProject(fileAtStart, files), line: +(box[2] ?? box[3]), message: box[1] })
 

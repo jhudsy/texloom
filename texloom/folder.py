@@ -124,6 +124,7 @@ class FolderSync:
         replica.on_compile_request = self.on_compile_request
         self._warned_shell: frozenset[str] = frozenset()
         self._last_request = 0.0
+        self._clean_build = False  # the next compile starts from scratch (requested from a browser)
 
     # --- helpers -------------------------------------------------------------
     def rel(self, p: Path) -> str:
@@ -414,8 +415,9 @@ class FolderSync:
             self._compile_task.cancel()
         self._compile_task = asyncio.get_event_loop().create_task(self._compile(delay=delay))
 
-    async def on_compile_request(self, frm: int | None) -> None:
-        """A browser asked for a compile (its device setting: 'compile with my own TeX')."""
+    async def on_compile_request(self, frm: int | None, clean: bool = False) -> None:
+        """A browser asked for a compile (its device setting: 'compile with my own TeX');
+        `clean`: from scratch, without the previous run's .aux, .bbl and other files."""
         if not self.compile or not self.r.keys.writable:
             return
         # Anyone with the link can ask (requests aren't signed): at most one compile every few seconds.
@@ -424,6 +426,8 @@ class FolderSync:
             return
         self._last_request = now
         await self.r.p2p({"k": "cack", "by": self.opts["label"]}, frm)
+        if clean:
+            self._clean_build = True
         self.schedule_compile(delay=0)
 
     async def _compile(self, delay: float) -> None:
@@ -442,6 +446,9 @@ class FolderSync:
         if self.opts.get("latexmk_rc"):
             extra += ["-r", str(Path(self.opts["latexmk_rc"]).expanduser())]
         build = self.root / STATE / "build"
+        if self._clean_build:  # compile from scratch: drop the last run's .aux, .bbl, …
+            self._clean_build = False
+            shutil.rmtree(build, ignore_errors=True)
         build.mkdir(parents=True, exist_ok=True)
         t0 = time.time()
         main_path = self.target(main)

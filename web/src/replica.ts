@@ -391,10 +391,11 @@ export class Replica {
     }
   }
 
-  /** Ask connected texloom helpers (running with --compile) to compile now. */
-  async requestCompile(): Promise<boolean> {
+  /** Ask connected texloom helpers (running with --compile) to compile now; `fromScratch`
+   *  deletes their build folder (.aux, .bbl, …) first. */
+  async requestCompile(fromScratch = false): Promise<boolean> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
-    await this.p2p({ k: 'creq' })
+    await this.p2p(fromScratch ? { k: 'creq', clean: true } : { k: 'creq' })
     return true
   }
 
