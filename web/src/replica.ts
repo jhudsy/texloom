@@ -146,6 +146,8 @@ export class Replica {
       const changed = added.concat(updated, removed)
       this.sendAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed))
     })
+    let pruneTimer: ReturnType<typeof setTimeout> | undefined
+    this.out.observe(() => { clearTimeout(pruneTimer); pruneTimer = setTimeout(() => this.pruneOutputs().catch(() => {}), 3000) })
     if (this.syncMode === 'live') this.connect()
     else { this.status = 'paused'; this.onStatus() }
   }
@@ -225,6 +227,7 @@ export class Replica {
         await this.p2p({ k: 'sv1', sv: b64e(Y.encodeStateVector(this.doc)) })
         this.sendAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID]))
         if (m.count >= COMPACT_AFTER) await this.compact()
+        setTimeout(() => this.pruneOutputs().catch(() => {}), 5000)
         this.manualDone?.(); this.manualDone = null
         break
       case 'up':
@@ -448,14 +451,53 @@ export class Replica {
   }
 
   // ---- blobs ---------------------------------------------------------------
-  async putBlob(plain: Uint8Array): Promise<string> {
+  /** Store file content here and upload it. 'output' marks compiled PDFs, logs and SyncTeX
+   *  data: replaced by the next compile, so collaborators may delete them from the server. */
+  async putBlob(plain: Uint8Array, kind: 'file' | 'output' = 'file'): Promise<string> {
     const id = await this.keys.blobId(plain)
-    if (!(await idbGet(this.db, 'blobs', id))) {
-      await idbPut(this.db, 'blobs', id, plain)
-      await idbPut(this.db, 'pending', id, 1)
-    }
+    const cached = !!(await idbGet(this.db, 'blobs', id))
+    if (!cached) await idbPut(this.db, 'blobs', id, plain)
+    // a project file is (re)uploaded even if cached, in case the server dropped it as output
+    if (!cached || kind === 'file') await idbPut(this.db, 'pending', id, kind === 'output' ? 'output' : 1)
     if (this.status === 'online') await this.uploadPending()
     return id
+  }
+
+  /** Ids ever used as project files, and ever published as compiled output. The document
+   *  keeps every past value (gc is off), so this covers what History could restore. */
+  private historyIds(): { files: Set<string>; outputs: Set<string> } {
+    const walk = (m: Y.Map<any>, pick: (v: any) => unknown[]) => {
+      const out = new Set<string>()
+      for (const last of (m as any)._map.values() as Iterable<any>)
+        for (let it = last; it; it = it.left)
+          for (const v of it.content?.getContent?.() ?? []) for (const id of pick(v)) if (typeof id === 'string' && BLOB_ID.test(id)) out.add(id)
+      return out
+    }
+    return { files: walk(this.bin, (v) => [v?.h]), outputs: walk(this.out, (v) => [v?.pdf, v?.log, v?.synctex]) }
+  }
+
+  /** Remove compiled output that a newer compile replaced, here and (for writers) on the server.
+   *  Never touches anything that was ever a project file. */
+  async pruneOutputs() {
+    const { files, outputs } = this.historyIds()
+    const cur = this.out.get('latest') ?? {}
+    const keep = new Set([cur.pdf, cur.log, cur.synctex])
+    const done = new Set((await idbGet<string[]>(this.db, 'kv', 'dropped')) ?? [])
+    const old = [...outputs].filter((id) => !keep.has(id) && !files.has(id) && !done.has(id))
+    if (!old.length) return
+    const toServer = this.keys.writable && this.serverMode === 'server' && this.storage === 'server' && this.status === 'online'
+    for (const id of old) {
+      await idbDel(this.db, 'blobs', id); await idbDel(this.db, 'pending', id)
+      if (toServer) {
+        const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
+          method: 'DELETE', headers: { 'X-Sig': b64e(this.keys.sign(`del:${id}`, new Uint8Array())) },
+        }).catch(() => null)
+        if (!r) continue // offline: try again later
+      }
+      done.add(id) // deleted, gone already, or kept for the owner's browser to remove
+    }
+    if (!toServer) for (const id of old) done.delete(id) // only local so far: the server copy is someone else's to drop
+    await idbPut(this.db, 'kv', 'dropped', [...done])
   }
 
   /** Give the server back its copy: the whole document, and every file we have. */
@@ -466,15 +508,29 @@ export class Replica {
     await this.send(crypto.randomUUID(), Y.encodeStateAsUpdate(this.doc), [])
   }
 
-  private async uploadPending() {
+  /** Uploads run one at a time: overlapping runs would send the same item twice, the second
+   *  time without its "output" mark. */
+  private uploadChain: Promise<void> = Promise.resolve()
+  private uploadPending(): Promise<void> {
+    const run = this.uploadChain.then(() => this.uploadPendingNow())
+    this.uploadChain = run.catch(() => {})
+    return run
+  }
+
+  private async uploadPendingNow() {
     if (!this.keys.writable || this.serverMode === 'relay' || this.storage === 'relay') return
+    let hist: ReturnType<Replica['historyIds']> | null = null
     for (const id of (await idbKeys(this.db, 'pending')) as string[]) {
       const plain = await idbGet<Uint8Array>(this.db, 'blobs', id)
+      if (!plain) { await idbDel(this.db, 'pending', id); continue }
+      const marked = (await idbGet(this.db, 'pending', id)) === 'output'
+      hist ??= this.historyIds()
+      const output = marked || (hist.outputs.has(id) && !hist.files.has(id))
       const d = await this.keys.encrypt(plain)
       const code = creationCode.get()
       const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
         method: 'PUT', body: d as BodyInit,
-        headers: { 'X-Sig': b64e(this.keys.sign(`blob:${id}:`, d)), ...(code ? { 'X-Create-Code': code } : {}) },
+        headers: { 'X-Sig': b64e(this.keys.sign(`blob:${id}:`, d)), ...(code ? { 'X-Create-Code': code } : {}), ...(output ? { 'X-Kind': 'output' } : {}) },
       }).catch(() => null)
       if (r && [403, 413, 507].includes(r.status)) {
         const why = (await r.json().catch(() => ({}))).code

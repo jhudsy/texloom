@@ -471,19 +471,28 @@ class FolderSync:
         if not self.r.keys.writable or not self.r.connected.is_set():
             return
         try:
-            pdf_id = await self.r.put_blob(pdf.read_bytes()) if pdf.exists() else None
-            log_id = await self.r.put_blob(log_text)
+            pdf_id = await self.r.put_blob(pdf.read_bytes(), "output") if pdf.exists() else None
+            log_id = await self.r.put_blob(log_text, "output")
             stx = build / f"{stem}.synctex.gz"
-            stx_id = await self.r.put_blob(stx.read_bytes()) if stx.exists() and pdf.exists() else None
+            stx_id = await self.r.put_blob(stx.read_bytes(), "output") if stx.exists() and pdf.exists() else None
         except Exception as e:  # noqa: BLE001
             log.warning("could not upload output: %s", e)
             return
+        prev = self.r.out.get("latest")
         def publish():
             self.r.out["latest"] = {
                 "pdf": pdf_id, "log": log_id, "ok": ok, "by": self.opts["label"],
                 "at": time.time(), "main": main, **({"synctex": stx_id} if stx_id else {}),
             }
         self.r.local_change(publish)
+        # drop the output this replaces (browsers also tidy up older ones, using the history)
+        if isinstance(prev, dict):
+            new = {pdf_id, log_id, stx_id}
+            files = {v.get("h") for v in self.r.bin.values() if isinstance(v, dict)}
+            for k in ("pdf", "log", "synctex"):
+                old = prev.get(k)
+                if old and old not in new and old not in files:
+                    await self.r.drop_output(old)
 
     def shell_mode(self) -> tuple[str, str]:
         """The latexmk shell-escape flag for this compile, and a note for the log.

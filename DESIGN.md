@@ -45,7 +45,7 @@ No accounts: a project is shared by sending a link.
 | `bin`: Y.Map      | path → `{h, size}`: content id of an encrypted blob (images, PDFs used as figures, fonts…) |
 | `dirs`: Y.Map     | path → true for explicit folders (folders are otherwise implied by file paths) |
 | `meta`: Y.Map     | `name`, `main` (main .tex file), settings                       |
-| `out`: Y.Map      | latest compiled output: `{pdf, log, synctex, by, at}` (blob ids) |
+| `out`: Y.Map      | latest compiled output: `{pdf, log, synctex, by, at}` (blob ids; stored as *output*, see below) |
 | `versions`: Y.Array | saved versions: `{at, by, label?, auto?, snap}` (encoded `Y.snapshot`) |
 | `clients`: Y.Map  | Yjs client id → display name (for "who wrote this")             |
 | `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, resolved, outcome?, replies: Y.Array}`; `start`/`end` are encoded Yjs relative positions, so they follow edits |
@@ -131,6 +131,17 @@ compact by itself: it can't read the data.)
 with `{k:"upd", u}`, the update the newcomer lacks, signed with `"p2p:" ‖ ciphertext`.
 Every peer also replies with `{k:"sv2", sv}`, so the newcomer can send back whatever
 *they* lack. Read-only peers never send updates, and unsigned updates are ignored.
+**Compiled output** (PDF, log, SyncTeX) is uploaded with `X-Kind: output` and replaced by
+every compile. `DELETE /blob/<project>/<id>` with `X-Sig = sign("del:<id>")` erases stored
+content: any writer may erase *output*; only the owner may erase other content, and
+content later uploaded as a project file stops being output. This is storage only:
+deleting a file from the project is a document edit any editor makes, and History can
+restore it while its content is stored. Clients find replaced outputs in the document's
+own history (every past `out.latest`, kept because gc is off), skip anything ever used in
+`bin`, and erase the rest locally and (as writers) on the server; the owner's client also
+clears outputs stored before they were marked. The helper erases the output it replaces,
+asking for output only (`X-Only-Output: 1`).
+
 Blobs move the same way: `{k:"breq", id}` → `{k:"blob", id, b}`. The receiver checks
 `HMAC(key, b) == id`, so any peer may serve them.
 

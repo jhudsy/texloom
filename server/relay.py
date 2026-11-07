@@ -243,6 +243,12 @@ class Store:
         if "seen" not in cols:  # last time anyone connected (for idle-project eviction)
             self.db.execute("ALTER TABLE projects ADD COLUMN seen REAL NOT NULL DEFAULT 0")
             self.db.execute("ALTER TABLE projects ADD COLUMN evicted REAL NOT NULL DEFAULT 0")
+        if "kind" not in {r[1] for r in self.db.execute("PRAGMA table_info(blob)")}:
+            # 'output' = compiled PDF/log/SyncTeX, replaced by every compile: any writer may erase
+            # the stored content. 'file' = content of project files: only the owner may erase it
+            # (deleting a file from the project is a document edit, and History can restore it
+            # only while this content exists)
+            self.db.execute("ALTER TABLE blob ADD COLUMN kind TEXT NOT NULL DEFAULT 'file'")
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(log)")}
         if "h" not in cols:  # content hash, to recognise replayed updates
             self.db.execute("ALTER TABLE log ADD COLUMN h BLOB")
@@ -435,12 +441,26 @@ class Store:
     def has_blob(self, project: str, bid: str) -> bool:
         return self.db.execute("SELECT 1 FROM blob WHERE project=? AND id=?", (project, bid)).fetchone() is not None
 
-    def put_blob(self, project: str, bid: str, data: bytes) -> None:
+    def put_blob(self, project: str, bid: str, data: bytes, kind: str = "file") -> None:
         with self.db:
-            cur = self.db.execute("INSERT OR IGNORE INTO blob(project, id, data) VALUES (?,?,?)", (project, bid, data))
+            cur = self.db.execute("INSERT OR IGNORE INTO blob(project, id, data, kind) VALUES (?,?,?,?)",
+                                  (project, bid, data, kind))
         if cur.rowcount:
             self.usage[project] += len(data)
             self.total += len(data)
+
+    def mark_file(self, project: str, bid: str) -> None:
+        """Content uploaded as a project file is a file, even if it was first stored as output."""
+        with self.db:
+            self.db.execute("UPDATE blob SET kind='file' WHERE project=? AND id=? AND kind!='file'", (project, bid))
+
+    def delete_blob(self, project: str, bid: str, any_kind: bool) -> bool:
+        with self.db:
+            cur = self.db.execute("DELETE FROM blob WHERE project=? AND id=?" + ("" if any_kind else " AND kind='output'"),
+                                  (project, bid))
+        if cur.rowcount:
+            self._recount(project)
+        return bool(cur.rowcount)
 
     def get_blob(self, project: str, bid: str) -> bytes | None:
         row = self.db.execute("SELECT data FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
@@ -720,14 +740,38 @@ class Relay:
             raise web.HTTPForbidden(text="bad signature")
         if self.store.relay_only(project):
             raise web.HTTPConflict(text="project is relay-only: blobs are exchanged peer to peer")
+        kind = "output" if request.headers.get("X-Kind") == "output" else "file"
         if self.store.has_blob(project, bid):
+            if kind == "file":
+                self.store.mark_file(project, bid)
             return web.Response(status=200)
         refused = self.may_store(project, len(data), self.codes.check(request.headers.get("X-Create-Code")))
         if refused:
             status = {"needs-code": 403, "quota-full": 507, "project-full": 413, "server-full": 507}[refused]
             return web.json_response({"code": refused}, status=status)
-        self.store.put_blob(project, bid, data)
+        self.store.put_blob(project, bid, data, kind)
         return web.Response(status=201)
+
+    async def delete_blob(self, request: web.Request) -> web.Response:
+        """Erase stored content. Any writer may erase compiled output (replaced by every compile);
+        only the owner may erase other content (e.g. outputs stored before outputs were marked).
+        This isn't deleting a file from the project, which any editor does in the document."""
+        project, bid = request.match_info["project"], request.match_info["id"]
+        if not PROJECT_RE.match(project) or not BLOB_RE.match(bid):
+            raise web.HTTPBadRequest()
+        try:
+            sig = b64d(request.headers.get("X-Sig", ""))
+        except (ValueError, binascii.Error):
+            raise web.HTTPForbidden(text="bad signature")
+        who = signer(project, f"del:{bid}".encode(), sig)
+        if who is None or who in self.store.revoked(project):
+            raise web.HTTPForbidden(text="bad signature")
+        # X-Only-Output: a client that can't check history asks to delete only marked output
+        any_kind = who == "owner" and request.headers.get("X-Only-Output") != "1"
+        if self.store.delete_blob(project, bid, any_kind=any_kind):
+            return web.Response(status=204)
+        # gone already, or a project file that only the owner may delete
+        return web.Response(status=404 if not self.store.has_blob(project, bid) else 403)
 
     async def get_blob(self, request: web.Request) -> web.Response:
         project, bid = request.match_info["project"], request.match_info["id"]
@@ -783,8 +827,8 @@ async def headers(request: web.Request, handler):
         except web.HTTPException as e:
             resp = e
     resp.headers["Access-Control-Allow-Origin"] = "*"  # sync data is ciphertext; keys never leave the page
-    resp.headers["Access-Control-Allow-Headers"] = "X-Sig, X-Create-Code, Content-Type"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, PUT, POST, OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "X-Sig, X-Create-Code, X-Kind, X-Only-Output, Content-Type"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, PUT, POST, DELETE, OPTIONS"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "no-referrer"
     if not request.path.startswith(("/ws/", "/blob/", "/api/", "/core/")):
@@ -819,6 +863,7 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
     app.router.add_get("/ws/{project}", relay.ws_handler)
     app.router.add_put("/blob/{project}/{id}", relay.put_blob)
     app.router.add_get("/blob/{project}/{id}", relay.get_blob)
+    app.router.add_delete("/blob/{project}/{id}", relay.delete_blob)
     app.router.add_route("OPTIONS", "/blob/{project}/{id}", lambda r: web.Response())
     app.router.add_get("/api/info", relay.info)
     app.router.add_post("/api/code", relay.check_code)

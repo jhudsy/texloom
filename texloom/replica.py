@@ -194,16 +194,19 @@ class Replica:
         log.info("uploaded snapshot (log had %d entries)", count)
 
     # --- blobs ---------------------------------------------------------------
-    async def put_blob(self, plaintext: bytes) -> str:
-        """Store a blob locally and upload it (now if online, else on reconnect)."""
+    async def put_blob(self, plaintext: bytes, kind: str = "file") -> str:
+        """Store a blob locally and upload it (now if online, else on reconnect). kind "output"
+        marks compiled PDFs/logs/SyncTeX: replaced by the next compile, so deletable by writers."""
         bid = self.keys.blob_id(plaintext)
         cache = self.dir / "blobs" / bid
-        if not cache.exists():
+        cached = cache.exists()
+        if not cached:
             cache.parent.mkdir(exist_ok=True)
             cache.write_bytes(plaintext)
+        if not cached or kind == "file":  # a file is re-sent in case the server dropped it as output
             pending = self.dir / "blobs-pending"
             pending.mkdir(exist_ok=True)
-            (pending / bid).touch()
+            (pending / bid).write_text("output" if kind == "output" else "")
         if self.connected.is_set():
             await self.upload_pending()
         return bid
@@ -219,6 +222,11 @@ class Replica:
             data = self.keys.encrypt((self.dir / "blobs" / bid).read_bytes())
             sig = self.keys.sign(f"blob:{bid}:".encode() + data)
             headers = {"X-Sig": b64e(sig)}
+            try:
+                if marker.read_text() == "output":
+                    headers["X-Kind"] = "output"
+            except OSError:
+                pass
             if self.create_code:
                 headers["X-Create-Code"] = self.create_code
             try:
@@ -233,6 +241,23 @@ class Replica:
             except aiohttp.ClientError as e:
                 log.warning("blob upload failed (%s); will retry", e)
                 return
+
+    async def drop_output(self, bid: str) -> None:
+        """Delete compiled output a newer compile replaced: here, and on the server (only if
+        the server marked it as output, so a project file can never be removed this way)."""
+        if not isinstance(bid, str) or not BLOB_RE.match(bid):
+            return
+        for p in (self.dir / "blobs" / bid, self.dir / "blobs-pending" / bid):
+            p.unlink(missing_ok=True)
+        if not self.keys.writable or self.http is None or self.server_mode == "relay" or self.storage == "relay":
+            return
+        sig = self.keys.sign(f"del:{bid}".encode())
+        try:
+            async with self.http.delete(f"{self.server}/blob/{self.keys.project}/{bid}",
+                                        headers={"X-Sig": b64e(sig), "X-Only-Output": "1"}):
+                pass
+        except aiohttp.ClientError:
+            pass  # stays on the server; harmless
 
     async def get_blob(self, bid: str) -> bytes:
         if not isinstance(bid, str) or not BLOB_RE.match(bid):

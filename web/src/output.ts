@@ -164,8 +164,8 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       const secs = ((performance.now() - t0) / 1000).toFixed(1)
       show(res.pdf, res.log, `${res.pdf ? '✓' : '✗ errors'} · in browser · ${secs}s`, !!res.pdf, res.synctex)
       if (writable && res.pdf) { // publish so collaborators see it without compiling
-        const [pdfId, logId, stxId] = await Promise.all([r.putBlob(res.pdf), r.putBlob(new TextEncoder().encode(res.log)),
-          res.synctex ? r.putBlob(res.synctex) : null])
+        const [pdfId, logId, stxId] = await Promise.all([r.putBlob(res.pdf, 'output'), r.putBlob(new TextEncoder().encode(res.log), 'output'),
+          res.synctex ? r.putBlob(res.synctex, 'output') : null])
         r.out.set('latest', { pdf: pdfId, log: logId, ...(stxId ? { synctex: stxId } : {}), ok: true, by: `${userName()} (browser)`, at: Date.now() / 1000, main })
       }
       return { ok: !!res.pdf, log: res.log }
