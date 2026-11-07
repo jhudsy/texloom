@@ -25,7 +25,17 @@ const concat = (a: Uint8Array, b: Uint8Array) => {
 //   member signature = 'M' | person's public key (32) | owner's grant signature (64)
 //                      | name length (1) | name (UTF-8) | signature (64)
 export interface Member { seed: Uint8Array; grant: Uint8Array; name: string }
-const MEMBER_TAG = 0x4d
+const MEMBER_TAG = 0x4d // keep in sync with texloom/crypto.py
+// Strict verification (no ZIP-215 leniency), as OpenSSL does in the relay and the helper,
+// so every party accepts exactly the same signatures.
+const STRICT = { zip215: false }
+const verifySig = (sig: Uint8Array, msg: Uint8Array, pub: Uint8Array) => ed25519.verify(sig, msg, pub, STRICT)
+
+/** The one spelling of a 32-byte public key, or null (base64 decoders accept variants). */
+export function canonicalPub(p: unknown): string | null {
+  if (typeof p !== 'string' || p.length > 64) return null
+  try { const raw = b64d(p); return raw.length === 32 ? b64e(raw) : null } catch { return null }
+}
 const grantMsg = (pub: Uint8Array, name: string) => concat(concat(enc.encode('grant:'), pub), enc.encode(`:${name}`))
 export const revokeMsg = (pub: string) => concat(enc.encode('revoke:'), b64d(pub))
 
@@ -33,13 +43,14 @@ export const revokeMsg = (pub: string) => concat(enc.encode('revoke:'), b64d(pub
 export function signer(project: string, msg: Uint8Array, sig: Uint8Array): { owner: true } | { pub: string; name: string } | null {
   try {
     const root = b64d(project)
-    if (sig.length === 64) return ed25519.verify(sig, msg, root) ? { owner: true } : null
+    if (sig.length === 64) return verifySig(sig, msg, root) ? { owner: true } : null
     if (sig[0] !== MEMBER_TAG || sig.length < 162) return null
     const pub = sig.subarray(1, 33), grant = sig.subarray(33, 97), n = sig[97]
     if (sig.length !== 98 + n + 64) return null
-    const name = new TextDecoder('utf-8', { fatal: true }).decode(sig.subarray(98, 98 + n))
-    if (!ed25519.verify(grant, grantMsg(pub, name), root)) return null
-    if (!ed25519.verify(sig.subarray(98 + n), msg, pub)) return null
+    // ignoreBOM: keep a leading BOM in the name, as Python does
+    const name = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(sig.subarray(98, 98 + n))
+    if (!verifySig(grant, grantMsg(pub, name), root)) return null
+    if (!verifySig(sig.subarray(98 + n), msg, pub)) return null
     return { pub: b64e(pub), name }
   } catch { return null }
 }
@@ -47,8 +58,10 @@ export function signer(project: string, msg: Uint8Array, sig: Uint8Array): { own
 export class Keys {
   private aes?: CryptoKey
   private hmac?: CryptoKey
-  /** Revoked personal keys (base64url), learned from the relay; their peer-to-peer updates are refused. */
+  /** Revoked personal keys (canonical base64url), learned from the relay; their peer-to-peer updates are refused. */
   readonly revoked = new Set<string>()
+  /** Personal keys seen signing valid data in this project: pub -> name (a member can't hide from the owner). */
+  readonly signers = new Map<string, string>()
   constructor(
     readonly project: string, // base64url Ed25519 public key
     readonly key: Uint8Array, // AES-256-GCM key
@@ -69,7 +82,7 @@ export class Keys {
     let member: Member | null = null
     if (m && g && n !== null) {
       member = { seed: b64d(m), grant: b64d(g), name: n }
-      if (!ed25519.verify(member.grant, grantMsg(ed25519.getPublicKey(member.seed), n), b64d(p))) throw new Error('this personal link was not issued for this project')
+      if (!verifySig(member.grant, grantMsg(ed25519.getPublicKey(member.seed), n), b64d(p))) throw new Error('this personal link was not issued for this project')
     }
     const keys = new Keys(p, b64d(k), w ? b64d(w) : null, member)
     if (keys.seed && b64e(ed25519.getPublicKey(keys.seed)) !== p) throw new Error('edit key does not match project')
@@ -90,20 +103,36 @@ export class Keys {
   }
 
   /** Owner only: a personal edit link for `name`. */
-  personal(name: string): { pub: string; keys: Keys } {
+  personal(name: string): { pub: string; grant: string; keys: Keys } {
     if (!this.seed) throw new Error('only the owner can create personal links')
     const clean = name.trim().slice(0, 60) || 'collaborator'
     if (enc.encode(clean).length > 200) throw new Error('name too long')
     const mseed = ed25519.utils.randomSecretKey()
     const pub = ed25519.getPublicKey(mseed)
     const grant = ed25519.sign(grantMsg(pub, clean), this.seed)
-    return { pub: b64e(pub), keys: new Keys(this.project, this.key, null, { seed: mseed, grant, name: clean }) }
+    return { pub: b64e(pub), grant: b64e(grant), keys: new Keys(this.project, this.key, null, { seed: mseed, grant, name: clean }) }
   }
 
-  /** Owner only: the signed revocation of a personal key. */
-  revocation(pub: string): string {
+  /** Owner only: the signed revocation of a personal key, for its canonical spelling. */
+  revocation(pub: string): { p: string; s: string } {
     if (!this.seed) throw new Error('only the owner can revoke links')
-    return b64e(ed25519.sign(revokeMsg(pub), this.seed))
+    const p = canonicalPub(pub)
+    if (!p) throw new Error('not a personal key')
+    return { p, s: b64e(ed25519.sign(revokeMsg(p), this.seed)) }
+  }
+
+  /** Was this grant issued by the owner, for this key and name? (Entries in `members` can be edited by anyone.) */
+  grantValid(pub: string, name: string, grant: unknown): boolean {
+    try { return typeof grant === 'string' && verifySig(b64d(grant), grantMsg(b64d(pub), name), b64d(this.project)) } catch { return false }
+  }
+
+  /** Owner-signed values (e.g. “this project moved”), which editors can't fake. */
+  ownerSign(text: string): string {
+    if (!this.seed) throw new Error('owner only')
+    return b64e(ed25519.sign(enc.encode(`owner:${text}`), this.seed))
+  }
+  ownerSigned(text: string, sig: unknown): boolean {
+    try { return typeof sig === 'string' && verifySig(b64d(sig), enc.encode(`owner:${text}`), b64d(this.project)) } catch { return false }
   }
 
   link(origin: string, write = true) { return `${origin}/#${this.fragment(write)}` }
@@ -139,6 +168,7 @@ export class Keys {
    *  (for new peer-to-peer updates; the relay already refuses them for stored ones). */
   verify(prefix: string, data: Uint8Array, sig: Uint8Array, fresh = false): boolean {
     const who = signer(this.project, concat(enc.encode(prefix), data), sig)
+    if (who && 'pub' in who && !this.signers.has(who.pub)) this.signers.set(who.pub, who.name)
     return !!who && !(fresh && 'pub' in who && this.revoked.has(who.pub))
   }
 

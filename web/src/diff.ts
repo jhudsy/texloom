@@ -23,10 +23,12 @@ function myers(a: string[], b: string[]): Op[] {
   const n = a.length, m = b.length, max = n + m
   if (!n) return b.map((t, j) => ({ type: 'add', a: 0, b: j, text: t }))
   if (!m) return a.map((t, i) => ({ type: 'del', a: i, b: 0, text: t }))
-  if (n * m > 25_000_000) // pathological sizes: replace the whole middle
-    return [...a.map((t, i): Op => ({ type: 'del', a: i, b: 0, text: t })), ...b.map((t, j): Op => ({ type: 'add', a: n, b: j, text: t }))]
+  const replaceAll = () => [...a.map((t, i): Op => ({ type: 'del', a: i, b: 0, text: t })), ...b.map((t, j): Op => ({ type: 'add', a: n, b: j, text: t }))]
+  if (n * m > 25_000_000) return replaceAll() // pathological sizes: replace the whole middle
   const v = new Int32Array(2 * max + 2), trace: Int32Array[] = []
   for (let d = 0; d <= max; d++) {
+    // the trace grows by a copy of v per step: very different texts would need gigabytes
+    if ((d + 1) * v.length > 16_000_000) return replaceAll()
     trace.push(v.slice())
     for (let k = -d; k <= d; k += 2) {
       let x = k === -d || (k !== d && v[max + k - 1] < v[max + k + 1]) ? v[max + k + 1] : v[max + k - 1] + 1

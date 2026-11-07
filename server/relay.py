@@ -45,12 +45,13 @@ import sqlite3
 import sys
 import time
 from collections import defaultdict
+from collections.abc import Container
 from dataclasses import dataclass
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
-from texloom.crypto import revoke_msg, signer
+from texloom.crypto import canonical_pub, revoke_msg, signer
 
 log = logging.getLogger("texloom.relay")
 
@@ -59,14 +60,24 @@ BLOB_RE = re.compile(r"^[0-9a-f]{32}$")
 KiB, MiB, GiB = 1 << 10, 1 << 20, 1 << 30
 UNLIMITED = math.inf
 MAX_UPDATE = 8 * MiB
-MAX_SNAPSHOT = 48 * MiB
-MAX_BLOB = 50 * MiB
-MAX_FRAME = 72 * MiB  # p2p frames may carry (base64) blobs
+MAX_SNAPSHOT = 12 * MiB  # bigger documents just aren't compacted (their log is kept as it is)
+MAX_BLOB = 50 * MiB  # uploaded over HTTP
+# Every WebSocket frame is read whole before it can be checked, so keep frames small: a few
+# large ones at once must not exhaust the server's memory. p2p frames carry files only in
+# relay-only projects, up to P2P_BLOB (clients check).
+MAX_FRAME = 16 * MiB
 FRAME_LIMITS = {"hello": 4 * KiB, "aw": 64 * KiB, "mode": 4 * KiB, "up": MAX_UPDATE * 4 // 3 + KiB,
                 "snap": MAX_SNAPSHOT * 4 // 3 + KiB, "p2p": MAX_FRAME, "revoke": 4 * KiB}
 RATE_WINDOW, RATE_MSGS, RATE_BYTES = 10.0, 600, 160 * MiB  # per connection
+HELLOS_PER_WINDOW = 5  # a log reply can be large: don't let one connection ask for it in a loop
 MAX_CONNECTIONS = 2000
 MODE_SKEW = 600  # seconds a signed mode-change command stays valid
+MAX_REVOKED = 1000  # revocations kept per project
+# Rows for projects that store nothing (relay-only mode, revocations) cost nothing to create,
+# so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
+META_RATE, META_BURST = 1.0, 600
+SEND_TIMEOUT = 20  # seconds; a peer that doesn't read is disconnected rather than holding up others
+INFLIGHT_MAX = 192 * MiB  # bytes of large frames being handled at once, server-wide
 
 
 def b64d(s: object) -> bytes:
@@ -79,8 +90,9 @@ def b64e(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 
 
-def verify(project: str, msg: bytes, sig: bytes, revoked: set[str] | frozenset = frozenset()) -> bool:
-    """Signed by the project's owner key, or by a personal key the owner granted and hasn't revoked."""
+def verify(project: str, msg: bytes, sig: bytes, revoked: Container[str] = frozenset()) -> bool:
+    """Signed by the project's owner key, or by a personal key the owner granted and hasn't revoked.
+    `revoked` holds canonical spellings, as signer() returns them."""
     who = signer(project, msg, sig)
     return who is not None and who not in revoked
 
@@ -220,6 +232,9 @@ class Store:
               PRIMARY KEY (project, pub));
             CREATE TABLE IF NOT EXISTS projects (
               project TEXT PRIMARY KEY, created REAL NOT NULL, label TEXT NOT NULL DEFAULT '');
+            CREATE TABLE IF NOT EXISTS gone (
+              project TEXT NOT NULL, h BLOB NOT NULL, PRIMARY KEY (project, h)) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS floor (project TEXT PRIMARY KEY, seq INTEGER NOT NULL);
             """
         )
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(projects)")}
@@ -250,6 +265,7 @@ class Store:
         self.owners: dict[str, str] = dict(self.db.execute("SELECT project, owner FROM projects"))
         self.seen: dict[str, float] = {p: max(s, c) for p, s, c in self.db.execute("SELECT project, seen, created FROM projects")}
         self.dir = path.parent
+        self.meta_tokens, self.meta_at = float(META_BURST), time.monotonic()
 
     # --- registration & accounting -------------------------------------------
     def owner(self, project: str) -> str | None:
@@ -262,8 +278,20 @@ class Store:
         self.owners[project] = owner
         log.info("registered project %s… (%s)", project[:8], label)
 
+    def meta_budget(self) -> bool:
+        """Take one unit from the server-wide budget for rows that store nothing (see META_RATE)."""
+        now = time.monotonic()
+        self.meta_tokens = min(META_BURST, self.meta_tokens + (now - self.meta_at) * META_RATE)
+        self.meta_at = now
+        if self.meta_tokens < 1:
+            return False
+        self.meta_tokens -= 1
+        return True
+
     def touch(self, project: str) -> None:
-        """Remember that someone opened the project (written at most hourly)."""
+        """Remember that someone opened a stored project (written at most hourly)."""
+        if project not in self.owners:
+            return  # nothing stored: nothing to keep track of (and no unbounded map)
         now = time.time()
         if now - self.seen.get(project, 0) < 3600:
             return
@@ -278,12 +306,15 @@ class Store:
 
     def evict(self, project: str) -> int:
         """Drop the stored copy (log and files) of an idle project. Its writers re-upload it
-        when they next connect; until then, link holders without a copy can't open it."""
+        when they next connect; until then, link holders without a copy can't open it.
+        Sequence numbers keep counting (so old entries can't be replayed into the gap);
+        `floor` tells clients that everything up to it is gone."""
         freed = self.usage.get(project, 0)
         with self.db:
             self.db.execute("DELETE FROM log WHERE project=?", (project,))
             self.db.execute("DELETE FROM blob WHERE project=?", (project,))
-            self.db.execute("DELETE FROM head WHERE project=?", (project,))
+            self.db.execute("INSERT INTO floor(project, seq) VALUES (?,?) "
+                            "ON CONFLICT(project) DO UPDATE SET seq=excluded.seq", (project, self.head(project)))
             self.db.execute("UPDATE projects SET evicted=? WHERE project=?", (time.time(), project))
         self._recount(project)
         return freed
@@ -307,10 +338,18 @@ class Store:
         row = self.db.execute("SELECT seq FROM head WHERE project=?", (project,)).fetchone()
         return row[0] if row else 0
 
+    def floor(self, project: str) -> int:
+        """Entries up to this sequence number were dropped by eviction."""
+        row = self.db.execute("SELECT seq FROM floor WHERE project=?", (project,)).fetchone()
+        return row[0] if row else 0
+
     def duplicate(self, project: str, data: bytes) -> int | None:
-        row = self.db.execute("SELECT seq FROM log WHERE project=? AND h=?",
-                              (project, hashlib.sha256(data).digest())).fetchone()
-        return row[0] if row else None
+        """A replay of an update already stored (its seq), or already compacted away (0)."""
+        h = hashlib.sha256(data).digest()
+        row = self.db.execute("SELECT seq FROM log WHERE project=? AND h=?", (project, h)).fetchone()
+        if row:
+            return row[0]
+        return 0 if self.db.execute("SELECT 1 FROM gone WHERE project=? AND h=?", (project, h)).fetchone() else None
 
     def append(self, project: str, data: bytes, sig: bytes) -> int:
         seq = self.head(project) + 1
@@ -335,6 +374,9 @@ class Store:
 
     def snapshot(self, project: str, upto: int, data: bytes, sig: bytes) -> None:
         with self.db:
+            # remember what the snapshot replaces, so those updates can't be stored again
+            self.db.execute("INSERT OR IGNORE INTO gone(project, h) SELECT project, h FROM log "
+                            "WHERE project=? AND seq<=? AND snap=0 AND h IS NOT NULL", (project, upto))
             self.db.execute("DELETE FROM log WHERE project=? AND seq<=?", (project, upto))
             self.db.execute("INSERT INTO log(project, seq, snap, data, sig, h) VALUES (?,?,1,?,?,?)",
                             (project, upto, data, sig, hashlib.sha256(data).digest()))
@@ -353,23 +395,33 @@ class Store:
 
     # --- storage mode & blobs ---------------------------------------------------
     def revoked(self, project: str) -> dict[str, bytes]:
-        """Personal keys the owner revoked: pub -> owner's signature."""
+        """Personal keys the owner revoked: canonical pub -> owner's signature."""
         if project not in self._revoked:
-            self._revoked[project] = dict(self.db.execute(
-                "SELECT pub, sig FROM revoked WHERE project=?", (project,)).fetchall())
+            rows = self.db.execute("SELECT pub, sig FROM revoked WHERE project=?", (project,)).fetchall()
+            self._revoked[project] = {c: sig for p, sig in rows if (c := canonical_pub(p))}
             if len(self._revoked) > 10000:
                 self._revoked.pop(next(iter(self._revoked)))
         return self._revoked[project]
 
-    def revoke(self, project: str, pub: str, sig: bytes) -> None:
+    def revoke(self, project: str, pub: str, sig: bytes) -> bool:
+        """Record a revocation (`pub` canonical). False if this project has too many already."""
+        known = self.revoked(project)
+        if pub in known:
+            return True
+        if len(known) >= MAX_REVOKED:
+            return False
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO revoked(project, pub, sig, at) VALUES (?,?,?,?)",
                             (project, pub, sig, time.time()))
         self._revoked.pop(project, None)
+        return True
 
     def relay_only(self, project: str) -> bool:
         row = self.db.execute("SELECT relay FROM mode WHERE project=?", (project,)).fetchone()
         return bool(row and row[0])
+
+    def has_mode(self, project: str) -> bool:
+        return self.db.execute("SELECT 1 FROM mode WHERE project=?", (project,)).fetchone() is not None
 
     def set_mode(self, project: str, relay_only: bool) -> None:
         with self.db:
@@ -401,6 +453,8 @@ class Conn:
     def __init__(self, peer_id: int):
         self.id = peer_id
         self.code: str | None = None
+        self.code_tried = False
+        self.hellos: list[float] = []
         self.window_start = time.monotonic()
         self.msgs = 0
         self.bytes = 0
@@ -412,6 +466,11 @@ class Conn:
         self.msgs += 1
         self.bytes += nbytes
         return self.msgs <= RATE_MSGS and self.bytes <= RATE_BYTES
+
+    def allow_hello(self) -> bool:
+        now = time.monotonic()
+        self.hellos = [t for t in self.hellos if now - t < RATE_WINDOW] + [now]
+        return len(self.hellos) <= HELLOS_PER_WINDOW
 
 
 class BadMessage(Exception):
@@ -433,6 +492,8 @@ class Relay:
         self.rooms: dict[str, set[web.WebSocketResponse]] = defaultdict(set)
         self.conns: dict[web.WebSocketResponse, Conn] = {}
         self._next_id = 1
+        self.inflight = 0  # bytes of large frames being handled right now
+        self.blob_reads = asyncio.Semaphore(4)  # concurrent blob uploads being read
 
     # --- storage policy ------------------------------------------------------------
     def may_store(self, project: str, nbytes: int, code: str | None) -> str | None:
@@ -467,14 +528,23 @@ class Relay:
         }
 
     # --- websocket ---------------------------------------------------------------------
+    async def send(self, ws: web.WebSocketResponse, text: str) -> None:
+        """Send to one peer; one that doesn't keep up is disconnected instead of stalling the room."""
+        if ws.closed:
+            return
+        try:
+            await asyncio.wait_for(ws.send_str(text), SEND_TIMEOUT)
+        except asyncio.TimeoutError:
+            log.info("disconnecting a peer that stopped reading")
+            asyncio.create_task(ws.close(code=1008, message=b"too slow"))
+        except (ConnectionError, RuntimeError):
+            pass
+
     async def broadcast(self, project: str, msg: dict, exclude=None) -> None:
         text = json.dumps(msg)
-        for ws in list(self.rooms[project]):
-            if ws is not exclude and not ws.closed:
-                try:
-                    await ws.send_str(text)
-                except (ConnectionError, RuntimeError):
-                    pass
+        peers = [ws for ws in self.rooms.get(project, ()) if ws is not exclude]
+        if peers:
+            await asyncio.gather(*(self.send(ws, text) for ws in peers))
 
     async def ws_handler(self, request: web.Request) -> web.WebSocketResponse:
         project = request.match_info["project"]
@@ -496,6 +566,11 @@ class Relay:
                 if not conn.allow(len(raw.data)):
                     await ws.close(code=1008, message=b"rate limit")
                     break
+                size = len(raw.data) if len(raw.data) > MiB else 0
+                if size and self.inflight + size > INFLIGHT_MAX:  # the server is busy with big frames
+                    await ws.send_json({"t": "err", "m": "server busy: try again"})
+                    continue
+                self.inflight += size
                 try:
                     msg = json.loads(raw.data)
                     if not isinstance(msg, dict):
@@ -508,6 +583,9 @@ class Relay:
                     await ws.send_json({"t": "err", "m": f"bad message: {e}"[:200]})
                 except Exception:  # noqa: BLE001 - one bad frame mustn't take the connection down
                     log.exception("error handling message")
+                finally:
+                    self.inflight -= size
+                    del raw
         finally:
             room.discard(ws)
             self.conns.pop(ws, None)
@@ -519,21 +597,25 @@ class Relay:
     async def handle(self, project: str, ws, conn: Conn, t: str, msg: dict) -> None:
         relay_only = self.store.relay_only(project)
         if t == "hello":
+            if not conn.allow_hello():
+                await ws.close(code=1008, message=b"rate limit")
+                return
             self.store.touch(project)
-            if msg.get("code") and conn.code is None:  # one code check per connection
+            if msg.get("code") and not conn.code_tried:  # one code check per connection
+                conn.code_tried = True
                 conn.code = self.codes.check(field(msg, "code", str))
             since = field(msg, "since", int, 0)
             entries = self.store.since(project, max(0, min(since, 2**62)))
             await ws.send_json(
                 {"t": "log", "entries": entries, "head": self.store.head(project),
-                 "count": self.store.count(project), "you": conn.id,
+                 "floor": self.store.floor(project), "count": self.store.count(project), "you": conn.id,
                  "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
                  "store": self.store_status(project, conn),
                  "rv": [{"p": p, "s": b64e(sig)} for p, sig in self.store.revoked(project).items()]})
         elif t == "up":
             d, s = field(msg, "d", str), field(msg, "s", str)
             data, sig = b64d(d), b64d(s)
-            if len(data) > MAX_UPDATE or not verify(project, b"upd:" + data, sig, set(self.store.revoked(project))):
+            if len(data) > MAX_UPDATE or not verify(project, b"upd:" + data, sig, self.store.revoked(project)):
                 await ws.send_json({"t": "err", "m": "rejected update (bad signature, or this personal link was revoked)"})
                 return
             if relay_only:  # pass it on, but keep nothing
@@ -541,7 +623,7 @@ class Relay:
                 await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
                 return
             dup = self.store.duplicate(project, data)
-            if dup is not None:  # a replay of something already stored: acknowledge, keep nothing new
+            if dup is not None:  # a replay of something already stored (or compacted): acknowledge, keep nothing
                 await ws.send_json({"t": "ack", "q": dup, "id": msg.get("id")})
                 return
             refused = self.may_store(project, len(data) + len(sig), conn.code)
@@ -558,11 +640,13 @@ class Relay:
             data, sig = b64d(field(msg, "d", str)), b64d(field(msg, "s", str))
             if relay_only or self.store.owner(project) is None:
                 return
-            # A snapshot must replace part of the log: after the previous snapshot, up to head.
-            if not (self.store.last_snapshot(project) < upto <= self.store.head(project)) or len(data) > MAX_SNAPSHOT:
+            # A snapshot must replace part of the log: after the previous snapshot (and anything
+            # evicted), up to head.
+            after = max(self.store.last_snapshot(project), self.store.floor(project))
+            if not (after < upto <= self.store.head(project)) or len(data) > MAX_SNAPSHOT:
                 await ws.send_json({"t": "err", "m": "rejected snapshot"})
                 return
-            if not verify(project, f"snap:{upto}:".encode() + data, sig, set(self.store.revoked(project))):
+            if not verify(project, f"snap:{upto}:".encode() + data, sig, self.store.revoked(project)):
                 await ws.send_json({"t": "err", "m": "rejected snapshot"})
                 return
             if self.may_store(project, self.store.snapshot_delta(project, upto, len(data) + len(sig)), conn.code):
@@ -574,8 +658,11 @@ class Relay:
         elif t == "p2p":
             # Opaque peer-to-peer payload (state-vector sync, blob transfer). Never stored.
             out = {"t": "p2p", "d": field(msg, "d", str), "from": conn.id}
-            if "s" in msg:
+            if "s" in msg:  # a signed update: don't pass on one from a revoked personal link
                 out["s"] = field(msg, "s", str)
+                revoked = self.store.revoked(project)
+                if revoked and not verify(project, b"p2p:" + b64d(out["d"]), b64d(out["s"]), revoked):
+                    return
             to = msg.get("to")
             if to is None:
                 await self.broadcast(project, out, ws)
@@ -587,20 +674,28 @@ class Relay:
                         await peer.send_json(out)
         elif t == "mode":
             mode, ts, sig = field(msg, "m", str), field(msg, "ts", int), b64d(field(msg, "s", str))
-            if mode not in ("server", "relay") or abs(time.time() - ts) > MODE_SKEW or not verify(
-                project, f"mode:{mode}:{ts}".encode(), sig, set(self.store.revoked(project))
-            ):
+            who = signer(project, f"mode:{mode}:{ts}".encode(), sig)
+            # Anyone with edit access may turn server storage on; only the owner may turn it off,
+            # since that deletes the server's copy.
+            if (mode not in ("server", "relay") or abs(time.time() - ts) > MODE_SKEW or who is None
+                    or who in self.store.revoked(project) or (mode == "relay" and who != "owner")):
                 await ws.send_json({"t": "err", "m": "rejected mode change"})
+                return
+            if self.store.owner(project) is None and not self.store.has_mode(project) and not self.store.meta_budget():
+                await ws.send_json({"t": "err", "m": "server busy: try again later"})
                 return
             self.store.set_mode(project, mode == "relay")
             log.info("project %s… storage mode -> %s", project[:8], mode)
             await self.broadcast(project, {"t": "mode", "m": mode})
         elif t == "revoke":  # the owner withdraws a personal edit link
-            pub, sig = field(msg, "p", str), b64d(field(msg, "s", str))
-            if len(pub) > 64 or signer(project, revoke_msg(pub), sig) != "owner":
+            pub, sig = canonical_pub(field(msg, "p", str)[:64]), b64d(field(msg, "s", str))
+            if pub is None or signer(project, revoke_msg(pub), sig) != "owner":
                 await ws.send_json({"t": "err", "m": "rejected revocation"})
                 return
-            self.store.revoke(project, pub, sig)
+            known = self.store.owner(project) is not None or self.store.has_mode(project)
+            if not known and not self.store.meta_budget() or not self.store.revoke(project, pub, sig):
+                await ws.send_json({"t": "err", "m": "rejected revocation: too many"})
+                return
             log.info("project %s…: revoked a personal link", project[:8])
             await self.broadcast(project, {"t": "rv", "p": pub, "s": b64e(sig)})  # including the owner
         else:
@@ -611,12 +706,17 @@ class Relay:
         project, bid = request.match_info["project"], request.match_info["id"]
         if not PROJECT_RE.match(project) or not BLOB_RE.match(bid):
             raise web.HTTPBadRequest()
-        data = await request.read()
+        if (request.content_length or 0) > MAX_BLOB:
+            raise web.HTTPRequestEntityTooLarge(max_size=MAX_BLOB, actual_size=request.content_length or 0)
         try:
             sig = b64d(request.headers.get("X-Sig", ""))
         except (ValueError, binascii.Error):
             raise web.HTTPForbidden(text="bad signature")
-        if len(data) > MAX_BLOB or not verify(project, f"blob:{bid}:".encode() + data, sig, set(self.store.revoked(project))):
+        if not (len(sig) == 64 or 162 <= len(sig) <= 417):  # an owner or personal-link signature
+            raise web.HTTPForbidden(text="bad signature")
+        async with self.blob_reads:  # only a few large bodies in memory at once
+            data = await request.read()
+        if len(data) > MAX_BLOB or not verify(project, f"blob:{bid}:".encode() + data, sig, self.store.revoked(project)):
             raise web.HTTPForbidden(text="bad signature")
         if self.store.relay_only(project):
             raise web.HTTPConflict(text="project is relay-only: blobs are exchanged peer to peer")

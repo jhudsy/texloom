@@ -20,12 +20,15 @@ import aiohttp
 from cryptography.exceptions import InvalidTag
 from pycrdt import Doc, Map, merge_updates
 
-from .crypto import Keys, b64d, b64e, revoke_msg, signer
+from .crypto import Keys, b64d, b64e, canonical_pub, revoke_msg, signer
 
 log = logging.getLogger("texloom")
 
 COMPACT_AFTER = 300  # log entries before a writer uploads a snapshot
 BLOB_RE = re.compile(r"^[0-9a-f]{32}$")  # blob ids are HMAC hex digests, never paths
+# Keep in sync with server/relay.py: frames are at most 16 MiB (base64 adds a third).
+MAX_SNAPSHOT = 12 * 1024 * 1024
+P2P_BLOB = 11 * 1024 * 1024  # files sent peer to peer (relay-only projects)
 
 
 class Replica:
@@ -56,6 +59,8 @@ class Replica:
         self.lock = asyncio.Lock()  # serialises remote applies with local folder ingests
         self.connected = asyncio.Event()
         self.synced = asyncio.Event()  # first catch-up complete
+        self._caught_up = False  # this connection's log (and revocation list) has been applied
+        self._revocations: list[dict] = []  # owner-signed, kept in state.json
         self.load()
 
     @property
@@ -73,12 +78,13 @@ class Replica:
             self.since = s.get("since", 0)
             self.pending_mode = s.get("pending_mode")
             self.outbox = {k: b64d(v) for k, v in s.get("outbox", {}).items()}
+            self._revoked(s.get("revoked", []), save=False)  # before anything arrives from peers
 
     def save(self) -> None:
         (self.dir / "doc.bin.tmp").write_bytes(self.doc.get_update())
         (self.dir / "doc.bin.tmp").replace(self.dir / "doc.bin")
         state = {"since": self.since, "pending_mode": self.pending_mode,
-                 "outbox": {k: b64e(v) for k, v in self.outbox.items()}}
+                 "outbox": {k: b64e(v) for k, v in self.outbox.items()}, "revoked": self._revocations}
         (self.dir / "state.json.tmp").write_text(json.dumps(state))
         (self.dir / "state.json.tmp").replace(self.dir / "state.json")
 
@@ -125,17 +131,23 @@ class Replica:
     def _verify(self, prefix: bytes, data: bytes, sig: bytes, fresh: bool = False) -> bool:
         return self.keys.verify(prefix + data, sig, fresh)
 
-    def _revoked(self, items: list) -> None:
-        """Personal keys the owner revoked (each signed by the owner)."""
+    def _revoked(self, items: list, save: bool = True) -> None:
+        """Personal keys the owner revoked (each signed by the owner); remembered across restarts."""
+        added = False
         for it in items or []:
             try:
-                pub, sig = str(it["p"]), b64d(str(it["s"]))
-                if signer(self.keys.project, revoke_msg(pub), sig) == "owner":
-                    if pub == self.keys.member_pub and pub not in self.keys.revoked:
-                        log.warning("the owner has revoked this personal edit link: your changes are no longer accepted")
-                    self.keys.revoked.add(pub)
+                pub, sig = canonical_pub(str(it["p"])), b64d(str(it["s"]))
+                if pub is None or pub in self.keys.revoked or signer(self.keys.project, revoke_msg(pub), sig) != "owner":
+                    continue
+                if pub == self.keys.member_pub:
+                    log.warning("the owner has revoked this personal edit link: your changes are no longer accepted")
+                self.keys.revoked.add(pub)
+                self._revocations.append({"p": pub, "s": b64e(sig)})
+                added = True
             except (KeyError, ValueError, TypeError):
                 continue
+        if added and save:
+            self.save()
 
     async def _apply_entries(self, entries: list[dict]) -> None:
         if not entries:
@@ -175,6 +187,8 @@ class Replica:
         if count < COMPACT_AFTER or not self.keys.writable or self.ws is None or self.server_mode == "relay":
             return
         data = self.keys.encrypt(self.doc.get_update())
+        if len(data) > MAX_SNAPSHOT:
+            return  # too big for the server to take: the log stays as it is
         sig = self.keys.sign(f"snap:{self.since}:".encode() + data)
         await self.ws.send_json({"t": "snap", "upto": self.since, "d": b64e(data), "s": b64e(sig)})
         log.info("uploaded snapshot (log had %d entries)", count)
@@ -270,6 +284,8 @@ class Replica:
             if k == "sv1":
                 await self.p2p({"k": "sv2", "sv": b64e(self.doc.get_state())}, frm)
         elif k == "upd":
+            if not self._caught_up:
+                return  # not before the server's revocation list is in; peers resend after our sv1
             if "s" not in m or not self._verify(b"p2p:", data, b64d(m["s"]), fresh=True):
                 log.warning("ignoring unsigned peer update")
                 return
@@ -286,9 +302,11 @@ class Replica:
             if not isinstance(bid, str) or not BLOB_RE.match(bid):
                 return
             cache = self.dir / "blobs" / bid
-            if cache.exists():
+            if cache.exists() and cache.stat().st_size <= P2P_BLOB:
                 await self.p2p({"k": "blob", "id": p["id"], "b": b64e(cache.read_bytes())}, frm)
         elif k == "blob":
+            if p.get("id") not in self._blob_waiters:
+                return  # only files we asked for
             blob = b64d(p["b"])
             if self.keys.blob_id(blob) != p["id"]:
                 return
@@ -344,8 +362,9 @@ class Replica:
             self.http = http
             while True:
                 try:
-                    async with http.ws_connect(ws_url, heartbeat=30, max_msg_size=0) as ws:
+                    async with http.ws_connect(ws_url, heartbeat=30, max_msg_size=64 * 1024 * 1024) as ws:
                         self.ws = ws
+                        self._caught_up = False
                         backoff = 1
                         log.info("connected to %s", self.server)
                         self.connected.set()
@@ -373,7 +392,9 @@ class Replica:
         if t == "log":
             self.server_mode = m.get("mode", "server")
             self._revoked(m.get("rv", []))
-            lost = m["head"] < self.since and m.get("mode") != "relay"  # server dropped its copy (idle eviction)
+            # the server dropped its copy (idle eviction): everything up to `floor` is gone
+            floor = m.get("floor") or 0
+            lost = m.get("mode") != "relay" and (m["head"] < self.since or 0 < self.since <= floor)
             if lost:
                 self.since, self._seen = m["head"], set()
             await self._apply_entries(m["entries"])
@@ -394,6 +415,7 @@ class Replica:
             self._seen = {q for q in self._seen if q > self.since}
             self._mark_seen(self.since)
             await self.flush_outbox()
+            self._caught_up = True
             await self.p2p({"k": "sv1", "sv": b64e(self.doc.get_state())})
             self.synced.set()
             await self._maybe_compact(m.get("count", 0))

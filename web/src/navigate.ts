@@ -15,20 +15,40 @@ export interface Outline { headings: Heading[]; words: number; files: string[] }
 const LEVELS: Record<string, number> = { part: 0, chapter: 1, section: 2, subsection: 3, subsubsection: 4, paragraph: 5, subparagraph: 6 }
 const SKIP_ENVS = 'equation|align|gather|multline|eqnarray|math|displaymath|flalign|alignat|verbatim|Verbatim|lstlisting|minted|tikzpicture|comment|filecontents'
 
-/** Replace everything that isn't prose (comments, maths, code) with spaces, keeping offsets and newlines. */
+/** Replace everything that isn't prose (comments, maths, code) with spaces, keeping offsets and newlines.
+ *  Linear time: delimiters are matched with indexOf, so a file full of unclosed "\\[" can't stall it. */
 export function blankNonProse(text: string): string {
   const blank = (s: string) => s.replace(/[^\n]/g, ' ')
-  return text
-    .replace(/(^|[^\\])%[^\n]*/g, (m, pre) => pre + blank(m.slice(pre.length)))
-    .replace(new RegExp(String.raw`\\begin\{(${SKIP_ENVS})(\*?)\}[\s\S]*?\\end\{\1\2\}`, 'g'), blank)
-    .replace(/\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\\)\$(?:\\.|[^$\\])*\$/g, blank)
+  let t = text.replace(/(^|[^\\])%[^\n]*/g, (m, pre) => pre + blank(m.slice(pre.length)))
+  // environments that aren't prose: \begin{x} … \end{x}
+  t = spans(t, new RegExp(String.raw`\\begin\{(${SKIP_ENVS})(\*?)\}`, 'g'), (m) => `\\end{${m[1]}${m[2]}}`, blank)
+  // display and inline maths (not "\\[2pt]", a line break with spacing)
+  t = spans(t, /\$\$|(?<!\\)\\\[|(?<!\\)\\\(/g, (m) => (m[0] === '$$' ? '$$' : m[0] === '\\[' ? '\\]' : '\\)'), blank)
+  return t.replace(/(?<!\\)\$(?:\\.|[^$\\]){0,5000}\$/g, blank)
+}
+
+/** Blank every span from a match of `open` to the next `close(match)`. Each closer is looked up
+ *  once: when one is missing, later openers of that kind are skipped instead of rescanned. */
+function spans(text: string, open: RegExp, close: (m: RegExpExecArray) => string, blank: (s: string) => string): string {
+  let out = '', i = 0, m: RegExpExecArray | null
+  const missing = new Set<string>()
+  open.lastIndex = 0
+  while ((m = open.exec(text))) {
+    const end = close(m)
+    if (missing.has(end)) continue
+    const j = text.indexOf(end, m.index + m[0].length)
+    if (j < 0) { missing.add(end); continue }
+    out += text.slice(i, m.index) + blank(text.slice(m.index, j + end.length))
+    i = open.lastIndex = j + end.length
+  }
+  return out + text.slice(i)
 }
 
 /** Words of prose in already-blanked LaTeX (in the spirit of texcount's text words). */
 export function countWords(blanked: string): number {
   const t = blanked
     // commands whose arguments aren't prose
-    .replace(/\\(?:label|ref|eqref|[cC]ref|autoref|pageref|nameref|cite\w*|nocite|includegraphics|usepackage|RequirePackage|documentclass|bibliography(?:style)?|addbibresource|input|include|subfile|begin|end|(?:re)?newcommand|newenvironment|DeclareMathOperator|url|href|[vh]space|setlength|setcounter|addtocounter|graphicspath|hypersetup|pagestyle|thispagestyle|newtheorem|providecommand)\*?\s*(?:\[[^\]]*\]\s*)*(?:\{[^{}]*\}\s*)?/g, ' ')
+    .replace(/\\(?:label|ref|eqref|[cC]ref|autoref|pageref|nameref|cite\w*|nocite|includegraphics|usepackage|RequirePackage|documentclass|bibliography(?:style)?|addbibresource|input|include|subfile|begin|end|(?:re)?newcommand|newenvironment|DeclareMathOperator|url|href|[vh]space|setlength|setcounter|addtocounter|graphicspath|hypersetup|pagestyle|thispagestyle|newtheorem|providecommand)\*?\s*(?:\[[^\]]{0,300}\]\s*){0,4}(?:\{[^{}]{0,2000}\}\s*)?/g, ' ')
     .replace(/\\[A-Za-z@]+\*?/g, ' ')
     .replace(/\\./g, ' ')
   return (t.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).filter((w) => /\p{L}/u.test(w)).length
@@ -73,9 +93,10 @@ export function outline(r: Replica): Outline {
       if (b >= 0) start = b + '\\begin{document}'.length
       if (e >= 0) end = e
     }
-    const re = /\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\s*(?:\[[^\]]*\]\s*)?(?=\{)|\\(input|include|subfile)\s*\{([^}]+)\}/g
+    const re = /\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\s*(?:\[[^\]]{0,300}\]\s*)?(?=\{)|\\(input|include|subfile)\s*\{([^}]{1,300})\}/g
     re.lastIndex = start
     let pos = start, m: RegExpExecArray | null
+    let lineAt = 0, line = 1 // counted incrementally: re-splitting the text per heading is quadratic
     while ((m = re.exec(blanked)) && m.index < end) {
       add(countWords(blanked.slice(pos, m.index)))
       if (m[1]) {
@@ -83,7 +104,7 @@ export function outline(r: Replica): Outline {
         const title = (g?.content ?? '').replace(/\\[A-Za-z@]+\*?\s*/g, '').replace(/[{}]/g, '').replace(/\s+/g, ' ').trim()
         pos = g?.end ?? re.lastIndex
         re.lastIndex = pos
-        const line = text.slice(0, m.index).split('\n').length
+        for (let i = text.indexOf('\n', lineAt); i >= 0 && i < m.index; i = text.indexOf('\n', i + 1)) { line++; lineAt = i + 1 }
         headings.push({ level: LEVELS[m[1]], title: title || '(untitled)', file, offset: m.index, line, words: 0, total: 0 })
         add(countWords(blankNonProse(g?.content ?? '')))
       } else {

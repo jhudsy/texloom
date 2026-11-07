@@ -23,7 +23,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url)
   if (url.origin !== location.origin) return
   const p = url.pathname
-  if (p.startsWith('/ws/') || p.startsWith('/blob/') || p.startsWith('/api/')) return
+  if (p.startsWith('/ws/') || p.startsWith('/blob/') || p.startsWith('/api/') || p === '/admin') return
 
   // The page: network first (so updates arrive), the cached copy when offline.
   if (req.mode === 'navigate') {
@@ -33,7 +33,8 @@ self.addEventListener('fetch', (event) => {
         const timer = setTimeout(() => ctrl.abort(), 4000)
         const res = await fetch(req, { signal: ctrl.signal })
         clearTimeout(timer)
-        if (res.ok) (await caches.open(CACHE)).put('/index.html', res.clone())
+        // only the app's own page (not /admin or anything else the server answers)
+        if (res.ok && p === '/' && (res.headers.get('content-type') || '').startsWith('text/html')) (await caches.open(CACHE)).put('/index.html', res.clone())
         return res
       } catch {
         return (await caches.match('/index.html')) || (await caches.match('/')) || Response.error()

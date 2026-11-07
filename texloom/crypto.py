@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import os
@@ -24,6 +25,18 @@ def b64d(s: str) -> bytes:
 
 
 MEMBER_TAG = 0x4D
+
+
+def canonical_pub(p: str) -> str | None:
+    """The one spelling of a 32-byte public key (base64 decoders accept variants, e.g. a changed
+    last character), so a revocation always matches the key signer() reports."""
+    if not isinstance(p, str) or len(p) > 64:
+        return None
+    try:
+        raw = b64d(p)
+    except (ValueError, binascii.Error):
+        return None
+    return b64e(raw) if len(raw) == 32 else None
 
 
 def grant_msg(pub: bytes, name: str) -> bytes:

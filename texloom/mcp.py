@@ -29,7 +29,8 @@ from pycrdt import Array, Assoc, Map, Text
 
 from . import __version__
 from .crypto import Keys, b64e
-from .folder import apply_text, safe_rel
+from .folder import apply_text
+from .paths import latexmk_command, main_file, safe_rel, tex_env
 from .replica import Replica
 
 log = logging.getLogger("texloom")
@@ -122,13 +123,7 @@ class Project:
         return str(yt)
 
     def main_file(self) -> str | None:
-        m = self.r.meta.get("main")
-        if m and m in self.r.files:
-            return str(m)
-        for p in sorted((p for p in self.r.files.keys() if p.endswith(".tex")), key=lambda p: (p != "main.tex", p.count("/"), p)):
-            if "\\documentclass" in str(self.r.files[p]):
-                return p
-        return None
+        return main_file(self.r.files, self.r.meta)
 
     def find_unique(self, path: str, old: str) -> int:
         s = self.text(path)
@@ -309,22 +304,22 @@ class Project:
                 if safe_rel(p):
                     (root / p).parent.mkdir(parents=True, exist_ok=True)
                     (root / p).write_text(str(self.r.files[p]))
+            missing = []
             for p, info in self.r.bin.items():
                 if safe_rel(p) and isinstance(info, dict) and info.get("h"):
                     try:
                         data = await asyncio.wait_for(self.r.get_blob(info["h"]), 30)
-                    except Exception:  # noqa: BLE001
+                    except Exception:  # noqa: BLE001 - compile without it, but say so
+                        missing.append(p)
                         continue
                     (root / p).parent.mkdir(parents=True, exist_ok=True)
                     (root / p).write_bytes(data)
-            engine = str(self.r.meta.get("engine", "pdflatex"))
-            flag = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}.get(engine, "-pdf")
-            extra = ["-bibtex-"] if self.r.meta.get("bib") == "none" else []
-            mp = root / main
-            env = {**os.environ, "openin_any": "p", "openout_any": "p"}
+            mp = (root / main).resolve()
+            if not mp.is_relative_to(root.resolve()) or not mp.is_file():
+                return f"The main file {main!r} isn't usable."
             proc = await asyncio.create_subprocess_exec(
-                "latexmk", "-norc", flag, "-interaction=nonstopmode", "-file-line-error", "-no-shell-escape",
-                *extra, f"./{mp.name}", cwd=mp.parent, env=env,
+                *latexmk_command(self.r.meta.get("engine"), self.r.meta.get("bib"), mp.name),
+                cwd=mp.parent, env=tex_env(),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
             try:
                 out, _ = await asyncio.wait_for(proc.communicate(), 300)
@@ -335,7 +330,8 @@ class Project:
             text = logf.read_text("utf-8", "replace") if logf.exists() else out.decode("utf-8", "replace")
             ok = proc.returncode == 0 and mp.with_suffix(".pdf").exists()
             pages = re.search(r"Output written on .*?\((\d+) pages?", text)
-            return (f"{'Compiled OK' if ok else 'Compile failed'}{f' ({pages.group(1)} pages)' if pages else ''}.\n\n"
+            gone = f"\n\nNot available, so compiled without: {', '.join(missing)}." if missing else ""
+            return (f"{'Compiled OK' if ok else 'Compile failed'}{f' ({pages.group(1)} pages)' if pages else ''}.{gone}\n\n"
                     + summarize_log(text))
 
 

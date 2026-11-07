@@ -9,10 +9,16 @@
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as awarenessProtocol from 'y-protocols/awareness'
-import { Keys, b64d, b64e, revokeMsg, signer } from './crypto'
+import { Keys, b64d, b64e, canonicalPub, revokeMsg, signer } from './crypto'
 
 const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
+// Keep in sync with server/relay.py: frames are at most 16 MiB (base64 adds a third).
+const MAX_SNAPSHOT = 12 * 1024 * 1024
+const P2P_BLOB = 11 * 1024 * 1024 // files sent peer to peer (relay-only projects)
+export const BLOB_ID = /^[0-9a-f]{32}$/
+/** Awareness colours and names come from anyone with the link: keep them harmless. */
+const COLOR = /^#[0-9a-fA-F]{3,8}$/
 
 // ---- tiny IndexedDB key-value helper (one DB per project) -----------------
 type Store = 'kv' | 'outbox' | 'blobs' | 'pending'
@@ -99,6 +105,8 @@ export class Replica {
   private ws: WebSocket | null = null
   private since = 0
   private seen = new Set<number>()
+  /** The server's log (and its list of revocations) has been applied since connecting. */
+  private synced = false
   private inflight = new Map<string, string[]>() // sent id -> outbox ids it covers
   private blobWaiters = new Map<string, ((b: Uint8Array) => void)[]>()
   private backoff = 1000
@@ -114,6 +122,8 @@ export class Replica {
     this.persistence = new IndexeddbPersistence(`texloom-doc-${this.keys.project}`, this.doc)
     await this.persistence.whenSynced
     this.since = (await idbGet<number>(this.db, 'kv', 'since')) ?? 0
+    // revocations learned earlier, before anything arrives from peers
+    this.learnRevoked((await idbGet<{ p: string; s: string }[]>(this.db, 'kv', 'revoked')) ?? [], false)
     this.pending = (await idbKeys(this.db, 'outbox')).length
     navigator.storage?.persist?.()
 
@@ -125,6 +135,11 @@ export class Replica {
       this.pending++
       this.onStatus()
       idbPut(this.db, 'outbox', id, update).then(() => this.send(id, update, [id]))
+    })
+    // Registered before the editor's own listeners, so they only ever see cleaned states.
+    this.awareness.on('change', ({ added, updated }: any, origin: unknown) => {
+      if (origin !== REMOTE) return
+      for (const id of [...added, ...updated]) cleanPresence(this.awareness.getStates().get(id))
     })
     this.awareness.on('update', ({ added, updated, removed }: any, origin: unknown) => {
       if (origin === REMOTE) return
@@ -177,6 +192,7 @@ export class Replica {
     ws.onmessage = (ev) => this.handle(JSON.parse(ev.data)).catch((e) => console.error(e))
     ws.onclose = () => {
       this.ws = null
+      this.synced = false
       this.inflight.clear()
       this.peers = 0
       this.status = this.syncMode === 'manual' ? 'paused' : 'offline'; this.onStatus()
@@ -192,13 +208,15 @@ export class Replica {
         this.storeInfo = m.store ?? null
         this.learnRevoked(m.rv ?? [])
         if (this.storeInfo?.registered && this.storeProblem === 'needs-code') this.storeProblem = null
-        const lost = m.head < this.since && m.mode !== 'relay' // the server dropped its copy (e.g. idle eviction)
+        // the server dropped its copy (idle eviction): everything up to `floor` is gone
+        const lost = m.mode !== 'relay' && (m.head < this.since || (this.since > 0 && this.since <= (m.floor ?? 0)))
         if (lost) { this.since = m.head; this.seen.clear(); idbPut(this.db, 'kv', 'since', this.since) }
         await this.apply(m.entries)
         this.since = Math.max(this.since, m.head)
         if (lost && this.keys.writable) await this.reseed()
         for (const q of this.seen) if (q <= this.since) this.seen.delete(q)
         this.markSeen(this.since)
+        this.synced = true
         this.status = 'online'; this.onStatus()
         const pendingMode = await idbGet<StorageMode>(this.db, 'kv', 'pendingMode')
         if (this.keys.writable && pendingMode) await this.sendMode(pendingMode) // changed while offline
@@ -224,7 +242,7 @@ export class Replica {
       }
       case 'aw': {
         const upd = await this.keys.decrypt(b64d(m.d)).catch(() => null)
-        if (upd) awarenessProtocol.applyAwarenessUpdate(this.awareness, upd, REMOTE)
+        if (upd) try { awarenessProtocol.applyAwarenessUpdate(this.awareness, upd, REMOTE) } catch { break }
         this.peers = Math.max(this.peers, this.awareness.getStates().size - 1)
         this.onStatus()
         break
@@ -303,6 +321,7 @@ export class Replica {
   private async compact() {
     if (!this.keys.writable || !this.ws || this.serverMode === 'relay') return
     const d = await this.keys.encrypt(Y.encodeStateAsUpdate(this.doc))
+    if (d.length > MAX_SNAPSHOT) return // too big for the server to take: the log stays as it is
     const upto = this.since
     this.ws.send(JSON.stringify({ t: 'snap', upto, d: b64e(d), s: b64e(this.keys.sign(`snap:${upto}:`, d)) }))
   }
@@ -338,18 +357,24 @@ export class Replica {
         break
       }
       case 'upd':
+        // Not before the server's list of revocations is in: a revoked link could slip one in.
+        // (Peers resend after our state vector, which goes out once the log is applied.)
+        if (!this.synced) return
         if (!m.s || !this.keys.verify('p2p:', data, b64d(m.s), true)) { console.warn('unsigned p2p update ignored'); return }
         Y.applyUpdate(this.doc, b64d(p.u), REMOTE)
         break
       case 'breq': {
+        if (typeof p.id !== 'string' || !BLOB_ID.test(p.id)) return
         const blob = await idbGet<Uint8Array>(this.db, 'blobs', p.id)
-        if (blob) await this.p2p({ k: 'blob', id: p.id, b: b64e(blob) }, m.from)
+        if (blob && blob.length <= P2P_BLOB) await this.p2p({ k: 'blob', id: p.id, b: b64e(blob) }, m.from)
         break
       }
       case 'cack': // a texloom helper accepted our compile request
         this.onCompileAck(p)
         break
       case 'blob': {
+        // only files we asked for (anyone with the link can send these)
+        if (typeof p.id !== 'string' || !this.blobWaiters.has(p.id) || typeof p.b !== 'string') return
         const blob = b64d(p.b)
         if ((await this.keys.blobId(blob)) !== p.id) return // integrity check
         await idbPut(this.db, 'blobs', p.id, blob)
@@ -367,25 +392,33 @@ export class Replica {
   }
 
   // ---- storage mode -----------------------------------------------------------
-  /** Personal links the owner revoked (each signed by the owner). */
-  private learnRevoked(items: { p: string; s: string }[]) {
+  /** Personal links the owner revoked (each signed by the owner); kept on this device too. */
+  private learnRevoked(items: { p: string; s: string }[], save = true) {
+    let added = false
     for (const it of items) {
       try {
-        if (typeof it.p !== 'string' || !(signer(this.keys.project, revokeMsg(it.p), b64d(it.s)) as any)?.owner) continue
-        this.keys.revoked.add(it.p)
-        if (it.p === this.keys.memberPub && !this.withdrawn) {
+        const pub = canonicalPub(it?.p)
+        if (!pub || this.keys.revoked.has(pub) || typeof it.s !== 'string') continue
+        const who = signer(this.keys.project, revokeMsg(pub), b64d(it.s))
+        if (!who || !('owner' in who)) continue
+        this.keys.revoked.add(pub)
+        this.revocations.push({ p: pub, s: it.s })
+        added = true
+        if (pub === this.keys.memberPub && !this.withdrawn) {
           this.withdrawn = true
           try { localStorage.setItem(`texloom.withdrawn.${this.keys.project}`, '1') } catch {}
           this.onStatus()
         }
       } catch {}
     }
+    if (added && save) idbPut(this.db, 'kv', 'revoked', this.revocations).catch(() => {})
   }
+  private revocations: { p: string; s: string }[] = []
 
   /** Owner only: withdraw a personal edit link. */
   revoke(pub: string): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
-    this.ws.send(JSON.stringify({ t: 'revoke', p: pub, s: this.keys.revocation(pub) }))
+    this.ws.send(JSON.stringify({ t: 'revoke', ...this.keys.revocation(pub) }))
     return true
   }
 
@@ -408,6 +441,7 @@ export class Replica {
   /** Change where the project lives. 'relay' deletes the server's copy. */
   async setStorage(mode: StorageMode) {
     if (!this.keys.writable) throw new Error('read-only')
+    if (mode === 'relay' && !this.keys.owner) throw new Error('only the owner can remove the server’s copy')
     this.meta.set('storage', mode)
     await idbPut(this.db, 'kv', 'pendingMode', mode)
     await this.sendMode(mode)
@@ -452,6 +486,7 @@ export class Replica {
   }
 
   async getBlob(id: string): Promise<Uint8Array> {
+    if (!BLOB_ID.test(id)) throw new Error('not a file id') // ids come from the shared document
     const cached = await idbGet<Uint8Array>(this.db, 'blobs', id)
     if (cached) return cached
     if (this.serverMode === 'server') {
@@ -481,4 +516,13 @@ export class Replica {
     for (const [p, b] of this.bin.entries()) out.set(p, await this.getBlob(b.h))
     return out
   }
+}
+
+/** A peer's presence state, made harmless: names are text, colours must be colours. */
+function cleanPresence(st: any) {
+  const u = st?.user
+  if (!u || typeof u !== 'object') return
+  if (typeof u.name !== 'string') u.name = 'Someone'
+  u.name = u.name.slice(0, 60)
+  for (const k of ['color', 'colorLight']) if (k in u && (typeof u[k] !== 'string' || !COLOR.test(u[k]))) u[k] = '#888888'
 }

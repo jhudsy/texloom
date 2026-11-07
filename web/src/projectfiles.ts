@@ -7,13 +7,26 @@ import type { Replica } from './replica'
 
 export const IMAGE_RE = /\.(png|jpe?g|gif|svg|webp|pdf|eps|ps|bmp|tiff?)$/i
 
-/** Normalise and validate a project-relative path; returns null if unacceptable. */
+// Keep in sync with safe_rel() in texloom/folder.py.
+// Files TeX tools read as configuration or run (latexmk runs latexmkrc as Perl), and folders
+// whose contents tools act on (.git hooks/config, editor settings): never part of a project,
+// whatever a collaborator or an imported archive puts there.
+const UNSAFE_NAMES = new Set(['latexmkrc', '.latexmkrc', 'texmf.cnf', '.texmf.cnf', 'mktexlsr', 'ls-r'])
+const PROTECTED_DIRS = new Set(['.texloom', '.git', '.vscode', '.idea'])
+
+/** Normalise and validate a project-relative path; returns null if unacceptable. Every path
+ *  that reaches a disk (folder sync, import) passes through here. */
 export function cleanPath(input: string): string | null {
   const p = input.trim().replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\.?\//, '').replace(/\/$/, '')
   if (!p || p.length > 300) return null
-  const parts = p.split('/')
-  if (parts.some((s) => !s || s === '.' || s === '..' || /[\x00-\x1f<>:"|?*]/.test(s))) return null
-  if (parts[0].toLowerCase() === '.texloom' || parts[0] === '.git') return null
+  for (const seg of p.split('/')) {
+    if (!seg || seg === '.' || seg === '..' || /[\x00-\x1f<>:"|?*]/.test(seg)) return null
+    // Windows drops trailing dots and spaces (".git." is ".git") and has 8.3 aliases ("GIT~1")
+    if (/[. ]$/.test(seg) || /~\d/.test(seg)) return null
+    // compared the way case-insensitive file systems (macOS, Windows) see names: ".GIT" is ".git"
+    const n = seg.normalize('NFKC').toLowerCase()
+    if (PROTECTED_DIRS.has(n) || UNSAFE_NAMES.has(n) || n.endsWith('.latexmkrc')) return null
+  }
   return p
 }
 

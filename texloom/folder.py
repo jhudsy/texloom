@@ -13,10 +13,8 @@ import hashlib
 import json
 import logging
 import os
-import re
 import shutil
 import time
-import unicodedata
 from pathlib import Path
 
 from pycrdt import Text
@@ -26,7 +24,7 @@ from .replica import BLOB_RE, Replica
 
 log = logging.getLogger("texloom")
 
-STATE = ".texloom"
+from .paths import PROTECTED_DIRS, STATE, UNSAFE_NAMES, WIN_RESERVED, latexmk_command, main_file, safe_rel, tex_env  # noqa: F401
 IGNORE_DIRS = {STATE, ".git", ".svn", "node_modules", "__pycache__", ".idea", ".vscode"}
 IGNORE_NAMES = {".DS_Store", "Thumbs.db"}
 IGNORE_SUFFIXES = (
@@ -41,34 +39,6 @@ TEXT_SUFFIXES = {
 }
 MAX_TEXT = 4 * 1024 * 1024
 MAX_FILE = 50 * 1024 * 1024
-
-# Files that TeX tools read as configuration or execute (latexmk runs latexmkrc as Perl).
-# They are never written from, or sent to, the shared project.
-UNSAFE_NAMES = {"latexmkrc", ".latexmkrc", "texmf.cnf", ".texmf.cnf", "mktexlsr", "ls-r"}
-WIN_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
-
-
-def safe_rel(rel: object) -> str | None:
-    """Validate a project path received from collaborators. None if it must not touch disk.
-
-    Rejects absolute paths, drive letters, backslashes, '.'/'..'/empty segments, control
-    characters, reserved names (compared case-insensitively, Unicode-normalised), and
-    files that TeX tools would execute or treat as configuration.
-    """
-    if not isinstance(rel, str) or not rel or len(rel) > 300:
-        return None
-    if rel.startswith("/") or "\\" in rel or re.match(r"^[A-Za-z]:", rel):
-        return None
-    for seg in rel.split("/"):
-        if seg in ("", ".", "..") or any(ord(c) < 32 or c in '<>:"|?*' for c in seg):
-            return None
-        n = unicodedata.normalize("NFKC", seg).casefold()
-        if n in (STATE, ".git") or n in UNSAFE_NAMES or n.endswith(".latexmkrc"):
-            return None
-        if os.name == "nt" and n.split(".")[0] in WIN_RESERVED:
-            return None
-    return rel
-
 
 def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
@@ -151,6 +121,7 @@ class FolderSync:
         replica.before_remote = self.ingest_all
         replica.on_remote = self.on_remote
         replica.on_compile_request = self.on_compile_request
+        self._last_request = 0.0
 
     # --- helpers -------------------------------------------------------------
     def rel(self, p: Path) -> str:
@@ -418,14 +389,7 @@ class FolderSync:
 
     # --- compile -------------------------------------------------------------
     def main_file(self) -> str | None:
-        m = self.r.meta.get("main")
-        if m and m in self.r.files:
-            return str(m)
-        cands = [p for p in self.r.files.keys() if p.endswith(".tex")]
-        for p in sorted(cands, key=lambda p: (p != "main.tex", p.count("/"), p)):
-            if "\\documentclass" in str(self.r.files[p]):
-                return p
-        return None
+        return main_file(self.r.files, self.r.meta)
 
     def schedule_compile(self, delay: float = 1.5) -> None:
         if not self.compile:
@@ -438,6 +402,11 @@ class FolderSync:
         """A browser asked for a compile (its device setting: 'compile with my own TeX')."""
         if not self.compile or not self.r.keys.writable:
             return
+        # Anyone with the link can ask (requests aren't signed): at most one compile every few seconds.
+        now = time.monotonic()
+        if now - self._last_request < 5:
+            return
+        self._last_request = now
         await self.r.p2p({"k": "cack", "by": self.opts["label"]}, frm)
         self.schedule_compile(delay=0)
 
@@ -447,7 +416,6 @@ class FolderSync:
         if not main:
             return
         engine = str(self.opts.get("engine") or self.r.meta.get("engine", "pdflatex"))
-        flag = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}.get(engine, "-pdf")
         extra = list(self.opts["latexmk_args"])
         # Collaborators write the document, so by default TeX may not run programs
         # (-no-shell-escape), may not read or write outside the project (openin/openout
@@ -456,18 +424,15 @@ class FolderSync:
         extra.append("-shell-escape" if self.opts["shell_escape"] else "-no-shell-escape")
         if self.opts.get("latexmk_rc"):
             extra += ["-r", str(Path(self.opts["latexmk_rc"]).expanduser())]
-        if self.r.meta.get("bib") == "none":
-            extra.append("-bibtex-")
         build = self.root / STATE / "build"
         build.mkdir(parents=True, exist_ok=True)
         t0 = time.time()
         main_path = self.target(main)
         if main_path is None or not main_path.is_file():
             return
-        env = {**os.environ, "openin_any": "p", "openout_any": "p", "TEXMFOUTPUT": str(build)}
         proc = await asyncio.create_subprocess_exec(
-            "latexmk", "-norc", flag, "-interaction=nonstopmode", "-synctex=1", "-file-line-error",
-            f"-outdir={build}", *extra, f"./{main_path.name}", cwd=main_path.parent, env=env,
+            *latexmk_command(engine, self.r.meta.get("bib"), main_path.name, "-synctex=1", f"-outdir={build}", *extra),
+            cwd=main_path.parent, env=tex_env(TEXMFOUTPUT=str(build)),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         )
         try:

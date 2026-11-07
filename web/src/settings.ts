@@ -111,6 +111,12 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       ['relay', 'Don’t store anything on the server', 'The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.'],
     ], async (v: StorageMode) => {
       if (!w) return
+      if (v === 'relay' && !r.keys.owner) {
+        alert('Only the project’s owner can delete the server’s copy.')
+        const keep = document.querySelector<HTMLInputElement>('input[name="storage"][value="server"]')
+        if (keep) keep.checked = true
+        return
+      }
       if (v === 'relay' && !confirm('Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.')) return
       await r.setStorage(v)
     }),

@@ -457,7 +457,8 @@ async function openProject(keys: Keys) {
   let toldWithdrawn = false
   const movedNote = h('div', { class: 'risk', role: 'status', hidden: true })
   const renderMoved = () => {
-    const at = r.meta.get('movedAt')
+    const m = r.meta.get('movedAt') // only the owner can sign it: an editor can't fake the banner
+    const at = m && typeof m === 'object' && keys.ownerSigned(`moved:${m.at}`, m.s) ? Number(m.at) : 0
     movedNote.hidden = !at
     if (at) movedNote.replaceChildren(h('span', {}, h('b', {}, '⚠ '),
       `The owner moved this project to new keys on ${new Date(at).toLocaleDateString()}. This copy no longer receives their changes: ask them for the new link.`))

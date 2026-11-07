@@ -41,8 +41,9 @@ export class ProjectIndex {
         for (const m of text.matchAll(/@(\w+)\s*[{(]\s*([^,\s{}()"#%'=]+)\s*,/g)) {
           const type = m[1].toLowerCase()
           if (type === 'string' || type === 'comment' || type === 'preamble') continue
-          const end = text.indexOf('\n@', m.index! + 1)
-          const rest = text.slice(m.index! + m[0].length, end < 0 ? undefined : end)
+          // this entry: up to the next '@' (bounded, so a crafted file can't make this quadratic)
+          const from = m.index! + m[0].length, next = text.indexOf('@', from)
+          const rest = text.slice(from, Math.min(next < 0 ? text.length : next, from + 20000))
           const t = bibField(rest, 'title')
           bib.push({ key: m[2], type, file: path, title: t?.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim() })
         }
@@ -321,10 +322,12 @@ function referenceLinter(index: ProjectIndex, compileProblems: () => Problem[]) 
     }
     const keys = new Set(idx.bib.map((b) => b.key))
     const labels = new Set(idx.labels.map((l) => l.key))
-    for (const m of text.matchAll(/\\([A-Za-z]+\*?)(?:\[[^\]]*\])*\{([^{}]*)\}/g)) {
+    const commented = commentedAt(text)
+    // bounded repeats: unbounded ones make crafted input (e.g. many unclosed "\a[") quadratic
+    for (const m of text.matchAll(/\\([A-Za-z]+\*?)(?:\[[^\]\n]{0,300}\]){0,4}\{([^{}]{0,2000})\}/g)) {
       const [, cmd, argRaw] = m
       const argFrom = m.index! + m[0].length - 1 - argRaw.length
-      if (isCommented(text, m.index!)) continue
+      if (commented(m.index!)) continue
       if (cmd === 'includegraphics') {
         const a = argRaw.trim()
         if (a && !a.includes('#') && !a.includes('\\') && !idx.hasImage(a))
@@ -352,10 +355,24 @@ function referenceLinter(index: ProjectIndex, compileProblems: () => Problem[]) 
   }, { delay: 600 })
 }
 
-function isCommented(text: string, pos: number): boolean {
-  const lineStart = text.lastIndexOf('\n', pos - 1) + 1
-  const pre = text.slice(lineStart, pos)
-  return /(^|[^\\])%/.test(pre)
+/** Is a position inside a % comment? Line starts are found once, so this stays linear
+ *  even for a huge single-line file. */
+function commentedAt(text: string): (pos: number) => boolean {
+  const starts = [0]
+  for (let i = text.indexOf('\n'); i >= 0; i = text.indexOf('\n', i + 1)) starts.push(i + 1)
+  const pct = new Map<number, number>() // line start -> first comment character (or Infinity)
+  return (pos) => {
+    let lo = 0, hi = starts.length - 1
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= pos) lo = mid; else hi = mid - 1 }
+    const s = starts[lo]
+    let c = pct.get(s)
+    if (c === undefined) {
+      const m = /(^|[^\\])%/.exec(text.slice(s, starts[lo + 1] ?? text.length))
+      c = m ? s + m.index + m[1].length : Infinity
+      pct.set(s, c)
+    }
+    return c < pos
+  }
 }
 
 // ---------------------------------------------------------------------------

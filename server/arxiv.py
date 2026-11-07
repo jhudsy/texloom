@@ -18,6 +18,7 @@ import zipfile
 import zlib
 from collections import OrderedDict, defaultdict, deque
 
+from texloom.paths import safe_rel
 from aiohttp import ClientSession, ClientTimeout, web
 
 ARXIV_ID = re.compile(r"^(\d{4}\.\d{4,5}|[a-z-]+(\.[A-Z]{2})?/\d{7})(v\d{1,3})?$")
@@ -35,7 +36,8 @@ def safe_name(name: str) -> str | None:
         return None
     if any(ord(c) < 32 for c in name):
         return None
-    return "/".join(parts)
+    joined = "/".join(parts)
+    return joined if safe_rel(joined) else None  # e.g. no latexmkrc (latexmk runs it as Perl)
 
 
 def to_zip(data: bytes, arxiv_id: str) -> bytes:
@@ -85,7 +87,11 @@ class ArxivFetcher:
         self.cache: OrderedDict[str, bytes] = OrderedDict()
 
     def _allow(self, ip: str) -> bool:
-        q, now = self.recent[ip], time.monotonic()
+        now = time.monotonic()
+        if len(self.recent) > 10000:  # forget addresses with nothing recent (bounded memory)
+            for k in [k for k, v in self.recent.items() if not v or now - v[-1] > 3600]:
+                del self.recent[k]
+        q = self.recent[ip]
         while q and now - q[0] > 3600:
             q.popleft()
         if len(q) >= PER_IP:
@@ -114,7 +120,7 @@ class ArxivFetcher:
             finally:
                 self.last = time.monotonic()
         try:
-            z = to_zip(data, aid)
+            z = await asyncio.get_running_loop().run_in_executor(None, to_zip, data, aid)  # off the event loop
         except (ValueError, OSError, EOFError, zlib.error, gzip.BadGzipFile, tarfile.TarError) as e:
             msg = str(e) if isinstance(e, ValueError) else "Couldn’t read the source archive."
             raise web.HTTPUnprocessableEntity(text=msg)
