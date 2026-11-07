@@ -12,8 +12,8 @@ no copy at all. No accounts: you share a link. (The command-line tools are calle
 - Compile in the browser (TeX Live 2026 in WebAssembly), or with your own TeX installation.
   Errors are listed with clickable locations; SyncTeX jumps between source and PDF
   (the → / ← arrows on the editor/PDF divider, ⌘⌥→ / ⌘⌥←, or double-click / right-click the PDF).
-- History without git: automatic and named versions, compare with now, restore a file or
-  everything, and see who wrote each line.
+- History without git: automatic and named versions (name any version later, e.g. the one you
+  submitted), compare with now, restore a file or everything, and see who wrote each line.
 - Comments and suggested changes (tracked changes) that collaborators accept or reject.
 - Edit the project as an ordinary folder, so Claude Code, vim or VS Code can work on it
   directly; changes flow both ways, live. Chrome and Edge can sync a folder with nothing

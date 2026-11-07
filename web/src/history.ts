@@ -11,14 +11,28 @@ export interface Version { at: number; by: string; label?: string; auto?: boolea
 const AUTO_IDLE = 2 * 60_000 // auto-save after this long without local edits
 const MAX_AUTO = 300
 
+/** Names given to versions after they were saved, by version (time and author). A map, so
+ *  two people renaming the same version at once end with one name, not two copies of it.
+ *  An empty name removes the name. */
+const versionNames = (r: Replica) => r.doc.getMap<string>('versionNames')
+const versionKey = (v: Pick<Version, 'at' | 'by'>) => `${v.at}:${v.by}`
+export function versionLabel(r: Replica, v: Version): string | undefined {
+  const n = versionNames(r).get(versionKey(v))
+  return typeof n === 'string' ? n || undefined : v.label
+}
+export function nameVersion(r: Replica, v: Version, label: string) {
+  versionNames(r).set(versionKey(v), label.trim().slice(0, 120))
+}
+
 export function saveVersion(r: Replica, by: string, label?: string, auto = false) {
   const snap = Y.encodeSnapshot(Y.snapshot(r.doc))
   r.doc.transact(() => {
     r.versions.push([{ at: Date.now(), by, ...(label ? { label } : {}), ...(auto ? { auto: true } : {}), snap }])
-    // keep the newest automatic versions; named ones are kept forever
-    let excess = r.versions.toArray().filter((v) => v?.auto).length - MAX_AUTO
+    // keep the newest automatic versions; named ones (also named later) are kept forever
+    const prunable = (v: any) => v?.auto && !versionLabel(r, v)
+    let excess = r.versions.toArray().filter(prunable).length - MAX_AUTO
     for (let i = 0; i < r.versions.length && excess > 0;) {
-      if (r.versions.get(i)?.auto) { r.versions.delete(i, 1); excess-- } else i++
+      if (prunable(r.versions.get(i))) { r.versions.delete(i, 1); excess-- } else i++
     }
   })
 }
@@ -110,18 +124,18 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
 
   function render() {
     const all = r.versions.toArray().filter((v) => v && v.snap) as Version[]
-    const shown = all.filter((v) => filter === 'all' || v.label).sort((a, b) => b.at - a.at)
+    const shown = all.filter((v) => filter === 'all' || versionLabel(r, v)).sort((a, b) => b.at - a.at)
     if (!shown.length) {
       list.replaceChildren(h('li', { class: 'muted small' },
         all.length ? 'No named versions yet.' : 'No versions yet. Versions are saved automatically a couple of minutes after you stop editing; use “Save version…” to name one.'))
       return
     }
-    list.replaceChildren(...shown.map((v) => h('li', {
-      class: `${v === selected ? 'active' : ''} ${v.label ? 'named' : ''}`,
+    list.replaceChildren(...shown.map((v) => { const label = versionLabel(r, v); return h('li', {
+      class: `${v === selected ? 'active' : ''} ${label ? 'named' : ''}`,
       onclick: () => { selected = v; render(); showVersion(v) },
     },
-      h('div', { class: 'vlabel' }, v.label ? `★ ${v.label}` : 'Auto-saved'),
-      h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`))))
+      h('div', { class: 'vlabel' }, label ? `★ ${label}` : 'Auto-saved'),
+      h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`)) }))
   }
 
   function showVersion(v: Version) {
@@ -149,10 +163,19 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
     }
     detail.replaceChildren(
       h('div', { class: 'vhead' },
-        h('div', {}, h('b', {}, v.label ?? 'Auto-saved'), h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`)),
+        h('div', {}, h('b', {}, versionLabel(r, v) ?? 'Auto-saved'), h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`)),
+        host.writable ? h('button', { title: 'Give this version a name (named versions are kept for good)', onclick: () => rename(v) }, versionLabel(r, v) ? 'Rename…' : 'Name…') : null,
         host.writable ? h('button', { onclick: () => restoreAll(past) }, 'Restore all files…') : null),
       rows.length ? h('p', { class: 'muted small' }, 'Changed since this version (click a file to compare):') : h('p', { class: 'muted small' }, 'Nothing has changed since this version.'),
       h('ul', { class: 'vfiles' }, ...rows))
+  }
+
+  function rename(v: Version) {
+    const was = versionLabel(r, v)
+    const label = prompt(was ? 'Rename this version (leave empty to remove the name):' : 'Name this version (e.g. “Submitted to journal”):', was ?? '')
+    if (label === null || label.trim() === (was ?? '')) return
+    nameVersion(r, v, label)
+    if (selected === v) showVersion(v)
   }
 
   function showFile(v: Version, path: string, past: Snap, now: Snap) {
@@ -191,6 +214,7 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
   }
 
   r.versions.observe(render)
+  versionNames(r).observe(() => { render(); if (selected && detail.querySelector('.vfiles')) showVersion(selected) })
   render()
   return panel
 }
