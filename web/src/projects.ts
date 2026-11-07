@@ -2,6 +2,7 @@
 // the server can't read projects, so it can't list them for you.
 import { forgetLocalCopy } from './replica'
 import { b64d } from './crypto'
+import { rememberFolder } from './foldersync'
 
 export interface Recent {
   project: string // unique id (from the link)
@@ -67,7 +68,9 @@ export const projects = {
   async forget(project: string) {
     await forgetLocalCopy(project)
     write(read().filter((x) => x.project !== project))
-    try { localStorage.removeItem(`texloom.device.${project}`) } catch {}
+    // every per-project setting (texloom.<what>.<project>) and the linked folder
+    try { for (const k of Object.keys(localStorage)) if (k.startsWith('texloom.') && k.endsWith(`.${project}`)) localStorage.removeItem(k) } catch {}
+    await rememberFolder(project, null).catch(() => {})
   },
 }
 

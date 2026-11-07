@@ -6,6 +6,7 @@ import type { Replica } from './replica'
 import type { ProjectIndex } from './latex'
 import { dialog, h } from './dom'
 import { cleanPath, mainFile } from './projectfiles'
+import { stripComments } from './texscan'
 
 /** The DOI for a pasted DOI, doi.org/arXiv URL or arXiv id, or null. */
 export function parseId(input: string): string | null {
@@ -95,7 +96,6 @@ export function formatEntry(type: string, key: string, fields: [string, string][
 export interface Added { key: string; file: string; existed: boolean; entry: string }
 
 // ---- which .bib file -------------------------------------------------------------------------
-const stripComments = (t: string) => t.replace(/(^|[^\\])%.*$/gm, '$1')
 const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '')
 
 /** Where a new entry can go, from what the document itself names. */

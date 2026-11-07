@@ -77,7 +77,8 @@ password manager works well.
 **Share** shows the links. Whoever created the project holds the **owner link**. From it
 they can make a **personal edit link** for each collaborator (by name), and later
 **revoke** one: the server and everyone's browsers then refuse that person's changes, and
-their app reopens read-only. A revoked person can still *read* new changes, because the
+their app reopens read-only. The list shows the start of each link's key, so two people
+with the same name can be told apart; only the owner can switch off server storage. A revoked person can still *read* new changes, because the
 link holds the encryption key. To shut them out completely, **Move to new keys**: the
 project (with history and comments) is copied into a new project with new keys, files
 are re-encrypted, the old server copy is deleted, and you send new links to the people
@@ -262,8 +263,9 @@ Collaborators write the document, so compiling is locked down by default:
   "paranoid" file access).
 - **No rc files:** latexmk ignores rc files (`-norc`), because a `latexmkrc` is Perl.
   Name one you trust with `latexmk_rc`.
-- **Unsafe files aren't written:** the helper never writes files such as `latexmkrc` or
-  `texmf.cnf` from the project, nor any path outside the folder.
+- **Unsafe files aren't written:** neither the helper nor the browser's folder sync
+  writes files such as `latexmkrc` or `texmf.cnf`, anything in `.git`, `.vscode` or
+  `.idea` (however it's capitalised), nor any path outside the folder.
 
 `shell_escape` (needed for minted and similar) lets the document run programs on *your*
 machine: turn it on only for projects whose editors you trust.

@@ -240,7 +240,7 @@ class Project:
         i = self.find_unique(path, old_string)
         iid = self._add_item("suggestion", path, i, i + len(old_string), new_string)
         if comment:
-            self.reply(iid, comment)
+            self.reply_comment(iid, comment)
         return (f"Suggested a change in {path} (line {self.line_of(self.text(path), i)}), id {iid}. "
                 "It is shown to collaborators, who can accept or reject it; the file is unchanged until then.")
 
@@ -267,7 +267,7 @@ class Project:
             rows.append("\n".join([f"[{iid}] {kind} by {m.get('by')} at {where} ({status}): {body}", *rep]))
         return "\n\n".join(rows) or "No open comments or suggestions."
 
-    def reply(self, id: str, text: str) -> str:
+    def reply_comment(self, id: str, text: str) -> str:
         m = self.review.get(id)
         if not isinstance(m, Map):
             raise ValueError(f"No comment with id {id}.")
@@ -277,7 +277,7 @@ class Project:
         self.edit(lambda: replies.append({"by": self.name, "at": int(time.time() * 1000), "text": text[:20000]}))
         return "Replied."
 
-    def resolve(self, id: str) -> str:
+    def resolve_comment(self, id: str) -> str:
         m = self.review.get(id)
         if not isinstance(m, Map):
             raise ValueError(f"No comment with id {id}.")
@@ -386,6 +386,9 @@ TOOLS = [
 ]
 
 
+TOOL_NAMES = {n for n, _, _ in TOOLS}
+
+
 class Server:
     def __init__(self, project: Project):
         self.p = project
@@ -402,14 +405,9 @@ class Server:
                 await asyncio.wait_for(p.r.synced.wait(), 10)
             except asyncio.TimeoutError:
                 pass  # offline: work on the local copy; changes sync later
-        fn = {
-            "list_files": p.list_files, "read_file": p.read_file, "write_file": p.write_file, "edit_file": p.edit_file,
-            "suggest_edit": p.suggest_edit, "add_comment": p.add_comment, "list_comments": p.list_comments,
-            "reply_comment": p.reply, "resolve_comment": p.resolve, "search": p.search,
-            "compile": p.compile, "compile_log": p.compile_log,
-        }.get(name)
-        if fn is None:
+        if name not in TOOL_NAMES:  # each tool is the Project method of the same name
             raise ValueError(f"Unknown tool {name}")
+        fn = getattr(p, name)
         res = fn(**args)
         return await res if asyncio.iscoroutine(res) else res
 

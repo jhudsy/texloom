@@ -2,6 +2,7 @@
 // commands, maths, comments, labels/citations/file names, and the preamble.
 import { RangeSetBuilder, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view'
+import { COMMENT, envClose, envOpen, INLINE_MATH, MATH_OPEN, mathClose, spans } from './texscan'
 
 const NO_CHECK = Decoration.mark({ attributes: { spellcheck: 'false' } })
 const MATH_ENVS = 'equation|align|gather|multline|eqnarray|math|displaymath|flalign|alignat|verbatim|Verbatim|lstlisting|minted|tikzpicture|filecontents|tabular\\*?|array'
@@ -15,14 +16,14 @@ export function nonProse(text: string): [number, number][] {
   const doc = text.indexOf('\\begin{document}')
   if (text.includes('\\documentclass') && doc > 0) add(0, doc + '\\begin{document}'.length)
   const res: RegExp[] = [
-    /(?<!\\)%[^\n]*/g, // comments
-    new RegExp(String.raw`\\begin\{(${MATH_ENVS})(\*?)\}[\s\S]*?\\end\{\1\2\}`, 'g'),
-    /\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\\)\$(?:\\.|[^$\\])*\$/g, // maths
-    new RegExp(String.raw`\\(?:${ARG_CMDS})\*?\s*(?:\[[^\]]*\]\s*)*(?:\{[^{}]*\})?`, 'g'), // commands with non-prose arguments
+    COMMENT, // comments
+    INLINE_MATH,
+    new RegExp(String.raw`\\(?:${ARG_CMDS})\*?\s*(?:\[[^\]]{0,300}\]\s*){0,4}(?:\{[^{}]{0,2000}\})?`, 'g'), // commands with non-prose arguments
     /\\[A-Za-z@]+\*?|\\./g, // any other command name
     /\[[^\]\n]{0,80}\]/g, // optional arguments, e.g. [width=0.5\linewidth]
   ]
   for (const re of res) for (const m of text.matchAll(re)) add(m.index!, m.index! + m[0].length)
+  for (const [a, b] of [...spans(text, envOpen(MATH_ENVS), envClose), ...spans(text, MATH_OPEN, mathClose)]) add(a, b) // linear time
   out.sort((a, b) => a[0] - b[0])
   const merged: [number, number][] = []
   for (const r of out) {

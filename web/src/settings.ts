@@ -2,6 +2,7 @@
 import type { Replica, StorageMode, SyncMode } from './replica'
 import { engineCached, clearEngineCache } from './compile'
 import { h, dialog } from './dom'
+import { detectMain } from './projectfiles'
 
 export type CompileWhere = 'browser' | 'local' | 'none'
 export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean; spell: boolean }
@@ -87,9 +88,8 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
   const d = prefs.device(r.keys.project)
   const w = r.keys.writable
   const texFiles = [...r.files.keys()].filter((p) => p.endsWith('.tex')).sort()
-  // Same rule the compiler uses when no main file is set: main.tex first, then any file with \documentclass.
-  const detectedMain = [...texFiles].sort((a, b) => Number(b === 'main.tex') - Number(a === 'main.tex'))
-    .find((p) => r.files.get(p)!.toString().includes('\\documentclass')) ?? texFiles[0] ?? ''
+  // the compiler's rule when no main file is chosen
+  const detectedMain = detectMain(texFiles, (p) => r.files.get(p)?.toString() ?? '') ?? texFiles[0] ?? ''
   const sel = (key: string, options: [string, string][], def: string) =>
     h('select', { disabled: !w, onchange: (e: any) => r.meta.set(key, e.target.value) },
       ...options.map(([v, l]) => h('option', { value: v, ...(String(r.meta.get(key) ?? def) === v ? { selected: true } : {}) }, l)))

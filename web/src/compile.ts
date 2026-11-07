@@ -3,6 +3,7 @@
 // tex-assets/ directory). The browser caches them in IndexedDB per site, so they
 // are downloaded once and shared by every project.
 import type { BusyTexRunner } from 'texlyre-busytex'
+import { stripComments } from './texscan'
 
 const BASE = '/core/busytex'
 let runner: Promise<BusyTexRunner> | null = null
@@ -67,7 +68,7 @@ export function requestedFiles(files: Map<string, string | Uint8Array>): string[
   }
   for (const [path, v] of files) {
     if (typeof v !== 'string' || !/\.(tex|sty|cls|ltx)$/i.test(path)) continue
-    const src = v.replace(/(^|[^\\])%.*$/gm, '$1')
+    const src = stripComments(v)
     for (const m of src.matchAll(/\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\]\s*)?\{([^}]*)\}/g)) add(m[1], '.sty')
     for (const m of src.matchAll(/\\(?:documentclass|LoadClass)\s*(?:\[[^\]]*\]\s*)?\{([^}]*)\}/g)) add(m[1], '.cls')
     for (const m of src.matchAll(/\\bibliographystyle\s*\{([^}]*)\}/g)) add(m[1], '.bst')

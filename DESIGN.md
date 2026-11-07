@@ -49,7 +49,7 @@ No accounts: a project is shared by sending a link.
 | `versions`: Y.Array | saved versions: `{at, by, label?, auto?, snap}` (encoded `Y.snapshot`) |
 | `clients`: Y.Map  | Yjs client id → display name (for "who wrote this")             |
 | `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, resolved, outcome?, replies: Y.Array}`; `start`/`end` are encoded Yjs relative positions, so they follow edits |
-| `members`: Y.Map  | personal edit links the owner issued: public key → `{name, at, by, revoked?}` (informational; enforcement is by signatures) |
+| `members`: Y.Map  | personal edit links the owner issued: public key → `{name, at, by, g, revoked?}`, `g` = the owner's grant. Any editor can write this map, so the share dialog only trusts entries whose grant verifies, the owner's own record of issued links (localStorage) and keys seen signing edits; enforcement is by signatures |
 
 Text merges character by character (CRDT). Binary files are last-writer-wins
 per path (whole-file replacement), as in Dropbox.
@@ -74,14 +74,20 @@ without compiling.
   signature is `'M' ‖ personal pub (32) ‖ grant (64) ‖ len(name) ‖ name ‖ sig (64)`, so
   anyone can verify it against the project id alone. A plain 64-byte signature is the
   owner's.
-- **Revocation:** the owner sends `sign(owner seed, "revoke:" ‖ personal pub)`. The relay
-  stores it, refuses that key's updates, snapshots, blobs and mode changes, and sends
-  the list in every `log` reply (and `rv` frames); peers refuse that key's peer-to-peer
-  updates. Already-stored updates stay valid (the relay accepted them while the key was
-  good), so documents still converge.
+- **Revocation:** the owner sends `sign(owner seed, "revoke:" ‖ personal pub)`. Keys are
+  always compared in their canonical base64url spelling (decoders accept variants of the
+  same 32 bytes). The relay stores it, refuses that key's updates, snapshots, blobs, mode
+  changes and signed peer-to-peer updates, and sends the list in every `log` reply (and
+  `rv` frames). Clients keep the list on the device, load it before connecting, and
+  ignore peer-to-peer updates until the server's `log` reply is applied; then they refuse
+  that key's peer-to-peer updates too. Already-stored updates stay valid (the relay
+  accepted them while the key was good), so documents still converge. Updates carry no
+  trustworthy time, so revocation relies on the relay: only moving to new keys doesn't.
+- **Owner-signed values** use the prefix `"owner:"`, e.g. `meta.movedAt = {at, s}` with
+  `s = sign(owner seed, "owner:moved:<at>")`; an unsigned one is ignored.
 - Revoked people keep the AES key and can still read. **Moving to new keys** copies the
   document (with history) into a fresh project, re-encrypts every blob (ids are keyed),
-  clears `members`, marks the old document `meta.movedAt`, and switches the old project
+  clears `members`, marks the old document `meta.movedAt` (owner-signed), and switches the old project
   to relay-only so the server deletes its copy.
 - Attribution: each user picks a display name, stored in their local settings. It is
   shown in cursors and history, and is self-declared, not authenticated.
@@ -95,16 +101,18 @@ without compiling.
 | `{t:"snap", upto, d, s}` | compaction: encrypted full state replacing log entries ≤ `upto`; `s` signs `"snap:<upto>:" ‖ d` |
 | `{t:"aw", d}` | ephemeral, encrypted awareness (cursors, names); relayed, never stored |
 | `{t:"p2p", d, s?, to?}` | encrypted peer-to-peer payload (below); relayed to one peer or all, never stored |
-| `{t:"mode", m, ts, s}` | set storage mode `"server"` or `"relay"`; `s` signs `"mode:<m>:<ts>"`, valid for 10 min |
+| `{t:"mode", m, ts, s}` | set storage mode `"server"` or `"relay"`; `s` signs `"mode:<m>:<ts>"`, valid for 10 min; `relay` (which deletes the server copy) only from the owner |
+| `{t:"revoke", p, s}` | owner only: revoke personal key `p`; `s` signs `"revoke:" ‖ p` |
 
 | server → client | meaning |
 |---|---|
-| `{t:"log", entries:[{q,d,s}], head, mode, you, peers}` | catch-up reply to `hello` (a snapshot, if any, comes first); `you` = this connection's peer id |
+| `{t:"log", entries:[{q,d,s}], head, floor, mode, you, peers, store, rv}` | catch-up reply to `hello` (a snapshot, if any, comes first); `you` = this connection's peer id; `floor` = entries up to here were evicted; `rv` = revocations |
 | `{t:"up", q, d, s}` | someone else's update |
 | `{t:"ack", q}` | your update was stored at sequence `q` |
 | `{t:"aw", d}` | someone's awareness |
 | `{t:"p2p", d, s?, from}` | a peer's payload |
 | `{t:"mode", m}` | storage mode changed |
+| `{t:"rv", p, s}` | a personal key was revoked |
 
 Ciphertext = `iv(12 bytes) ‖ AES-256-GCM(plaintext)`.
 
@@ -133,7 +141,8 @@ Blobs move the same way: `{k:"breq", id}` → `{k:"blob", id, b}`. The receiver 
   `up` is broadcast and acknowledged, but not stored. Peers sync with each other
   using the catch-up handshake, so they must be connected at the same time.
 
-The mode is a shared project setting, `meta.storage`. A replica sends a signed `mode`
+The mode is a shared project setting, `meta.storage`; any editor may switch storage on,
+but only the owner may switch it off. A replica sends a signed `mode`
 command only when its user *changes* the setting, queuing it if offline; it never
 "corrects" the server on connect, so a stale replica can't undo someone else's
 switch. Switching back to `server` re-uploads a full snapshot and all blobs.
@@ -148,20 +157,32 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   (`--max-bytes`, `--min-free`).
 - **No lost work:** a refused `up` is still broadcast live but not acked; it stays in the
   sender's outbox and is retried. Clients show a "not saved on server" warning.
-- **Snapshots** must satisfy `last snapshot < upto ≤ head`, at most 48 MB, and they are
-  counted against limits by their size change.
+- **Snapshots** must satisfy `max(last snapshot, floor) < upto ≤ head`, at most 12 MiB
+  (bigger documents just aren't compacted), and they are counted against limits by their
+  size change.
 - **Replays:** an identical `up` (same ciphertext hash) is acked with its existing sequence
-  number and not stored again.
+  number and not stored again; hashes of updates a snapshot replaced are kept (`gone`),
+  so those can't be stored again either.
+- **Memory:** WebSocket frames are read whole before they can be checked, so they are
+  capped at 16 MiB, and large frames being handled are capped server-wide (192 MiB).
+  Files go over HTTP (≤ 50 MiB, a few uploads read at a time), or peer to peer
+  (≤ 11 MiB) in relay-only projects.
 - **Per-connection limits:** frame-size caps per message type, a message/byte rate limit,
-  and a global connection cap. nginx adds per-IP limits on code checks, uploads and
-  connections.
+  at most 5 `hello`s per 10 s, one creation-code check, and a global connection cap.
+  Peers that stop reading are disconnected after 20 s rather than stalling broadcasts.
+  Rows for projects that store nothing (relay mode, revocations) come out of a
+  server-wide budget; at most 1000 revocations per project. nginx adds per-IP limits on
+  code checks, uploads and connections.
 
-**Folder helper hardening.** Every path from the project goes through `safe_rel`. It
-rejects:
+**Folder hardening.** Every path from the project goes through `safe_rel`
+(`texloom/paths.py`) in the helper and `cleanPath` (`web/src/projectfiles.ts`) in the
+browser's folder sync and imports; the two apply the same rules. They reject:
 - absolute paths, drive letters, backslashes, and `.`, `..` or empty segments;
-- control characters;
-- `.texloom`/`.git`, compared case-insensitively;
-- files TeX tools execute (`latexmkrc`, `texmf.cnf`).
+- control characters and `<>:"|?*`;
+- `.texloom`, `.git`, `.vscode`, `.idea` at any depth, compared the way case-insensitive
+  file systems see names (NFKC, case-folded: `.GIT` is `.git`);
+- Windows aliases: segments ending in a dot or space, and 8.3 short names (`GIT~1`);
+- files TeX tools execute or read as configuration (`latexmkrc`, `*.latexmkrc`, `texmf.cnf`).
 
 The resolved path must stay inside the project folder (no writing through symlinks).
 - **Blob ids** must be 32 hex characters, and blobs from the server are checked against
@@ -280,8 +301,9 @@ positions, which pycrdt produces in the Yjs wire format.
   interleave. Plan: highlight concurrently-edited regions after a sync for review.
 - Self-declared display names. Personal links tie edits to a key the owner named, but
   revoking stops writing, not reading, without re-keying.
-- Idle eviction (`--evict-idle-days`) makes the server copy a cache: a client whose
-  `since` is ahead of the server's `head` re-uploads its whole state and files. Link
+- Idle eviction (`--evict-idle-days`) makes the server copy a cache: sequence numbers
+  keep counting, and a writer whose `since` is at or below the reported `floor`
+  re-uploads its whole state and files. Link
   holders with no copy can't open an evicted project until a writer returns.
 - Browser storage can be evicted: request persistent storage; the server copy and
   daemon copies are the backup.

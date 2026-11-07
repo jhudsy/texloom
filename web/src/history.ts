@@ -3,7 +3,8 @@
 import * as Y from 'yjs'
 import type { Replica } from './replica'
 import { h } from './dom'
-import { diffLines, diffStats, setText, type Op } from './diff'
+import { diffLines, diffStats, type Op } from './diff'
+import { putText } from './projectfiles'
 
 export interface Version { at: number; by: string; label?: string; auto?: boolean; snap: Uint8Array }
 
@@ -172,14 +173,8 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
     if (!confirm(`Restore ${path} to this version? The current text is replaced (and stays in history).`)) return
     r.doc.transact(() => {
       const old = past.files.get(path)
-      if (old !== undefined) {
-        r.bin.delete(path)
-        const yt = r.files.get(path)
-        if (yt) setText(yt, old); else r.files.set(path, new Y.Text(old))
-      } else {
-        const b = past.bin.get(path)!
-        r.files.delete(path); r.bin.set(path, b)
-      }
+      if (old !== undefined) putText(r, path, old)
+      else { r.files.delete(path); r.bin.set(path, past.bin.get(path)!) }
     })
     host.openFile(path)
   }
@@ -189,7 +184,7 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
     r.doc.transact(() => {
       for (const p of [...r.files.keys()]) if (!past.files.has(p)) r.files.delete(p)
       for (const p of [...r.bin.keys()]) if (!past.bin.has(p)) r.bin.delete(p)
-      past.files.forEach((text, p) => { const yt = r.files.get(p); if (yt) setText(yt, text); else r.files.set(p, new Y.Text(text)) })
+      past.files.forEach((text, p) => putText(r, p, text))
       past.bin.forEach((b, p) => { if (r.bin.get(p)?.h !== b.h) r.bin.set(p, b) })
     })
     saveVersion(r, host.userName(), `Restored version from ${when(selected?.at ?? Date.now())}`)

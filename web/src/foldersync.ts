@@ -1,14 +1,13 @@
 // Keep a folder on this computer in sync from the browser itself (Chrome, Edge and
 // other Chromium browsers: the File System Access API), with nothing to install.
 // Works while the tab is open; the texloom helper does the same without a browser.
-import * as Y from 'yjs'
 import type { Replica } from './replica'
-import { setText } from './diff'
-import { cleanPath, isText } from './projectfiles'
+import { cleanPath, isText, mainFile, putBinary, putText } from './projectfiles'
 
 const DB = 'texloom-folders'
 const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycache__', '.idea', '.vscode'])
-const BUILD = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex\.gz|synctex|bbl|blg|bcf|run\.xml|nav|snm|vrb|idx|ilg|ind|xdv|dvi|swp|tmp)$|~$|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$/i
+// Build output and editor droppings: never synced. Same list as IGNORE_* in texloom/folder.py.
+const BUILD = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex\.gz|synctex|bbl|blg|bcf|run\.xml|nav|snm|vrb|idx|ilg|ind|xdv|dvi|swp|swx|tmp)$|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$/i
 const MAX = 50 * 1024 * 1024
 
 type Known = Record<string, { h: string; m: number; z: number }>
@@ -153,9 +152,11 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       n += addDirs.length + goneDirs.length
     }
     for (const d of diskDirs) if (r.dirs.has(d)) knownDirs.add(d)
+    const main = mainFile(r)
+    const ownPdf = main ? main.replace(/\.tex$/, '.pdf') : null // compiled on this computer: output, not source
     for (const [p, fh] of disk) {
       const path = cleanPath(p)
-      if (!path) continue
+      if (!path || path === ownPdf) continue
       const f = await fh.getFile()
       const k = known[path]
       if (k && k.m === f.lastModified && k.z === f.size) continue
@@ -164,16 +165,8 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       const text = isText(path, data)
       const h = text !== null ? await sha(data) : await r.keys.blobId(data)
       if (k?.h === h) { known[path] = { h, m: f.lastModified, z: f.size }; continue }
-      if (text !== null) {
-        r.doc.transact(() => {
-          r.bin.delete(path)
-          const yt = r.files.get(path)
-          if (yt) setText(yt, text); else r.files.set(path, new Y.Text(text))
-        })
-      } else {
-        const id = await r.putBlob(data)
-        r.doc.transact(() => { r.files.delete(path); r.bin.set(path, { h: id, size: data.length }) })
-      }
+      if (text !== null) r.doc.transact(() => putText(r, path, text))
+      else { const id = await r.putBlob(data); r.doc.transact(() => putBinary(r, path, id, data.length)) }
       known[path] = { h, m: f.lastModified, z: f.size }; n++
     }
     for (const p of Object.keys(known)) {

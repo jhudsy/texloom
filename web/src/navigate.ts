@@ -3,6 +3,7 @@
 import type { Replica } from './replica'
 import { h } from './dom'
 import { mainFile } from './projectfiles'
+import { COMMENT, envClose, envOpen, INLINE_MATH, MATH_OPEN, mathClose, spans } from './texscan'
 
 export type Reveal = (file: string, from: number, to: number) => void
 
@@ -15,33 +16,18 @@ export interface Outline { headings: Heading[]; words: number; files: string[] }
 const LEVELS: Record<string, number> = { part: 0, chapter: 1, section: 2, subsection: 3, subsubsection: 4, paragraph: 5, subparagraph: 6 }
 const SKIP_ENVS = 'equation|align|gather|multline|eqnarray|math|displaymath|flalign|alignat|verbatim|Verbatim|lstlisting|minted|tikzpicture|comment|filecontents'
 
-/** Replace everything that isn't prose (comments, maths, code) with spaces, keeping offsets and newlines.
- *  Linear time: delimiters are matched with indexOf, so a file full of unclosed "\\[" can't stall it. */
+/** Replace everything that isn't prose (comments, maths, code) with spaces, keeping offsets and newlines. */
 export function blankNonProse(text: string): string {
   const blank = (s: string) => s.replace(/[^\n]/g, ' ')
-  let t = text.replace(/(^|[^\\])%[^\n]*/g, (m, pre) => pre + blank(m.slice(pre.length)))
-  // environments that aren't prose: \begin{x} … \end{x}
-  t = spans(t, new RegExp(String.raw`\\begin\{(${SKIP_ENVS})(\*?)\}`, 'g'), (m) => `\\end{${m[1]}${m[2]}}`, blank)
-  // display and inline maths (not "\\[2pt]", a line break with spacing)
-  t = spans(t, /\$\$|(?<!\\)\\\[|(?<!\\)\\\(/g, (m) => (m[0] === '$$' ? '$$' : m[0] === '\\[' ? '\\]' : '\\)'), blank)
-  return t.replace(/(?<!\\)\$(?:\\.|[^$\\]){0,5000}\$/g, blank)
-}
-
-/** Blank every span from a match of `open` to the next `close(match)`. Each closer is looked up
- *  once: when one is missing, later openers of that kind are skipped instead of rescanned. */
-function spans(text: string, open: RegExp, close: (m: RegExpExecArray) => string, blank: (s: string) => string): string {
-  let out = '', i = 0, m: RegExpExecArray | null
-  const missing = new Set<string>()
-  open.lastIndex = 0
-  while ((m = open.exec(text))) {
-    const end = close(m)
-    if (missing.has(end)) continue
-    const j = text.indexOf(end, m.index + m[0].length)
-    if (j < 0) { missing.add(end); continue }
-    out += text.slice(i, m.index) + blank(text.slice(m.index, j + end.length))
-    i = open.lastIndex = j + end.length
+  const blankSpans = (t: string, ranges: [number, number][]) => {
+    let out = '', i = 0
+    for (const [a, b] of ranges) { out += t.slice(i, a) + blank(t.slice(a, b)); i = b }
+    return out + t.slice(i)
   }
-  return out + text.slice(i)
+  let t = text.replace(COMMENT, blank)
+  t = blankSpans(t, spans(t, envOpen(SKIP_ENVS), envClose))
+  t = blankSpans(t, spans(t, MATH_OPEN, mathClose))
+  return t.replace(INLINE_MATH, blank)
 }
 
 /** Words of prose in already-blanked LaTeX (in the spirit of texcount's text words). */

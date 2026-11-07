@@ -2,7 +2,7 @@
 import * as Y from 'yjs'
 import type { Replica } from './replica'
 import { h } from './dom'
-import { allFiles, allFolders, cleanPath, deletePath, exists, isText, mainFile, movePath, newFolder } from './projectfiles'
+import { allFiles, allFolders, cleanPath, deletePath, exists, mainFile, movePath, newFolder, putFile } from './projectfiles'
 
 export interface FileTree {
   el: HTMLElement
@@ -178,18 +178,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
       const rel = (f as any).webkitRelativePath || f.name
       const path = cleanPath(join(dir, rel))
       if (!path) { alert(`Skipped ${f.name}: unsupported name.`); continue }
-      const data = new Uint8Array(await f.arrayBuffer())
-      const text = isText(path, data)
-      if (text !== null) {
-        r.doc.transact(() => {
-          r.bin.delete(path)
-          const yt = r.files.get(path)
-          if (yt) { yt.delete(0, yt.length); yt.insert(0, text) } else r.files.set(path, new Y.Text(text))
-        })
-      } else {
-        const id = await r.putBlob(data)
-        r.doc.transact(() => { r.files.delete(path); r.bin.set(path, { h: id, size: data.length }) })
-      }
+      await putFile(r, path, new Uint8Array(await f.arrayBuffer()))
     }
   }
 

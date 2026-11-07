@@ -4,7 +4,7 @@ import * as Y from 'yjs'
 import { unzipSync } from 'fflate'
 import type { Replica } from './replica'
 import { dialog, h } from './dom'
-import { cleanPath, isText } from './projectfiles'
+import { cleanPath, detectMain, isText, putBinary, putText } from './projectfiles'
 import { latexTitle } from './projects'
 
 export interface Template { id: string; name: string; info: string; main: string; files: Record<string, string> }
@@ -204,6 +204,7 @@ export function applyTemplate(r: Replica, t: Template, by: string) {
 // Import
 // ---------------------------------------------------------------------------
 const JUNK = /(^|\/)(__MACOSX|\.DS_Store|Thumbs\.db|\.git|\.svn|\.texloom)(\/|$)|(^|\/)\._/
+// Like the folder-sync list, but keeps .bbl: arXiv sources often ship one instead of a .bib.
 const BUILD = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex\.gz|synctex|blg|bcf|run\.xml|nav|snm|vrb|xdv|dvi)$/i
 const TEXTISH = /\.(tex|bib|bbl|sty|cls|bst|cfg|def|clo|ltx|txt|md|dtx|ins|tikz|pgf|csv|dat)$/i
 
@@ -232,18 +233,13 @@ export async function importEntries(r: Replica, entries: Record<string, Uint8Arr
   }
   r.doc.transact(() => {
     if (opts.replaceAll) { for (const p of [...r.files.keys()]) r.files.delete(p); for (const p of [...r.bin.keys()]) r.bin.delete(p) }
-    for (const [p, text] of texts) {
-      r.bin.delete(p)
-      const yt = r.files.get(p)
-      if (yt) { if (yt.toString() !== text) { yt.delete(0, yt.length); yt.insert(0, text) } } else r.files.set(p, new Y.Text(text))
-    }
-    for (const f of files) if (blobs.has(f.path)) { r.files.delete(f.path); r.bin.set(f.path, { h: blobs.get(f.path)!, size: f.data.length }) }
-    // pick the main file: one with \documentclass and \begin{document}, preferring the top level
+    for (const [p, text] of texts) putText(r, p, text)
+    for (const f of files) if (blobs.has(f.path)) putBinary(r, f.path, blobs.get(f.path)!, f.data.length)
+    // pick the main file (the compiler's rule), unless one is chosen already
     const cur = r.meta.get('main')
     if (!cur || !r.files.has(cur)) {
-      const cands = [...texts.keys()].filter((p) => p.endsWith('.tex') && /\\documentclass/.test(texts.get(p)!) && /\\begin\{document\}/.test(texts.get(p)!))
-        .sort((a, b) => a.split('/').length - b.split('/').length || Number(b === 'main.tex') - Number(a === 'main.tex') || a.localeCompare(b))
-      if (cands[0]) r.meta.set('main', cands[0])
+      const main = detectMain(texts.keys(), (p) => texts.get(p) ?? '')
+      if (main) r.meta.set('main', main)
     }
     // a .bbl without a .bib (typical of arXiv): use it as is
     if (![...r.files.keys()].some((p) => p.endsWith('.bib')) && [...r.files.keys()].some((p) => p.endsWith('.bbl'))) r.meta.set('bib', 'none')

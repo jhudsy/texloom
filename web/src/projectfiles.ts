@@ -4,6 +4,7 @@
 import * as Y from 'yjs'
 import { zipSync, type Zippable } from 'fflate'
 import type { Replica } from './replica'
+import { setText } from './diff'
 
 export const IMAGE_RE = /\.(png|jpe?g|gif|svg|webp|pdf|eps|ps|bmp|tiff?)$/i
 
@@ -36,12 +37,43 @@ export function isText(path: string, data: Uint8Array): string | null {
   try { return new TextDecoder('utf-8', { fatal: true }).decode(data) } catch { return null }
 }
 
-/** The file compiled as the document: the chosen one, else main.tex, else any file with \documentclass. */
+/** The document to compile when none is chosen: main.tex, else a file with \documentclass,
+ *  top-level folders first. Same rule as main_file() in texloom/paths.py. */
+export function detectMain(paths: Iterable<string>, textOf: (p: string) => string): string | null {
+  const depth = (p: string) => p.split('/').length
+  const tex = [...paths].filter((p) => p.endsWith('.tex') && cleanPath(p) === p)
+    .sort((a, b) => Number(a !== 'main.tex') - Number(b !== 'main.tex') || depth(a) - depth(b) || (a < b ? -1 : a > b ? 1 : 0))
+  return tex.find((p) => textOf(p).includes('\\documentclass')) ?? null
+}
+
+/** The file compiled as the document: the chosen one, else detectMain(). */
 export function mainFile(r: Replica): string | null {
   const m = r.meta.get('main')
-  if (m && r.files.has(m)) return m as string
-  const tex = [...r.files.keys()].filter((p) => p.endsWith('.tex')).sort((a, b) => Number(b === 'main.tex') - Number(a === 'main.tex') || a.localeCompare(b))
-  return tex.find((p) => r.files.get(p)!.toString().includes('\\documentclass')) ?? tex[0] ?? null
+  if (typeof m === 'string' && r.files.has(m) && cleanPath(m) === m) return m
+  return detectMain(r.files.keys(), (p) => r.files.get(p)?.toString() ?? '')
+}
+
+/** Put text at `path` (replacing a binary file there). Existing text changes by a minimal diff,
+ *  so collaborators' concurrent edits and cursors survive. Batch calls inside r.doc.transact. */
+export function putText(r: Replica, path: string, text: string) {
+  r.bin.delete(path)
+  const yt = r.files.get(path)
+  if (!yt) r.files.set(path, new Y.Text(text))
+  else if (yt.toString() !== text) setText(yt, text)
+}
+
+/** Point `path` at stored file content (replacing text there). */
+export function putBinary(r: Replica, path: string, id: string, size: number) {
+  r.files.delete(path)
+  r.bin.set(path, { h: id, size })
+}
+
+/** Add or replace a file from its bytes: text if it decodes as such, else stored as a binary file. */
+export async function putFile(r: Replica, path: string, data: Uint8Array) {
+  const text = isText(path, data)
+  if (text !== null) { r.doc.transact(() => putText(r, path, text)); return }
+  const id = await r.putBlob(data)
+  r.doc.transact(() => putBinary(r, path, id, data.length))
 }
 
 export const allFiles = (r: Replica) => [...new Set([...r.files.keys(), ...r.bin.keys()])].sort()
