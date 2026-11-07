@@ -103,13 +103,25 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     return [authorsField, plugin, gutter({ class: 'cm-authors', markers: (v) => v.state.field(authorsField), initialSpacer: () => new AuthorMarker('Someone', '#888') })]
   }
 
+  let bound: Y.Text | undefined // the text the open editor edits
+  // The open path now holds a different text (a same-name file from someone else won,
+  // clashes.ts): edits to the old one would be lost, so show the new one.
+  r.files.observe((ev) => {
+    if (current && ev.keysChanged.has(current) && r.files.has(current) && r.files.get(current) !== bound) {
+      const p = current
+      current = null
+      open(p)
+    }
+  })
+
   function open(path: string | null) {
     if (path === current && (view || !path)) return
     current = path
     view?.destroy(); view = null
     el.replaceChildren()
+    bound = undefined
     if (!path) return
-    const yt = r.files.get(path)
+    const yt = bound = r.files.get(path)
     if (yt) {
       view = new EditorView({
         parent: el,

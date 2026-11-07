@@ -343,8 +343,13 @@ main thread only reads `Daemon.states` and hands work (join, share, restart) to 
 
 ## Known limitations / open questions
 
-- Two peers who both *create* the same path while offline: one file wins (LWW on the
-  `files` map). Mitigation: show a warning, keep the loser as `name (conflict).tex`.
+- Two peers who both *create* (or upload) the same path while apart: Yjs keeps one value
+  per map key and deletes the other everywhere. `web/src/clashes.ts` finds the loser (a
+  deleted value for the key that no later write saw: no item has it as `origin`) and
+  writes it back as `name (conflict).ext`, with a banner. Only a browser that already held
+  the losing version restores it, since only it knows exactly what that version said; same
+  content on both sides is not a clash. The folder helper (pycrdt) can't see item origins,
+  so a version created there and lost while no browser held it is not restored.
 - Long divergent offline edits of the same paragraph merge character-wise and may
   interleave. Plan: highlight concurrently-edited regions after a sync for review.
 - Self-declared display names. Personal links tie edits to a key the owner named, but

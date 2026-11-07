@@ -115,6 +115,9 @@ export class Replica {
 
   constructor(readonly keys: Keys, readonly server: string, public syncMode: SyncMode = 'live') {}
 
+  /** A transaction applied changes received from others. */
+  isRemote(origin: unknown): boolean { return origin === REMOTE }
+
   get storage(): StorageMode { return this.meta.get('storage') === 'relay' ? 'relay' : 'server' }
 
   async open(): Promise<void> {

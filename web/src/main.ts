@@ -18,6 +18,7 @@ import type { ProgramLine } from './texscan'
 import { ProjectIndex } from './latex'
 import { autoSave, createHistoryPanel } from './history'
 import { referenceDialog } from './references'
+import { watchClashes, type Clash } from './clashes'
 import { shareDialog } from './sharing'
 import { folderFiles, folderPermission, folderSyncSupported, pickFolder, rememberFolder, savedFolder, startFolderSync, type FolderSync } from './foldersync'
 import { applyTemplate, chooseTemplate, importDialog, TEMPLATES } from './templates'
@@ -141,7 +142,9 @@ async function openProject(keys: Keys) {
   // a brand-new project: fill it from the chosen template (or open Import)
   let template: string | null = null
   try { template = localStorage.getItem(`texloom.newTemplate.${keys.project}`); localStorage.removeItem(`texloom.newTemplate.${keys.project}`) } catch {}
-  if (writable && r.files.size === 0 && r.bin.size === 0 && !r.meta.get('seeded')) {
+  // Only projects made here with New project: one opened from a link already exists, and
+  // starter files added before its own arrive would clash with them (clashes.ts).
+  if (template && writable && r.files.size === 0 && r.bin.size === 0 && !r.meta.get('seeded')) {
     const seed = () => {
       if (r.files.size || r.bin.size || r.meta.get('seeded')) return
       if (template === 'import') { importDialog(r, { fresh: true, onDone: () => tree.open(mainFile(r) ?? '') }); return }
@@ -149,8 +152,7 @@ async function openProject(keys: Keys) {
       applyTemplate(r, t, me.name)
       tree.open(t.main)
     }
-    // a project we just created is empty for sure; one opened from a link may still be arriving
-    setTimeout(seed, template ? 0 : 1500)
+    setTimeout(seed, 0)
   }
 
   // ---- components ----
@@ -487,6 +489,22 @@ async function openProject(keys: Keys) {
   }
   risk.el.after(movedNote)
   movedNote.after(programsNote)
+  // files created under the same name by two people apart: both kept (clashes.ts)
+  const clashNote = h('div', { class: 'risk', role: 'status', hidden: true })
+  const clashes: Clash[] = []
+  const renderClashes = () => {
+    clashNote.hidden = !clashes.length
+    const open = (p: string) => h('button', { onclick: () => tree.open(p) }, p)
+    clashNote.replaceChildren(
+      h('span', {}, h('b', {}, '⚠ '), clashes.length > 1 ? 'Files were created under the same names on two devices while apart. Both versions are kept: '
+        : 'A file was created under the same name on two devices while apart. Both versions are kept: ',
+        ...clashes.flatMap((c, i) => [i ? '; ' : '', open(c.path), ` (${c.by ?? 'the other device'}’s) and `, open(c.copy), ' (this device’s)']),
+        '. Merge them and delete the copy when you’re done.'),
+      h('span', { class: 'actions' },
+        h('button', { title: 'Hide', 'aria-label': 'Hide this warning', onclick: () => { clashes.length = 0; renderClashes() } }, '✕')))
+  }
+  programsNote.after(clashNote)
+  watchClashes(r, (c) => { clashes.push(c); renderClashes() })
   r.meta.observe(renderMoved); renderMoved()
   r.onStatus = () => {
     renderStatus()

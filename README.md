@@ -7,7 +7,8 @@ no copy at all. No accounts: you share a link. (The command-line tools are calle
 `texloom`.)
 
 - Live editing with other people's cursors (click someone's avatar to jump to them);
-  offline edits merge automatically on reconnect. Installs as an offline-capable app.
+  offline edits merge automatically on reconnect. Two files created under the same name while
+  apart are both kept (one as `name (conflict).tex`). Installs as an offline-capable app.
 - Compile in the browser (TeX Live 2026 in WebAssembly), or with your own TeX installation.
   Errors are listed with clickable locations; SyncTeX jumps between source and PDF
   (the → / ← arrows on the editor/PDF divider, ⌘⌥→ / ⌘⌥←, or double-click / right-click the PDF).
