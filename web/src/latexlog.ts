@@ -34,6 +34,7 @@ export function parseLog(log: string, files: string[]): Problem[] {
   }
   const stack: (string | null)[] = [] // open "(file" groups; null for ordinary parentheses
   let bibSource: string | null = null // the .bib biber is reading ("Found BibTeX data source 'bib/own.bib'")
+  const bibSources = new Set<string>() // every .bib biber looked for
   const current = () => { for (let i = stack.length - 1; i >= 0; i--) if (stack[i]) return stack[i]; return null }
 
   for (let i = 0; i < lines.length; i++) {
@@ -65,14 +66,21 @@ export function parseLog(log: string, files: string[]): Problem[] {
     // biber ("ERROR - Cannot find 'refs.bib'!") and BibTeX ("I couldn't open database file refs.bib")
     const source = /Found BibTeX data source '([^']+)'/.exec(line)
     if (source) bibSource = source[1]
+    const looking = /Looking for bibtex file '([^']+)'/.exec(line)
+    if (looking) bibSources.add(looking[1])
     const biber = /\b(ERROR|WARN) - (.*)$/.exec(line)
     if (biber) {
       // a syntax error is reported in biber's UTF-8 copy of the .bib ("/tmp/biber_tmp_…utf8,
       // line 130, …"): name the project's file and line instead, so it can be clicked
-      const sub = /^BibTeX subsystem: \S+, line (\d+), (.*)$/.exec(biber[2].trim())
-      const bib = sub && bibSource ? bibFile(bibSource, files) : null
-      add(sub && bibSource
-        ? { severity: biber[1] === 'ERROR' ? 'error' : 'warning', file: bib, line: +sub[1], message: `Biber: ${bibSource}, line ${sub[1]}: ${sub[2]}` }
+      const sub = /^BibTeX subsystem: (\S+), line (\d+), (.*)$/.exec(biber[2].trim())
+      // biber names its copy after the MD5 of the file's name: that says which .bib it is
+      // (warnings can come after it has moved on to the next one)
+      const hash = sub ? /([0-9a-f]{32})_\d+\.utf8,?$/.exec(sub[1])?.[1] : undefined
+      const named = hash ? [...bibSources].find((p) => md5(p.slice(p.lastIndexOf('/') + 1)) === hash) : undefined
+      const src = named ?? bibSource
+      const bib = sub && src ? bibFile(src, files) : null
+      add(sub && src
+        ? { severity: biber[1] === 'ERROR' ? 'error' : 'warning', file: bib, line: +sub[2], message: `Biber: ${src}, line ${sub[2]}: ${sub[3]}` }
         : { severity: biber[1] === 'ERROR' ? 'error' : 'warning', file: null, line: null, message: `Biber: ${biber[2].trim()}` })
     }
     const bibtex = /^I (couldn't open (?:database|style|auxiliary) file .*|found no \\\w+ commands?.*)$/.exec(line)
@@ -94,4 +102,35 @@ export function parseLog(log: string, files: string[]): Problem[] {
   }
   const rank = { error: 0, warning: 1, box: 2 }
   return out.sort((a, b) => rank[a.severity] - rank[b.severity])
+}
+
+/** MD5 of a string's UTF-8 bytes, as hex (biber names its temporary copies with it). */
+export function md5(text: string): string {
+  const data = new TextEncoder().encode(text)
+  const n = ((data.length + 8) >> 6) + 1
+  const words = new Uint32Array(n * 16)
+  for (let i = 0; i < data.length; i++) words[i >> 2] |= data[i] << ((i % 4) * 8)
+  words[data.length >> 2] |= 0x80 << ((data.length % 4) * 8)
+  words[n * 16 - 2] = data.length * 8
+  const K = Array.from({ length: 64 }, (_, i) => Math.floor(Math.abs(Math.sin(i + 1)) * 2 ** 32) >>> 0)
+  const S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21]
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476
+  for (let blk = 0; blk < n; blk++) {
+    let a = a0, b = b0, c = c0, d = d0
+    for (let i = 0; i < 64; i++) {
+      const r = i >> 4
+      let f: number, g: number
+      if (r === 0) { f = (b & c) | (~b & d); g = i }
+      else if (r === 1) { f = (d & b) | (~d & c); g = (5 * i + 1) % 16 }
+      else if (r === 2) { f = b ^ c ^ d; g = (3 * i + 5) % 16 }
+      else { f = c ^ (b | ~d); g = (7 * i) % 16 }
+      const tmp = d; d = c; c = b
+      const x = (a + f + K[i] + words[blk * 16 + g]) >>> 0
+      const sh = S[r * 4 + (i % 4)]
+      b = (b + ((x << sh) | (x >>> (32 - sh)))) >>> 0
+      a = tmp
+    }
+    a0 = (a0 + a) >>> 0; b0 = (b0 + b) >>> 0; c0 = (c0 + c) >>> 0; d0 = (d0 + d) >>> 0
+  }
+  return [a0, b0, c0, d0].map((v) => [0, 8, 16, 24].map((s) => ((v >>> s) & 255).toString(16).padStart(2, '0')).join('')).join('')
 }
