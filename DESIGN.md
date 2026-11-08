@@ -66,6 +66,9 @@ without compiling.
   without any registration step.
 - **Edit link:** `https://host/#p=<id>&k=<aes key>&w=<signing seed>`
 - **Read-only link:** `https://host/#p=<id>&k=<aes key>`
+- The web app removes the keys from the address bar when it opens a link, leaving `#p=<id>`. The
+  tab keeps its link in sessionStorage, so a reload keeps the same access; another tab uses the
+  best link in this browser's project list. If the browser won't store it, the address is left as is.
 - Keys live after `#`, which browsers never send to the server.
 - Every stored update is `sign(seed, "upd:" ‖ ciphertext)`. The server and peers
   reject unsigned writes. Without `w`, the editor is read-only.

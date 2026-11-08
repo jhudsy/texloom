@@ -23,6 +23,9 @@ export interface Recent {
 
 const KEY = 'texloom.recent'
 const read = (): Recent[] => { try { return JSON.parse(localStorage.getItem(KEY) || '[]') } catch { return [] } }
+/** Where a tab keeps the link it was opened with (see addressbar.ts). */
+export const tabKeysItem = (project: string) => `texloom.keys.${project}`
+
 const GONE = 'texloom.recentGone' // project -> when it was removed, so other devices remove it too
 let changed: (() => void) | null = null
 const write = (list: Recent[], quietly = false) => {
@@ -103,8 +106,14 @@ export const projects = {
     if (people.join('\n') !== (r.people ?? []).join('\n')) projects.update(project, { people })
   },
 
+  /** The best link this browser has for a project. */
+  fragmentOf(project: string): string | null {
+    return read().find((r) => r.project === project)?.fragment ?? null
+  },
+
   async forget(project: string) {
     await forgetLocalCopy(project)
+    try { sessionStorage.removeItem(tabKeysItem(project)) } catch {}
     writeGone({ ...readGone(), [project]: Date.now() })
     write(read().filter((x) => x.project !== project))
     // every per-project setting (texloom.<what>.<project>) and the linked folder

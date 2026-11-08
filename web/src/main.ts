@@ -12,6 +12,7 @@ import { $, h, saveFile } from './dom'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
+import { missingKeysDialog, projectFromAddress } from './addressbar'
 import { menuItems, openContextMenu } from './contextmenu'
 import { menuTargets } from './editormenu'
 import { FilePreview, isPreviewable } from './preview'
@@ -48,12 +49,14 @@ if ('serviceWorker' in navigator && !noSW && (location.protocol === 'https:' || 
 
 window.addEventListener('hashchange', () => location.reload())
 const listHash = takeListHash()
-const keys = (() => { try { return Keys.fromFragment(location.hash) } catch (e) { alert(e); return null } })()
+const opened = (() => { try { return projectFromAddress() } catch (e) { alert(e); return null } })()
+const keys = opened === 'no-key' ? null : opened
 let refreshProjects = () => {}
 if (keys) openProject(keys)
 else landing()
 startListSync(() => refreshProjects())
 if (listHash) handleListHash(listHash)
+if (opened === 'no-key') missingKeysDialog()
 
 /** A description from texscan.ts (kept in English there: it is also data), translated. */
 const PROGRAM_WHAT: Record<string, () => string> = {
@@ -122,7 +125,7 @@ function projectList(): HTMLElement {
     details.push(t('opened {{when}}', { when: whenOpened(r.at) }))
     return h('li', { class: dupes.has(label) ? 'dupe' : '' },
       h('div', { class: 'top' },
-        h('a', { href: '#' + r.fragment, class: 'pname' }, label),
+        h('a', { href: `#p=${r.project}`, class: 'pname' }, label),
         h('code', { class: 'pcode', title: t('Project code: derived from this project’s unique ID. Two projects with the same name always have different codes.') }, projectCode(r.project)),
         h('span', { class: `tag ${r.writable ? '' : 'ro'}` }, r.writable ? t('edit') : t('read-only')),
         r.atRisk || r.storage === 'relay' ? h('span', { class: 'tag warn', title: t('The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.') }, t('not on server')) : null,

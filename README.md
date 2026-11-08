@@ -91,6 +91,11 @@ project (with history and comments) is copied into a new project with new keys, 
 are re-encrypted, the old server copy is deleted, and you send new links to the people
 who should keep access. The plain **read-only link** works as before.
 
+**Send links from Share, not the address bar.** In the web app the address bar shows only the
+project's id. The keys stay in the browser, so a copied address opens nothing for anyone else (it
+says to ask for a link), and only works in the browser that opened the project. Links from Share
+work as usual, and old links and bookmarks that contain keys still open.
+
 **Email…** next to a personal or read-only link opens your own email app with an
 invitation and the link filled in. The link travels in that email, never through the
 TeXLoom server (which must not see its keys), so anyone who can read the email can open
