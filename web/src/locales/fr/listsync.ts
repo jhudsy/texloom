@@ -24,14 +24,17 @@ const fr: Catalog = {
   'Sync now': 'Synchroniser',
   'Copied': 'Copié',
   'Copy sync link': 'Copier le lien de synchronisation',
-  'Passkey added.': 'Clé d’accès ajoutée.',
+  'Passkey added. Keep the sync link as well: it still opens the list if you lose this passkey.':
+    'Clé d’accès ajoutée. Gardez aussi le lien de synchronisation : il ouvre toujours la liste si vous perdez cette clé.',
   'Add a passkey': 'Ajouter une clé d’accès',
   'Stop on this browser': 'Arrêter sur ce navigateur',
   'Sync link': 'Lien de synchronisation',
   'Keep the list of your projects on the server, encrypted, so it follows you to other computers and browsers. The server can’t read it.':
     'Conservez la liste de vos projets sur le serveur, chiffrée, pour la retrouver sur d’autres ordinateurs et navigateurs. Le serveur ne peut pas la lire.',
-  'It is opened by a sync link, and optionally by a passkey. If you lose both, the list is gone; your projects are not, and still open from their own links.':
-    'Elle s’ouvre avec un lien de synchronisation et, si vous le souhaitez, une clé d’accès. Si vous perdez les deux, la liste est perdue ; vos projets ne le sont pas et s’ouvrent toujours avec leurs propres liens.',
+  'It is opened by a sync link, and optionally by a passkey.':
+    'Elle s’ouvre avec un lien de synchronisation et, si vous le souhaitez, une clé d’accès.',
+  'There is no way to recover a lost list. The server can’t read it, so nobody can reset it for you. If you lose the sync link and every passkey, the list is gone for good. Your projects aren’t deleted, but you’ll need each project’s own link to open it.':
+    'Une liste perdue ne peut pas être récupérée. Le serveur ne peut pas la lire, donc personne ne peut la réinitialiser pour vous. Si vous perdez le lien de synchronisation et toutes vos clés d’accès, la liste est définitivement perdue. Vos projets ne sont pas supprimés, mais il vous faudra le lien de chaque projet pour l’ouvrir.',
   'List started. Copy its sync link and keep it safe.': 'Liste créée. Copiez son lien de synchronisation et gardez-le en lieu sûr.',
   'Start a new list': 'Créer une liste',
   'Unlock with a passkey': 'Déverrouiller avec une clé d’accès',

@@ -106,9 +106,12 @@ the list on one device removes it on the others.
 A list is opened by a **sync link** (`https://server/#sync=…`). Keep that link in a password
 manager, because it opens every project on the list. You can also add a **passkey**, which your
 phone or password manager carries between devices; passkeys need a browser with the WebAuthn PRF
-feature and belong to the server's address. If you lose the link and every passkey, the list is
-gone, though your projects aren't: each still opens from its own link. Only use a sync link that's
-yours, since using one adds your projects to that list.
+feature and belong to the server's address. Only use a sync link that's yours, since using one
+adds your projects to that list.
+
+**A lost list can't be recovered.** The server can't read it, so nobody, including whoever runs the
+server, can reset access for you. If you lose the sync link and every passkey, the list is gone for
+good. Your projects aren't deleted, but you'll need each project's own link to open it.
 
 In the desktop app, use **Project list…**; for the helper, see `texloom projects` below. Starting a
 list counts as creating something on the server, so servers that require a creation code ask for

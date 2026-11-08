@@ -283,6 +283,7 @@ async function unlockWithPasskey(): Promise<Uint8Array | null> {
 
 // ---- the dialog ----------------------------------------------------------------------------
 const ADD_WARNING = () => t('The projects in this browser will be added to this list, and anyone who has its link can open them. Use it only if the link is yours.')
+const NO_RECOVERY = () => t('There is no way to recover a lost list. The server can’t read it, so nobody can reset it for you. If you lose the sync link and every passkey, the list is gone for good. Your projects aren’t deleted, but you’ll need each project’s own link to open it.')
 const COPY_WARNING = () => t('Keep this link somewhere safe, such as a password manager: it opens every project on the list.')
 
 async function adopt(secret: Uint8Array) {
@@ -310,11 +311,12 @@ export function listDialog() {
       body.replaceChildren(
         h('p', {}, tn(count, 'This browser keeps its list of {{n}} project on the server, encrypted. The server can’t read it.', 'This browser keeps its list of {{n}} projects on the server, encrypted. The server can’t read it.')),
         lastError ? h('p', { class: 'err small' }, explain(lastError)) : '',
+        h('p', { class: 'recovery-warning', role: 'note' }, NO_RECOVERY()),
         h('p', { class: 'muted small' }, COPY_WARNING()),
         h('div', { class: 'row' },
           h('button', { onclick: act(syncNow) }, t('Sync now')),
           h('button', { onclick: (e: any) => { navigator.clipboard.writeText(linkFor(secret)); e.target.textContent = t('Copied') } }, t('Copy sync link')),
-          passkey ? h('button', { onclick: act(async () => { if (await addPasskey(secret)) msg.textContent = t('Passkey added.') }) }, t('Add a passkey')) : '',
+          passkey ? h('button', { onclick: act(async () => { if (await addPasskey(secret)) msg.textContent = t('Passkey added. Keep the sync link as well: it still opens the list if you lose this passkey.') }) }, t('Add a passkey')) : '',
           h('button', { onclick: () => { saveSecret(null); lastSynced = ''; lastError = null; render() } }, t('Stop on this browser')),
         ),
       )
@@ -323,7 +325,8 @@ export function listDialog() {
     const input = h('input', { type: 'password', placeholder: t('Sync link'), 'aria-label': t('Sync link'), autocomplete: 'off' }) as HTMLInputElement
     body.replaceChildren(
       h('p', {}, t('Keep the list of your projects on the server, encrypted, so it follows you to other computers and browsers. The server can’t read it.')),
-      h('p', { class: 'muted small' }, t('It is opened by a sync link, and optionally by a passkey. If you lose both, the list is gone; your projects are not, and still open from their own links.')),
+      h('p', { class: 'muted small' }, t('It is opened by a sync link, and optionally by a passkey.')),
+      h('p', { class: 'recovery-warning', role: 'note' }, NO_RECOVERY()),
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: act(async () => {
           const fresh = newSecret()

@@ -125,6 +125,7 @@ aside, .editor { border-right: none; }
 .pane-toggle { padding: 2px 8px; }
 .pane-toggle.off { color: var(--muted); }
 
+@media (min-width: 901px) { .pdfbar .narrow-only { display: none; } }
 @media (max-width: 900px) {
   .split { visibility: hidden; } /* small windows show the editor or the PDF panel (▥ switches) */
 }
@@ -349,3 +350,5 @@ aside .tab { padding: 4px 8px; }
 .md-preview .md-left { text-align: left; }
 .md-preview .md-math { overflow-x: auto; overflow-y: hidden; }
 .md-preview .md-noimage { color: var(--muted); font-size: .9em; }
+
+.recovery-warning { margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }

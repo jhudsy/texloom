@@ -238,9 +238,9 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const out: Output = {
     pane, compileBtn, compile, lastLog: () => lastLog, pdfView, problems: () => problems, onProblems, showInPdf, showInSource, syncRequest: null,
   }
-  const backBtn = h('button', { title: t('Go to the source of the spot you last clicked in the PDF, or the middle of the view (⌘⌥← / Ctrl+Alt+←). Or double-click / right-click the PDF.'), 'aria-label': t('Go to source'), onclick: () => { if (!showInSource()) info.textContent = t('Compile first: the PDF has no SyncTeX data yet.') } }, '⇤')
-  const syncBtn = h('button', { title: t('Show the editor’s line in the PDF (⌘⌥→ / Ctrl+Alt+→)'), 'aria-label': t('Show in PDF'), onclick: () => out.syncRequest?.() }, '⇥')
-  dlBtn.before(backBtn, syncBtn)
+  const backBtn = h('button', { class: 'narrow-only', title: t('Go to the source of the spot you last clicked in the PDF, or the middle of the view (⌘⌥← / Ctrl+Alt+←). Or double-click / right-click the PDF.'), 'aria-label': t('Go to source'), onclick: () => { if (!showInSource()) info.textContent = t('Compile first: the PDF has no SyncTeX data yet.') } }, '⇤')
+  const syncBtn = h('button', { class: 'narrow-only', title: t('Show the editor’s line in the PDF (⌘⌥→ / Ctrl+Alt+→)'), 'aria-label': t('Show in PDF'), onclick: () => out.syncRequest?.() }, '⇥')
+  dlBtn.before(backBtn, syncBtn) // small windows only: the arrows on the divider aren't shown there
   renderProblems()
   return out
 }

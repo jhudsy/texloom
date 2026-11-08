@@ -247,6 +247,8 @@ def projects_command(a) -> None:
             save_link(key.link(a.server))
             print("Your sync link (keep it in a password manager: it opens every project on the list):\n")
             print(key.link(a.server))
+            print("\nThis can't be recovered: nobody can reset it for you. If you lose this link and every passkey,\n"
+                  "the list is gone for good. Your projects aren't deleted, but you'll need each one's own link.")
             return
         if a.action == "use":
             if not a.link:
