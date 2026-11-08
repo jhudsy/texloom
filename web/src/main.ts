@@ -12,6 +12,8 @@ import { $, h, saveFile } from './dom'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
+import { FilePreview, isPreviewable } from './preview'
+import { handleListHash, listDialog, startListSync, takeListHash } from './listsync'
 import { createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
@@ -41,9 +43,13 @@ if ('serviceWorker' in navigator && !noSW && (location.protocol === 'https:' || 
 }
 
 window.addEventListener('hashchange', () => location.reload())
+const listHash = takeListHash()
 const keys = (() => { try { return Keys.fromFragment(location.hash) } catch (e) { alert(e); return null } })()
+let refreshProjects = () => {}
 if (keys) openProject(keys)
 else landing()
+startListSync(() => refreshProjects())
+if (listHash) handleListHash(listHash)
 
 /** A description from texscan.ts (kept in English there: it is also data), translated. */
 const PROGRAM_WHAT: Record<string, () => string> = {
@@ -65,6 +71,7 @@ function landing() {
   app.className = 'landing'
   const nameIn = h('input', { value: prefs.name, placeholder: t('Your name (shown to collaborators)'), oninput: (e: any) => (prefs.name = e.target.value) })
   const linkIn = h('input', { placeholder: t('Paste a project link…'), 'aria-label': t('Project link') })
+  const list = h('div', {}, projectList())
   app.append(
     h('h1', {}, brand()),
     h('p', { class: 'sub' }, t('Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.')),
@@ -89,8 +96,10 @@ function landing() {
     h('h2', {}, t('Your projects'), h('small', { class: 'muted' }, ' ' + t('— opened in this browser'))),
     h('p', { class: 'muted small' },
       t('These are kept in this browser. Clearing this site’s data (or the browser’s history and site data) deletes them here.{{safari}} Keep the links somewhere safe: a project stored on the server can always be reopened from its link. Projects marked “not on server” exist only on devices.', { safari: SAFARI_NOTE })),
-    projectList(),
+    h('p', {}, h('button', { onclick: () => listDialog() }, t('Project list on the server…'))),
+    list,
   )
+  refreshProjects = () => list.replaceChildren(projectList())
 }
 
 function projectList(): HTMLElement {
@@ -197,9 +206,11 @@ async function openProject(keys: Keys) {
     checks: () => device.checks,
     onReview: (kind) => { if (writable) { openReview(); review()?.add(kind) } },
   })
+  let panelsReady = false // the file tree opens the first file before the panels below exist
   const tree = createFileTree(r, writable, (p) => {
     editor.open(p)
     r.awareness.setLocalStateField('file', p) // so collaborators can jump to where you are
+    if (panelsReady) previewFile(p)
   })
 
   // "Import" (zip / arXiv) and "+ Reference" (DOI / arXiv): in the file tools
@@ -239,9 +250,26 @@ async function openProject(keys: Keys) {
   }
   output.onProblems.push(() => editor.relint())
   // right-hand panel tabs; panels other than the PDF are created on first use
-  type Tab = 'pdf' | 'ai' | 'review' | 'history'
+  type Tab = 'pdf' | 'preview' | 'ai' | 'review' | 'history'
+  const preview = new FilePreview(r)
+  let currentTab: Tab = 'pdf'
+  let cameFromPdf = false // the preview replaced the PDF by itself, so it can give it back
+  /** A file chosen in the file list: show it in the Preview tab if it can be shown. */
+  function previewFile(p: string | null) {
+    if (!p || !isPreviewable(p)) {
+      if (currentTab === 'preview' && cameFromPdf) showTab('pdf')
+      return
+    }
+    preview.show(p)
+    const was = currentTab
+    if (layout.rightHidden) layout.showRight()
+    else if (was !== 'pdf' && was !== 'preview' && r.files.has(p)) return // it's in the editor anyway: leave that tab open
+    if (was !== 'preview') showTab('preview')
+    if (was === 'pdf') cameFromPdf = true
+  }
   const panes: Record<Tab, HTMLElement> = {
     pdf: output.pane,
+    preview: preview.el,
     ai: h('div', { class: 'pane', hidden: true }),
     review: h('div', { class: 'pane', hidden: true }),
     history: h('div', { class: 'pane', hidden: true }),
@@ -266,6 +294,7 @@ async function openProject(keys: Keys) {
   }
   const tabBtns = {
     pdf: h('button', { class: 'tab active', onclick: () => showTab('pdf') }, t('PDF')),
+    preview: h('button', { class: 'tab', title: t('Markdown, images and PDFs from the project'), onclick: () => showTab('preview') }, t('Preview')),
     ai: h('button', { class: 'tab', onclick: () => showTab('ai') }, t('Assistant')),
     review: h('button', { class: 'tab', title: t('Comments and suggested changes'), onclick: () => showTab('review') }, t('Review')),
     history: h('button', { class: 'tab', onclick: () => showTab('history') }, t('History')),
@@ -285,7 +314,9 @@ async function openProject(keys: Keys) {
     }
     if (!panes[t].firstChild && makers[t]) panes[t].append(makers[t]!())
     syncArrows.hidden = t !== 'pdf'
-    try { localStorage.setItem('texloom.tab', t) } catch {}
+    currentTab = t
+    cameFromPdf = false
+    if (t !== 'preview') try { localStorage.setItem('texloom.tab', t) } catch {}
   }
 
   // left-hand tabs: files, search across files, outline with word count
@@ -421,7 +452,7 @@ async function openProject(keys: Keys) {
     splitL,
     editor.el,
     splitR,
-    h('section', { class: 'right' }, h('div', { class: 'tabs' }, tabBtns.pdf, tabBtns.ai, tabBtns.review, tabBtns.history), panes.pdf, panes.ai, panes.review, panes.history),
+    h('section', { class: 'right' }, h('div', { class: 'tabs' }, tabBtns.pdf, tabBtns.preview, tabBtns.ai, tabBtns.review, tabBtns.history), panes.pdf, panes.preview, panes.ai, panes.review, panes.history),
   )
   const layout = setupLayout(mainEl, splitL, splitR)
   layout.onChange = () => {
@@ -436,6 +467,8 @@ async function openProject(keys: Keys) {
   if (savedLeft === 'outline') showLeft('outline')
   const savedTab = localStorage.getItem('texloom.tab') as Tab | null
   if (savedTab && savedTab in panes && savedTab !== 'pdf') showTab(savedTab)
+  panelsReady = true
+  previewFile(editor.current())
 
   // ⌘S / Ctrl+S compiles from anywhere (the editor handles it itself when focused)
   document.addEventListener('keydown', (e) => {

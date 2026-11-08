@@ -15,7 +15,6 @@ import { latexSupport, recheck, type AddReference, type ProjectIndex } from './l
 import { imageDropExtension } from './pasteimage'
 import { spellcheck } from './spell'
 import { mathPreview } from './mathpreview'
-import { PdfView } from './pdfview'
 import { lineAuthors } from './history'
 import type { Problem } from './latexlog'
 import { keymap } from '@codemirror/view'
@@ -164,17 +163,6 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     el.append(box)
     r.getBlob(info.h).then((data) => {
       if (current !== path) return
-      const type = /\.pdf$/i.test(path) ? 'application/pdf' : /\.svg$/i.test(path) ? 'image/svg+xml' : /\.(png|jpe?g|gif|webp)$/i.test(path) ? `image/${path.split('.').pop()!.toLowerCase().replace('jpg', 'jpeg')}` : ''
-      // SVG is shown via <img>, where scripts in it don't run; PDFs are rendered with PDF.js.
-      if (type.startsWith('image/')) {
-        // Revoke the blob URL once shown, so it can't be opened as a page on this site (SVG scripts).
-        const url = URL.createObjectURL(new Blob([data as BlobPart], { type }))
-        const img = h('img', { src: url, alt: name })
-        img.addEventListener('load', () => URL.revokeObjectURL(url), { once: true })
-        img.addEventListener('error', () => URL.revokeObjectURL(url), { once: true })
-        box.append(img)
-      }
-      else if (type === 'application/pdf') { const pv = new PdfView(); box.append(pv.el); pv.show(data).catch(() => {}) }
       box.append(h('p', {}, h('button', { onclick: () => saveFile(name, data) }, t('Download {{name}}', { name }))))
     }).catch((e) => box.append(h('p', { class: 'err' }, String(e))))
   }

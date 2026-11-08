@@ -346,6 +346,29 @@ main thread only reads `Daemon.states` and hands work (join, share, restart) to 
   (registered by the macOS bundle, in HKCU on Windows, by a .desktop file on Linux). It
   stays on the machine, and nothing is joined without confirming in the app.
 
+## Project lists
+
+An optional, encrypted copy of a person's list of projects (`server/lists.py`, `texloom/listsync.py`,
+`web/src/listsync.ts`; the two clients must match). The server stores opaque blobs and can't tie
+one to the projects it names.
+
+- A list has a random 32-byte secret K, carried in a sync link (`/#sync=<K>`).
+  `seed = HMAC-SHA256(K, "texloom list sign")` gives an Ed25519 key pair whose public key is the
+  list's id; `aes = HMAC-SHA256(K, "texloom list encrypt")` is the AES-GCM key. The blob is
+  `iv | ciphertext`.
+- `GET /api/list/<id>` returns the blob and `X-Seq`. `PUT` carries `X-Seq` (must be the current
+  value + 1, otherwise 409 and the client merges and retries) and `X-Sig`, a signature over
+  `list:<id>:<seq>:` + blob. `DELETE` is signed over `listdel:<id>`. A new list needs what a new
+  project needs (`X-Create-Code`) and belongs to that code, so purging the code removes it.
+- Document: `{"v":1,"projects":{"<id>":{"f":fragment,"n":name,"at":ms,"w":bool,"nick"?,"t"?,"by"?}},"gone":{"<id>":ms}}`.
+  Merging keeps the latest `gone` time per project and the most recently opened entry, never
+  replaces an edit link with a read-only one, and drops a project removed after it was last opened.
+  Removal records are forgotten after a year.
+- Other ways in are entries of the same kind holding `{"v":1,"wrap":<K>}`, opened by their own
+  secret. A passkey's secret comes from WebAuthn PRF with the salt `texloom project list v1`. The
+  desktop app can't use a passkey, so it opens `/#unlock-for-app`, and the page returns the sync
+  link through `texloom://sync?link=…`, which the app confirms before using.
+
 ## Known limitations / open questions
 
 - Deleting a project for everyone: today the owner can remove the server's copy (relay mode),

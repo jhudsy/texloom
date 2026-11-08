@@ -96,6 +96,24 @@ invitation and the link filled in. The link travels in that email, never through
 TeXLoom server (which must not see its keys), so anyone who can read the email can open
 the project. A personal link is shown, and can be emailed, only when you create it.
 
+### Your project list on other devices
+
+The start page lists the projects opened in that browser, and only there. To take the list with
+you, choose **Project list on the server…**: the list is kept on the server, encrypted, and merged
+between every browser and computer you connect. The server can't read it. Removing a project from
+the list on one device removes it on the others.
+
+A list is opened by a **sync link** (`https://server/#sync=…`). Keep that link in a password
+manager, because it opens every project on the list. You can also add a **passkey**, which your
+phone or password manager carries between devices; passkeys need a browser with the WebAuthn PRF
+feature and belong to the server's address. If you lose the link and every passkey, the list is
+gone, though your projects aren't: each still opens from its own link. Only use a sync link that's
+yours, since using one adds your projects to that list.
+
+In the desktop app, use **Project list…**; for the helper, see `texloom projects` below. Starting a
+list counts as creating something on the server, so servers that require a creation code ask for
+one. Servers can turn lists off with `--no-project-lists`.
+
 ### Editor
 
 | | |
@@ -151,6 +169,11 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   panel; ☰ and ▥ hide the side panes.
 - **Compile log:** **Log** shows it under the PDF; drag its top edge to resize.
 - **Downloads:** **⤓ PDF** and **⤓ Source** (a `.zip`).
+
+**Preview.** Choosing a Markdown file, image or PDF in the file list shows it in the **Preview**
+tab, next to the PDF of the compiled document. Markdown updates as you type and can show the
+project's own images and math in `$…$` or `$$…$$`. Raw HTML appears as plain text, and images from
+other websites aren't loaded.
 
 ## Running a server
 
@@ -341,6 +364,7 @@ collaborators type in their browsers. With `--compile`:
 | `texloom start` | sync every folder on this computer's list, in one process |
 | `texloom autostart on\|off\|status` | run `texloom start` at login (macOS, Linux, Windows) |
 | `texloom list` / `add <dir>` / `leave <dir>` | the folder list (`clone` and `new` add to it; leaving keeps the files) |
+| `texloom projects` / `new --server URL` / `use '<sync link>'` / `off` | your encrypted project list on the server: what's on it (`--links` prints each project's link), start one, use one from elsewhere, stop on this computer |
 | `texloom new <dir> --server URL [--code C]` | share an existing folder as a new project; prints both links |
 | `texloom clone <link> <dir>` | check out a project |
 | `texloom run <dir> [--compile] [--shell-restricted \| --shell-escape]` | keep the folder in sync, live |

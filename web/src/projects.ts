@@ -1,9 +1,10 @@
-// The list of projects opened in this browser (start page). Kept in localStorage only:
-// the server can't read projects, so it can't list them for you.
+// The list of projects opened in this browser (start page). Kept in localStorage; the server
+// can't read projects, so it can't list them for you (listsync.ts can keep an encrypted copy).
 import { forgetLocalCopy } from './replica'
 import { b64d } from './crypto'
 import { rememberFolder } from './foldersync'
 import { t, locale } from './i18n'
+import type { ListDoc, ListEntry } from './listsync'
 
 export interface Recent {
   project: string // unique id (from the link)
@@ -22,7 +23,14 @@ export interface Recent {
 
 const KEY = 'texloom.recent'
 const read = (): Recent[] => { try { return JSON.parse(localStorage.getItem(KEY) || '[]') } catch { return [] } }
-const write = (list: Recent[]) => { try { localStorage.setItem(KEY, JSON.stringify(list.slice(0, 200))) } catch {} }
+const GONE = 'texloom.recentGone' // project -> when it was removed, so other devices remove it too
+let changed: (() => void) | null = null
+const write = (list: Recent[], quietly = false) => {
+  try { localStorage.setItem(KEY, JSON.stringify(list.slice(0, 200))) } catch {}
+  if (!quietly) changed?.()
+}
+const readGone = (): Record<string, number> => { try { return JSON.parse(localStorage.getItem(GONE) || '{}') } catch { return {} } }
+const writeGone = (gone: Record<string, number>) => { try { localStorage.setItem(GONE, JSON.stringify(gone)) } catch {} }
 
 /** Short, readable project code derived from its id, e.g. "K7P2-QX4M" (Crockford
  *  base32: no lookalike letters, no '-' or '_' from the base64 id). */
@@ -56,6 +64,35 @@ export const projects = {
     write(list)
   },
 
+  onChange(f: () => void) { changed = f },
+
+  /** This browser's list, in the form kept on the server. */
+  asList(): ListDoc {
+    const out: Record<string, ListEntry> = {}
+    for (const r of read()) {
+      const e: ListEntry = { f: r.fragment, n: r.name, at: r.at, w: r.writable }
+      if (r.nick) e.nick = r.nick
+      if (r.docTitle) e.t = r.docTitle
+      if (r.createdBy) e.by = r.createdBy
+      out[r.project] = e
+    }
+    return { v: 1, projects: out, gone: readGone() }
+  },
+
+  /** Take on the merged list. True if what this browser shows changed. */
+  applyList(doc: ListDoc): boolean {
+    const before = read()
+    const keepFields = (r: Recent) => [r.project, r.fragment, r.name, r.at, r.writable, r.nick ?? '', r.docTitle ?? '', r.createdBy ?? '']
+    const same = (l: Recent[]) => JSON.stringify(l.map(keepFields).sort())
+    const next = Object.entries(doc.projects).map(([project, e]): Recent => ({
+      ...before.find((x) => x.project === project),
+      project, fragment: e.f, name: e.n ?? '', at: e.at, writable: !!e.w, nick: e.nick, docTitle: e.t, createdBy: e.by,
+    })).sort((a, b) => b.at - a.at)
+    write(next, true)
+    writeGone(doc.gone)
+    return same(before) !== same(next)
+  },
+
   /** Remember collaborators' names seen in a project (excluding yourself). */
   sawPeople(project: string, names: string[], me: string) {
     const r = read().find((x) => x.project === project)
@@ -68,6 +105,7 @@ export const projects = {
 
   async forget(project: string) {
     await forgetLocalCopy(project)
+    writeGone({ ...readGone(), [project]: Date.now() })
     write(read().filter((x) => x.project !== project))
     // every per-project setting (texloom.<what>.<project>) and the linked folder
     try { for (const k of Object.keys(localStorage)) if (k.startsWith('texloom.') && k.endsWith(`.${project}`)) localStorage.removeItem(k) } catch {}
