@@ -128,8 +128,9 @@ async function push(key: ListKey, seq: number, doc: unknown): Promise<boolean> {
 async function update<T>(key: ListKey, change: (had: T | null) => T): Promise<T> {
   for (let i = 0; i < 5; i++) {
     const had = await pull<T>(key)
+    const before = had && canon(had.doc) // `change` may alter what it is given
     const next = change(had?.doc ?? null)
-    if (had && canon(next) === canon(had.doc)) return next
+    if (before === canon(next)) return next
     if (await push(key, (had?.seq ?? 0) + 1, next)) return next
   }
   throw new ListError('busy')
