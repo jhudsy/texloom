@@ -52,6 +52,7 @@ function askPassword(setting: boolean): Promise<{ username: string; password: st
     const submit = () => {
       if (!username.value.trim() || !password.value) return
       if (setting && password.value.length < MIN_PASSWORD) { msg.textContent = t('Use at least {{n}} characters.', { n: MIN_PASSWORD }); return }
+      if (setting && new Set(password.value).size < 6) { msg.textContent = t('That password is too easy to guess.'); return }
       if (setting && password.value !== again.value) { msg.textContent = t('The two passwords don’t match.'); return }
       out = { username: username.value, password: password.value }
       dlg.close()

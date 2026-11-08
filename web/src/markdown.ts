@@ -12,6 +12,9 @@ export interface MarkdownHost {
 }
 
 const MAX_DEPTH = 24
+// A shared document is someone else's input: these keep a crafted one from hanging the tab.
+const MAX_LINE = 10_000
+const MAX_INLINE = 10_000
 const HR = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
 const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/
 const FENCE = /^( {0,3})(`{3,}|~{3,})[ \t]*([^\s`]*)/
@@ -146,8 +149,7 @@ class Renderer {
           let j = i + 1
           while (j < lines.length && blank(lines[j])) j++
           if (j >= lines.length || indentOf(lines[j]) < indent) break
-          body.push('')
-          i++
+          for (; i < j; i++) body.push('')
         }
         else if (indentOf(l) >= indent) { body.push(l.slice(indent)); i++ }
         else if (ITEM.test(l) || startsBlock(l)) break
@@ -224,7 +226,7 @@ class Renderer {
 
   // ---- within a line ----------------------------------------------------------------------
   private inline(text: string, parent: Node, depth: number) {
-    if (depth > MAX_DEPTH) { parent.appendChild(document.createTextNode(text)); return }
+    if (depth > MAX_DEPTH || text.length > MAX_INLINE) { parent.appendChild(document.createTextNode(text)); return }
     let buf = '', i = 0
     const flush = () => { if (buf) { parent.appendChild(document.createTextNode(buf)); buf = '' } }
     const put = (node: Node, end: number) => { flush(); parent.appendChild(node); i = end }
@@ -370,7 +372,7 @@ class Renderer {
 export function renderMarkdown(source: string, file: string, host: MarkdownHost): DocumentFragment {
   const out = document.createDocumentFragment()
   const text = source.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---[ \t]*(?:\n|$)/, '') // front matter isn't part of the text
-  const lines = text.split('\n').map((l) => l.replace(/^[ \t]+/, (ws) => ws.replace(/\t/g, '    ')))
+  const lines = text.split('\n').map((l) => l.slice(0, MAX_LINE).replace(/^[ \t]+/, (ws) => ws.replace(/\t/g, '    ')))
   new Renderer(file, host).blocks(lines, 0, out)
   return out
 }

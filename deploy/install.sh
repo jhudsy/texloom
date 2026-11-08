@@ -160,6 +160,7 @@ if [ ! -f "$SITE" ]; then
   cat > "$SITE" <<NGINX
 # Rate limits (http context; names prefixed to avoid clashing with other sites)
 limit_req_zone \$binary_remote_addr zone=texloom_code:1m rate=6r/m;
+limit_req_zone \$binary_remote_addr zone=texloom_list:1m rate=1r/s;
 map \$request_method \$texloom_put_key { PUT \$binary_remote_addr; default ""; }
 limit_req_zone \$texloom_put_key zone=texloom_upload:10m rate=10r/s;
 limit_conn_zone \$binary_remote_addr zone=texloom_ws:10m;
@@ -211,6 +212,12 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 120s;
+    }
+    # project lists: slows anyone trying passwords or creation codes
+    location /api/list/ {
+        limit_req zone=texloom_list burst=60 nodelay;
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host \$host;
     }
     location /api/ {
         proxy_pass http://127.0.0.1:8787;
@@ -266,6 +273,13 @@ import sys
 path, app_dir = sys.argv[1], sys.argv[2]
 site = open(path).read()
 blocks = {
+    "location /api/list/": """    # project lists: slows anyone trying passwords or creation codes
+    location /api/list/ {
+        limit_req zone=texloom_list burst=60 nodelay;
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;
+    }
+""",
     "location /api/arxiv/": """    # importing an arXiv paper's source: the relay fetches it (rate-limited there too)
     location /api/arxiv/ {
         limit_req zone=texloom_code burst=3 nodelay;
@@ -297,6 +311,11 @@ blocks = {
     }
 """,
 }
+if "zone=texloom_list:" not in site:
+    zone = "limit_req_zone $binary_remote_addr zone=texloom_list:1m rate=1r/s;\n"
+    code_zone = site.index("limit_req_zone $binary_remote_addr zone=texloom_code:")
+    site = site[:code_zone] + zone + site[code_zone:]
+    open(path, "w").write(site)
 anchor = "    location /api/ {"
 missing = "".join(b for k, b in blocks.items() if k not in site)
 if missing and anchor in site:

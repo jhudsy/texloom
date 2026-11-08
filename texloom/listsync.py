@@ -67,7 +67,7 @@ class ListKey:
     def from_link(cls, link: str) -> tuple[ListKey, str]:
         u = urlsplit(link.strip())
         values = parse_qs(u.fragment).get("sync")
-        if not values or not u.scheme or not u.netloc:
+        if not values or u.scheme not in ("http", "https") or not u.netloc:
             raise ValueError("not a sync link")
         secret = b64d(values[0])
         if len(secret) != 32:

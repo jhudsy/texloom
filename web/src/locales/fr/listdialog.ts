@@ -67,6 +67,7 @@ const fr: Catalog = {
     'Nom d’utilisateur ou e-mail (ni vérifié ni conservé)',
   'Password':
     'Mot de passe',
+  'That password is too easy to guess.': 'Ce mot de passe est trop facile à deviner.',
   'Password again':
     'Confirmer le mot de passe',
   'OK':

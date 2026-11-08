@@ -88,7 +88,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     return menuItems(
       [t('Open'), () => openFile(path)],
       isPreviewable(path) && [t('Show in Preview'), () => menu.preview(path)],
-      insert && latex !== null && [t('Insert {{latex}}', { latex }), () => insert(latex)],
+      insert && latex !== null && !/[{}\\%#]/.test(path) && [t('Insert {{latex}}', { latex }), () => insert(latex)],
       writable && !isBin && path.endsWith('.tex') && [t('Set as main file'), () => r.meta.set('main', path)],
       [t('Download'), () => { download(path).catch((e) => alert(String(e))) }],
       writable && [t('Rename or move'), () => rename(path, false)],

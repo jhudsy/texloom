@@ -22,6 +22,7 @@ MAX_LIST = 256 * 1024  # bytes per entry: thousands of projects
 MAX_PER_OWNER = 32  # entries per creation code (a list, and the passkeys that unlock it)
 MAX_TOTAL = 50_000  # entries in all, for servers that let anyone create them
 RETIRED = -1  # sequence number of a replaced or deleted list: its id can't be used again
+MAX_RETIRED = 256  # markers kept per creation code; a code can't fill the server with them
 
 
 class Lists:
@@ -61,12 +62,15 @@ class Lists:
         (perhaps leaked) link can't quietly start the list again under that link."""
         with self.db:
             self.db.execute("UPDATE lists SET seq=?, data=x'', seen=? WHERE id=?", (RETIRED, time.time(), lid))
+            self.db.execute("DELETE FROM lists WHERE seq=?1 AND owner=(SELECT owner FROM lists WHERE id=?2) AND id NOT IN "
+                            "(SELECT id FROM lists WHERE seq=?1 AND owner=(SELECT owner FROM lists WHERE id=?2) "
+                            "ORDER BY seen DESC LIMIT ?3)", (RETIRED, lid, MAX_RETIRED))
 
     def count(self, owner: str) -> int:
         return self.db.execute("SELECT COUNT(*) FROM lists WHERE owner=? AND seq<>?", (owner, RETIRED)).fetchone()[0]
 
     def room_for(self, owner: str) -> bool:
-        if self.db.execute("SELECT COUNT(*) FROM lists").fetchone()[0] >= MAX_TOTAL:
+        if self.db.execute("SELECT COUNT(*) FROM lists WHERE seq<>?", (RETIRED, )).fetchone()[0] >= MAX_TOTAL:
             return False
         return owner == "default" or self.count(owner) < MAX_PER_OWNER
 
