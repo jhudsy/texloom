@@ -9,7 +9,7 @@
   texloom list | add <dir> | leave <dir>          the folder list (clone and new add to it)
   texloom run   <dir> --git                       also keep the folder's git repository in step (e.g. GitHub)
   texloom allow <dir>                             review lines that run programs; allow them with --shell-escape
-  texloom mcp   <dir|link> [--name NAME]          MCP server: an agent edits/comments as a collaborator
+  texloom mcp   <dir|link> [--name NAME] [--suggest-only]  MCP server: an agent edits/comments as a collaborator
 """
 
 from __future__ import annotations
@@ -329,6 +329,8 @@ def main() -> None:
     p = sub.add_parser("mcp", help="run an MCP server (stdio) so an agent can work on the project")
     p.add_argument("target", help="a texloom folder, or a project link")
     p.add_argument("--name", default="Claude (agent)", help="how the agent appears to collaborators")
+    p.add_argument("--suggest-only", action="store_true",
+                   help="the agent can comment and suggest changes for people to accept, but not edit files directly")
     p = sub.add_parser("links", help="print share links")
     p.add_argument("dir", type=Path, nargs="?", default=Path("."))
     a = ap.parse_args()
@@ -409,7 +411,7 @@ def main() -> None:
             keys, server = load(d)
             code = load_config(d).get("create_code") or os.environ.get("TEXLOOM_CODE", "")
         try:
-            asyncio.run(serve(keys, server, a.name[:64], code or None))
+            asyncio.run(serve(keys, server, a.name[:64], code or None, a.suggest_only))
         except KeyboardInterrupt:
             pass
     elif a.cmd == "projects":

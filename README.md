@@ -495,8 +495,27 @@ The agent appears to everyone as **Claude (agent)** (change with `--name`), with
 cursor and its lines credited in "who wrote this". Its tools: list, read, search, write and
 edit files; **suggest** changes and **comment** (shown in the Review tab for people to
 accept or reject); list, reply to and resolve comments; and compile (with local `latexmk`)
-or read the latest compile log. Ask it to "suggest" rather than "edit" when you want to
-review its changes first.
+or read the latest compile log.
+
+Asking it to "suggest" rather than "edit" is only a request. To enforce it, add
+`--suggest-only`: the agent then has no way to change files directly, and every change is a
+suggestion people accept or reject. With a read-only link it can't change the project at all.
+
+```bash
+claude mcp add texloom -- texloom mcp --suggest-only ~/papers/demo
+```
+
+Each tool is labelled with the standard MCP annotations (read-only, destructive), so clients can
+decide when to ask you first. `write_file` and `edit_file` are marked destructive.
+
+**Two things to keep in mind:**
+
+- **`claude mcp add` saves its command in your client's settings, including any link you give it.**
+  An edit link there is a full key to the project: anything that can read that file can edit it.
+  Prefer a folder (`texloom mcp ~/papers/demo`), or a read-only link if the agent only needs to read.
+- **Project files and comments are text other people wrote, and the agent reads them.** Someone
+  with access could write instructions aimed at it. Use `--suggest-only` on projects you share with
+  people you don't fully trust, and be careful about what else that agent can reach.
 
 ## Assistant
 
