@@ -34,7 +34,7 @@ input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-r
 .recent a { color: var(--fg); font-weight: 500; }
 
 /* project */
-.project { display: flex; flex-direction: column; height: 100vh; }
+.project { display: flex; flex-direction: column; height: 100vh; height: var(--app-h, 100dvh); overflow: hidden; }
 header { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { font-weight: 700; color: var(--accent); text-decoration: none; }
 /* TeXLoom wordmark: the "e" dropped as in the TeX logo */
@@ -72,7 +72,9 @@ aside .tools { display: flex; gap: 6px; padding: 8px; flex-wrap: wrap; }
 .files .acts button { padding: 0 4px; font-size: 11px; border: none; background: transparent; color: var(--muted); }
 aside .hint { font-size: 12px; padding: 8px 10px; }
 
-.editor { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); }
+.editor-area { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.editor { flex: 1; min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); }
+.keybar { display: none; }
 .editor .cm-editor { height: 100%; font-size: 14px; }
 .editor .cm-scroller { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 .binary { padding: 16px; height: 100%; display: flex; flex-direction: column; gap: 8px; }
@@ -118,16 +120,51 @@ main > * { min-width: 0; }
 @keyframes cmflash { from { background: color-mix(in srgb, #ffd400 45%, transparent); } to { background: transparent; } }
 main.no-left > aside, main.no-left > .split:first-of-type { visibility: hidden; overflow: hidden; }
 main.no-right > .right, main.no-right > .split:last-of-type { visibility: hidden; overflow: hidden; }
-main.no-editor > .editor { visibility: hidden; overflow: hidden; }
+main.no-editor > .editor-area { visibility: hidden; overflow: hidden; }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing iframe, body.resizing canvas, body.resizing .cm-editor { pointer-events: none; }
 aside, .editor { border-right: none; }
 .pane-toggle { padding: 2px 8px; }
 .pane-toggle.off { color: var(--muted); }
 
-@media (min-width: 901px) { .pdfbar .narrow-only { display: none; } }
-@media (max-width: 900px) {
-  .split { visibility: hidden; } /* small windows show the editor or the PDF panel (▥ switches) */
+@media (min-width: 900px) { .narrow-only { display: none !important; } }
+@media (max-width: 899.98px) {
+  .wide-only { display: none !important; }
+  .split { visibility: hidden; } /* small windows show the editor or the PDF panel */
+  header { gap: 6px; padding: 6px 8px; }
+  header .spacer { display: none; }
+  .title { flex: 1; width: auto; min-width: 0; }
+  .status { font-size: 0; }
+  .status::before { font-size: 12px; margin: 0; }
+  .peers .peer:nth-child(n+3) { display: none; }
+  .pane-toggle { white-space: nowrap; }
+  /* the file list opens over the editor */
+  main { position: relative; }
+  aside { position: absolute; inset: 0 auto 0 0; width: min(320px, 85vw); z-index: 20; box-shadow: 4px 0 16px rgb(0 0 0 / .35); }
+  main.drawer-open::after { content: ""; position: absolute; inset: 0; z-index: 19; background: rgb(0 0 0 / .4); }
+  .pdfbar { flex-wrap: wrap; }
+  .pdfbar button { white-space: nowrap; }
+  dialog.dlg { padding: 14px 16px; max-height: 92dvh; }
+}
+@media (max-width: 599.98px) {
+  .brand { display: none; }
+  header .badge { display: none; }
+  .landing { margin-top: 4vh; }
+}
+@media (pointer: coarse) {
+  button { min-height: 40px; touch-action: manipulation; }
+  input, select, textarea, .editor .cm-editor { font-size: 16px; } /* smaller text makes iOS zoom in when focused */
+  .peer { min-height: 0; }
+  .files li { padding-top: 10px; padding-bottom: 10px; }
+  .files li.active .acts { display: flex; } /* there's no hover to reveal them */
+  .files .acts button { min-height: 36px; padding: 0 10px; font-size: 14px; }
+  .filetree .hint { display: none; }
+  .split::after { inset: 0 -12px; }
+  .syncarrows button { width: 36px; height: 36px; min-height: 0; }
+  .ctxmenu button { min-height: 44px; }
+  .keybar { display: flex; gap: 4px; padding: 4px 6px; overflow-x: auto; scrollbar-width: none; border-top: 1px solid var(--line); background: var(--panel); flex: none; }
+  .keybar button { min-width: 40px; padding: 0 6px; font-family: ui-monospace, Menlo, monospace; flex: none; }
+  main.no-editor .keybar { display: none; }
 }
 
 /* progress */

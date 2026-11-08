@@ -19,6 +19,9 @@ export interface Layout {
   showRight(): void
   /** Small windows: switch back from the PDF panel to the editor. */
   showEditor(): void
+  /** Small windows: the file list is a drawer over the editor. */
+  closeDrawer(): void
+  readonly narrow: boolean
   readonly leftHidden: boolean
   readonly rightHidden: boolean
   onChange: () => void
@@ -29,15 +32,15 @@ export function setupLayout(main: HTMLElement, splitL: HTMLElement, splitR: HTML
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(s)) } catch {} }
 
   let narrowRight = false // small windows: showing the PDF/assistant panel instead of the editor
+  let drawerOpen = false // small windows: the file list is open over them
   const apply = () => {
     if (innerWidth < NARROW) { // small windows: the editor OR the PDF/assistant panel, switched with ▥
       const right = narrowRight
-      main.classList.toggle('no-left', s.leftHidden)
+      main.classList.toggle('no-left', !drawerOpen)
+      main.classList.toggle('drawer-open', drawerOpen)
       main.classList.toggle('no-right', !right)
       main.classList.toggle('no-editor', right)
-      main.style.gridTemplateColumns = right
-        ? `${s.leftHidden ? 0 : 160}px 0 0 0 minmax(0, 1fr)`
-        : `${s.leftHidden ? 0 : 160}px 0 minmax(0, 1fr) 0 0`
+      main.style.gridTemplateColumns = right ? '0 0 0 minmax(0, 1fr)' : '0 minmax(0, 1fr) 0 0' // the file list is out of the grid here (a drawer)
       layout.onChange()
       return
     }
@@ -48,6 +51,7 @@ export function setupLayout(main: HTMLElement, splitL: HTMLElement, splitR: HTML
     s.right = Math.max(MIN_RIGHT, Math.min(s.right, total - leftW - MIN_EDITOR))
     const rightW = s.rightHidden ? 0 : s.right
     main.classList.add('custom')
+    main.classList.remove('drawer-open')
     main.classList.toggle('no-left', s.leftHidden)
     main.classList.toggle('no-right', s.rightHidden)
     main.classList.remove('no-editor')
@@ -102,19 +106,27 @@ export function setupLayout(main: HTMLElement, splitL: HTMLElement, splitR: HTML
   splitR.setAttribute('role', 'separator'); splitR.setAttribute('aria-label', t('Resize PDF and assistant panel'))
   splitL.title = splitR.title = t('Drag to resize · double-click to reset')
   addEventListener('resize', apply)
+  main.addEventListener('pointerdown', (e) => { // a tap beside the drawer closes it
+    if (drawerOpen && innerWidth < NARROW && !(e.target as HTMLElement).closest('aside')) layout.closeDrawer()
+  })
 
   const layout: Layout = {
-    toggleLeft() { s.leftHidden = !s.leftHidden; apply(); save() },
+    toggleLeft() {
+      if (innerWidth < NARROW) { drawerOpen = !drawerOpen; apply(); return }
+      s.leftHidden = !s.leftHidden; apply(); save()
+    },
     toggleRight() {
       if (innerWidth < NARROW) { narrowRight = !narrowRight; apply(); return }
       s.rightHidden = !s.rightHidden; apply(); save()
     },
     showRight() {
-      if (innerWidth < NARROW) { if (!narrowRight) { narrowRight = true; apply() } return }
+      if (innerWidth < NARROW) { if (!narrowRight || drawerOpen) { narrowRight = true; drawerOpen = false; apply() } return }
       if (s.rightHidden) { s.rightHidden = false; apply(); save() }
     },
-    showEditor() { if (innerWidth < NARROW && narrowRight) { narrowRight = false; apply() } },
-    get leftHidden() { return s.leftHidden },
+    showEditor() { if (innerWidth < NARROW && (narrowRight || drawerOpen)) { narrowRight = false; drawerOpen = false; apply() } },
+    closeDrawer() { if (drawerOpen) { drawerOpen = false; apply() } },
+    get narrow() { return innerWidth < NARROW },
+    get leftHidden() { return innerWidth < NARROW ? !drawerOpen : s.leftHidden },
     get rightHidden() { return innerWidth < NARROW ? !narrowRight : s.rightHidden },
     onChange: () => {},
   }

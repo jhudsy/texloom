@@ -12,6 +12,7 @@ import { $, h, saveFile } from './dom'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
+import { openContextMenu } from './contextmenu'
 import { menuTargets } from './editormenu'
 import { FilePreview, isPreviewable } from './preview'
 import { handleListHash, listDialog, startListSync, takeListHash } from './listsync'
@@ -205,7 +206,7 @@ async function openProject(keys: Keys) {
       writable,
       review: (kind) => { if (writable) { openReview(); review()?.add(kind) } },
       showInPdf: () => syncToPdf(),
-      search: (text) => { showLeft('search'); search.focus(text) },
+      search: (text) => { if (layout.leftHidden) layout.toggleLeft(); showLeft('search'); search.focus(text) },
       ask: () => { if (layout.rightHidden) layout.showRight(); showTab('ai') },
       file: () => editor.current(),
       ...menuTargets(r, index, gotoSource, (path) => { layout.showEditor(); tree.open(path) }),
@@ -220,7 +221,10 @@ async function openProject(keys: Keys) {
   const tree = createFileTree(r, writable, (p) => {
     editor.open(p)
     r.awareness.setLocalStateField('file', p) // so collaborators can jump to where you are
-    if (panelsReady) previewFile(p)
+    if (!panelsReady) return
+    if (layout.narrow && p && !(isPreviewable(p) && !r.files.has(p))) layout.showEditor() // a text file: it opens in the editor
+    previewFile(p)
+    layout.closeDrawer()
   })
 
   // "Import" (zip / arXiv) and "+ Reference" (DOI / arXiv): in the file tools
@@ -271,6 +275,7 @@ async function openProject(keys: Keys) {
       return
     }
     preview.show(p)
+    if (layout.narrow && r.files.has(p)) return // small windows show one thing at a time, and it's in the editor
     const was = currentTab
     if (layout.rightHidden) layout.showRight()
     else if (was !== 'pdf' && was !== 'preview' && r.files.has(p)) return // it's in the editor anyway: leave that tab open
@@ -355,7 +360,7 @@ async function openProject(keys: Keys) {
 
   // ---- folder sync from the browser (Chromium) ----
   let folder: FolderSync | null = null
-  const folderBtn = h('button', { class: 'folder', hidden: true, onclick: () => folderMenu() })
+  const folderBtn = h('button', { class: 'folder wide-only', hidden: true, onclick: () => folderMenu() })
   const showFolder = () => {
     folderBtn.hidden = !folder && !pendingFolder
     folderBtn.textContent = folder ? `📁 ${folder.name}` : `📁 ${t('Reconnect folder')}`
@@ -421,9 +426,21 @@ async function openProject(keys: Keys) {
   const status = h('span', { class: 'status', role: 'status' })
   const peers = h('span', { class: 'peers' })
   const title = h('input', { class: 'title', readonly: !writable, 'aria-label': t('Project name'), onchange: (e: any) => r.meta.set('name', e.target.value) })
-  const syncBtn = h('button', { onclick: async () => { syncBtn.setAttribute('disabled', ''); await r.syncNow(); syncBtn.removeAttribute('disabled') } }, t('Sync now'))
-  const zipBtn = h('button', { title: t('Download all files as a .zip'), onclick: () => downloadZip() }, `⤓ ${t('Source')}`)
+  const syncBtn = h('button', { class: 'wide-only', onclick: async () => { syncBtn.setAttribute('disabled', ''); await r.syncNow(); syncBtn.removeAttribute('disabled') } }, t('Sync now'))
+  const zipBtn = h('button', { class: 'wide-only', title: t('Download all files as a .zip'), onclick: () => downloadZip() }, `⤓ ${t('Source')}`)
   const leftBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleLeft() }, '☰')
+  const allProjects = () => { location.href = '/' }
+  const moreBtn = h('button', { class: 'narrow-only', title: t('More'), 'aria-label': t('More'), onclick: (e: any) => {
+    const b = e.currentTarget.getBoundingClientRect()
+    openContextMenu(b.right, b.bottom + 4, [
+      [t('Share'), () => shareDialog(r, server, me.name)],
+      ...(syncBtn.hidden ? [] : [[t('Sync now'), () => syncBtn.click()] as [string, () => void]]),
+      [`⤓ ${t('Source')}`, () => zipBtn.click()],
+      ...(folderBtn.hidden ? [] : [[folderBtn.textContent ?? '', () => folderBtn.click()] as [string, () => void]]),
+      [t('Settings'), () => openSettings()],
+      [t('All projects'), allProjects],
+    ])
+  } }, '⋯')
   const rightBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleRight() }, '▥')
   const splitL = h('div', { class: 'split' })
   // Overleaf-style arrows on the editor/PDF divider: jump between the source and the PDF
@@ -438,6 +455,22 @@ async function openProject(keys: Keys) {
   const mainEl = h('main', {})
   const risk = riskBanner(r, writable, () => openSettings())
 
+  /** On-screen keyboards hide the characters LaTeX is made of. */
+  function latexKeys() {
+    return h('div', { class: 'keybar', role: 'toolbar', 'aria-label': t('LaTeX characters') }, ...['\\', '{', '}', '$', '%', '_', '^', '&', '[', ']', '~'].map((key) => h('button', {
+      tabindex: -1,
+      onmousedown: (e: Event) => e.preventDefault(), // keep the editor's focus and on-screen keyboard
+      onclick: () => { const v = editor.view(); if (v) { v.dispatch(v.state.replaceSelection(key)); v.focus() } },
+    }, key)))
+  }
+  // Keep the toolbar and the character bar above the on-screen keyboard.
+  const vv = window.visualViewport
+  if (vv && matchMedia('(pointer: coarse)').matches) {
+    const fit = () => { document.documentElement.style.setProperty('--app-h', `${vv.height}px`); scrollTo(0, 0) }
+    vv.addEventListener('resize', fit)
+    fit()
+  }
+
   const app = $('#app')
   app.className = 'project'
   app.append(
@@ -449,10 +482,11 @@ async function openProject(keys: Keys) {
       syncBtn,
       zipBtn,
       folderBtn,
-      h('button', { onclick: () => shareDialog(r, server, me.name) }, t('Share')),
-      h('button', { title: t('Settings'), onclick: () => openSettings() }, '⚙'),
+      h('button', { class: 'wide-only', onclick: () => shareDialog(r, server, me.name) }, t('Share')),
+      h('button', { class: 'wide-only', title: t('Settings'), onclick: () => openSettings() }, '⚙'),
       output.compileBtn,
       rightBtn,
+      moreBtn,
     ),
     risk.el,
     mainEl,
@@ -460,13 +494,14 @@ async function openProject(keys: Keys) {
   mainEl.append(
     h('aside', {}, h('div', { class: 'tabs' }, leftBtns.files, leftBtns.search, leftBtns.outline), leftPanes.files, leftPanes.search, leftPanes.outline),
     splitL,
-    editor.el,
+    h('div', { class: 'editor-area' }, editor.el, writable ? latexKeys() : null),
     splitR,
     h('section', { class: 'right' }, h('div', { class: 'tabs' }, tabBtns.pdf, tabBtns.preview, tabBtns.ai, tabBtns.review, tabBtns.history), panes.pdf, panes.preview, panes.ai, panes.review, panes.history),
   )
   const layout = setupLayout(mainEl, splitL, splitR)
   layout.onChange = () => {
     leftBtn.title = layout.leftHidden ? t('Show the file list') : t('Hide the file list')
+    rightBtn.textContent = !layout.narrow ? '▥' : layout.rightHidden ? t('PDF') : t('Editor')
     rightBtn.title = layout.rightHidden ? t('Show the PDF and assistant') : t('Hide the PDF and assistant')
     leftBtn.classList.toggle('off', layout.leftHidden)
     rightBtn.classList.toggle('off', layout.rightHidden)
@@ -484,6 +519,7 @@ async function openProject(keys: Keys) {
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
       e.preventDefault()
+      if (layout.leftHidden) layout.toggleLeft()
       if (layout.leftHidden) layout.toggleLeft()
       showLeft('search')
       const sel = editor.selection()
@@ -633,6 +669,7 @@ async function openProject(keys: Keys) {
     title.title = t('Project name (shared with collaborators) · code {{code}}', { code: projectCode(keys.project) })
   }
   r.meta.observe(renderMeta); renderMeta()
+  output.compileBtn.addEventListener('click', () => { if (layout.narrow) { layout.showRight(); showTab('pdf') } }) // the result is what you want to see
 
   // debugging handle, only when enabled with localStorage['texloom.debug'] = '1'
   try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor, startFolderSync } } catch {}

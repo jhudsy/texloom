@@ -173,6 +173,10 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **Compile log:** **Log** shows it under the PDF; drag its top edge to resize.
 - **Downloads:** **⤓ PDF** and **⤓ Source** (a `.zip`).
 
+**Phones and tablets.** In small windows the editor and the PDF take turns on screen, the file list
+opens over them from ☰, and the other commands are under ⋯. On touch screens a bar above the keyboard
+has the characters LaTeX needs.
+
 **Right-click.** On selected text: show it in the PDF, comment, suggest a change, search the project
 or ask the assistant. On a LaTeX command: go to a `\ref`'s label or a `\cite`'s bibliography entry,
 find the uses of a `\label`, open an `\input` or `\includegraphics` file, or show that line in the
