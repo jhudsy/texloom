@@ -6,37 +6,9 @@ import { h } from './dom'
 import { diffLines, diffStats, type Op } from './diff'
 import { putText } from './projectfiles'
 import { t, tn, locale } from './i18n'
-
-export interface Version { at: number; by: string; label?: string; auto?: boolean; snap: Uint8Array }
+import { docAt, nameVersion, observeNames, saveVersion, versionLabel, type Version } from './versions'
 
 const AUTO_IDLE = 2 * 60_000 // auto-save after this long without local edits
-const MAX_AUTO = 300
-
-/** Names given to versions after they were saved, by version (time and author). A map, so
- *  two people renaming the same version at once end with one name, not two copies of it.
- *  An empty name removes the name. */
-const versionNames = (r: Replica) => r.doc.getMap<string>('versionNames')
-const versionKey = (v: Pick<Version, 'at' | 'by'>) => `${v.at}:${v.by}`
-export function versionLabel(r: Replica, v: Version): string | undefined {
-  const n = versionNames(r).get(versionKey(v))
-  return typeof n === 'string' ? n || undefined : v.label
-}
-export function nameVersion(r: Replica, v: Version, label: string) {
-  versionNames(r).set(versionKey(v), label.trim().slice(0, 120))
-}
-
-export function saveVersion(r: Replica, by: string, label?: string, auto = false) {
-  const snap = Y.encodeSnapshot(Y.snapshot(r.doc))
-  r.doc.transact(() => {
-    r.versions.push([{ at: Date.now(), by, ...(label ? { label } : {}), ...(auto ? { auto: true } : {}), snap }])
-    // keep the newest automatic versions; named ones (also named later) are kept forever
-    const prunable = (v: any) => v?.auto && !versionLabel(r, v)
-    let excess = r.versions.toArray().filter(prunable).length - MAX_AUTO
-    for (let i = 0; i < r.versions.length && excess > 0;) {
-      if (prunable(r.versions.get(i))) { r.versions.delete(i, 1); excess-- } else i++
-    }
-  })
-}
 
 /** Save an automatic version after a pause in local editing, and when leaving the page. */
 export function autoSave(r: Replica, by: () => string) {
@@ -46,11 +18,6 @@ export function autoSave(r: Replica, by: () => string) {
   const flush = () => { if (dirty) { dirty = false; saveVersion(r, by(), undefined, true) } }
   setInterval(() => { if (dirty && Date.now() - last > AUTO_IDLE) flush() }, 30_000)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush() })
-}
-
-/** The project as it was at a version (a read-only Y.Doc). */
-export function docAt(r: Replica, v: Version): Y.Doc {
-  return Y.createDocFromSnapshot(r.doc, Y.decodeSnapshot(v.snap))
 }
 
 type Snap = { files: Map<string, string>; bin: Map<string, { h: string; size: number }> }
@@ -129,7 +96,7 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
     h('div', { class: 'history-body' }, list, detail))
 
   function render() {
-    const all = r.versions.toArray().filter((v) => v && v.snap) as Version[]
+    const all = r.versions.toArray().filter((v) => v && (v.snap || v.link)) as Version[]
     const shown = all.filter((v) => filter === 'all' || versionLabel(r, v)).sort((a, b) => b.at - a.at)
     if (!shown.length) {
       list.replaceChildren(h('li', { class: 'muted small' },
@@ -220,7 +187,7 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
   }
 
   r.versions.observe(render)
-  versionNames(r).observe(() => { render(); if (selected && detail.querySelector('.vfiles')) showVersion(selected) })
+  observeNames(r, () => { render(); if (selected && detail.querySelector('.vfiles')) showVersion(selected) })
   render()
   return panel
 }

@@ -46,7 +46,8 @@ No accounts: a project is shared by sending a link.
 | `dirs`: Y.Map     | path → true for explicit folders (folders are otherwise implied by file paths) |
 | `meta`: Y.Map     | `name`, `main` (main .tex file), settings                       |
 | `out`: Y.Map      | latest compiled output: `{pdf, log, synctex, by, at}` (blob ids; stored as *output*, see below) |
-| `versions`: Y.Array | saved versions: `{at, by, label?, auto?, snap}` (encoded `Y.snapshot`) |
+| `versions`: Y.Array | saved versions: `{at, by, label?, auto?, link}` (older ones: `snap`, a whole encoded `Y.snapshot`) |
+| `versionChain`: Y.Array | what versions are built from: `{id, base, snap}`, see History |
 | `clients`: Y.Map  | Yjs client id → display name (for "who wrote this")             |
 | `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, resolved, outcome?, replies: Y.Array}`; `start`/`end` are encoded Yjs relative positions, so they follow edits |
 | `members`: Y.Map  | personal edit links the owner issued: public key → `{name, at, by, g, revoked?}`, `g` = the owner's grant. Any editor can write this map, so the share dialog only trusts entries whose grant verifies, the owner's own record of issued links (localStorage) and keys seen signing edits; enforcement is by signatures |
@@ -325,10 +326,20 @@ A chat panel (`web/src/assistant/`) that acts on the project like another collab
 
 ## History
 
-The Yjs document keeps tombstones of deleted text, so snapshots are cheap:
-`Y.snapshot(doc)` stored with a label and time. "View at version", "diff two
-versions" and "restore file" are computed client-side. Named versions are just
+The Yjs document keeps tombstones of deleted text, so a version needs only a
+`Y.snapshot(doc)`: a state vector and everything deleted so far. "View at version", "diff
+two versions" and "restore file" are computed client-side. Named versions are just
 labelled snapshots.
+
+A whole snapshot per version made documents grow with the square of their history, because
+the document never forgets anything stored in it, even after a version is removed. So
+versions are a chain (`web/src/versions.ts`): each link in `versionChain` holds only the
+deletions and clocks new since the link it builds on (`base`), and a version names its link.
+Simultaneous saves just fork the chain. Before writing a link, the saver rebuilds it and
+compares with the real state; if they differ, or the chain is damaged, the link holds the
+whole snapshot (`base: null`). Removing a version only unlists it, since later links build
+on it. Older versions keep their own `snap` and clients that predate the chain ignore new
+ones. `npm run check-versions` in `web/` tests all this.
 
 ## Agents (MCP)
 

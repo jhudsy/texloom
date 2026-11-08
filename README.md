@@ -651,6 +651,7 @@ against the same data, `scripts/listsync-vectors.json`:
 ```bash
 python scripts/check_listsync.py
 cd web && npm run check-listsync
+npm run check-versions  # saved versions: every one opens exactly, and storing them stays small
 ```
 
 ### Translations

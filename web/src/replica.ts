@@ -11,6 +11,7 @@ import { IndexeddbPersistence } from 'y-indexeddb'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import { Keys, b64d, b64e, canonicalPub, revokeMsg, signer } from './crypto'
 import { t } from './i18n'
+import type { Link } from './versions'
 
 const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
@@ -81,7 +82,8 @@ export class Replica {
   readonly files = this.doc.getMap<Y.Text>('files')
   readonly bin = this.doc.getMap<{ h: string; size: number }>('bin')
   readonly dirs = this.doc.getMap<boolean>('dirs') // explicit (possibly empty) folders
-  readonly versions = this.doc.getArray<any>('versions') // saved versions: {at, by, label, auto, snap}
+  readonly versions = this.doc.getArray<any>('versions') // saved versions: {at, by, label, auto, link} (older ones: snap)
+  readonly versionChain = this.doc.getArray<Link>('versionChain') // what those versions are built from (versions.ts)
   readonly members = this.doc.getMap<any>('members') // personal links: public key -> {name, at, by, revoked?}
   /** This personal link was revoked by the owner. */
   withdrawn = false
