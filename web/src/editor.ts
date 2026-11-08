@@ -14,6 +14,7 @@ import { t } from './i18n'
 import { latexSupport, recheck, type AddReference, type ProjectIndex } from './latex'
 import { imageDropExtension } from './pasteimage'
 import { spellcheck } from './spell'
+import { editorMenu, type EditorMenuHost } from './editormenu'
 import { mathPreview } from './mathpreview'
 import { lineAuthors } from './history'
 import type { Problem } from './latexlog'
@@ -53,6 +54,7 @@ export interface EditorHooks {
   problems: (file: string) => Problem[] // last compile's problems for a file
   review: (file: string) => Extension // comment/suggestion highlights
   onReview: (kind: 'comment' | 'suggestion') => void // ⌘⌥M / ⌘⌥E
+  menu: EditorMenuHost // right-click on selected text and LaTeX commands
   addReference: AddReference // from \cite{ completion
   spell: () => { on: boolean; lang: string }
   mathPreview: () => boolean
@@ -141,6 +143,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []), addReference: writable ? hooks.addReference : undefined, checks: () => hooks.checks() && !!current && /\.(tex|ltx)$/i.test(current) }),
             imageDropExtension(r, writable),
             spellSlot.of(spellExt()),
+            editorMenu(hooks.menu),
             mathSlot.of(mathExt()),
             authorsSlot.of(authorsOn ? authorsExtension(yt) : []),
             hooks.review(path),

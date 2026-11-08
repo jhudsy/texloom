@@ -12,6 +12,7 @@ import { $, h, saveFile } from './dom'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
+import { menuTargets } from './editormenu'
 import { FilePreview, isPreviewable } from './preview'
 import { handleListHash, listDialog, startListSync, takeListHash } from './listsync'
 import { createEditorPane } from './editor'
@@ -200,6 +201,15 @@ async function openProject(keys: Keys) {
     onSync: () => syncToPdf(),
     problems: (file) => output.problems().filter((p) => p.file === file),
     review: (file) => reviewExtension(r, file, (id) => { openReview(); review()?.focus(id) }),
+    menu: {
+      writable,
+      review: (kind) => { if (writable) { openReview(); review()?.add(kind) } },
+      showInPdf: () => syncToPdf(),
+      search: (text) => { showLeft('search'); search.focus(text) },
+      ask: () => { if (layout.rightHidden) layout.showRight(); showTab('ai') },
+      file: () => editor.current(),
+      ...menuTargets(r, index, gotoSource, (path) => { layout.showEditor(); tree.open(path) }),
+    },
     addReference: (seed, insert) => referenceDialog(r, index, insert, seed),
     spell: () => ({ on: device.spell, lang: String(r.meta.get('lang') ?? '') }),
     mathPreview: () => device.mathPreview,

@@ -173,6 +173,12 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **Compile log:** **Log** shows it under the PDF; drag its top edge to resize.
 - **Downloads:** **⤓ PDF** and **⤓ Source** (a `.zip`).
 
+**Right-click.** On selected text: show it in the PDF, comment, suggest a change, search the project
+or ask the assistant. On a LaTeX command: go to a `\ref`'s label or a `\cite`'s bibliography entry,
+find the uses of a `\label`, open an `\input` or `\includegraphics` file, or show that line in the
+PDF. Anywhere else you get the browser's own menu with its spelling suggestions, and Shift +
+right-click always does.
+
 **Preview.** Choosing a Markdown file, image or PDF in the file list shows it in the **Preview**
 tab, next to the PDF of the compiled document. Markdown updates as you type and can show the
 project's own images and math in `$…$` or `$$…$$`. Raw HTML appears as plain text, and images from

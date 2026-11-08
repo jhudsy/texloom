@@ -3,6 +3,7 @@
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { t } from './i18n'
+import { openContextMenu, type MenuItem } from './contextmenu'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 export { pdfjs }
@@ -13,7 +14,7 @@ export class PdfView {
   onPick: ((page: number, x: number, y: number) => void) | null = null
   /** Where the PDF was last clicked (what “go to source” uses), in PDF points. */
   private lastClick: { page: number; x: number; y: number } | null = null
-  private menu: HTMLDivElement | null = null
+  private menu: (() => void) | null = null
   private pages: { wrap: HTMLDivElement; scale: number }[] = []
   private gen = 0
   private last: Uint8Array | null = null
@@ -78,43 +79,11 @@ export class PdfView {
     return { page: best + 1, x: r.width / 2 / p.scale, y }
   }
 
-  private openMenu(x: number, y: number, items: [string, () => void][]) {
+  private openMenu(x: number, y: number, items: MenuItem[]) {
     this.closeMenu()
-    const m = document.createElement('div')
-    m.className = 'ctxmenu'
-    m.setAttribute('role', 'menu')
-    for (const [label, run] of items) {
-      const b = document.createElement('button')
-      b.setAttribute('role', 'menuitem')
-      b.textContent = label
-      b.onclick = () => { this.closeMenu(); run() }
-      m.append(b)
-    }
-    document.body.append(m)
-    const w = m.offsetWidth, h = m.offsetHeight
-    Object.assign(m.style, { left: `${Math.min(x, innerWidth - w - 4)}px`, top: `${Math.min(y, innerHeight - h - 4)}px` })
-    ;(m.firstElementChild as HTMLElement | null)?.focus()
-    const away = (e: Event) => {
-      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !m.contains(e.target as Node)) this.closeMenu()
-    }
-    setTimeout(() => {
-      document.addEventListener('pointerdown', away, true)
-      document.addEventListener('keydown', away, true)
-      addEventListener('blur', away)
-    })
-    this.menu = m
-    ;(m as any).cleanup = () => {
-      document.removeEventListener('pointerdown', away, true)
-      document.removeEventListener('keydown', away, true)
-      removeEventListener('blur', away)
-    }
+    this.menu = openContextMenu(x, y, items, () => { this.menu = null })
   }
-  private closeMenu() {
-    if (!this.menu) return
-    ;(this.menu as any).cleanup?.()
-    this.menu.remove()
-    this.menu = null
-  }
+  private closeMenu() { this.menu?.() }
 
   /** Briefly highlight a box (PDF points from the page's top-left) and scroll it into view. */
   highlight(page: number, x: number, y: number, w: number, h: number) {
