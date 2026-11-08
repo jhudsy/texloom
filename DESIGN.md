@@ -181,7 +181,10 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   size change.
 - **Replays:** an identical `up` (same ciphertext hash) is acked with its existing sequence
   number and not stored again; hashes of updates a snapshot replaced are kept (`gone`),
-  so those can't be stored again either.
+  so those can't be stored again either. Only the last 10,000 sequence numbers per project
+  are remembered, each counting 100 bytes against the allowance, and eviction, purging or
+  going relay-only forgets them. An older replay is harmless: updates are idempotent, and
+  it counts against the allowance only until the next snapshot.
 - **Memory:** WebSocket frames are read whole before they can be checked, so they are
   capped at 16 MiB, and large frames being handled are capped server-wide (192 MiB).
   Files go over HTTP (≤ 50 MiB, a few uploads read at a time), or peer to peer

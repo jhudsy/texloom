@@ -85,6 +85,12 @@ MAX_CONNECTIONS = 2000
 PURGE_PAUSE = 0.01  # seconds between deleted projects: lets live editing through
 MODE_SKEW = 600  # seconds a signed mode-change command stays valid
 MAX_REVOKED = 1000  # revocations kept per project
+# Compacted edits are remembered by hash so a replay of one isn't stored again. Only the most
+# recent are kept per project, and each counts against the allowance, so the table can't grow
+# without limit. Replaying something older is harmless: edits are idempotent, and the copy
+# counts against the allowance only until the next compaction.
+GONE_KEEP = 10_000  # sequence numbers
+GONE_COST = 100  # bytes a remembered edit counts for
 # Rows for projects that store nothing (relay-only mode, revocations) cost nothing to create,
 # so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
 META_RATE, META_BURST = 1.0, 600
@@ -370,7 +376,8 @@ class Store:
             CREATE TABLE IF NOT EXISTS projects (
               project TEXT PRIMARY KEY, created REAL NOT NULL, label TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS gone (
-              project TEXT NOT NULL, h BLOB NOT NULL, PRIMARY KEY (project, h)) WITHOUT ROWID;
+              project TEXT NOT NULL, h BLOB NOT NULL, seq INTEGER NOT NULL DEFAULT 0,
+              PRIMARY KEY (project, h)) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS floor (project TEXT PRIMARY KEY, seq INTEGER NOT NULL);
             """
         )
@@ -393,6 +400,8 @@ class Store:
                 self.db.execute("UPDATE log SET h=? WHERE project=? AND seq=?",
                                 (hashlib.sha256(data).digest(), project, seq))
         self.db.execute("CREATE INDEX IF NOT EXISTS log_h ON log(project, h)")
+        if "seq" not in {r[1] for r in self.db.execute("PRAGMA table_info(gone)")}:
+            self.db.execute("ALTER TABLE gone ADD COLUMN seq INTEGER NOT NULL DEFAULT 0")
         with self.db:  # projects stored before registration existed are grandfathered in
             self.db.execute(
                 "INSERT OR IGNORE INTO projects(project, created, label, owner) "
@@ -401,7 +410,8 @@ class Store:
             )
         self.usage: dict[str, int] = defaultdict(int)
         for q in ("SELECT project, SUM(length(data) + length(sig)) FROM log GROUP BY project",
-                  "SELECT project, SUM(length(data)) FROM blob GROUP BY project"):
+                  "SELECT project, SUM(length(data)) FROM blob GROUP BY project",
+                  f"SELECT project, COUNT(*) * {GONE_COST} FROM gone GROUP BY project"):
             for project, n in self.db.execute(q):
                 self.usage[project] += n or 0
         self.total = sum(self.usage.values())
@@ -456,6 +466,7 @@ class Store:
         with self.db:
             self.db.execute("DELETE FROM log WHERE project=?", (project,))
             self.db.execute("DELETE FROM blob WHERE project=?", (project,))
+            self.db.execute("DELETE FROM gone WHERE project=?", (project,))
             self.db.execute("INSERT INTO floor(project, seq) VALUES (?,?) "
                             "ON CONFLICT(project) DO UPDATE SET seq=excluded.seq", (project, self.head(project)))
             self.db.execute("UPDATE projects SET evicted=? WHERE project=?", (time.time(), project))
@@ -474,6 +485,7 @@ class Store:
                             (project,)).fetchone()[0]
         n += self.db.execute("SELECT COALESCE(SUM(length(data)), 0) FROM blob WHERE project=?",
                              (project,)).fetchone()[0]
+        n += GONE_COST * self.db.execute("SELECT COUNT(*) FROM gone WHERE project=?", (project,)).fetchone()[0]
         self.total += n - self.usage[project]
         self.usage[project] = n
 
@@ -515,15 +527,19 @@ class Store:
 
     def snapshot_delta(self, project: str, upto: int, size: int) -> int:
         """Bytes a snapshot would add (negative when it frees space)."""
-        freed = self.db.execute("SELECT COALESCE(SUM(length(data) + length(sig)), 0) FROM log "
-                                "WHERE project=? AND seq<=?", (project, upto)).fetchone()[0]
-        return size - freed
+        freed, remembered = self.db.execute(
+            "SELECT COALESCE(SUM(length(data) + length(sig)), 0), COALESCE(SUM(snap=0 AND h IS NOT NULL), 0) "
+            "FROM log WHERE project=? AND seq<=?", (project, upto)).fetchone()
+        forgotten = self.db.execute("SELECT COUNT(*) FROM gone WHERE project=? AND seq<=?",
+                                    (project, upto - GONE_KEEP)).fetchone()[0]
+        return size - freed + (remembered - forgotten) * GONE_COST
 
     def snapshot(self, project: str, upto: int, data: bytes, sig: bytes) -> None:
         with self.db:
             # remember what the snapshot replaces, so those updates can't be stored again
-            self.db.execute("INSERT OR IGNORE INTO gone(project, h) SELECT project, h FROM log "
+            self.db.execute("INSERT OR IGNORE INTO gone(project, h, seq) SELECT project, h, seq FROM log "
                             "WHERE project=? AND seq<=? AND snap=0 AND h IS NOT NULL", (project, upto))
+            self.db.execute("DELETE FROM gone WHERE project=? AND seq<=?", (project, upto - GONE_KEEP))
             self.db.execute("DELETE FROM log WHERE project=? AND seq<=?", (project, upto))
             self.db.execute("INSERT INTO log(project, seq, snap, data, sig, h) VALUES (?,?,1,?,?,?)",
                             (project, upto, data, sig, hashlib.sha256(data).digest()))
@@ -577,6 +593,7 @@ class Store:
             if relay_only:  # forget everything we stored for this project
                 self.db.execute("DELETE FROM log WHERE project=?", (project,))
                 self.db.execute("DELETE FROM blob WHERE project=?", (project,))
+                self.db.execute("DELETE FROM gone WHERE project=?", (project,))
         self._recount(project)
 
     def has_blob(self, project: str, bid: str) -> bool:
