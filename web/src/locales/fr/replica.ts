@@ -1,5 +1,7 @@
 import type { Catalog } from '../../i18n'
 const fr: Catalog = {
+  'the server refused the change': 'le serveur a refusé la modification',
+  'the server is busy: try again later': 'le serveur est occupé : réessayez plus tard',
   'the server can’t be reached': 'le serveur est injoignable',
   'the server didn’t confirm': 'le serveur n’a pas confirmé',
   'read-only': 'lecture seule',

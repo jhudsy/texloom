@@ -13,7 +13,7 @@ import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
 import { missingKeysDialog, projectFromAddress } from './addressbar'
-import { menuItems, openContextMenu } from './contextmenu'
+import { menuItems, openContextMenu, type MenuItem } from './contextmenu'
 import { menuTargets } from './editormenu'
 import { FilePreview, isPreviewable } from './preview'
 import { isTexFile } from './projectfiles'
@@ -212,7 +212,7 @@ async function openProject(keys: Keys) {
       review: addReview,
       showInPdf: () => syncToPdf(),
       search: (text) => revealSearch(text),
-      ask: () => { if (layout.rightHidden) layout.showRight(); showTab('ai') },
+      ask: () => { layout.reveal('right'); showTab('ai') },
       file: () => editor.current(),
       ...menuTargets(r, index, gotoSource, (path) => { layout.showEditor(); tree.open(path) }),
     },
@@ -225,11 +225,9 @@ async function openProject(keys: Keys) {
   const tree = createFileTree(r, writable, (p) => {
     editor.open(p)
     r.awareness.setLocalStateField('file', p) // so collaborators can jump to where you are
-    if (layout.narrow && p && !(isPreviewable(p) && !r.files.has(p))) layout.showEditor() // a text file: it opens in the editor
-    previewFile(p)
-    layout.closeDrawer()
+    showFile(p)
   }, {
-    preview: (p) => { preview.show(p); layout.showRight(); showTab('preview') },
+    preview: (p) => { preview.show(p); layout.reveal('right'); showTab('preview') },
     insert: () => {
       const v = editor.view()
       if (!v || !isTexFile(editor.current())) return null
@@ -262,11 +260,11 @@ async function openProject(keys: Keys) {
     }
   }
   function addReview(kind: 'comment' | 'suggestion') { if (writable) { openReview(); review()?.add(kind) } }
-  function revealSearch(text?: string) { if (layout.leftHidden) layout.toggleLeft(); showLeft('search'); search.focus(text) }
+  function revealSearch(text?: string) { layout.reveal('left'); showLeft('search'); search.focus(text) }
   function syncToPdf() {
     const c = editor.context(), v = editor.view()
     if (!c?.file || !v) return
-    if (layout.rightHidden) layout.showRight()
+    layout.reveal('right')
     showTab('pdf')
     if (!output.showInPdf(c.file, v.state.doc.lineAt(v.state.selection.main.head).number)) alert(t('Compile first: the PDF has no SyncTeX data yet.'))
   }
@@ -280,17 +278,21 @@ async function openProject(keys: Keys) {
   const preview = new FilePreview(r)
   let currentTab: Tab = 'pdf'
   let cameFromPdf = false // the preview replaced the PDF by itself, so it can give it back
-  /** A file chosen in the file list: show it in the Preview tab if it can be shown. */
-  function previewFile(p: string | null) {
-    if (!p || !isPreviewable(p)) {
-      if (currentTab === 'preview' && cameFromPdf) showTab('pdf')
+  /** Where a file chosen in the list appears: text in the editor, and anything previewable in the Preview tab. */
+  function showFile(p: string | null) {
+    layout.closeDrawer()
+    const previewable = !!p && isPreviewable(p), inEditor = !!p && r.files.has(p)
+    if (previewable) preview.show(p)
+    else if (currentTab === 'preview' && cameFromPdf) showTab('pdf')
+    if (layout.narrow) { // one thing on screen at a time
+      if (previewable && !inEditor) { layout.reveal('right'); showTab('preview') }
+      else if (p) layout.showEditor()
       return
     }
-    preview.show(p)
-    if (layout.narrow && r.files.has(p)) return // small windows show one thing at a time, and it's in the editor
+    if (!previewable) return
     const was = currentTab
-    if (layout.rightHidden) layout.showRight()
-    else if (was !== 'pdf' && was !== 'preview' && r.files.has(p)) return // it's in the editor anyway: leave that tab open
+    if (layout.isOpen('right') && was !== 'pdf' && was !== 'preview' && inEditor) return // it's in the editor anyway: leave that tab open
+    layout.reveal('right')
     if (was !== 'preview') showTab('preview')
     if (was === 'pdf') cameFromPdf = true
   }
@@ -304,7 +306,7 @@ async function openProject(keys: Keys) {
   let reviewPanel: ReviewPanel | null = null
   const review = () => reviewPanel
   const revealAt = (file: string, from: number, to: number) => { layout.showEditor(); tree.open(file); setTimeout(() => editor.reveal(from, to), 0) }
-  const openReview = () => { if (layout.rightHidden) layout.showRight(); showTab('review') }
+  const openReview = () => { layout.reveal('right'); showTab('review') }
   const makers: Partial<Record<Tab, () => HTMLElement>> = {
     ai: () => createAssistantPanel({
       replica: r, writable, editorContext: editor.context,
@@ -439,22 +441,27 @@ async function openProject(keys: Keys) {
   const status = h('span', { class: 'status', role: 'status' })
   const peers = h('span', { class: 'peers' })
   const title = h('input', { class: 'title', readonly: !writable, 'aria-label': t('Project name'), onchange: (e: any) => r.meta.set('name', e.target.value) })
-  const syncBtn = h('button', { class: 'wide-only', onclick: async () => { syncBtn.setAttribute('disabled', ''); await r.syncNow(); syncBtn.removeAttribute('disabled') } }, t('Sync now'))
+  const syncNow = async () => { syncBtn.setAttribute('disabled', ''); await r.syncNow(); syncBtn.removeAttribute('disabled') }
+  const syncBtn = h('button', { class: 'wide-only', onclick: syncNow }, t('Sync now'))
   const zipBtn = h('button', { class: 'wide-only', title: t('Download all files as a .zip'), onclick: () => downloadZip() }, `⤓ ${t('Source')}`)
-  const leftBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleLeft() }, '☰')
+  const shareProject = () => shareDialog(r, server, me.name)
+  const shareBtn = h('button', { class: 'wide-only', onclick: shareProject }, t('Share'))
+  const settingsBtn = h('button', { class: 'wide-only', title: t('Settings'), onclick: () => openSettings() }, '⚙')
+  // Each is a button in wide windows and an item under ⋯ in small ones.
+  const headerActions: { btn: HTMLElement; label: () => string; run: () => void }[] = [
+    { btn: syncBtn, label: () => t('Sync now'), run: syncNow },
+    { btn: zipBtn, label: () => `⤓ ${t('Source')}`, run: () => downloadZip() },
+    { btn: folderBtn, label: () => folderBtn.textContent ?? '', run: () => folderMenu() },
+    { btn: shareBtn, label: () => t('Share'), run: shareProject },
+    { btn: settingsBtn, label: () => t('Settings'), run: () => openSettings() },
+  ]
+  const leftBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggle('left') }, '☰')
   const allProjects = () => { location.href = '/' }
   const moreBtn = h('button', { class: 'narrow-only', title: t('More'), 'aria-label': t('More'), onclick: (e: any) => {
     const b = e.currentTarget.getBoundingClientRect()
-    openContextMenu(b.right, b.bottom + 4, menuItems(
-      [t('Share'), () => shareDialog(r, server, me.name)],
-      !syncBtn.hidden && [t('Sync now'), () => syncBtn.click()],
-      [`⤓ ${t('Source')}`, () => zipBtn.click()],
-      !folderBtn.hidden && [folderBtn.textContent ?? '', () => folderBtn.click()],
-      [t('Settings'), () => openSettings()],
-      [t('All projects'), allProjects],
-    ))
+    openContextMenu(b.right, b.bottom + 4, menuItems(...headerActions.map((a) => !a.btn.hidden && ([a.label(), a.run] as MenuItem)), [t('All projects'), allProjects]))
   } }, '⋯')
-  const rightBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleRight() }, '▥')
+  const rightBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggle('right') }, '▥')
   const splitL = h('div', { class: 'split' })
   // Overleaf-style arrows on the editor/PDF divider: jump between the source and the PDF
   const arrow = (label: string, title: string, run: () => void) => h('button', {
@@ -492,11 +499,7 @@ async function openProject(keys: Keys) {
       h('a', { href: '/', class: 'brand', title: t('All projects'), onclick: (e: Event) => { e.preventDefault(); location.href = '/' } }, brand()),
       title, writable ? null : h('span', { class: 'badge' }, t('read-only')),
       h('span', { class: 'spacer' }), peers, status,
-      syncBtn,
-      zipBtn,
-      folderBtn,
-      h('button', { class: 'wide-only', onclick: () => shareDialog(r, server, me.name) }, t('Share')),
-      h('button', { class: 'wide-only', title: t('Settings'), onclick: () => openSettings() }, '⚙'),
+      ...headerActions.map((a) => a.btn),
       output.compileBtn,
       rightBtn,
       moreBtn,
@@ -513,13 +516,14 @@ async function openProject(keys: Keys) {
   )
   const layout = setupLayout(mainEl, splitL, splitR)
   layout.onChange = () => {
-    leftBtn.title = layout.leftHidden ? t('Show the file list') : t('Hide the file list')
-    rightBtn.textContent = !layout.narrow ? '▥' : layout.rightHidden ? t('PDF') : t('Editor')
-    rightBtn.title = layout.rightHidden ? t('Show the PDF and assistant') : t('Hide the PDF and assistant')
-    leftBtn.classList.toggle('off', layout.leftHidden)
-    rightBtn.classList.toggle('off', layout.rightHidden)
-    leftBtn.setAttribute('aria-pressed', String(!layout.leftHidden))
-    rightBtn.setAttribute('aria-pressed', String(!layout.rightHidden))
+    const left = layout.isOpen('left'), right = layout.isOpen('right')
+    leftBtn.title = left ? t('Hide the file list') : t('Show the file list')
+    rightBtn.textContent = !layout.narrow ? '▥' : right ? t('Editor') : t('PDF')
+    rightBtn.title = right ? t('Hide the PDF and assistant') : t('Show the PDF and assistant')
+    leftBtn.classList.toggle('off', !left)
+    rightBtn.classList.toggle('off', !right)
+    leftBtn.setAttribute('aria-pressed', String(left))
+    rightBtn.setAttribute('aria-pressed', String(right))
   }
   const savedLeft = localStorage.getItem('texloom.ltab') as LeftTab | null
   if (savedLeft === 'outline') showLeft('outline')
@@ -531,7 +535,7 @@ async function openProject(keys: Keys) {
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
       e.preventDefault()
-      if (layout.leftHidden) layout.toggleLeft()
+      layout.reveal('left')
       showLeft('search')
       const sel = editor.selection()
       if (sel && sel.to > sel.from && !sel.text.includes('\n')) search.focus(sel.text)
@@ -680,7 +684,7 @@ async function openProject(keys: Keys) {
     title.title = t('Project name (shared with collaborators) · code {{code}}', { code: projectCode(keys.project) })
   }
   r.meta.observe(renderMeta); renderMeta()
-  output.compileBtn.addEventListener('click', () => { if (layout.narrow) { layout.showRight(); showTab('pdf') } }) // the result is what you want to see
+  output.compileBtn.addEventListener('click', () => { if (layout.narrow) { layout.reveal('right'); showTab('pdf') } }) // the result is what you want to see
 
   // debugging handle, only when enabled with localStorage['texloom.debug'] = '1'
   try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor, startFolderSync } } catch {}

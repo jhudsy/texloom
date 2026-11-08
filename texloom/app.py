@@ -151,8 +151,8 @@ def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
     if r.store_problem:
         why = {
             "needs-code": _("This server needs a creation code to store new projects: add it to the folder's .texloom/config.json as \"create_code\" and restart the app."),
-            "quota-full": _("This project's creation code has expired: renewing it restores storage.") if r.code_expired
-            else _("The storage allowance of this project's creation code is used up."),
+            "code-expired": _("This project's creation code has expired: renewing it restores storage."),
+            "quota-full": _("The storage allowance of this project's creation code is used up."),
             "project-full": _("This project has reached the server's size limit."),
             "server-full": _("The server is out of space: changes are kept here and retried."),
         }.get(r.store_problem, r.store_problem)

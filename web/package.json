@@ -7,6 +7,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "check-i18n": "node scripts/check-i18n.mjs",
+    "check-listsync": "node scripts/check-listsync.mjs",
     "download-tex": "texlyre-busytex download-assets ../tex-assets"
   },
   "keywords": [],

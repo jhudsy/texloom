@@ -56,7 +56,7 @@ class Replica:
         self.server_mode = "server"  # what the server says: "server" (stores) or "relay"
         self.pending_mode: str | None = None  # storage change not yet sent to the server
         self.code_expired = False  # the server says this project's creation code has expired
-        self.store_problem: str | None = None  # why the server isn't storing changes (needs-code, quota-full, …)
+        self.store_refusal: str | None = None  # what the server last said; see store_problem
         self.refused: str | None = None  # the server's reason for rejecting the last change sent
         self._blob_waiters: dict[str, list[asyncio.Future]] = {}
         self.before_remote: Callable[[], Awaitable[None]] | None = None
@@ -242,7 +242,7 @@ class Replica:
                         return
                     r.raise_for_status()
                 marker.unlink()
-                self.store_problem = None
+                self.store_refusal = None
             except aiohttp.ClientError as e:
                 log.warning("blob upload failed (%s); will retry", e)
                 return
@@ -378,8 +378,15 @@ class Replica:
         relay = self.server_mode == "relay" or self.storage == "relay"
         return len(self.outbox) + (0 if relay or not blobs.is_dir() else sum(1 for _f in blobs.iterdir()))
 
+    @property
+    def store_problem(self) -> str | None:
+        """Why the server isn't storing changes (needs-code, quota-full, code-expired, …). It refuses
+        with quota-full when a code has expired, which older clients understand."""
+        return "code-expired" if self.store_refusal == "quota-full" and self.code_expired else self.store_refusal
+
     def _storage_warning(self, code: str) -> None:
-        self.store_problem = code
+        self.store_refusal = code
+        code = self.store_problem
         if code in self._warned:
             return
         self._warned.add(code)
@@ -387,9 +394,8 @@ class Replica:
             "needs-code": "NOT SAVED ON SERVER: this server needs a creation code to store new projects. "
                           "Add \"create_code\" to .texloom/config.json (or set TEXLOOM_CODE) and restart. "
                           "Changes still reach collaborators who are online.",
-            "quota-full": "NOT SAVED ON SERVER: this project's creation code has expired; renewing it restores storage."
-                          if self.code_expired else
-                          "NOT SAVED ON SERVER: the storage allowance of this project's creation code is used up.",
+            "code-expired": "NOT SAVED ON SERVER: this project's creation code has expired; renewing it restores storage.",
+            "quota-full": "NOT SAVED ON SERVER: the storage allowance of this project's creation code is used up.",
             "project-full": "NOT SAVED ON SERVER: this project has reached the server's size limit.",
             "server-full": "NOT SAVED ON SERVER: the server is out of space; changes are kept here and retried.",
         }.get(code, f"not saved on server: {code}"))
@@ -474,7 +480,7 @@ class Replica:
         elif t == "ack":
             if m["q"]:
                 self._mark_seen(m["q"])
-                self.store_problem = None  # stored again
+                self.store_refusal = None  # stored again
             self.outbox.pop(m.get("id"), None)
             self.refused = None
             self.save()

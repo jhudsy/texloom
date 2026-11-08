@@ -73,7 +73,7 @@ export function riskBanner(r: Replica, writable: boolean, openSettings: () => vo
     const MB = Math.round((r.storeInfo?.projectMax ?? 0) / 1048576)
     const why =
       p === 'needs-code' ? t('Not saved on the server: storing new projects here needs a creation code.')
-      : p === 'quota-full' && r.storeInfo?.codeExpired ? t('Not saved on the server: the creation code this project was created with has expired. Renewing it restores storage.')
+      : p === 'code-expired' ? t('Not saved on the server: the creation code this project was created with has expired. Renewing it restores storage.')
       : p === 'quota-full' ? t('Not saved on the server: the storage allowance of the creation code this project was created with is used up.')
       : p === 'project-full' ? t('Not saved on the server: this project has reached the server’s {{mb}} MB limit.', { mb: MB })
       : p === 'server-full' ? t('Not saved on the server: the server is out of space. Changes are kept here and retried every few minutes.')

@@ -82,6 +82,7 @@ FRAME_LIMITS = {"hello": 4 * KiB, "aw": 64 * KiB, "mode": 4 * KiB, "up": MAX_UPD
 RATE_WINDOW, RATE_MSGS, RATE_BYTES = 10.0, 600, 160 * MiB  # per connection
 HELLOS_PER_WINDOW = 5  # a log reply can be large: don't let one connection ask for it in a loop
 MAX_CONNECTIONS = 2000
+PURGE_PAUSE = 0.01  # seconds between deleted projects: lets live editing through
 MODE_SKEW = 600  # seconds a signed mode-change command stays valid
 MAX_REVOKED = 1000  # revocations kept per project
 # Rows for projects that store nothing (relay-only mode, revocations) cost nothing to create,
@@ -240,6 +241,11 @@ class CodeBook:
         projects fall back to the default allowance and it can't store new projects."""
         u = self.until.get(code)
         return u is not None and today() > u
+
+    def lapsed(self, owner: str) -> bool:
+        """True if `owner` was a creation code that has since expired or been removed."""
+        self._load()
+        return bool(self.path) and owner not in ("default", "existing") and (owner not in self.codes or self.expired(owner))
 
     def lapsed_since(self, code: str) -> int | None:
         """Whole days since an expired code's last valid day (None if it hasn't expired)."""
@@ -677,25 +683,35 @@ class Relay:
         idle eviction does. Writers' re-uploads are refused while the code is expired or
         removed, so the projects carry on relay-only, on people's devices. Projects someone
         has open are skipped (and picked up next time). Returns (purged, bytes freed, skipped)."""
-        purged = freed = skipped = 0
+        tally = [0, 0, 0]
+        for _project in self._purging(owner, tally):
+            pass
+        return tally[0], tally[1], tally[2]
+
+    def _purging(self, owner: str, tally: list[int]):
+        """Purge a code's projects one at a time, yielding after each. `tally`: purged, freed, skipped."""
         if self.lists:
             self.lists.purge_owner(owner)
         for p in self.store.stored_by(owner):
             if self.rooms.get(p):
-                skipped += 1
+                tally[2] += 1
                 continue
-            freed += self.store.evict(p)
-            purged += 1
-        return purged, freed, skipped
+            tally[1] += self.store.evict(p)
+            tally[0] += 1
+            yield p
 
-    def purge_expired(self, after_days: float) -> None:
-        """Purge the projects of codes that expired more than `after_days` ago."""
+    async def purge_expired(self, after_days: float) -> None:
+        """Purge the projects of codes that expired more than `after_days` ago, letting live
+        editing through between projects (a lapsed plan can hold gigabytes)."""
         self.codes._load()
         for c in list(self.codes.until):
             days = self.codes.lapsed_since(c)
             if days is None or days <= after_days or not (self.store.stored_by(c) or (self.lists and self.lists.count(c))):
                 continue
-            n, freed, skipped = self.purge(c)
+            tally = [0, 0, 0]
+            for _project in self._purging(c, tally):
+                await asyncio.sleep(PURGE_PAUSE)
+            n, freed, skipped = tally
             log.info("purged %d project(s) of code %s… (%s), expired %d day(s) ago%s", n, c[:4],
                      fmt_size(freed), days, f"; {skipped} open, left for later" if skipped else "")
 
@@ -706,8 +722,7 @@ class Relay:
             "registered": owner is not None,
             # its creation code has expired or was removed (the refusal itself stays quota-full,
             # which older clients understand)
-            "codeExpired": bool(self.codes.path and owner and owner not in ("default", "existing")
-                                and (owner not in self.codes.codes or self.codes.expired(owner))),
+            "codeExpired": bool(owner and self.codes.lapsed(owner)),
             "creation": "open" if self.codes.open_creation else "code",
             "canCreate": self.codes.open_creation or bool(conn.code),
             "used": self.store.usage.get(project, 0),
@@ -867,10 +882,10 @@ class Relay:
             # since that deletes the server's copy.
             if (mode not in ("server", "relay") or abs(time.time() - ts) > MODE_SKEW or who is None
                     or who in self.store.revoked(project) or (mode == "relay" and who != "owner")):
-                await ws.send_json({"t": "err", "m": "rejected mode change"})
+                await ws.send_json({"t": "err", "code": "mode-rejected", "m": "rejected mode change"})
                 return
             if self.store.owner(project) is None and not self.store.has_mode(project) and not self.store.meta_budget():
-                await ws.send_json({"t": "err", "m": "server busy: try again later"})
+                await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
                 return
             self.store.set_mode(project, mode == "relay")
             log.info("project %s… storage mode -> %s", project[:8], mode)
@@ -1011,7 +1026,7 @@ class Relay:
             return web.json_response({"seq": current}, status=409)
         owner = row[1] if row else (self.codes.check(request.headers.get("X-Create-Code")) or "default")
         if self.codes.allowance(owner) <= 0:
-            return web.json_response({"code": "code-expired" if row else "needs-code"}, status=403)
+            return web.json_response({"code": "code-expired" if self.codes.lapsed(owner) else "needs-code"}, status=403)
         if self.store.free_disk() - len(data) < self.limits.min_free or (not row and not self.lists.room_for(owner)):
             return web.json_response({"code": "list-full"}, status=507)
         self.lists.put(lid, seq, data, owner)
@@ -1096,8 +1111,9 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
                                 continue  # someone is connected right now
                             freed = relay.store.evict(p)
                             log.info("evicted idle project %s… (%s, unopened for %g days)", p[:8], fmt_size(freed), evict_days)
+                            await asyncio.sleep(PURGE_PAUSE)
                     if purge_days is not None:
-                        relay.purge_expired(purge_days)
+                        await relay.purge_expired(purge_days)
                     if evict_days > 0 and relay.lists:
                         relay.lists.drop_idle(time.time() - evict_days * 86400)
                     await asyncio.sleep(min(3600, max(60, evict_days * 8640)) if evict_days > 0 else 3600)

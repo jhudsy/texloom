@@ -67,7 +67,7 @@ export const creationCode = {
 }
 
 /** Why the server isn't storing this project's changes (they still reach people online). */
-export type StoreProblem = 'needs-code' | 'quota-full' | 'project-full' | 'server-full' | null
+export type StoreProblem = 'needs-code' | 'quota-full' | 'code-expired' | 'project-full' | 'server-full' | null
 const STORE_PROBLEMS = new Set(['needs-code', 'quota-full', 'project-full', 'server-full'])
 export interface StoreInfo { codeExpired?: boolean; registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number | null; allowance: number | null }
 
@@ -96,8 +96,10 @@ export class Replica {
   pending = 0 // local updates not yet acknowledged
   peers = 0 // other connections to this project right now
   serverMode: StorageMode = 'server'
-  storeProblem: StoreProblem = null
+  private refusal: StoreProblem = null // what the server last said; see storeProblem
   storeInfo: StoreInfo | null = null
+  /** Why the server isn't storing changes. It refuses with quota-full when a code has expired, which older clients understand. */
+  get storeProblem(): StoreProblem { return this.refusal === 'quota-full' && this.storeInfo?.codeExpired ? 'code-expired' : this.refusal }
   onStatus: () => void = () => {}
   onCompileAck: (info: { by: string }) => void = () => {}
 
@@ -213,7 +215,7 @@ export class Replica {
         this.peers = m.peers ?? 0
         this.storeInfo = m.store ?? null
         this.learnRevoked(m.rv ?? [])
-        if (this.storeInfo?.registered && this.storeProblem === 'needs-code') this.storeProblem = null
+        if (this.storeInfo?.registered && this.refusal === 'needs-code') this.refusal = null
         // the server dropped its copy (idle eviction): everything up to `floor` is gone
         const lost = m.mode !== 'relay' && (m.head < this.since || (this.since > 0 && this.since <= (m.floor ?? 0)))
         if (lost) { this.since = m.head; this.seen.clear(); idbPut(this.db, 'kv', 'since', this.since) }
@@ -240,7 +242,7 @@ export class Replica {
         break
       case 'ack': {
         if (m.q) this.markSeen(m.q)
-        if (m.q && this.storeProblem) { this.storeProblem = null; this.onStatus() }
+        if (m.q && this.refusal) { this.refusal = null; this.onStatus() }
         for (const id of this.inflight.get(m.id) ?? []) await idbDel(this.db, 'outbox', id)
         this.inflight.delete(m.id)
         this.pending = (await idbKeys(this.db, 'outbox')).length
@@ -262,18 +264,19 @@ export class Replica {
         break
       case 'mode':
         this.serverMode = m.m
-        if (m.m === 'relay') { this.storeProblem = null; this.modeAck?.(null) } // not storing is the point
+        if (m.m === 'relay') { this.refusal = null; this.modeAck?.(null) } // not storing is the point
         this.onStatus()
         break
       case 'err':
         if (STORE_PROBLEMS.has(m.code)) {
           // Not stored, but already relayed to anyone online. Keep it in the outbox; retry later.
           if (m.id) this.inflight.delete(m.id)
-          this.storeProblem = m.code
+          this.refusal = m.code
           this.scheduleRetry()
           this.onStatus()
         } else {
-          if (/mode change/.test(String(m.m))) this.modeAck?.(String(m.m))
+          if (m.code === 'mode-rejected') this.modeAck?.(t('the server refused the change'))
+          if (m.code === 'mode-busy') this.modeAck?.(t('the server is busy: try again later'))
           console.warn('server:', m.m)
         }
     }
@@ -281,13 +284,13 @@ export class Replica {
 
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private scheduleRetry() {
-    if (this.retryTimer || this.storeProblem === 'needs-code') return // a code only helps once entered
+    if (this.retryTimer || this.refusal === 'needs-code') return // a code only helps once entered
     this.retryTimer = setTimeout(() => { this.retryTimer = null; if (this.status === 'online') this.flushOutbox() }, 5 * 60_000)
   }
 
   /** Reconnect (e.g. after entering a creation code) so the server re-evaluates storing. */
   retryStore() {
-    this.storeProblem = null
+    this.refusal = null
     this.onStatus()
     if (this.syncMode === 'manual') { this.syncNow(); return }
     ;(this.ws as WebSocket | null)?.close() // onclose reconnects; hello carries the new code
@@ -438,7 +441,7 @@ export class Replica {
     const ts = Math.floor(Date.now() / 1000)
     this.ws.send(JSON.stringify({ t: 'mode', m: mode, ts, s: b64e(this.keys.sign(`mode:${mode}:${ts}`, new Uint8Array())) }))
     this.serverMode = mode
-    if (mode === 'relay') this.storeProblem = null
+    if (mode === 'relay') this.refusal = null
     await idbDel(this.db, 'kv', 'pendingMode')
     if (mode === 'server') {
       // Give the server a complete copy again: full state plus every blob we hold.
@@ -562,7 +565,7 @@ export class Replica {
       }).catch(() => null)
       if (r && [403, 413, 507].includes(r.status)) {
         const why = (await r.json().catch(() => ({}))).code
-        if (STORE_PROBLEMS.has(why)) { this.storeProblem = why; this.scheduleRetry(); this.onStatus() }
+        if (STORE_PROBLEMS.has(why)) { this.refusal = why; this.scheduleRetry(); this.onStatus() }
       }
       if (!r?.ok) return
       await idbDel(this.db, 'pending', id)

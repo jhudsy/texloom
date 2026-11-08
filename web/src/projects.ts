@@ -4,7 +4,7 @@ import { forgetLocalCopy } from './replica'
 import { b64d } from './crypto'
 import { rememberFolder } from './foldersync'
 import { t, locale } from './i18n'
-import type { ListDoc, ListEntry } from './listsync'
+import type { ListDoc, ListEntry } from './listcore'
 
 export interface Recent {
   project: string // unique id (from the link)

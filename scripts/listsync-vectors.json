@@ -1,0 +1,274 @@
+{
+ "keys": [
+  {
+   "secret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+   "id": "JCQkcu5_781XEO6-38wl-zkVWGn-GQ41qE2n_Frslmg",
+   "seq": 7,
+   "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
+   "signature": "Mhfffj9ymKBqLLIzkjxjtIGGqqGJle_Jc-3UxpOX2E4eJ44Nnu6JLkyeaomiT5wz6B6sOCQQXx-7XIvhqZe2DQ",
+   "ciphertext": "J-Dxu1yfBRtru9iSIzLVB20IAyWQyMzDYwpIDH7h8mhOCzrLUcusXOMfTYHizmaQ1QZhcmkW",
+   "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
+   "link": "https://example.org/#sync=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+  },
+  {
+   "secret": "__________________________________________8",
+   "id": "4pFBGkNjGZAR8A6fzVXaBleSlZ_Clzp9OqmiqSbODt4",
+   "seq": 7,
+   "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
+   "signature": "J1ku7E7WW-gFQlwPeTbinTvWFngJW8f7u-ALt7kwrOVgvOdlB0voBr60YGxv6P9xg_TtFvLUsJkJdwWvbgsvBg",
+   "ciphertext": "aP8jvA6qQ1SLH5zTwTZfKUmpmjn17vCUCPShUWAVmIJcW3K7dyq9OcjpvzKHKiM0jcZ5_KT_",
+   "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
+   "link": "https://example.org/#sync=__________________________________________8"
+  }
+ ],
+ "passwords": [
+  {
+   "username": "ada@example.org",
+   "password": "correct horse battery",
+   "secret": "5NSLwAp12TI0W05Nsxh95RKT3WwvpHku8Tgl9-qbFAA"
+  },
+  {
+   "username": "  Ada@Example.ORG ",
+   "password": "correct horse battery",
+   "secret": "5NSLwAp12TI0W05Nsxh95RKT3WwvpHku8Tgl9-qbFAA"
+  },
+  {
+   "username": "josé",
+   "password": "pässwörd ﬁne long",
+   "secret": "1CsawpZpmnjiTjih07NxEt3TE7YccSVA-uSbUYvu4Ng"
+  },
+  {
+   "username": "ｗｉｄｅ",
+   "password": "Ａ full-width pass",
+   "secret": "NJZFBw6VSTR4BM91jH1zChET82WHd-hiEvPxukGDXOM"
+  }
+ ],
+ "merges": [
+  {
+   "what": "newest wins",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "p=a&k=1",
+      "n": "Old",
+      "at": 5,
+      "w": false
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "p=a&k=2",
+      "n": "New",
+      "at": 7,
+      "w": false
+     }
+    },
+    "gone": {}
+   },
+   "merged": "{\"gone\":{},\"projects\":{\"a\":{\"at\":7,\"f\":\"p=a&k=2\",\"n\":\"New\",\"w\":false}},\"v\":1}"
+  },
+  {
+   "what": "an edit link is never downgraded",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "p=a&k=1&w=x",
+      "n": "A",
+      "at": 5,
+      "w": true
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "p=a&k=1",
+      "n": "A",
+      "at": 9,
+      "w": false
+     }
+    },
+    "gone": {}
+   },
+   "merged": "{\"gone\":{},\"projects\":{\"a\":{\"at\":9,\"f\":\"p=a&k=1&w=x\",\"n\":\"A\",\"w\":true}},\"v\":1}"
+  },
+  {
+   "what": "empty values don't replace real ones",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f1",
+      "n": "Name",
+      "at": 5,
+      "w": true,
+      "nick": "mine",
+      "t": "Title"
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f2",
+      "n": "",
+      "at": 9,
+      "w": true,
+      "nick": ""
+     }
+    },
+    "gone": {}
+   },
+   "merged": "{\"gone\":{},\"projects\":{\"a\":{\"at\":9,\"f\":\"f2\",\"n\":\"Name\",\"nick\":\"mine\",\"t\":\"Title\",\"w\":true}},\"v\":1}"
+  },
+  {
+   "what": "removal beats an older copy",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f",
+      "n": "A",
+      "at": 5,
+      "w": true
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {},
+    "gone": {
+     "a": 6
+    }
+   },
+   "merged": "{\"gone\":{\"a\":6},\"projects\":{},\"v\":1}"
+  },
+  {
+   "what": "reopening beats an older removal",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f",
+      "n": "A",
+      "at": 8,
+      "w": true
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {},
+    "gone": {
+     "a": 6
+    }
+   },
+   "merged": "{\"gone\":{\"a\":6},\"projects\":{\"a\":{\"at\":8,\"f\":\"f\",\"n\":\"A\",\"w\":true}},\"v\":1}"
+  },
+  {
+   "what": "a removal at the same moment wins",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f",
+      "n": "A",
+      "at": 6,
+      "w": true
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {},
+    "gone": {
+     "a": 6
+    }
+   },
+   "merged": "{\"gone\":{\"a\":6},\"projects\":{},\"v\":1}"
+  },
+  {
+   "what": "the latest removal is kept",
+   "a": {
+    "v": 1,
+    "projects": {},
+    "gone": {
+     "a": 3,
+     "b": 9
+    }
+   },
+   "b": {
+    "v": 1,
+    "projects": {},
+    "gone": {
+     "a": 7
+    }
+   },
+   "merged": "{\"gone\":{\"a\":7,\"b\":9},\"projects\":{},\"v\":1}"
+  },
+  {
+   "what": "a tie is the same either way",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f1",
+      "n": "Zoë",
+      "at": 5,
+      "w": true
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f2",
+      "n": "Åsa",
+      "at": 5,
+      "w": true
+     }
+    },
+    "gone": {}
+   },
+   "merged": "{\"gone\":{},\"projects\":{\"a\":{\"at\":5,\"f\":\"f2\",\"n\":\"Åsa\",\"w\":true}},\"v\":1}"
+  },
+  {
+   "what": "non-ASCII and extras survive",
+   "a": {
+    "v": 1,
+    "projects": {
+     "é": {
+      "f": "f",
+      "n": "日本語 €",
+      "at": 1,
+      "w": false,
+      "by": "José",
+      "t": "“Quoted”"
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {},
+    "gone": {}
+   },
+   "merged": "{\"gone\":{},\"projects\":{\"é\":{\"at\":1,\"by\":\"José\",\"f\":\"f\",\"n\":\"日本語 €\",\"t\":\"“Quoted”\",\"w\":false}},\"v\":1}"
+  }
+ ]
+}
