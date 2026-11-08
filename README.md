@@ -524,7 +524,7 @@ collaborator:
 - it can list, read and search files, make targeted edits, create or delete files,
   compile, and read the compile log;
 - with **Ask before applying edits** (the default), each change appears as a diff to
-  apply or reject;
+  apply or reject; deleting a file always asks, even with this turned off;
 - every request's edits can be undone in one click, and they reach collaborators like
   anyone else's.
 
