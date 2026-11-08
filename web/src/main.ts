@@ -227,7 +227,7 @@ async function openProject(keys: Keys) {
     r.awareness.setLocalStateField('file', p) // so collaborators can jump to where you are
     showFile(p)
   }, {
-    preview: (p) => { preview.show(p); layout.reveal('right'); showTab('preview') },
+    preview: (p) => { preview.show(p); showInPanel(true); layout.reveal('right'); showTab('pdf') },
     insert: () => {
       const v = editor.view()
       if (!v || !isTexFile(editor.current())) return null
@@ -265,6 +265,7 @@ async function openProject(keys: Keys) {
     const c = editor.context(), v = editor.view()
     if (!c?.file || !v) return
     layout.reveal('right')
+    showInPanel(false)
     showTab('pdf')
     if (!output.showInPdf(c.file, v.state.doc.lineAt(v.state.selection.main.head).number)) alert(t('Compile first: the PDF has no SyncTeX data yet.'))
   }
@@ -274,31 +275,38 @@ async function openProject(keys: Keys) {
   }
   output.onProblems.push(() => editor.relint())
   // right-hand panel tabs; panels other than the PDF are created on first use
-  type Tab = 'pdf' | 'preview' | 'ai' | 'review' | 'history'
+  type Tab = 'pdf' | 'ai' | 'review' | 'history'
   const preview = new FilePreview(r)
   let currentTab: Tab = 'pdf'
-  let cameFromPdf = false // the preview replaced the PDF by itself, so it can give it back
-  /** Where a file chosen in the list appears: text in the editor, and anything previewable in the Preview tab. */
+  let showingFile = false // the PDF tab is showing a file from the project, not the compiled PDF
+  /** What the PDF tab shows: the compiled PDF, or a file from the project. */
+  function showInPanel(file: boolean) {
+    showingFile = file
+    const seen = currentTab === 'pdf' && file
+    preview.el.hidden = !seen
+    output.pane.hidden = file
+    tabBtns.pdf.textContent = file ? t('Preview') : t('PDF')
+    syncArrows.hidden = currentTab !== 'pdf' || file
+    if (seen) preview.visible()
+  }
+  preview.onBack = () => showInPanel(false)
+  /** Where a file chosen in the list appears: text in the editor, and anything previewable in the PDF tab. */
   function showFile(p: string | null) {
     layout.closeDrawer()
     const previewable = !!p && isPreviewable(p), inEditor = !!p && r.files.has(p)
     if (previewable) preview.show(p)
-    else if (currentTab === 'preview' && cameFromPdf) showTab('pdf')
+    showInPanel(previewable)
     if (layout.narrow) { // one thing on screen at a time
-      if (previewable && !inEditor) { layout.reveal('right'); showTab('preview') }
+      if (previewable && !inEditor) { layout.reveal('right'); showTab('pdf') }
       else if (p) layout.showEditor()
       return
     }
-    if (!previewable) return
-    const was = currentTab
-    if (layout.isOpen('right') && was !== 'pdf' && was !== 'preview' && inEditor) return // it's in the editor anyway: leave that tab open
+    if (!previewable || (layout.isOpen('right') && currentTab !== 'pdf' && inEditor)) return // it's in the editor anyway: leave that tab open
     layout.reveal('right')
-    if (was !== 'preview') showTab('preview')
-    if (was === 'pdf') cameFromPdf = true
+    showTab('pdf')
   }
   const panes: Record<Tab, HTMLElement> = {
-    pdf: output.pane,
-    preview: preview.el,
+    pdf: h('div', { class: 'pane' }, output.pane, preview.el),
     ai: h('div', { class: 'pane', hidden: true }),
     review: h('div', { class: 'pane', hidden: true }),
     history: h('div', { class: 'pane', hidden: true }),
@@ -323,7 +331,6 @@ async function openProject(keys: Keys) {
   }
   const tabBtns = {
     pdf: h('button', { class: 'tab active', onclick: () => showTab('pdf') }, t('PDF')),
-    preview: h('button', { class: 'tab', title: t('Markdown, images and PDFs from the project'), onclick: () => showTab('preview') }, t('Preview')),
     ai: h('button', { class: 'tab', onclick: () => showTab('ai') }, t('Assistant')),
     review: h('button', { class: 'tab', title: t('Comments and suggested changes'), onclick: () => showTab('review') }, t('Review')),
     history: h('button', { class: 'tab', onclick: () => showTab('history') }, t('History')),
@@ -342,11 +349,9 @@ async function openProject(keys: Keys) {
       tabBtns[k].classList.toggle('active', k === t)
     }
     if (!panes[t].firstChild && makers[t]) panes[t].append(makers[t]!())
-    syncArrows.hidden = t !== 'pdf'
     currentTab = t
-    if (t === 'preview') preview.visible()
-    cameFromPdf = false
-    if (t !== 'preview') try { localStorage.setItem('texloom.tab', t) } catch {}
+    showInPanel(showingFile)
+    try { localStorage.setItem('texloom.tab', t) } catch {}
   }
 
   // left-hand tabs: files, search across files, outline with word count
@@ -512,7 +517,7 @@ async function openProject(keys: Keys) {
     splitL,
     h('div', { class: 'editor-area' }, editor.el, writable ? latexKeys() : null),
     splitR,
-    h('section', { class: 'right' }, h('div', { class: 'tabs' }, tabBtns.pdf, tabBtns.preview, tabBtns.ai, tabBtns.review, tabBtns.history), panes.pdf, panes.preview, panes.ai, panes.review, panes.history),
+    h('section', { class: 'right' }, h('div', { class: 'tabs' }, tabBtns.pdf, tabBtns.ai, tabBtns.review, tabBtns.history), panes.pdf, panes.ai, panes.review, panes.history),
   )
   const layout = setupLayout(mainEl, splitL, splitR)
   layout.onChange = () => {
@@ -684,7 +689,7 @@ async function openProject(keys: Keys) {
     title.title = t('Project name (shared with collaborators) · code {{code}}', { code: projectCode(keys.project) })
   }
   r.meta.observe(renderMeta); renderMeta()
-  output.compileBtn.addEventListener('click', () => { if (layout.narrow) { layout.reveal('right'); showTab('pdf') } }) // the result is what you want to see
+  output.compileBtn.addEventListener('click', () => { showInPanel(false); if (layout.narrow) { layout.reveal('right'); showTab('pdf') } }) // the result is what you want to see
 
   // debugging handle, only when enabled with localStorage['texloom.debug'] = '1'
   try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor, startFolderSync } } catch {}

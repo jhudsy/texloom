@@ -362,8 +362,9 @@ aside .tab { padding: 4px 8px; }
 .radio.disabled input { cursor: not-allowed; }
 
 /* Preview tab */
-.preview-pane > .preview-name { padding: 4px 12px; border-bottom: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
-.preview-empty { padding: 16px; }
+.preview-pane > .preview-name { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--line); flex: none; }
+.preview-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview-name button { flex: none; }
 .preview-pdf { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .preview-image { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 .preview-image img { max-width: 100%; background: repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 16px 16px; }

@@ -23,7 +23,6 @@ const fr: Catalog = {
   'LaTeX characters': 'Caractères LaTeX',
   'Project list on the server…': 'Liste de projets sur le serveur…',
   'Preview': 'Aperçu',
-  'Markdown, images and PDFs from the project': 'Markdown, images et PDF du projet',
   '— opened in this browser': '— ouverts dans ce navigateur',
   'These are kept in this browser. Clearing this site’s data (or the browser’s history and site data) deletes them here.{{safari}} Keep the links somewhere safe: a project stored on the server can always be reopened from its link. Projects marked “not on server” exist only on devices.': 'Ils sont conservés dans ce navigateur. Effacer les données de ce site (ou l’historique et les données de site du navigateur) les supprime ici.{{safari}} Gardez les liens en lieu sûr : un projet stocké sur le serveur peut toujours être rouvert depuis son lien. Les projets marqués « pas sur le serveur » n’existent que sur des appareils.',
   'None yet. Projects you create or open from a link appear here.': 'Aucun pour l’instant. Les projets que vous créez ou ouvrez depuis un lien apparaissent ici.',

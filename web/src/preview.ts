@@ -1,4 +1,4 @@
-// The Preview tab: shows the Markdown, image or PDF file chosen in the file list.
+// Shows the Markdown, image or PDF file chosen in the file list, in place of the compiled PDF.
 import { h } from './dom'
 import { t } from './i18n'
 import { renderMarkdown } from './markdown'
@@ -22,9 +22,10 @@ export class FilePreview {
   private stale = false // changed while the tab was hidden
   private draw: () => void = () => {}
   private images = new Map<string, HTMLImageElement[]>() // the last render's, reused so they don't flicker
+  /** Go back to the compiled PDF (also when the file shown has been deleted). */
+  onBack: () => void = () => {}
 
   constructor(private r: Replica) {
-    this.empty()
     const recheck = () => { if (this.path && this.fingerprint(this.path) !== this.shown) this.load(this.path) }
     r.files.observe(recheck)
     r.bin.observe(recheck)
@@ -38,10 +39,6 @@ export class FilePreview {
     if (text !== undefined) return { key: text, data: async () => new TextEncoder().encode(text) }
     const info = this.r.bin.get(path)
     return info ? { key: info.h, data: () => this.r.getBlob(info.h) } : null
-  }
-
-  private empty() {
-    this.el.replaceChildren(h('p', { class: 'muted preview-empty' }, t('Choose a Markdown file, image or PDF in the file list to see it here.')))
   }
 
   show(path: string) {
@@ -78,8 +75,8 @@ export class FilePreview {
     this.shown = this.fingerprint(path)
     const gen = ++this.gen
     const src = this.source(path)
-    if (!src) { this.empty(); return }
-    const name = h('div', { class: 'preview-name muted small' }, path)
+    if (!src) { this.path = null; this.onBack(); return }
+    const name = h('div', { class: 'preview-name muted small' }, h('span', {}, path), h('button', { onclick: () => this.onBack() }, t('Compiled PDF')))
     if (MARKDOWN.test(path) && this.r.files.has(path)) { this.markdown(path, name, gen); return }
     const box = h('div', { class: PDF.test(path) ? 'preview-pdf' : 'preview-image' })
     this.el.replaceChildren(name, box)

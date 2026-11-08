@@ -197,10 +197,10 @@ PDF. Anywhere else you get the browser's own menu with its spelling suggestions,
 right-click always does. The file list has its own menu (preview, insert into the document,
 download, rename, delete), and so does the PDF (go to source, download, compile).
 
-**Preview.** Choosing a Markdown file, image or PDF in the file list shows it in the **Preview**
-tab, next to the PDF of the compiled document. Markdown updates as you type and can show the
-project's own images and math in `$…$` or `$$…$$`. Raw HTML appears as plain text, and images from
-other websites aren't loaded.
+**Preview.** Choosing a Markdown file, image or PDF in the file list shows it in the PDF panel, in
+place of the compiled document; **Compiled PDF** switches back, as does choosing a `.tex` file or
+compiling. Markdown updates as you type, with no compile, and can show the project's own images and
+math in `$…$` or `$$…$$`. Raw HTML appears as plain text, and images from other websites aren't loaded.
 
 ## Running a server
 

@@ -9,7 +9,7 @@ const fr: Catalog = {
   'Drag to move · drop files from your computer onto a folder to upload · ★ = main file': 'Glissez pour déplacer · déposez des fichiers de votre ordinateur sur un dossier pour les ajouter · ★ = fichier principal',
   'Adding to: {{folder}}/': 'Ajout dans : {{folder}}/',
   '{{action}}: {{path}}': '{{action}} : {{path}}',
-  'Show in Preview': 'Afficher dans l’aperçu',
+  'Preview': 'Aperçu',
   'Insert {{latex}}': 'Insérer {{latex}}',
   'Download': 'Télécharger',
   'Open': 'Ouvrir',
