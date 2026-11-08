@@ -4,12 +4,14 @@
 // A list is opened by one random secret, carried in a "sync link" (…/#sync=…: like a project
 // link, the part after # never reaches the server). From it come an encryption key and a signing
 // key whose public half is the list's id, so the server holds something it can neither read nor
-// change. A passkey is a second way in: it yields a secret that opens a small entry of the same
-// kind, holding the list's secret.
+// change. Passkeys and passwords are other ways in: each yields a secret that opens a small entry
+// of the same kind, holding the list's secret. A further entry, opened by the list's secret,
+// records those entries' signing keys, so that they can be removed.
 import { ed25519 } from '@noble/curves/ed25519.js'
+import { scryptAsync } from '@noble/hashes/scrypt.js'
 import { b64d, b64e } from './crypto'
 import { dialog, h } from './dom'
-import { t, tn } from './i18n'
+import { locale, t, tn } from './i18n'
 import { projects } from './projects'
 import { creationCode } from './replica'
 import { askCode } from './storagenotice'
@@ -48,6 +50,8 @@ class ListKey {
   async decrypt(data: Uint8Array): Promise<Uint8Array> {
     return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.subarray(0, 12) as BufferSource }, this.aes, data.subarray(12) as BufferSource))
   }
+
+  get signingSeed(): string { return b64e(this.seed) }
 
   signPut(seq: number, data: Uint8Array): string {
     const head = enc.encode(`list:${this.id}:${seq}:`)
@@ -115,6 +119,7 @@ function forgetOldRemovals(doc: ListDoc): ListDoc {
 async function pull(key: ListKey): Promise<{ seq: number; plain: Uint8Array } | null> {
   const r = await fetch(`/api/list/${key.id}`, { cache: 'no-store' })
   if (r.status === 404) return null
+  if (r.status === 410) throw new ListError('list-retired')
   if (!r.ok) throw new ListError('server')
   return { seq: Number(r.headers.get('X-Seq')), plain: await key.decrypt(new Uint8Array(await r.arrayBuffer())) }
 }
@@ -188,6 +193,9 @@ function explain(code: string | null): string {
     case 'needs-code': return t('This server needs a creation code to store a list.')
     case 'code-expired': return t('The creation code this list was created with has expired.')
     case 'list-full': return t('The server has no room for another list.')
+    case 'list-retired': return t('This list was replaced or deleted. Stop on this browser, then use its new sync link.')
+    case 'password-taken': return t('That username and password are already in use. Choose another password.')
+    case 'wrong-password': return t('That username and password don’t open a list on this server.')
     case 'network': return t('Couldn’t reach the server; try again when online.')
     case null: return ''
     default: return t('The server refused the list.')
@@ -259,31 +267,129 @@ async function getPasskey(only: BufferSource[] = []): Promise<Uint8Array | null>
   return out
 }
 
-/** Let a passkey open the list. */
-async function addPasskey(secret: Uint8Array): Promise<boolean> {
-  const unlocking = await createPasskey()
-  if (!unlocking) return false
+// ---- other ways in, and removing them -------------------------------------------------------
+interface Slot { kind: 'passkey' | 'password'; at: number; seed: string }
+type Registry = { v: 1; slots: Record<string, Slot> }
+
+const registryKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 'texloom list slots'))
+
+async function readRegistry(secret: Uint8Array): Promise<Registry> {
+  const had = await pull(await registryKey(secret))
+  return had ? JSON.parse(dec.decode(had.plain)) as Registry : { v: 1, slots: {} }
+}
+
+async function updateRegistry(secret: Uint8Array, change: (r: Registry) => void) {
+  const key = await registryKey(secret)
+  for (let i = 0; i < 5; i++) {
+    const had = await pull(key)
+    const doc: Registry = had ? JSON.parse(dec.decode(had.plain)) : { v: 1, slots: {} }
+    change(doc)
+    if (await push(key, (had?.seq ?? 0) + 1, enc.encode(canon(doc)))) return
+  }
+  throw new ListError('busy')
+}
+
+/** Delete an entry, keeping its id out of use, given the seed of its signing key. */
+async function retire(id: string, seed: string) {
+  const sig = b64e(ed25519.sign(enc.encode(`listdel:${id}`), b64d(seed)))
+  const r = await fetch(`/api/list/${id}`, { method: 'DELETE', headers: { 'X-Sig': sig } })
+  if (!r.ok) throw new ListError('server')
+}
+
+/** Make `unlocking` a way into the list. */
+async function addSlot(secret: Uint8Array, unlocking: Uint8Array, kind: Slot['kind']): Promise<string> {
   const key = await ListKey.of(unlocking)
   const plain = enc.encode(JSON.stringify({ v: 1, wrap: b64e(secret) }))
   await withCode(async () => {
     const had = await pull(key)
+    if (had && kind === 'password') throw new ListError('password-taken')
     if (!await push(key, (had?.seq ?? 0) + 1, plain)) throw new ListError('busy')
+    await updateRegistry(secret, (r) => { r.slots[key.id] = { kind, at: Date.now(), seed: key.signingSeed } })
   })
+  return key.id
+}
+
+async function removeSlot(secret: Uint8Array, id: string, slot: Slot) {
+  await retire(id, slot.seed)
+  await updateRegistry(secret, (r) => { delete r.slots[id] })
+}
+
+/** Remove every way in, and the record of them. */
+async function removeAllSlots(secret: Uint8Array) {
+  const { slots } = await readRegistry(secret)
+  for (const [id, slot] of Object.entries(slots)) await retire(id, slot.seed)
+  const key = await registryKey(secret)
+  await retire(key.id, key.signingSeed)
+}
+
+/** Let a passkey open the list. */
+async function addPasskey(secret: Uint8Array): Promise<boolean> {
+  const unlocking = await createPasskey()
+  if (!unlocking) return false
+  await addSlot(secret, unlocking, 'passkey')
   return true
+}
+
+const MIN_PASSWORD = 12
+
+/** What a username and password stand for. Slow on purpose, and done on this device: neither is
+ *  ever sent anywhere. Must match texloom/listsync.py. */
+const passwordSecret = (username: string, password: string) => scryptAsync(
+  enc.encode(password.normalize('NFKC')),
+  enc.encode(`texloom list password v1:${username.trim().toLowerCase().normalize('NFKC')}`),
+  { N: 2 ** 17, r: 8, p: 1, dkLen: 32, maxmem: 256 * 1024 * 1024 + 1024 },
+)
+
+/** Set the list's one password, replacing any earlier one. */
+async function setPassword(secret: Uint8Array, username: string, password: string) {
+  const fresh = await addSlot(secret, await passwordSecret(username, password), 'password')
+  const { slots } = await readRegistry(secret)
+  for (const [id, slot] of Object.entries(slots)) if (slot.kind === 'password' && id !== fresh) await removeSlot(secret, id, slot)
+}
+
+async function unlockWithPassword(username: string, password: string): Promise<Uint8Array> {
+  const had = await pull(await ListKey.of(await passwordSecret(username, password))).catch(() => null) // removed, or wrong
+  if (!had) throw new ListError('wrong-password')
+  return b64d(JSON.parse(dec.decode(had.plain)).wrap)
+}
+
+/** Move the list to a new secret, for when the link has got out. Everything that opened the old
+ *  one stops working, including passkeys and passwords: whoever has the old link could read them. */
+async function replaceList(secret: Uint8Array) {
+  await syncNow()
+  const fresh = newSecret()
+  const key = await ListKey.of(fresh)
+  await withCode(() => exchange(key, projects.asList()))
+  await removeAllSlots(secret)
+  const old = await ListKey.of(secret)
+  await retire(old.id, old.signingSeed)
+  saveSecret(fresh)
+  lastSynced = ''
+  lastError = null
+  await syncNow()
+}
+
+async function deleteList(secret: Uint8Array) {
+  await removeAllSlots(secret)
+  const key = await ListKey.of(secret)
+  await retire(key.id, key.signingSeed)
+  saveSecret(null)
+  lastSynced = ''
+  lastError = null
 }
 
 /** The list's secret, from a passkey added earlier; null if the person cancelled. */
 async function unlockWithPasskey(): Promise<Uint8Array | null> {
   const unlocking = await getPasskey()
   if (!unlocking) return null
-  const had = await pull(await ListKey.of(unlocking))
+  const had = await pull(await ListKey.of(unlocking)).catch(() => null) // removed, or never added here
   if (!had) throw new PasskeyError(t('That passkey doesn’t open a list on this server.'))
   return b64d(JSON.parse(dec.decode(had.plain)).wrap)
 }
 
 // ---- the dialog ----------------------------------------------------------------------------
 const ADD_WARNING = () => t('The projects in this browser will be added to this list, and anyone who has its link can open them. Use it only if the link is yours.')
-const NO_RECOVERY = () => t('There is no way to recover a lost list. The server can’t read it, so nobody can reset it for you. If you lose the sync link and every passkey, the list is gone for good. Your projects aren’t deleted, but you’ll need each project’s own link to open it.')
+const NO_RECOVERY = () => t('There is no way to recover a lost list. The server can’t read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren’t deleted, but you’ll need each project’s own link to open it.')
 const COPY_WARNING = () => t('Keep this link somewhere safe, such as a password manager: it opens every project on the list.')
 
 async function adopt(secret: Uint8Array) {
@@ -291,6 +397,39 @@ async function adopt(secret: Uint8Array) {
   lastSynced = ''
   await syncNow()
 }
+
+/** Ask for a username and password; `setting` also confirms it and explains the limits. */
+function askPassword(setting: boolean): Promise<{ username: string; password: string } | null> {
+  return new Promise((resolve) => {
+    const username = h('input', { autocomplete: 'username', spellcheck: 'false' }) as HTMLInputElement
+    const password = h('input', { type: 'password', autocomplete: setting ? 'new-password' : 'current-password' }) as HTMLInputElement
+    const again = h('input', { type: 'password', autocomplete: 'new-password' }) as HTMLInputElement
+    const msg = h('p', { class: 'err small', role: 'status' })
+    let out: { username: string; password: string } | null = null
+    const submit = () => {
+      if (!username.value.trim() || !password.value) return
+      if (setting && password.value.length < MIN_PASSWORD) { msg.textContent = t('Use at least {{n}} characters.', { n: MIN_PASSWORD }); return }
+      if (setting && password.value !== again.value) { msg.textContent = t('The two passwords don’t match.'); return }
+      out = { username: username.value, password: password.value }
+      dlg.close()
+    }
+    const form = h('form', { onsubmit: (e: Event) => { e.preventDefault(); submit() } },
+      h('h3', {}, setting ? t('Set a password') : t('Unlock with a password')),
+      h('p', { class: 'muted small' }, t('Your username and password stay on this device. Only a value worked out from them reaches the server, so it never learns either one.')),
+      setting ? h('p', { class: 'recovery-warning', role: 'note' }, t('A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else.')) : '',
+      h('label', { class: 'field' }, t('Username or email (not checked, and never stored)'), username),
+      h('label', { class: 'field' }, t('Password'), password),
+      setting ? h('label', { class: 'field' }, t('Password again'), again) : '',
+      msg,
+      h('div', { class: 'row end' }, h('button', { type: 'button', onclick: () => dlg.close() }, t('Cancel')), h('button', { class: 'primary', type: 'submit' }, t('OK'))),
+    )
+    const dlg = dialog('settings', form)
+    dlg.addEventListener('close', () => resolve(out))
+    username.focus()
+  })
+}
+
+const whenAdded = (at: number) => new Date(at).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
 
 export function listDialog() {
   const body = h('div', {})
@@ -301,6 +440,22 @@ export function listDialog() {
     msg.textContent = ''
     try { await f() } catch (e) { msg.textContent = e instanceof PasskeyError ? e.message : problem(e) }
     render()
+    refreshWays()
+  }
+
+  const ways = h('div', { class: 'list-ways' })
+  async function refreshWays() {
+    const secret = savedSecret()
+    ways.replaceChildren()
+    if (!secret) return
+    const slots = await readRegistry(secret).then((r) => r.slots, () => ({} as Registry['slots']))
+    const rows = Object.entries(slots).sort((a, b) => a[1].at - b[1].at).map(([id, slot]) => h('div', { class: 'row' },
+      h('span', { class: 'spacer' }, slot.kind === 'passkey' ? t('Passkey, added {{when}}', { when: whenAdded(slot.at) }) : t('Password, set {{when}}', { when: whenAdded(slot.at) })),
+      h('button', { onclick: act(async () => {
+        if (!confirm(slot.kind === 'passkey' ? t('Stop this passkey opening the list? You can also delete it from your password manager.') : t('Remove this password?'))) return
+        await removeSlot(secret, id, slot)
+      }) }, t('Remove'))))
+    ways.replaceChildren(...(rows.length ? [h('h5', {}, t('Other ways to open this list')), ...rows] : []))
   }
 
   function render() {
@@ -317,7 +472,27 @@ export function listDialog() {
           h('button', { onclick: act(syncNow) }, t('Sync now')),
           h('button', { onclick: (e: any) => { navigator.clipboard.writeText(linkFor(secret)); e.target.textContent = t('Copied') } }, t('Copy sync link')),
           passkey ? h('button', { onclick: act(async () => { if (await addPasskey(secret)) msg.textContent = t('Passkey added. Keep the sync link as well: it still opens the list if you lose this passkey.') }) }, t('Add a passkey')) : '',
-          h('button', { onclick: () => { saveSecret(null); lastSynced = ''; lastError = null; render() } }, t('Stop on this browser')),
+          h('button', { onclick: act(async () => {
+            const asked = await askPassword(true)
+            if (!asked) return
+            msg.textContent = t('Working…')
+            await setPassword(secret, asked.username, asked.password)
+            msg.textContent = t('Password set.')
+          }) }, t('Set a password')),
+          h('button', { onclick: () => { saveSecret(null); lastSynced = ''; lastError = null; render(); refreshWays() } }, t('Stop on this browser')),
+        ),
+        ways,
+        h('h5', {}, t('If the link has got out, or you’re finished with the list')),
+        h('div', { class: 'row' },
+          h('button', { onclick: act(async () => {
+            if (!confirm(t('Replace the sync link? The old link, and every passkey and password, will stop working. Other devices will need the new link.'))) return
+            await replaceList(secret)
+            msg.textContent = t('Done. Copy the new sync link and keep it safe. Add any passkeys and password again.')
+          }) }, t('Replace the sync link…')),
+          h('button', { class: 'danger', onclick: act(async () => {
+            if (!confirm(t('Delete this list from the server, for every device? Your projects aren’t deleted, and this browser keeps its own list.'))) return
+            await deleteList(secret)
+          }) }, t('Delete this list…')),
         ),
       )
       return
@@ -339,6 +514,14 @@ export function listDialog() {
           const unlocked = await unlockWithPasskey()
           if (unlocked && confirm(ADD_WARNING())) await adopt(unlocked)
         }) }, t('Unlock with a passkey')) : '',
+        h('button', { onclick: act(async () => {
+          const asked = await askPassword(false)
+          if (!asked) return
+          msg.textContent = t('Working…')
+          const unlocked = await unlockWithPassword(asked.username, asked.password)
+          msg.textContent = ''
+          if (confirm(ADD_WARNING())) await adopt(unlocked)
+        }) }, t('Unlock with a password')),
       ),
       h('div', { class: 'row' }, input, h('button', { onclick: act(async () => {
         const secret = secretFromLink(input.value)
@@ -349,6 +532,7 @@ export function listDialog() {
   }
 
   render()
+  refreshWays()
   fetch('/api/info').then((r) => r.json()).then((i) => { if (i.projectLists === false) { body.replaceChildren(h('p', {}, t('This server doesn’t keep project lists.'))) } }).catch(() => {})
 }
 

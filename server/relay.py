@@ -62,7 +62,7 @@ from aiohttp import WSMsgType, web
 
 from texloom.crypto import canonical_pub, revoke_msg, signer
 
-from .lists import MAX_LIST, Lists
+from .lists import MAX_LIST, RETIRED, Lists
 
 log = logging.getLogger("texloom.relay")
 
@@ -974,6 +974,8 @@ class Relay:
         row = self.lists.get(self._list_request(request)) if self.lists else None
         if row is None:
             raise web.HTTPNotFound()
+        if row[0] == RETIRED:
+            return web.json_response({"code": "list-retired"}, status=410)
         return web.Response(body=row[1], content_type="application/octet-stream",
                             headers={"X-Seq": str(row[0]), "Cache-Control": "no-store"})
 
@@ -997,6 +999,8 @@ class Relay:
         if len(data) > MAX_LIST or not self._list_signed(lid, f"list:{lid}:{seq}:".encode() + data, request):
             raise web.HTTPForbidden(text="bad signature")
         row = self.lists.get(lid)
+        if row and row[0] == RETIRED:
+            return web.json_response({"code": "list-retired"}, status=410)
         current = row[0] if row else 0
         if seq != current + 1:  # someone else updated it: the client merges and tries again
             return web.json_response({"seq": current}, status=409)
@@ -1013,7 +1017,7 @@ class Relay:
         assert self.lists
         if not self._list_signed(lid, f"listdel:{lid}".encode(), request):
             raise web.HTTPForbidden(text="bad signature")
-        self.lists.delete(lid)
+        self.lists.retire(lid)
         return web.Response(status=204)
 
     async def check_code(self, request: web.Request) -> web.Response:

@@ -225,6 +225,13 @@ async function openProject(keys: Keys) {
     if (layout.narrow && p && !(isPreviewable(p) && !r.files.has(p))) layout.showEditor() // a text file: it opens in the editor
     previewFile(p)
     layout.closeDrawer()
+  }, {
+    preview: (p) => { preview.show(p); layout.showRight(); showTab('preview') },
+    insert: () => {
+      const v = editor.view()
+      if (!v || !/\.(?:tex|ltx)$/i.test(editor.current() ?? '')) return null
+      return (text) => { v.dispatch(v.state.replaceSelection(text)); v.focus() }
+    },
   })
 
   // "Import" (zip / arXiv) and "+ Reference" (DOI / arXiv): in the file tools

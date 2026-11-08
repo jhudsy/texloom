@@ -74,6 +74,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   setLogOpen(localStorage.getItem(LOG_KEY) === '1')
 
   // double-click or right-click → “Go to source” in the PDF: jump to the source line
+  pdfView.menuExtras = () => [[t('Download the PDF'), () => dlBtn.click()], [t('Compile'), () => { compile() }]]
   pdfView.onPick = async (page, x, y) => {
     const st = await syncTex()
     const hit = st?.toSource(page, x, y)

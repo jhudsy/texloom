@@ -21,6 +21,7 @@ import time
 MAX_LIST = 256 * 1024  # bytes per entry: thousands of projects
 MAX_PER_OWNER = 32  # entries per creation code (a list, and the passkeys that unlock it)
 MAX_TOTAL = 50_000  # entries in all, for servers that let anyone create them
+RETIRED = -1  # sequence number of a replaced or deleted list: its id can't be used again
 
 
 class Lists:
@@ -48,12 +49,14 @@ class Lists:
                             "ON CONFLICT(id) DO UPDATE SET seq=excluded.seq, data=excluded.data, seen=excluded.seen",
                             (lid, seq, data, owner, time.time()))
 
-    def delete(self, lid: str) -> None:
+    def retire(self, lid: str) -> None:
+        """Delete an entry's contents but remember its id, so a device still holding a replaced
+        (perhaps leaked) link can't quietly start the list again under that link."""
         with self.db:
-            self.db.execute("DELETE FROM lists WHERE id=?", (lid, ))
+            self.db.execute("UPDATE lists SET seq=?, data=x'', seen=? WHERE id=?", (RETIRED, time.time(), lid))
 
     def count(self, owner: str) -> int:
-        return self.db.execute("SELECT COUNT(*) FROM lists WHERE owner=?", (owner, )).fetchone()[0]
+        return self.db.execute("SELECT COUNT(*) FROM lists WHERE owner=? AND seq<>?", (owner, RETIRED)).fetchone()[0]
 
     def room_for(self, owner: str) -> bool:
         if self.db.execute("SELECT COUNT(*) FROM lists").fetchone()[0] >= MAX_TOTAL:

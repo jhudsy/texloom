@@ -1,9 +1,11 @@
 // The project file tree: folders (collapsible), files, and file/folder operations.
+import { openContextMenu, type MenuItem } from './contextmenu'
+import { isPreviewable } from './preview'
 import * as Y from 'yjs'
 import type { Replica } from './replica'
-import { h } from './dom'
+import { h, saveFile } from './dom'
 import { t, tn } from './i18n'
-import { allFiles, allFolders, cleanPath, deletePath, exists, mainFile, movePath, newFolder, putFile } from './projectfiles'
+import { allFiles, allFolders, cleanPath, deletePath, exists, IMAGE_RE, mainFile, movePath, newFolder, putFile } from './projectfiles'
 
 export interface FileTree {
   el: HTMLElement
@@ -15,7 +17,13 @@ const base = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 const parent = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '')
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name)
 
-export function createFileTree(r: Replica, writable: boolean, onOpen: (path: string | null) => void): FileTree {
+export interface FileTreeMenu {
+  preview(path: string): void
+  /** Put LaTeX at the editor's cursor; absent when no .tex file is open. */
+  insert(): ((text: string) => void) | null
+}
+
+export function createFileTree(r: Replica, writable: boolean, onOpen: (path: string | null) => void, menu: FileTreeMenu): FileTree {
   let current: string | null = null // open file
   let folder = '' // folder new things go into (selected folder, or the open file's folder)
   const KEY = `texloom.tree.${r.keys.project}`
@@ -64,6 +72,26 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     }
   }
 
+  async function download(path: string) {
+    const info = r.bin.get(path)
+    const data = info ? await r.getBlob(info.h) : r.files.get(path)?.toString() ?? ''
+    saveFile(base(path), data)
+  }
+
+  function rowMenu(path: string, isDir: boolean, isBin: boolean): MenuItem[] {
+    if (isDir) return writable ? [[t('New file here'), () => newFile(path)], [t('Rename or move'), () => rename(path, true)], [t('Delete'), () => remove(path, true)]] : []
+    const insert = writable ? menu.insert() : null
+    const latex = /\.tex$/i.test(path) ? `\\input{${path.replace(/\.tex$/i, '')}}` : IMAGE_RE.test(path) ? `\\includegraphics{${path}}` : null
+    return [
+      [t('Open'), () => openFile(path)],
+      ...(isPreviewable(path) ? [[t('Show in Preview'), () => menu.preview(path)] as MenuItem] : []),
+      ...(insert && latex ? [[t('Insert {{latex}}', { latex }), () => insert(latex)] as MenuItem] : []),
+      ...(writable && !isBin && path.endsWith('.tex') ? [[t('Set as main file'), () => r.meta.set('main', path)] as MenuItem] : []),
+      [t('Download'), () => { download(path).catch((e) => alert(String(e))) }],
+      ...(writable ? [[t('Rename or move'), () => rename(path, false)], [t('Delete'), () => remove(path, false)]] as MenuItem[] : []),
+    ]
+  }
+
   function row(path: string, depth: number, isDir: boolean, open: boolean, isMain: boolean): HTMLElement {
     const isBin = r.bin.has(path)
     const icon = isDir ? (open ? '▾' : '▸') : isMain ? '★' : isBin ? '▣' : '¶'
@@ -82,6 +110,11 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     },
       h('span', { class: 'icon' }, icon),
       h('span', { class: 'path' }, base(path)))
+    li.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      openContextMenu(e.clientX, e.clientY, rowMenu(path, isDir, isBin))
+    })
     if (writable) {
       const act = (title: string, label: string, fn: () => void) =>
         h('button', { title, 'aria-label': t('{{action}}: {{path}}', { action: title, path }), onclick: (e: Event) => { e.stopPropagation(); fn() } }, label)

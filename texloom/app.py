@@ -597,7 +597,7 @@ class ProjectListDialog(QtWidgets.QDialog):
             "because it opens every project on the list."))
         intro.setWordWrap(True)
         lay.addWidget(intro)
-        no_recovery = QtWidgets.QLabel(_("There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it."))
+        no_recovery = QtWidgets.QLabel(_("There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it."))
         no_recovery.setWordWrap(True)
         no_recovery.setStyleSheet(f"color: {AMBER}")
         lay.addWidget(no_recovery)
@@ -621,9 +621,11 @@ class ProjectListDialog(QtWidgets.QDialog):
         passkey = QtWidgets.QPushButton(_("Unlock with a passkey…"))
         passkey.setToolTip(_("Opens the server's page in your browser, which sends the list back to this app."))
         passkey.clicked.connect(self.passkey)
+        password = QtWidgets.QPushButton(_("Unlock with a password…"))
+        password.clicked.connect(self.password)
         off = QtWidgets.QPushButton(_("Stop on this computer"))
         off.clicked.connect(self.off)
-        for w in (self.code, new, passkey, off):
+        for w in (self.code, new, passkey, password, off):
             row.addWidget(w)
         lay.addLayout(row)
         self.status = QtWidgets.QLabel("")
@@ -657,6 +659,8 @@ class ProjectListDialog(QtWidgets.QDialog):
                 "needs-code": _("This server needs a creation code to store a list."),
                 "code-expired": _("The creation code this list was created with has expired."),
                 "list-full": _("The server has no room for another list."),
+                "list-retired": _("This list was replaced or deleted. Use its new sync link."),
+                "wrong-password": _("That username and password don't open a list on this server."),
             }.get(e.code, e.code)
         return str(e)
 
@@ -706,6 +710,29 @@ class ProjectListDialog(QtWidgets.QDialog):
             return
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(f"{server}/#unlock-for-app"))
         self.status.setText(_("Unlock the list in your browser; it will come back here."))
+
+    def password(self) -> None:
+        server = self._server()
+        if not server:
+            self.status.setText(_("Join or share a project first, so TeXLoom knows which server to use."))
+            return
+        username, ok = QtWidgets.QInputDialog.getText(self, _("Project list"), _("Username or email:"))
+        if not ok or not username.strip():
+            return
+        secret, ok = QtWidgets.QInputDialog.getText(self, _("Project list"), _("Password:"), QtWidgets.QLineEdit.Password)
+        if not ok or not secret:
+            return
+        QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            key = listsync.unlock_with_password(server, username, secret)
+        except Exception as e:  # noqa: BLE001 - shown to the user
+            self.status.setText(self._explain(e))
+            return
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        self.link.setText(key.link(server))
+        listsync.save_link(key.link(server))
+        self.refresh_list()
 
     def off(self) -> None:
         listsync.save_link(None)
@@ -776,6 +803,10 @@ class Window(QtWidgets.QMainWindow):
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(1000)
+        self.list_busy, self.list_at, self.list_folders = False, 0.0, None
+        self.list_timer = QtCore.QTimer(self)
+        self.list_timer.timeout.connect(self.keep_list_updated)
+        self.list_timer.start(60_000)
         self.refresh()
 
     # -- detail pane
@@ -914,6 +945,25 @@ class Window(QtWidgets.QMainWindow):
         self.show_window()
         JoinDialog(self.engine, self, link, from_web).exec()
         self.refresh()
+
+    def keep_list_updated(self) -> None:
+        """Keep the project list in step: when this computer's folders change, and every half hour."""
+        if self.list_busy or not listsync.saved_link():
+            return
+        folders = {str(d) for d in registry.folders()}
+        if folders == self.list_folders and time.time() - self.list_at < 1800:
+            return
+
+        def work() -> None:
+            try:
+                listsync.sync_this_computer()
+            except Exception as e:  # noqa: BLE001 - offline, say: the next try will do
+                log.debug("project list: %s", e)
+            finally:
+                self.list_folders, self.list_at, self.list_busy = folders, time.time(), False
+
+        self.list_busy = True
+        threading.Thread(target=work, daemon=True).start()
 
     def project_list(self, link: str = "", from_web: bool = False) -> None:
         self.show_window()

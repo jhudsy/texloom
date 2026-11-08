@@ -230,8 +230,13 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'This computer no longer uses a project list. The list itself stays on the server.':
         'Cet ordinateur n’utilise plus de liste de projets. La liste reste sur le serveur.',
     'Close': 'Fermer',
-    "There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it.":
-        'Une liste perdue ne peut pas être récupérée. Le serveur ne peut pas la lire, donc personne ne peut la réinitialiser pour vous. Si vous perdez le lien de synchronisation et toutes vos clés d’accès, la liste est définitivement perdue. Vos projets ne sont pas supprimés, mais il vous faudra le lien de chaque projet pour l’ouvrir.',
+    "There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it.":
+        'Une liste perdue ne peut pas être récupérée. Le serveur ne peut pas la lire, donc personne ne peut la réinitialiser pour vous. Si vous perdez le lien de synchronisation et toutes vos clés d’accès, et oubliez tout mot de passe, la liste est définitivement perdue. Vos projets ne sont pas supprimés, mais il vous faudra le lien de chaque projet pour l’ouvrir.',
+    'Unlock with a password…': 'Déverrouiller avec un mot de passe…',
+    'This list was replaced or deleted. Use its new sync link.': 'Cette liste a été remplacée ou supprimée. Utilisez son nouveau lien de synchronisation.',
+    "That username and password don't open a list on this server.": 'Ce nom d’utilisateur et ce mot de passe n’ouvrent aucune liste sur ce serveur.',
+    'Username or email:': 'Nom d’utilisateur ou e-mail\xa0:',
+    'Password:': 'Mot de passe\xa0:',
     'Project list…':
         'Liste de projets…',
     'A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.':

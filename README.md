@@ -106,14 +106,22 @@ the list on one device removes it on the others.
 A list is opened by a **sync link** (`https://server/#sync=…`). Keep that link in a password
 manager, because it opens every project on the list. You can also add a **passkey**, which your
 phone or password manager carries between devices; passkeys need a browser with the WebAuthn PRF
-feature and belong to the server's address. Only use a sync link that's yours, since using one
-adds your projects to that list.
+feature and belong to the server's address. Or set a **username and password** in the web app:
+both stay on your device, and only a value worked out from them (with scrypt) reaches the server.
+Only use a sync link that's yours, since using one adds your projects to that list.
+
+If a link gets out, **Replace the sync link…** moves the list to a new one. The old link stops
+working, and so do passkeys and the password, which you then add again. **Delete this list…**
+removes it for every device. Passkeys and the password can each be removed in the same dialog.
 
 **A lost list can't be recovered.** The server can't read it, so nobody, including whoever runs the
-server, can reset access for you. If you lose the sync link and every passkey, the list is gone for
-good. Your projects aren't deleted, but you'll need each project's own link to open it.
+server, can reset access for you. A forgotten password can only be replaced using the sync link or
+a passkey. If you lose the link and every passkey, and forget any password, the list is gone for
+good. Your projects aren't deleted, but you'll need each project's own link to open it. A password
+is also the one way in that can be guessed, by someone with the server's data, so make it long.
 
-In the desktop app, use **Project list…**; for the helper, see `texloom projects` below. Starting a
+In the desktop app, use **Project list…**, which also keeps the list up to date while the app
+runs; for the helper, see `texloom projects` below (`use --password` unlocks with a password). Starting a
 list counts as creating something on the server, so servers that require a creation code ask for
 one. Servers can turn lists off with `--no-project-lists`.
 
@@ -181,7 +189,8 @@ has the characters LaTeX needs.
 or ask the assistant. On a LaTeX command: go to a `\ref`'s label or a `\cite`'s bibliography entry,
 find the uses of a `\label`, open an `\input` or `\includegraphics` file, or show that line in the
 PDF. Anywhere else you get the browser's own menu with its spelling suggestions, and Shift +
-right-click always does.
+right-click always does. The file list has its own menu (preview, insert into the document,
+download, rename, delete), and so does the PDF (go to source, download, compile).
 
 **Preview.** Choosing a Markdown file, image or PDF in the file list shows it in the **Preview**
 tab, next to the PDF of the compiled document. Markdown updates as you type and can show the

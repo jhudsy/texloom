@@ -12,6 +12,8 @@ export class PdfView {
   readonly el: HTMLDivElement
   /** Double-click or “Go to source” on a page: page number (1-based) and position in PDF points from the top-left. */
   onPick: ((page: number, x: number, y: number) => void) | null = null
+  /** More right-click items, after “Go to source here”. */
+  menuExtras: (() => MenuItem[]) | null = null
   /** Where the PDF was last clicked (what “go to source” uses), in PDF points. */
   private lastClick: { page: number; x: number; y: number } | null = null
   private menu: (() => void) | null = null
@@ -41,7 +43,7 @@ export class PdfView {
       if (!at || !this.onPick) return
       e.preventDefault()
       this.lastClick = at
-      this.openMenu(e.clientX, e.clientY, [[t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)]])
+      this.openMenu(e.clientX, e.clientY, [[t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)], ...(this.menuExtras?.() ?? [])])
     })
     this.el.addEventListener('scroll', () => this.closeMenu(), { passive: true })
   }

@@ -365,7 +365,14 @@ one to the projects it names.
   replaces an edit link with a read-only one, and drops a project removed after it was last opened.
   Removal records are forgotten after a year.
 - Other ways in are entries of the same kind holding `{"v":1,"wrap":<K>}`, opened by their own
-  secret. A passkey's secret comes from WebAuthn PRF with the salt `texloom project list v1`. The
+  secret. A password's secret is `scrypt(password, "texloom list password v1:" + username, N=2^17,
+  r=8, p=1)`, with the password NFKC-normalised and the username also trimmed and lower-cased. A
+  passkey's secret comes from WebAuthn PRF with the salt `texloom project list v1`. An entry opened
+  by `HMAC-SHA256(K, "texloom list slots")` records each way in with its signing seed (not its
+  encryption key), so whoever holds K can remove them but not read them.
+- `DELETE` retires an entry: its contents go, but its id answers 410 until it is purged, so a
+  device with a replaced (perhaps leaked) link can't start the list again under that link. Replacing
+  a link retires every way in, because anyone holding the old link can read what it records. The
   desktop app can't use a passkey, so it opens `/#unlock-for-app`, and the page returns the sync
   link through `texloom://sync?link=…`, which the app confirms before using.
 

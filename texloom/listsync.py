@@ -14,6 +14,7 @@ import hmac
 import json
 import os
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -30,10 +31,12 @@ from .crypto import b64d, b64e
 SIGN_LABEL, CRYPT_LABEL = b"texloom list sign", b"texloom list encrypt"
 TIMEOUT = 15
 YEAR_MS = 365 * 86400_000
+# Must match web/src/listsync.ts. A password only ever opens a small entry holding the list's secret.
+SCRYPT_N, SCRYPT_R, SCRYPT_P = 2**17, 8, 1
 
 
 class ListError(Exception):
-    """code: needs-code, code-expired, list-full, not-found, or a short description."""
+    """code: needs-code, code-expired, list-full, list-retired, wrong-password, or a short description."""
 
     def __init__(self, code: str):
         super().__init__(code)
@@ -132,6 +135,8 @@ def pull(key: ListKey, server: str) -> tuple[int, dict | None]:
     status, body, headers = _request("GET", f"{server}/api/list/{key.id}")
     if status == 404:
         return 0, None
+    if status == 410:
+        raise ListError("list-retired")
     if status != 200:
         raise ListError(f"server said {status}")
     return int(headers.get("X-Seq", headers.get("x-seq", 0))), json.loads(key.decrypt(body))
@@ -164,6 +169,28 @@ def sync(key: ListKey, server: str, local: dict, code: str | None = None) -> dic
         if _push(key, server, seq + 1, merged, code):
             return merged
     raise ListError("the list keeps changing: try again")
+
+
+def password_secret(username: str, password: str) -> bytes:
+    """The secret a username and password stand for. Slow on purpose, and done on this computer:
+    neither is ever sent anywhere."""
+    salt = "texloom list password v1:" + unicodedata.normalize("NFKC", username.strip().lower())
+    return hashlib.scrypt(unicodedata.normalize("NFKC", password).encode(), salt=salt.encode(),
+                          n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32, maxmem=256 * 1024 * 1024)
+
+
+def unlock_with_password(server: str, username: str, password: str) -> ListKey:
+    """The list a username and password open."""
+    unlocking = ListKey(password_secret(username, password))
+    try:
+        _, entry = pull(unlocking, server)
+    except ListError as e:
+        if e.code != "list-retired":  # a password that was changed or removed
+            raise
+        entry = None
+    if entry is None:
+        raise ListError("wrong-password")
+    return ListKey(b64d(entry["wrap"]))
 
 
 # --- this computer -----------------------------------------------------------------------------

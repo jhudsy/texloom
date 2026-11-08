@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import json
 import logging
 import os
@@ -232,7 +233,7 @@ def allow_programs(d: Path, yes: bool) -> None:
 
 
 def projects_command(a) -> None:
-    from .listsync import ListError, ListKey, local_folders, not_here, save_link, saved_link, sync, sync_this_computer
+    from .listsync import ListError, ListKey, local_folders, not_here, save_link, sync, sync_this_computer, unlock_with_password
     code = a.code or os.environ.get("TEXLOOM_CODE") or None
     try:
         if a.action == "off":
@@ -247,10 +248,16 @@ def projects_command(a) -> None:
             save_link(key.link(a.server))
             print("Your sync link (keep it in a password manager: it opens every project on the list):\n")
             print(key.link(a.server))
-            print("\nThis can't be recovered: nobody can reset it for you. If you lose this link and every passkey,\n"
-                  "the list is gone for good. Your projects aren't deleted, but you'll need each one's own link.")
+            print("\nThis can't be recovered: nobody can reset it for you. If you lose this link, every passkey and any\n"
+                  "password, the list is gone for good. Your projects aren't deleted, but you'll need each one's own link.")
             return
-        if a.action == "use":
+        if a.action == "use" and a.password:
+            if not a.server:
+                sys.exit("`texloom projects use --password` needs --server URL")
+            username = input("Username or email: ")
+            server = a.server.rstrip("/")
+            save_link(unlock_with_password(server, username, getpass.getpass("Password: ")).link(server))
+        elif a.action == "use":
             if not a.link:
                 sys.exit("`texloom projects use` needs the sync link (quote it: it contains '#')")
             ListKey.from_link(a.link)
@@ -261,7 +268,9 @@ def projects_command(a) -> None:
     except ListError as e:
         sys.exit({"needs-code": "This server needs a creation code to store a list: use --code or TEXLOOM_CODE.",
                   "code-expired": "The creation code this list was created with has expired.",
-                  "list-full": "The server has no room for another list."}.get(e.code, e.code))
+                  "list-full": "The server has no room for another list.",
+                  "list-retired": "This list was replaced or deleted: use its new sync link.",
+                  "wrong-password": "That username and password don't open a list on this server."}.get(e.code, e.code))
     if result is None:
         print("No project list yet. Start one with `texloom projects new --server URL`,\n"
               "or use an existing one with `texloom projects use '<sync link>'`.")
@@ -313,6 +322,7 @@ def main() -> None:
     p.add_argument("--server", help="for `new`: the server, e.g. https://texloom.example.org")
     p.add_argument("--code", help="creation code, if the server needs one to store a new list")
     p.add_argument("--links", action="store_true", help="also print each project's link")
+    p.add_argument("--password", action="store_true", help="for `use`: unlock with a username and password (set in the web app)")
     p = sub.add_parser("add", help="add a texloom folder to the list")
     p.add_argument("dir", type=Path)
     p = sub.add_parser("leave", help="stop syncing a folder (its files stay)")
