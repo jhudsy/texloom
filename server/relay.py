@@ -696,6 +696,10 @@ class Relay:
         allowance = self.codes.allowance(owner or conn.code or "default")
         return {
             "registered": owner is not None,
+            # its creation code has expired or was removed (the refusal itself stays quota-full,
+            # which older clients understand)
+            "codeExpired": bool(self.codes.path and owner and owner not in ("default", "existing")
+                                and (owner not in self.codes.codes or self.codes.expired(owner))),
             "creation": "open" if self.codes.open_creation else "code",
             "canCreate": self.codes.open_creation or bool(conn.code),
             "used": self.store.usage.get(project, 0),

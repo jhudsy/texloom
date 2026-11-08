@@ -31,6 +31,8 @@ const fr: Catalog = {
   // risk banner
   'Not saved on the server: storing new projects here needs a creation code.':
     'Non enregistré sur le serveur : stocker de nouveaux projets ici nécessite un code de création.',
+  'Not saved on the server: the creation code this project was created with has expired. Renewing it restores storage.':
+    'Non enregistré sur le serveur : le code de création de ce projet a expiré. Le renouveler rétablit le stockage.',
   'Not saved on the server: the storage allowance of the creation code this project was created with is used up.':
     'Non enregistré sur le serveur : le quota de stockage du code de création utilisé pour créer ce projet est épuisé.',
   'Not saved on the server: this project has reached the server’s {{mb}} MB limit.':

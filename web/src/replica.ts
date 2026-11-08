@@ -69,7 +69,7 @@ export const creationCode = {
 /** Why the server isn't storing this project's changes (they still reach people online). */
 export type StoreProblem = 'needs-code' | 'quota-full' | 'project-full' | 'server-full' | null
 const STORE_PROBLEMS = new Set(['needs-code', 'quota-full', 'project-full', 'server-full'])
-export interface StoreInfo { registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number | null; allowance: number | null }
+export interface StoreInfo { codeExpired?: boolean; registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number | null; allowance: number | null }
 
 export type Status = 'offline' | 'connecting' | 'online' | 'paused'
 export type SyncMode = 'live' | 'manual'
