@@ -643,6 +643,16 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | `deploy/` | install script (nginx, certbot, systemd), Caddy config, systemd unit |
 
 
+### Checks
+
+The project list has to match exactly between the Python and web clients. Both are checked
+against the same data, `scripts/listsync-vectors.json`:
+
+```bash
+python scripts/check_listsync.py
+cd web && npm run check-listsync
+```
+
 ### Translations
 
 Interface text is written in English inside `t('…')` (web) or `_('…')` (desktop app); the
