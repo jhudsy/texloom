@@ -32,6 +32,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     "Change refused": "Modification refusée",
     "The server refused a change from this folder: {reason}": "Le serveur a refusé une modification de ce dossier : {reason}",
     "This server needs a creation code to store new projects: add it to the folder's .texloom/config.json as \"create_code\" and restart the app.": "Ce serveur demande un code de création pour stocker de nouveaux projets : ajoutez-le dans le fichier .texloom/config.json du dossier sous « create_code », puis redémarrez l’application.",
+    "This project's creation code has expired: renewing it restores storage.": "Le code de création de ce projet a expiré\u00a0: le renouveler rétablit le stockage.",
     "The storage allowance of this project's creation code is used up.": "Le quota de stockage du code de création de ce projet est épuisé.",
     "This project has reached the server's size limit.": "Ce projet a atteint la taille maximale autorisée par le serveur.",
     "The server is out of space: changes are kept here and retried.": "Le serveur n’a plus d’espace : les modifications sont conservées ici et renvoyées plus tard.",
@@ -202,4 +203,52 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     # -- tray menu
     "Open TeXLoom": "Ouvrir TeXLoom",
     "Quit TeXLoom": "Quitter TeXLoom",
+
+    # -- project list
+    'Project list':
+        'Liste de projets',
+    "Keep the list of your projects on the server, encrypted, so it follows you to other computers and browsers. The server can't read it. It is opened by a sync link: keep that link in a password manager, because it opens every project on the list.":
+        'Conservez la liste de vos projets sur le serveur, chiffrée, pour la retrouver sur d’autres ordinateurs et navigateurs. Le serveur ne peut pas la lire. Elle s’ouvre avec un lien de synchronisation\xa0: gardez ce lien dans un gestionnaire de mots de passe, car il ouvre tous les projets de la liste.',
+    'Sync link':
+        'Lien de synchronisation',
+    'Use this link':
+        'Utiliser ce lien',
+    'Creation code (if the server needs one)':
+        'Code de création (si le serveur en demande un)',
+    'Start a new list':
+        'Créer une liste',
+    'Unlock with a passkey…':
+        'Déverrouiller avec une clé d’accès…',
+    "Opens the server's page in your browser, which sends the list back to this app.":
+        'Ouvre la page du serveur dans votre navigateur, qui renvoie la liste à cette application.',
+    'Stop on this computer':
+        'Arrêter sur cet ordinateur',
+    'Join…':
+        'Rejoindre…',
+    'Unlock the list in your browser; it will come back here.':
+        'Déverrouillez la liste dans votre navigateur\xa0; elle reviendra ici.',
+    'This computer no longer uses a project list. The list itself stays on the server.':
+        'Cet ordinateur n’utilise plus de liste de projets. La liste reste sur le serveur.',
+    'Close': 'Fermer',
+    'Project list…':
+        'Liste de projets…',
+    'A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.':
+        'Une page web a demandé à TeXLoom d’utiliser cette liste de projets. Vos dossiers y seraient ajoutés, et toute personne ayant ce lien pourrait les ouvrir. Ne l’utilisez que si ce lien est le vôtre.',
+    "Projects on the list that aren't on this computer:":
+        'Projets de la liste absents de cet ordinateur\xa0:',
+    'This computer has no project list yet.':
+        'Cet ordinateur n’a pas encore de liste de projets.',
+    'Join or share a project first, so TeXLoom knows which server to use.':
+        'Rejoignez ou partagez d’abord un projet, pour que TeXLoom sache quel serveur utiliser.',
+    'Untitled project':
+        'Projet sans titre',
+    "That isn't a sync link.":
+        'Ce n’est pas un lien de synchronisation.',
+    'This server needs a creation code to store a list.':
+        'Ce serveur demande un code de création pour conserver une liste.',
+    'The creation code this list was created with has expired.':
+        'Le code de création utilisé pour cette liste a expiré.',
+    'The server has no room for another list.':
+        'Le serveur n’a plus de place pour une autre liste.',
+    'The list has {n} projects.': ('La liste contient {n} projet.', 'La liste contient {n} projets.'),
 }

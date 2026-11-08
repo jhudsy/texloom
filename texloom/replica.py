@@ -55,6 +55,7 @@ class Replica:
         self.on_compile_request: Callable[[int, bool], Awaitable[None]] | None = None
         self.server_mode = "server"  # what the server says: "server" (stores) or "relay"
         self.pending_mode: str | None = None  # storage change not yet sent to the server
+        self.code_expired = False  # the server says this project's creation code has expired
         self.store_problem: str | None = None  # why the server isn't storing changes (needs-code, quota-full, …)
         self.refused: str | None = None  # the server's reason for rejecting the last change sent
         self._blob_waiters: dict[str, list[asyncio.Future]] = {}
@@ -386,7 +387,9 @@ class Replica:
             "needs-code": "NOT SAVED ON SERVER: this server needs a creation code to store new projects. "
                           "Add \"create_code\" to .texloom/config.json (or set TEXLOOM_CODE) and restart. "
                           "Changes still reach collaborators who are online.",
-            "quota-full": "NOT SAVED ON SERVER: the storage allowance of this project's creation code is used up.",
+            "quota-full": "NOT SAVED ON SERVER: this project's creation code has expired; renewing it restores storage."
+                          if self.code_expired else
+                          "NOT SAVED ON SERVER: the storage allowance of this project's creation code is used up.",
             "project-full": "NOT SAVED ON SERVER: this project has reached the server's size limit.",
             "server-full": "NOT SAVED ON SERVER: the server is out of space; changes are kept here and retried.",
         }.get(code, f"not saved on server: {code}"))
@@ -427,6 +430,7 @@ class Replica:
     async def _handle(self, m: dict) -> None:
         t = m.get("t")
         if t == "log":
+            self.code_expired = bool((m.get("store") or {}).get("codeExpired"))
             self.server_mode = m.get("mode", "server")
             self._revoked(m.get("rv", []))
             # the server dropped its copy (idle eviction): everything up to `floor` is gone

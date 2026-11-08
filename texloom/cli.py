@@ -231,6 +231,48 @@ def allow_programs(d: Path, yes: bool) -> None:
     print(f"Allowed {len(found)} line(s). A running `texloom run` uses them from its next compile.")
 
 
+def projects_command(a) -> None:
+    from .listsync import ListError, ListKey, local_folders, not_here, save_link, saved_link, sync, sync_this_computer
+    code = a.code or os.environ.get("TEXLOOM_CODE") or None
+    try:
+        if a.action == "off":
+            save_link(None)
+            print("This computer no longer uses a project list. The list itself stays on the server.")
+            return
+        if a.action == "new":
+            if not a.server:
+                sys.exit("`texloom projects new` needs --server URL")
+            key = ListKey.generate()
+            sync(key, a.server.rstrip("/"), local_folders(a.server), code)
+            save_link(key.link(a.server))
+            print("Your sync link (keep it in a password manager: it opens every project on the list):\n")
+            print(key.link(a.server))
+            return
+        if a.action == "use":
+            if not a.link:
+                sys.exit("`texloom projects use` needs the sync link (quote it: it contains '#')")
+            ListKey.from_link(a.link)
+            save_link(a.link)
+        result = sync_this_computer(code)
+    except ValueError as e:
+        sys.exit(str(e))
+    except ListError as e:
+        sys.exit({"needs-code": "This server needs a creation code to store a list: use --code or TEXLOOM_CODE.",
+                  "code-expired": "The creation code this list was created with has expired.",
+                  "list-full": "The server has no room for another list."}.get(e.code, e.code))
+    if result is None:
+        print("No project list yet. Start one with `texloom projects new --server URL`,\n"
+              "or use an existing one with `texloom projects use '<sync link>'`.")
+        return
+    _, server, doc = result
+    away = {p for p, _ in not_here(doc, server)}
+    for p, e in sorted(doc["projects"].items(), key=lambda x: -x[1].get("at", 0)):
+        print(f"{e.get('nick') or e.get('n') or '(untitled)'}  [{'edit' if e.get('w') else 'read-only'}]"
+              f"{'  not on this computer' if p in away else ''}")
+        if a.links:
+            print(f"    {server}/#{e['f']}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="texloom", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -263,6 +305,12 @@ def main() -> None:
     p = sub.add_parser("autostart", help="run `texloom start` at login (on/off/status)")
     p.add_argument("state", choices=["on", "off", "status"])
     sub.add_parser("list", help="the folders this computer keeps in sync")
+    p = sub.add_parser("projects", help="your encrypted project list on the server (show/new/use/off)")
+    p.add_argument("action", nargs="?", default="show", choices=["show", "new", "use", "off"])
+    p.add_argument("link", nargs="?", help="for `use`: the sync link")
+    p.add_argument("--server", help="for `new`: the server, e.g. https://texloom.example.org")
+    p.add_argument("--code", help="creation code, if the server needs one to store a new list")
+    p.add_argument("--links", action="store_true", help="also print each project's link")
     p = sub.add_parser("add", help="add a texloom folder to the list")
     p.add_argument("dir", type=Path)
     p = sub.add_parser("leave", help="stop syncing a folder (its files stay)")
@@ -362,6 +410,8 @@ def main() -> None:
             asyncio.run(serve(keys, server, a.name[:64], code or None))
         except KeyboardInterrupt:
             pass
+    elif a.cmd == "projects":
+        projects_command(a)
     elif a.cmd == "links":
         keys, server = load(a.dir)
         print_links(keys, server)

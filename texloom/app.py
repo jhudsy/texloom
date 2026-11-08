@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
-from . import __version__, autostart, registry
+from . import __version__, autostart, listsync, registry
 from .cli import DEFAULT_CONFIG, clone_project, load_config, new_project, peek, run, update_config
 from .crypto import Keys
 from .daemon import CURRENT, FOLDER, Daemon, FolderProblem, FolderTag
@@ -151,7 +151,8 @@ def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
     if r.store_problem:
         why = {
             "needs-code": _("This server needs a creation code to store new projects: add it to the folder's .texloom/config.json as \"create_code\" and restart the app."),
-            "quota-full": _("The storage allowance of this project's creation code is used up."),
+            "quota-full": _("This project's creation code has expired: renewing it restores storage.") if r.code_expired
+            else _("The storage allowance of this project's creation code is used up."),
             "project-full": _("This project has reached the server's size limit."),
             "server-full": _("The server is out of space: changes are kept here and retried."),
         }.get(r.store_problem, r.store_problem)
@@ -191,6 +192,15 @@ def slug(name: str) -> str:
 
 def default_parent() -> Path:
     return Path.home() / "TeXLoom"
+
+
+def sync_link_from_url(url: str) -> str | None:
+    """The sync link in a texloom://sync?link=… URL (sent by the web page that unlocks a list)."""
+    u = urlparse(url)
+    if u.scheme != SCHEME or u.netloc != "sync":
+        return None
+    link = (parse_qs(u.query).get("link") or [""])[0]
+    return link if link.startswith(("https://", "http://")) and "#sync=" in link else None
 
 
 def link_from_url(url: str) -> str | None:
@@ -567,6 +577,145 @@ class ShareFolderDialog(QtWidgets.QDialog):
         self.accept()
 
 
+class ProjectListDialog(QtWidgets.QDialog):
+    """The encrypted project list: set it up, and join projects from it."""
+
+    def __init__(self, window, link: str = "", from_web: bool = False) -> None:
+        super().__init__(window)
+        self.window_ = window
+        self.setWindowTitle(_("Project list"))
+        self.setMinimumWidth(600)
+        lay = QtWidgets.QVBoxLayout(self)
+        if from_web:
+            warn = QtWidgets.QLabel(_("A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours."))
+            warn.setWordWrap(True)
+            warn.setStyleSheet(f"color: {AMBER}")
+            lay.addWidget(warn)
+        intro = QtWidgets.QLabel(_(
+            "Keep the list of your projects on the server, encrypted, so it follows you to other computers and "
+            "browsers. The server can't read it. It is opened by a sync link: keep that link in a password manager, "
+            "because it opens every project on the list."))
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+        row = QtWidgets.QHBoxLayout()
+        self.link = QtWidgets.QLineEdit(link or listsync.saved_link() or "")
+        self.link.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.link.setPlaceholderText(_("Sync link"))
+        use = QtWidgets.QPushButton(_("Use this link"))
+        use.clicked.connect(self.use)
+        copy = QtWidgets.QPushButton(_("Copy"))
+        copy.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(self.link.text()))
+        row.addWidget(self.link, 1)
+        row.addWidget(use)
+        row.addWidget(copy)
+        lay.addLayout(row)
+        row = QtWidgets.QHBoxLayout()
+        self.code = QtWidgets.QLineEdit("")
+        self.code.setPlaceholderText(_("Creation code (if the server needs one)"))
+        new = QtWidgets.QPushButton(_("Start a new list"))
+        new.clicked.connect(self.start)
+        passkey = QtWidgets.QPushButton(_("Unlock with a passkey…"))
+        passkey.setToolTip(_("Opens the server's page in your browser, which sends the list back to this app."))
+        passkey.clicked.connect(self.passkey)
+        off = QtWidgets.QPushButton(_("Stop on this computer"))
+        off.clicked.connect(self.off)
+        for w in (self.code, new, passkey, off):
+            row.addWidget(w)
+        lay.addLayout(row)
+        self.status = QtWidgets.QLabel("")
+        self.status.setWordWrap(True)
+        lay.addWidget(self.status)
+        lay.addWidget(QtWidgets.QLabel(_("Projects on the list that aren't on this computer:")))
+        self.items = QtWidgets.QListWidget()
+        self.items.itemDoubleClicked.connect(lambda _item: self.join())
+        lay.addWidget(self.items, 1)
+        row = QtWidgets.QHBoxLayout()
+        join = QtWidgets.QPushButton(_("Join…"))
+        join.clicked.connect(self.join)
+        close = QtWidgets.QPushButton(_("Close"))
+        close.clicked.connect(self.accept)
+        row.addWidget(join)
+        row.addStretch(1)
+        row.addWidget(close)
+        lay.addLayout(row)
+        if listsync.saved_link() and not from_web:
+            self.refresh_list()
+
+    def _server(self) -> str:
+        try:
+            return listsync.ListKey.from_link(self.link.text())[1]
+        except ValueError:
+            return known_server()
+
+    def _explain(self, e: Exception) -> str:
+        if isinstance(e, listsync.ListError):
+            return {
+                "needs-code": _("This server needs a creation code to store a list."),
+                "code-expired": _("The creation code this list was created with has expired."),
+                "list-full": _("The server has no room for another list."),
+            }.get(e.code, e.code)
+        return str(e)
+
+    def refresh_list(self) -> None:
+        self.items.clear()
+        QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            result = listsync.sync_this_computer(self.code.text().strip() or None)
+        except Exception as e:  # noqa: BLE001 - shown to the user
+            self.status.setText(self._explain(e))
+            return
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        if result is None:
+            self.status.setText(_("This computer has no project list yet."))
+            return
+        _key, server, doc = result
+        self.status.setText(ngettext(len(doc["projects"]), "The list has {n} project.", "The list has {n} projects.", n=len(doc["projects"])))
+        for _p, entry in listsync.not_here(doc, server):
+            item = QtWidgets.QListWidgetItem(entry.get("nick") or entry.get("n") or _("Untitled project"))
+            item.setData(Qt.UserRole, f"{server}/#{entry['f']}")
+            self.items.addItem(item)
+
+    def use(self) -> None:
+        try:
+            listsync.ListKey.from_link(self.link.text())
+        except ValueError:
+            self.status.setText(_("That isn't a sync link."))
+            return
+        listsync.save_link(self.link.text().strip())
+        self.refresh_list()
+
+    def start(self) -> None:
+        server = known_server()
+        if not server:
+            self.status.setText(_("Join or share a project first, so TeXLoom knows which server to use."))
+            return
+        link = listsync.ListKey.generate().link(server)
+        self.link.setText(link)
+        listsync.save_link(link)
+        self.refresh_list()
+
+    def passkey(self) -> None:
+        server = self._server()
+        if not server:
+            self.status.setText(_("Join or share a project first, so TeXLoom knows which server to use."))
+            return
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(f"{server}/#unlock-for-app"))
+        self.status.setText(_("Unlock the list in your browser; it will come back here."))
+
+    def off(self) -> None:
+        listsync.save_link(None)
+        self.link.clear()
+        self.items.clear()
+        self.status.setText(_("This computer no longer uses a project list. The list itself stays on the server."))
+
+    def join(self) -> None:
+        item = self.items.currentItem()
+        if item:
+            self.window_.join(item.data(Qt.UserRole))
+            self.refresh_list()
+
+
 def known_server() -> str:
     for d in registry.folders():
         try:
@@ -591,6 +740,7 @@ class Window(QtWidgets.QMainWindow):
         tb.addAction(_("Join project…"), self.join)
         tb.addAction(_("Share a folder…"), self.share_folder)
         tb.addAction(_("Add existing folder…"), self.add_existing)
+        tb.addAction(_("Project list…"), lambda: self.project_list())
         tb.addSeparator()
         self.pause_act = tb.addAction(_("Pause syncing"), self.toggle_pause)
         spacer = QtWidgets.QWidget()
@@ -759,6 +909,11 @@ class Window(QtWidgets.QMainWindow):
     def join(self, link: str = "", from_web: bool = False) -> None:
         self.show_window()
         JoinDialog(self.engine, self, link, from_web).exec()
+        self.refresh()
+
+    def project_list(self, link: str = "", from_web: bool = False) -> None:
+        self.show_window()
+        ProjectListDialog(self, link, from_web).exec()
         self.refresh()
 
     def add_existing(self) -> None:
@@ -941,8 +1096,11 @@ def main(argv: list[str] | None = None) -> None:
     win = Window(engine, activity)
 
     def handle(url: str) -> None:
-        link = link_from_url(url)
-        if link:
+        sync_link = sync_link_from_url(url)
+        link = None if sync_link else link_from_url(url)
+        if sync_link:
+            win.project_list(sync_link, from_web=True)
+        elif link:
             win.join(link, from_web=True)
         else:
             win.show_window()

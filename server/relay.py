@@ -62,6 +62,8 @@ from aiohttp import WSMsgType, web
 
 from texloom.crypto import canonical_pub, revoke_msg, signer
 
+from .lists import MAX_LIST, Lists
+
 log = logging.getLogger("texloom.relay")
 
 PROJECT_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")  # base64url(32-byte pubkey)
@@ -635,8 +637,9 @@ def field(msg: dict, key: str, typ: type, default=None):
 
 
 class Relay:
-    def __init__(self, store: Store, limits: Limits | None = None, codes: CodeBook | None = None):
+    def __init__(self, store: Store, limits: Limits | None = None, codes: CodeBook | None = None, lists: bool = True):
         self.store = store
+        self.lists = Lists(store.db) if lists else None
         self.limits = limits or Limits()
         self.codes = codes or CodeBook(None)
         self.rooms: dict[str, set[web.WebSocketResponse]] = defaultdict(set)
@@ -672,6 +675,8 @@ class Relay:
         removed, so the projects carry on relay-only, on people's devices. Projects someone
         has open are skipped (and picked up next time). Returns (purged, bytes freed, skipped)."""
         purged = freed = skipped = 0
+        if self.lists:
+            self.lists.purge_owner(owner)
         for p in self.store.stored_by(owner):
             if self.rooms.get(p):
                 skipped += 1
@@ -685,7 +690,7 @@ class Relay:
         self.codes._load()
         for c in list(self.codes.until):
             days = self.codes.lapsed_since(c)
-            if days is None or days <= after_days or not self.store.stored_by(c):
+            if days is None or days <= after_days or not (self.store.stored_by(c) or (self.lists and self.lists.count(c))):
                 continue
             n, freed, skipped = self.purge(c)
             log.info("purged %d project(s) of code %s… (%s), expired %d day(s) ago%s", n, c[:4],
@@ -952,8 +957,64 @@ class Relay:
             "creation": "open" if self.codes.open_creation else "code",
             "defaultAllowance": None if d == UNLIMITED else d,
             "projectMaxBytes": self.limits.project_max,
+            "projectLists": self.lists is not None,
             "texlive": self.texlive.info() if self.texlive else None,
         })
+
+    # --- encrypted project lists (see lists.py) -----------------------------------------
+    def _list_request(self, request: web.Request) -> str:
+        if not self.lists:
+            raise web.HTTPNotFound()
+        lid = request.match_info["id"]
+        if not PROJECT_RE.match(lid):
+            raise web.HTTPBadRequest()
+        return lid
+
+    async def get_list(self, request: web.Request) -> web.Response:
+        row = self.lists.get(self._list_request(request)) if self.lists else None
+        if row is None:
+            raise web.HTTPNotFound()
+        return web.Response(body=row[1], content_type="application/octet-stream",
+                            headers={"X-Seq": str(row[0]), "Cache-Control": "no-store"})
+
+    def _list_signed(self, lid: str, msg: bytes, request: web.Request) -> bool:
+        try:
+            sig = b64d(request.headers.get("X-Sig", ""))
+        except (ValueError, binascii.Error):
+            return False
+        return len(sig) == 64 and signer(lid, msg, sig) == "owner"
+
+    async def put_list(self, request: web.Request) -> web.Response:
+        lid = self._list_request(request)
+        assert self.lists
+        if (request.content_length or 0) > MAX_LIST:
+            raise web.HTTPRequestEntityTooLarge(max_size=MAX_LIST, actual_size=request.content_length or 0)
+        try:
+            seq = int(request.headers.get("X-Seq", ""))
+        except ValueError:
+            raise web.HTTPBadRequest()
+        data = await request.read()
+        if len(data) > MAX_LIST or not self._list_signed(lid, f"list:{lid}:{seq}:".encode() + data, request):
+            raise web.HTTPForbidden(text="bad signature")
+        row = self.lists.get(lid)
+        current = row[0] if row else 0
+        if seq != current + 1:  # someone else updated it: the client merges and tries again
+            return web.json_response({"seq": current}, status=409)
+        owner = row[2] if row else (self.codes.check(request.headers.get("X-Create-Code")) or "default")
+        if self.codes.allowance(owner) <= 0:
+            return web.json_response({"code": "code-expired" if row else "needs-code"}, status=403)
+        if self.store.free_disk() - len(data) < self.limits.min_free or (not row and not self.lists.room_for(owner)):
+            return web.json_response({"code": "list-full"}, status=507)
+        self.lists.put(lid, seq, data, owner)
+        return web.json_response({"seq": seq})
+
+    async def delete_list(self, request: web.Request) -> web.Response:
+        lid = self._list_request(request)
+        assert self.lists
+        if not self._list_signed(lid, f"listdel:{lid}".encode(), request):
+            raise web.HTTPForbidden(text="bad signature")
+        self.lists.delete(lid)
+        return web.Response(status=204)
 
     async def check_code(self, request: web.Request) -> web.Response:
         try:
@@ -1003,8 +1064,8 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
              limits: Limits | None = None, codes: CodeBook | None = None, arxiv: bool = True,
              admin_token: str = "", evict_days: float = 0, texlive: Path | None = None,
              texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None,
-             purge_days: float | None = None) -> web.Application:
-    relay = Relay(Store(db), limits, codes)
+             purge_days: float | None = None, lists: bool = True) -> web.Application:
+    relay = Relay(Store(db), limits, codes, lists)
     if texlive:  # TeX Live files on demand for the in-browser engine
         from .texlive import TexLive
         tl = TexLive(texlive, texlive_max, (limits or Limits()).min_free, texlive_mirrors)
@@ -1028,6 +1089,8 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
                             log.info("evicted idle project %s… (%s, unopened for %g days)", p[:8], fmt_size(freed), evict_days)
                     if purge_days is not None:
                         relay.purge_expired(purge_days)
+                    if evict_days > 0 and relay.lists:
+                        relay.lists.drop_idle(time.time() - evict_days * 86400)
                     await asyncio.sleep(min(3600, max(60, evict_days * 8640)) if evict_days > 0 else 3600)
             task = asyncio.create_task(loop())
             yield
@@ -1039,6 +1102,9 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
     app.router.add_delete("/blob/{project}/{id}", relay.delete_blob)
     app.router.add_route("OPTIONS", "/blob/{project}/{id}", lambda r: web.Response())
     app.router.add_get("/api/info", relay.info)
+    app.router.add_get("/api/list/{id}", relay.get_list)
+    app.router.add_put("/api/list/{id}", relay.put_list)
+    app.router.add_delete("/api/list/{id}", relay.delete_list)
     if relay.texlive:
         app.router.add_get("/texlive/{year}/{fmt}/{name}", relay.texlive.handle)
     app.router.add_post("/api/code", relay.check_code)
@@ -1088,6 +1154,8 @@ def main() -> None:
                    help="delete the stored copies of projects whose creation code expired more than DAYS days "
                         "ago (checked hourly; default: never, or TEXLOOM_PURGE_EXPIRED_AFTER). Their files stay "
                         "on people's devices")
+    p.add_argument("--no-project-lists", action="store_true",
+                   help="don't store people's encrypted project lists (the sync link and passkey features)")
     p.add_argument("--no-arxiv", action="store_true", help="disable importing arXiv sources through this server")
     p.add_argument("--evict-idle-days", type=float, default=float(os.environ.get("TEXLOOM_EVICT_IDLE_DAYS") or 0),
                    help="drop the stored copy of projects nobody opened for this many days (0 = never; or "
@@ -1173,7 +1241,7 @@ def main() -> None:
     web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv,
                         admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
                         texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
-                        purge_days=a.purge_expired_after), host=a.host, port=a.port)
+                        purge_days=a.purge_expired_after, lists=not a.no_project_lists), host=a.host, port=a.port)
 
 
 if __name__ == "__main__":
