@@ -3,28 +3,24 @@
 // read them, or add to that menu. Shift + right-click always gives the browser's menu.
 import { EditorSelection, type SelectionRange, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { openContextMenu, type MenuItem } from './contextmenu'
+import { menuItems, openContextMenu, type MenuItem } from './contextmenu'
 import { t } from './i18n'
-import type { ProjectIndex } from './latex'
-import { allFiles } from './projectfiles'
+import { CITE_CMDS, REF_CMDS, type ProjectIndex } from './latex'
+import { allFiles, isTexFile } from './projectfiles'
 import type { Replica } from './replica'
+import { COMMENT } from './texscan'
 
 type Hit =
   | { kind: 'ref' | 'label' | 'cite'; key: string }
   | { kind: 'file'; name: string; command: string }
   | { kind: 'command' }
 
-const REFS = /^(?:ref|eqref|[cC]ref|autoref|pageref|nameref|[vV]ref|[cC]pageref|hyperref)$/
-const CITES = /^(?:[a-zA-Z]*[cC]ite[a-zA-Z]*)$/
 const FILES = /^(?:input|include|subfile|includegraphics|includepdf|bibliography|addbibresource|lstinputlisting|verbatiminput)$/
 const TOKEN = /\\\\|\\([A-Za-z@]+)\*?\s*((?:\[[^\]\n]*\]\s*)*)(\{([^{}\n]*)\})?/g
 
 const isComment = (line: string, offset: number) => {
-  for (let i = 0; i < offset; i++) {
-    if (line[i] === '\\') i++
-    else if (line[i] === '%') return true
-  }
-  return false
+  const at = line.search(COMMENT)
+  return at >= 0 && offset > at
 }
 
 /** The piece of a comma-separated argument at `at`, or else its first piece. */
@@ -49,8 +45,8 @@ function commandAt(line: string, offset: number): Hit | null {
     const at = arg === undefined ? 0 : offset - (m.index + m[0].length - 1 - arg.length)
     const key = arg === undefined ? '' : pieceAt(arg, at)
     if (key && name === 'label') return { kind: 'label', key }
-    if (key && REFS.test(name)) return { kind: 'ref', key }
-    if (key && CITES.test(name)) return { kind: 'cite', key }
+    if (key && REF_CMDS.test(name)) return { kind: 'ref', key }
+    if (key && CITE_CMDS.test(name)) return { kind: 'cite', key }
     if (key && FILES.test(name)) return { kind: 'file', name: key, command: name }
     return offset <= m.index + 1 + name.length ? { kind: 'command' } : null
   }
@@ -70,15 +66,14 @@ export interface EditorMenuHost {
   file(): string | null
 }
 
-const isTex = (path: string | null) => !!path && /\.(?:tex|ltx)$/i.test(path)
-
 function selectionItems(host: EditorMenuHost, text: string, canShow: boolean): MenuItem[] {
-  return [
-    ...(canShow ? [[t('Show in PDF'), host.showInPdf] as MenuItem] : []),
-    ...(host.writable ? [[t('Add a comment…'), () => host.review('comment')], [t('Suggest a change…'), () => host.review('suggestion')]] as MenuItem[] : []),
-    ...(text.includes('\n') ? [] : [[t('Search the project'), () => host.search(text)] as MenuItem]),
+  return menuItems(
+    canShow && [t('Show in PDF'), host.showInPdf],
+    host.writable && [t('Add a comment…'), () => host.review('comment')],
+    host.writable && [t('Suggest a change…'), () => host.review('suggestion')],
+    !text.includes('\n') && [t('Search the project'), () => host.search(text)],
     [t('Ask the assistant'), host.ask],
-  ]
+  )
 }
 
 function commandItems(host: EditorMenuHost, hit: Hit, canShow: boolean): MenuItem[] {
@@ -116,13 +111,13 @@ export function editorMenu(host: EditorMenuHost): Extension {
       const doc = view.state.doc
       const start = doc.toString().indexOf('\\begin{document}')
       const inBody = start < 0 || pos > start
-      const canShow = isTex(host.file()) && inBody
+      const canShow = isTexFile(host.file()) && inBody
       const inside = !prior.empty && pos >= prior.from && pos <= prior.to
       let items: MenuItem[]
       if (inside) items = selectionItems(host, doc.sliceString(prior.from, prior.to), canShow)
       else {
         const line = doc.lineAt(pos)
-        const hit = isTex(host.file()) ? commandAt(line.text, pos - line.from) : null
+        const hit = isTexFile(host.file()) ? commandAt(line.text, pos - line.from) : null
         items = hit ? commandItems(host, hit, canShow) : []
       }
       if (!items.length) return false
@@ -133,8 +128,6 @@ export function editorMenu(host: EditorMenuHost): Extension {
     },
   })
 }
-
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 function findFile(all: Set<string>, name: string, command: string, from: string): string | null {
   const exts = command === 'includegraphics' ? ['', '.pdf', '.png', '.jpg', '.jpeg', '.eps', '.svg'] : /bib/.test(command) ? ['', '.bib'] : ['', '.tex']
@@ -153,19 +146,12 @@ function findFile(all: Set<string>, name: string, command: string, from: string)
 export function menuTargets(r: Replica, index: ProjectIndex, goto: (file: string, line: number) => void, open: (path: string) => void) {
   return {
     gotoLabel(key: string) {
-      index.get()
-      const found = index.labels.find((l) => l.key === key)
+      const found = index.get().labels.find((l) => l.key === key)
       return found ? () => goto(found.file, found.line) : null
     },
     gotoCitation(key: string) {
-      index.get()
-      const found = index.bib.find((b) => b.key === key)
-      if (!found) return null
-      return () => {
-        const text = r.files.get(found.file)?.toString() ?? ''
-        const at = new RegExp(`@\\w+\\s*[{(]\\s*${escapeRe(key)}\\s*,`).exec(text)
-        goto(found.file, at ? text.slice(0, at.index).split('\n').length : 1)
-      }
+      const found = index.get().bib.find((b) => b.key === key)
+      return found ? () => goto(found.file, found.line) : null
     },
     openFile(name: string, command: string, from: string) {
       const path = findFile(new Set(allFiles(r)), name, command, from)

@@ -2,14 +2,13 @@
 import { h } from './dom'
 import { t } from './i18n'
 import { renderMarkdown } from './markdown'
-import { loadKatex } from './mathpreview'
+import { loadKatex, render as renderMath } from './mathpreview'
 import { PdfView } from './pdfview'
 import type { Replica } from './replica'
 
 const MARKDOWN = /\.(?:md|markdown)$/i
 const IMAGE_TYPES: [RegExp, string][] = [[/\.png$/i, 'image/png'], [/\.jpe?g$/i, 'image/jpeg'], [/\.gif$/i, 'image/gif'], [/\.svg$/i, 'image/svg+xml'], [/\.webp$/i, 'image/webp']]
 const PDF = /\.pdf$/i
-const MAX_MATH = 20_000
 const typeOf = (path: string) => IMAGE_TYPES.find(([re]) => re.test(path))?.[1] ?? null
 
 export const isPreviewable = (path: string) => MARKDOWN.test(path) || PDF.test(path) || typeOf(path) !== null
@@ -20,11 +19,13 @@ export class FilePreview {
   private shown = ''
   private gen = 0
   private stop: () => void = () => {}
+  private stale = false // changed while the tab was hidden
+  private draw: () => void = () => {}
   private images = new Map<string, HTMLImageElement[]>() // the last render's, reused so they don't flicker
 
   constructor(private r: Replica) {
     this.empty()
-    const recheck = () => { if (this.path && this.fingerprint(this.path) !== this.shown) this.show(this.path) }
+    const recheck = () => { if (this.path && this.fingerprint(this.path) !== this.shown) this.load(this.path) }
     r.files.observe(recheck)
     r.bin.observe(recheck)
   }
@@ -39,38 +40,56 @@ export class FilePreview {
     return info ? { key: info.h, data: () => this.r.getBlob(info.h) } : null
   }
 
-  private empty(text = t('Choose a Markdown file, image or PDF in the file list to see it here.')) {
-    this.el.replaceChildren(h('p', { class: 'muted preview-empty' }, text))
+  private empty() {
+    this.el.replaceChildren(h('p', { class: 'muted preview-empty' }, t('Choose a Markdown file, image or PDF in the file list to see it here.')))
   }
 
   show(path: string) {
+    if (path !== this.path || this.fingerprint(path) !== this.shown) this.load(path)
+  }
+
+  /** The tab has come into view: catch up with what changed while it was hidden. */
+  visible() {
+    if (this.stale) this.draw()
+  }
+
+  /** Draw now if the tab is showing, otherwise when it next is. */
+  private drawWhenSeen(draw: () => void) {
+    this.draw = () => { this.stale = false; draw() }
+    if (this.el.hidden) this.stale = true
+    else this.draw()
+  }
+
+  /** Call `redraw` a moment after edits to `text` stop, for as long as this file is shown. */
+  private follow(path: string, redraw: () => void, wait: number) {
+    const text = this.r.files.get(path)
+    if (!text) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const later = () => { clearTimeout(timer); timer = setTimeout(() => this.drawWhenSeen(redraw), wait) }
+    text.observe(later)
+    this.stop = () => { clearTimeout(timer); text.unobserve(later) }
+  }
+
+  private load(path: string) {
     this.stop()
     this.stop = () => {}
     this.images = new Map()
     this.path = path
     this.shown = this.fingerprint(path)
     const gen = ++this.gen
-    if (!this.shown) { this.empty(); return }
-    const name = h('div', { class: 'preview-name muted small' }, path)
-    if (MARKDOWN.test(path) && this.r.files.has(path)) { this.markdown(path, name, gen); return }
     const src = this.source(path)
     if (!src) { this.empty(); return }
+    const name = h('div', { class: 'preview-name muted small' }, path)
+    if (MARKDOWN.test(path) && this.r.files.has(path)) { this.markdown(path, name, gen); return }
     const box = h('div', { class: PDF.test(path) ? 'preview-pdf' : 'preview-image' })
     this.el.replaceChildren(name, box)
-    const text = this.r.files.get(path)
-    if (text) { // edited in the editor: follow along
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const later = () => { clearTimeout(timer); timer = setTimeout(() => this.show(path), 500) }
-      text.observe(later)
-      this.stop = () => { clearTimeout(timer); text.unobserve(later) }
-    }
+    this.follow(path, () => this.load(path), 500)
     if (PDF.test(path)) {
-      src.data().then((data) => {
-        if (gen !== this.gen) return
-        const view = new PdfView()
-        box.append(view.el)
-        return view.show(data)
-      }).catch((e) => { if (gen === this.gen) box.append(h('p', { class: 'err' }, String(e))) })
+      const view = new PdfView()
+      box.append(view.el)
+      this.drawWhenSeen(() => {
+        src.data().then((data) => view.show(data)).catch((e) => { if (gen === this.gen) box.append(h('p', { class: 'err' }, String(e))) })
+      })
     }
     else box.append(this.image(src.data, path, path.slice(path.lastIndexOf('/') + 1)))
   }
@@ -108,20 +127,13 @@ export class FilePreview {
           this.images.set(src.key, [...(this.images.get(src.key) ?? []), img])
           return img
         },
-        math: katex ? (tex, display, into) => {
-          if (tex.length > MAX_MATH) { into.textContent = t('Too long to preview.'); return }
-          try { katex.render(tex, into, { displayMode: display, throwOnError: false, trust: false }) }
-          catch { into.textContent = tex }
-        } : undefined,
+        math: katex ? (tex, display, into) => renderMath(katex, into, { tex, display }) : undefined,
       })
       const top = box.scrollTop
       box.replaceChildren(content)
       box.scrollTop = top
     }
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const later = () => { clearTimeout(timer); timer = setTimeout(render, 250) }
-    text.observe(later)
-    this.stop = () => { clearTimeout(timer); text.unobserve(later) }
-    void render()
+    this.follow(path, () => { void render() }, 250)
+    this.drawWhenSeen(() => { void render() })
   }
 }

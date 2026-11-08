@@ -31,8 +31,9 @@ const fr: Catalog = {
   'Sync link': 'Lien de synchronisation',
   'Keep the list of your projects on the server, encrypted, so it follows you to other computers and browsers. The server can’t read it.':
     'Conservez la liste de vos projets sur le serveur, chiffrée, pour la retrouver sur d’autres ordinateurs et navigateurs. Le serveur ne peut pas la lire.',
-  'It is opened by a sync link, and optionally by a passkey.':
-    'Elle s’ouvre avec un lien de synchronisation et, si vous le souhaitez, une clé d’accès.',
+  'It is opened by a sync link, and optionally by a passkey or a password.':
+    'Elle s’ouvre avec un lien de synchronisation et, si vous le souhaitez, une clé d’accès ou un mot de passe.',
+  'The passkey didn’t work. Try again.': 'La clé d’accès n’a pas fonctionné. Réessayez.',
   'There is no way to recover a lost list. The server can’t read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren’t deleted, but you’ll need each project’s own link to open it.':
     'Une liste perdue ne peut pas être récupérée. Le serveur ne peut pas la lire, donc personne ne peut la réinitialiser pour vous. Si vous perdez le lien de synchronisation et toutes vos clés d’accès, et oubliez tout mot de passe, la liste est définitivement perdue. Vos projets ne sont pas supprimés, mais il vous faudra le lien de chaque projet pour l’ouvrir.',
   'List started. Copy its sync link and keep it safe.': 'Liste créée. Copiez son lien de synchronisation et gardez-le en lieu sûr.',

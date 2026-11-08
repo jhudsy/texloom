@@ -121,7 +121,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
   const storageRadios = () => radios('storage', r.storage, [
     ['server', t('Keep an encrypted copy on the server'),
       noStorage ? t('Not available yet: this server stores new projects only with a creation code. Until one is entered, your changes are kept here and reach collaborators who are online.')
-        : r.storeProblem ? t('Collaborators get your changes even if you’re never online at the same time. Right now the server isn’t taking more ({{reason}}): your changes are kept here and sent later.', { reason: problemText(r.storeProblem) })
+        : r.storeProblem ? t('Collaborators get your changes even if you’re never online at the same time. Right now the server isn’t taking more ({{reason}}): your changes are kept here and sent later.', { reason: (r.storeProblem === 'quota-full' && r.storeInfo?.codeExpired ? t('code expired') : problemText(r.storeProblem)) })
           : t('Collaborators get your changes even if you’re never online at the same time. The server can’t read it.'),
       !w || noStorage],
     ['relay', t('Don’t store anything on the server'), t('The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.'), !w],

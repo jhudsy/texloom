@@ -102,8 +102,10 @@ export class PdfView {
   async show(data: Uint8Array) {
     this.last = data
     const gen = ++this.gen
-    const doc = await pdfjs.getDocument({ data: data.slice() }).promise
-    if (gen !== this.gen) return
+    const task = pdfjs.getDocument({ data: data.slice() })
+    const doc = await task.promise
+    try {
+      if (gen !== this.gen) return
     const scrollFrac = this.el.scrollTop / Math.max(1, this.el.scrollHeight)
     if (!this.el.clientWidth) return // hidden: render when it becomes visible
     this.renderedWidth = this.el.clientWidth
@@ -131,5 +133,6 @@ export class PdfView {
     this.pages = info
     this.el.replaceChildren(pages)
     this.el.scrollTop = scrollFrac * this.el.scrollHeight
+    } finally { void task.destroy() } // otherwise each document keeps a worker for the life of the tab
   }
 }

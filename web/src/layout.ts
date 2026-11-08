@@ -50,7 +50,6 @@ export function setupLayout(main: HTMLElement, splitL: HTMLElement, splitR: HTML
     const leftW = s.leftHidden ? 0 : s.left
     s.right = Math.max(MIN_RIGHT, Math.min(s.right, total - leftW - MIN_EDITOR))
     const rightW = s.rightHidden ? 0 : s.right
-    main.classList.add('custom')
     main.classList.remove('drawer-open')
     main.classList.toggle('no-left', s.leftHidden)
     main.classList.toggle('no-right', s.rightHidden)

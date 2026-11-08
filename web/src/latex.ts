@@ -22,7 +22,7 @@ const rechecked = (u: ViewUpdate) => u.transactions.some((t) => t.effects.some((
 // Project index: labels, bibliography keys, images, files and macros, rebuilt
 // lazily after the project changes.
 // ---------------------------------------------------------------------------
-export interface BibEntry { key: string; type: string; title?: string; file: string }
+export interface BibEntry { key: string; type: string; title?: string; file: string; line: number }
 export interface Label { key: string; file: string; line: number }
 
 export class ProjectIndex {
@@ -46,14 +46,16 @@ export class ProjectIndex {
       const text = yt.toString()
       if (/\.bib$/i.test(path)) {
         bibs.push(path)
+        let line = 1, counted = 0
         for (const m of text.matchAll(/@(\w+)\s*[{(]\s*([^,\s{}()"#%'=]+)\s*,/g)) {
           const type = m[1].toLowerCase()
           if (type === 'string' || type === 'comment' || type === 'preamble') continue
+          for (let i = text.indexOf('\n', counted); i >= 0 && i < m.index!; i = text.indexOf('\n', i + 1)) { line++; counted = i + 1 }
           // this entry: up to the next '@' (bounded, so a crafted file can't make this quadratic)
           const from = m.index! + m[0].length, next = text.indexOf('@', from)
           const rest = text.slice(from, Math.min(next < 0 ? text.length : next, from + 20000))
           const t = bibField(rest, 'title')
-          bib.push({ key: m[2], type, file: path, title: t?.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim() })
+          bib.push({ key: m[2], type, file: path, line, title: t?.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim() })
         }
       } else if (/\.(tex|sty|cls|ltx)$/i.test(path)) {
         if (/\.tex$/i.test(path)) tex.push(path)
@@ -156,8 +158,8 @@ const PACKAGES = ['amsmath', 'amssymb', 'amsthm', 'graphicx', 'hyperref', 'cleve
   'tikz', 'pgfplots', 'geometry', 'fontenc', 'inputenc', 'babel', 'csquotes', 'biblatex', 'natbib', 'listings', 'minted', 'algorithm2e',
   'algorithmic', 'algorithm', 'subcaption', 'caption', 'float', 'enumitem', 'siunitx', 'microtype', 'lmodern', 'mathtools', 'url', 'todonotes', 'xspace', 'lipsum']
 
-const CITE_CMDS = /^(no|paren|text|auto|foot|full|super|smart)?cite[pt]?\*?$|^cite(author|year|title|num)\*?$|^[Cc]ite[pt]?$|^[Aa]utocite$/
-const REF_CMDS = /^(ref|eqref|autoref|[cC]ref|pageref|nameref|vref|Vref|cpageref|labelcref)\*?$/
+export const CITE_CMDS = /^(no|paren|text|auto|foot|full|super|smart)?cite[pt]?\*?$|^cite(author|year|title|num)\*?$|^[Cc]ite[pt]?$|^[Aa]utocite$/
+export const REF_CMDS = /^(ref|eqref|autoref|[cC]ref|pageref|nameref|vref|Vref|cpageref|labelcref)\*?$/
 
 // ---------------------------------------------------------------------------
 // Completion

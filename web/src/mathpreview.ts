@@ -129,7 +129,7 @@ type KaTeX = typeof import('katex').default
 let katex: Promise<KaTeX> | null = null
 export const loadKatex = () => (katex ??= Promise.all([import('katex'), import('katex/dist/katex.min.css')]).then(([k]) => k.default))
 
-function render(k: KaTeX, el: HTMLElement, s: MathSpan, macros: Record<string, string>) {
+export function render(k: KaTeX, el: HTMLElement, s: Pick<MathSpan, 'tex' | 'display'>, macros: Record<string, string> = {}) {
   if (s.tex.length > MAX_TEX) { el.textContent = t('Too long to preview.'); return }
   try {
     k.render(s.tex, el, {

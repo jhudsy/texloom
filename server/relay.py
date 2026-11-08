@@ -180,6 +180,20 @@ class CodeBook:
     def normalize(code: object) -> str:
         return re.sub(r"[^0-9A-Z]", "", str(code).upper())[:32]
 
+    @staticmethod
+    def _line_fields(parts: list[str]) -> tuple[str, list[str], str | None]:
+        """The size, label words and until= date after the code on a line of a codes file."""
+        rest = [p for p in parts[1:] if not UNTIL_RE.match(p)]
+        dates = [UNTIL_RE.match(p)[1] for p in parts[1:] if UNTIL_RE.match(p)]  # the last day the code is valid
+        size, label = "unlimited", rest
+        if rest:
+            try:
+                parse_size(rest[0])
+                size, label = rest[0], rest[1:]
+            except ValueError:  # old format "code label": unlimited
+                pass
+        return size, label, dates[-1] if dates else None
+
     def _load(self) -> None:
         if not self.path:
             return
@@ -198,19 +212,14 @@ class CodeBook:
             parts = line.split("#", 1)[0].split()
             if not parts:
                 continue
-            # an optional "until=YYYY-MM-DD" anywhere after the code: the last day the code is valid
+            size, label, until_text = self._line_fields(parts)
+            allowance, label = parse_size(size), " ".join(label)
             expires = None
-            for p in [p for p in parts[1:] if UNTIL_RE.match(p)]:
-                parts.remove(p)
+            if until_text:
                 try:
-                    expires = parse_date(UNTIL_RE.match(p)[1])
+                    expires = parse_date(until_text)
                 except ValueError as e:
                     log.warning("%s line %d: %s (ignored: the code doesn't expire)", path, n, e)
-            try:
-                allowance = parse_size(parts[1]) if len(parts) > 1 else UNLIMITED
-                label = " ".join(parts[2:])
-            except ValueError:  # old format "code label": unlimited
-                allowance, label = UNLIMITED, " ".join(parts[1:])
             if parts[0].lower() == "default":
                 default = allowance if default is None else default
             else:
@@ -305,21 +314,15 @@ class CodeBook:
             parts = body.split()
             if not parts or parts[0].lower() == "default" or self.normalize(parts[0]) != want:
                 continue
-            old = [p for p in parts[1:] if UNTIL_RE.match(p)]
-            rest = [p for p in parts[1:] if not UNTIL_RE.match(p)]
+            size, label, until_text = self._line_fields(parts)
             try:
-                current = parse_date(UNTIL_RE.match(old[-1])[1]) if old else None
+                current = parse_date(until_text) if until_text else None
             except ValueError:
                 current = None
             if months:
                 until = add_months(max(today(), current or today()), months)
             elif until is None:
                 until = current
-            try:
-                parse_size(rest[0]) if rest else None
-                size, label = (rest[0], rest[1:]) if rest else ("unlimited", [])
-            except ValueError:  # old format "code label": unlimited
-                size, label = "unlimited", rest
             size = allowance or size
             new = "  ".join([parts[0], size, *([f"until={until.isoformat()}"] if until else []), *([" ".join(label)] if label else [])])
             lines[i] = new + (f"  {hash_}{comment}" if hash_ else "") + "\n"
@@ -971,7 +974,9 @@ class Relay:
         return lid
 
     async def get_list(self, request: web.Request) -> web.Response:
-        row = self.lists.get(self._list_request(request)) if self.lists else None
+        lid = self._list_request(request)
+        assert self.lists
+        row = self.lists.get(lid)
         if row is None:
             raise web.HTTPNotFound()
         if row[0] == RETIRED:
@@ -998,13 +1003,13 @@ class Relay:
         data = await request.read()
         if len(data) > MAX_LIST or not self._list_signed(lid, f"list:{lid}:{seq}:".encode() + data, request):
             raise web.HTTPForbidden(text="bad signature")
-        row = self.lists.get(lid)
+        row = self.lists.meta(lid)
         if row and row[0] == RETIRED:
             return web.json_response({"code": "list-retired"}, status=410)
         current = row[0] if row else 0
         if seq != current + 1:  # someone else updated it: the client merges and tries again
             return web.json_response({"seq": current}, status=409)
-        owner = row[2] if row else (self.codes.check(request.headers.get("X-Create-Code")) or "default")
+        owner = row[1] if row else (self.codes.check(request.headers.get("X-Create-Code")) or "default")
         if self.codes.allowance(owner) <= 0:
             return web.json_response({"code": "code-expired" if row else "needs-code"}, status=403)
         if self.store.free_disk() - len(data) < self.limits.min_free or (not row and not self.lists.room_for(owner)):

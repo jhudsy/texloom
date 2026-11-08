@@ -1,6 +1,9 @@
 // A small right-click menu. Returns a function that closes it.
 export type MenuItem = [label: string, run: () => void]
 
+/** Menu items, leaving out the ones whose condition was false: `cond && [label, run]`. */
+export const menuItems = (...items: (MenuItem | false | null | undefined)[]) => items.filter(Boolean) as MenuItem[]
+
 export function openContextMenu(x: number, y: number, items: MenuItem[], onClose?: () => void): () => void {
   const m = document.createElement('div')
   m.className = 'ctxmenu'

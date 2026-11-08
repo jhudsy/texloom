@@ -76,6 +76,7 @@ export async function putFile(r: Replica, path: string, data: Uint8Array) {
   r.doc.transact(() => putBinary(r, path, id, data.length))
 }
 
+export const isTexFile = (path: string | null | undefined) => !!path && /\.(?:tex|ltx)$/i.test(path)
 export const allFiles = (r: Replica) => [...new Set([...r.files.keys(), ...r.bin.keys()])].sort()
 
 /** Every folder: explicit ones plus the parents of every file. */

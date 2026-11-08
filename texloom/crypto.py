@@ -122,13 +122,17 @@ class Keys:
         return b64e(pub), b64e(grant), Keys(self.project, self.key, None, member=(mseed, grant, clean))
 
     # --- links -----------------------------------------------------------
-    def link(self, server: str, write: bool = True) -> str:
+    def fragment(self, write: bool = True) -> str:
+        """The part of a link after the #."""
         frag = f"p={self.project}&k={b64e(self.key)}"
         if write and self.seed:
             frag += f"&w={b64e(self.seed)}"
         elif write and self.member:
             frag += f"&m={b64e(self.member[0])}&g={b64e(self.member[1])}&n={quote(self.member[2], safe='')}"
-        return f"{server.rstrip('/')}/#{frag}"
+        return frag
+
+    def link(self, server: str, write: bool = True) -> str:
+        return f"{server.rstrip('/')}/#{self.fragment(write)}"
 
     @classmethod
     def from_link(cls, link: str) -> tuple["Keys", str]:

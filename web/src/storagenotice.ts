@@ -7,7 +7,7 @@ import { t } from './i18n'
 const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent)
 export const SAFARI_NOTE = isSafari ? ' ' + t('Safari may also delete a site’s data after about 7 days without a visit.') : ''
 
-export async function serverInfo(): Promise<{ creation: 'open' | 'code'; projectMaxBytes: number } | null> {
+export async function serverInfo(): Promise<{ creation: 'open' | 'code'; projectMaxBytes: number; projectLists?: boolean } | null> {
   try { const r = await fetch('/api/info'); return r.ok ? await r.json() : null } catch { return null }
 }
 

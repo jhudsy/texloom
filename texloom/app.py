@@ -580,8 +580,11 @@ class ShareFolderDialog(QtWidgets.QDialog):
 class ProjectListDialog(QtWidgets.QDialog):
     """The encrypted project list: set it up, and join projects from it."""
 
+    work_done = QtCore.Signal(object, object, object)  # what to do next, its result, or the error
+
     def __init__(self, window, link: str = "", from_web: bool = False) -> None:
         super().__init__(window)
+        self.work_done.connect(self.after_work)
         self.window_ = window
         self.setWindowTitle(_("Project list"))
         self.setMinimumWidth(600)
@@ -653,36 +656,58 @@ class ProjectListDialog(QtWidgets.QDialog):
         except ValueError:
             return known_server()
 
-    def _explain(self, e: Exception) -> str:
-        if isinstance(e, listsync.ListError):
-            return {
-                "needs-code": _("This server needs a creation code to store a list."),
-                "code-expired": _("The creation code this list was created with has expired."),
-                "list-full": _("The server has no room for another list."),
-                "list-retired": _("This list was replaced or deleted. Use its new sync link."),
-                "wrong-password": _("That username and password don't open a list on this server."),
-            }.get(e.code, e.code)
-        return str(e)
+    def in_background(self, work, then) -> None:
+        """Network and password hashing are slow: keep the window responsive."""
+        self.status.setText(_("Working…"))
+
+        def run() -> None:
+            try:
+                result, error = work(), None
+            except Exception as e:  # noqa: BLE001 - shown to the user
+                result, error = None, e
+            try:
+                self.work_done.emit(then, result, error)
+            except RuntimeError:  # the dialog was closed meanwhile
+                pass
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def after_work(self, then, result, error) -> None:
+        if error is None:
+            then(result)
+        else:
+            self.status.setText(listsync.explain(error.code) if isinstance(error, listsync.ListError) else str(error))
 
     def refresh_list(self) -> None:
         self.items.clear()
-        QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            result = listsync.sync_this_computer(self.code.text().strip() or None)
-        except Exception as e:  # noqa: BLE001 - shown to the user
-            self.status.setText(self._explain(e))
-            return
-        finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
-        if result is None:
+        code = self.code.text().strip() or None
+
+        def work():
+            found = listsync.sync_this_computer(code)
+            return found and (*found, listsync.not_here(found[1], found[0]))
+
+        self.in_background(work, self.show_list)
+
+    def show_list(self, found) -> None:
+        if found is None:
             self.status.setText(_("This computer has no project list yet."))
             return
-        _key, server, doc = result
+        server, doc, away = found
         self.status.setText(ngettext(len(doc["projects"]), "The list has {n} project.", "The list has {n} projects.", n=len(doc["projects"])))
-        for _p, entry in listsync.not_here(doc, server):
+        for _p, entry in away:
             item = QtWidgets.QListWidgetItem(entry.get("nick") or entry.get("n") or _("Untitled project"))
             item.setData(Qt.UserRole, f"{server}/#{entry['f']}")
             self.items.addItem(item)
+
+    def adopt(self, link: str) -> None:
+        self.link.setText(link)
+        listsync.save_link(link)
+        self.refresh_list()
+
+    def need_server(self, server: str) -> str:
+        if not server:
+            self.status.setText(_("Join or share a project first, so TeXLoom knows which server to use."))
+        return server
 
     def use(self) -> None:
         try:
@@ -690,49 +715,27 @@ class ProjectListDialog(QtWidgets.QDialog):
         except ValueError:
             self.status.setText(_("That isn't a sync link."))
             return
-        listsync.save_link(self.link.text().strip())
-        self.refresh_list()
+        self.adopt(self.link.text().strip())
 
     def start(self) -> None:
-        server = known_server()
-        if not server:
-            self.status.setText(_("Join or share a project first, so TeXLoom knows which server to use."))
-            return
-        link = listsync.ListKey.generate().link(server)
-        self.link.setText(link)
-        listsync.save_link(link)
-        self.refresh_list()
+        if server := self.need_server(known_server()):
+            self.adopt(listsync.ListKey.generate().link(server))
 
     def passkey(self) -> None:
-        server = self._server()
-        if not server:
-            self.status.setText(_("Join or share a project first, so TeXLoom knows which server to use."))
-            return
-        QtGui.QDesktopServices.openUrl(QtCore.QUrl(f"{server}/#unlock-for-app"))
-        self.status.setText(_("Unlock the list in your browser; it will come back here."))
+        if server := self.need_server(self._server()):
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(f"{server}/#unlock-for-app"))
+            self.status.setText(_("Unlock the list in your browser; it will come back here."))
 
     def password(self) -> None:
-        server = self._server()
+        server = self.need_server(self._server())
         if not server:
-            self.status.setText(_("Join or share a project first, so TeXLoom knows which server to use."))
             return
         username, ok = QtWidgets.QInputDialog.getText(self, _("Project list"), _("Username or email:"))
         if not ok or not username.strip():
             return
         secret, ok = QtWidgets.QInputDialog.getText(self, _("Project list"), _("Password:"), QtWidgets.QLineEdit.Password)
-        if not ok or not secret:
-            return
-        QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            key = listsync.unlock_with_password(server, username, secret)
-        except Exception as e:  # noqa: BLE001 - shown to the user
-            self.status.setText(self._explain(e))
-            return
-        finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
-        self.link.setText(key.link(server))
-        listsync.save_link(key.link(server))
-        self.refresh_list()
+        if ok and secret:
+            self.in_background(lambda: listsync.unlock_with_password(server, username, secret), lambda key: self.adopt(key.link(server)))
 
     def off(self) -> None:
         listsync.save_link(None)

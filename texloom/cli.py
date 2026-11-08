@@ -233,7 +233,7 @@ def allow_programs(d: Path, yes: bool) -> None:
 
 
 def projects_command(a) -> None:
-    from .listsync import ListError, ListKey, local_folders, not_here, save_link, sync, sync_this_computer, unlock_with_password
+    from .listsync import ListError, ListKey, explain, local_folders, not_here, save_link, sync, sync_this_computer, unlock_with_password
     code = a.code or os.environ.get("TEXLOOM_CODE") or None
     try:
         if a.action == "off":
@@ -266,16 +266,12 @@ def projects_command(a) -> None:
     except ValueError as e:
         sys.exit(str(e))
     except ListError as e:
-        sys.exit({"needs-code": "This server needs a creation code to store a list: use --code or TEXLOOM_CODE.",
-                  "code-expired": "The creation code this list was created with has expired.",
-                  "list-full": "The server has no room for another list.",
-                  "list-retired": "This list was replaced or deleted: use its new sync link.",
-                  "wrong-password": "That username and password don't open a list on this server."}.get(e.code, e.code))
+        sys.exit(explain(e.code) + (" Use --code or TEXLOOM_CODE." if e.code == "needs-code" else ""))
     if result is None:
         print("No project list yet. Start one with `texloom projects new --server URL`,\n"
               "or use an existing one with `texloom projects use '<sync link>'`.")
         return
-    _, server, doc = result
+    server, doc = result
     away = {p for p, _ in not_here(doc, server)}
     for p, e in sorted(doc["projects"].items(), key=lambda x: -x[1].get("at", 0)):
         print(f"{e.get('nick') or e.get('n') or '(untitled)'}  [{'edit' if e.get('w') else 'read-only'}]"

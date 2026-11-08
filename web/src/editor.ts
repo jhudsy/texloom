@@ -14,6 +14,7 @@ import { t } from './i18n'
 import { latexSupport, recheck, type AddReference, type ProjectIndex } from './latex'
 import { imageDropExtension } from './pasteimage'
 import { spellcheck } from './spell'
+import { isTexFile } from './projectfiles'
 import { editorMenu, type EditorMenuHost } from './editormenu'
 import { mathPreview } from './mathpreview'
 import { lineAuthors } from './history'
@@ -69,9 +70,9 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
   const authorsSlot = new Compartment()
   const spellSlot = new Compartment()
   const mathSlot = new Compartment()
-  const mathExt = () => (hooks.mathPreview() && !!current && /\.(tex|ltx)$/i.test(current) ? (mathExtension ??= mathPreview(r.files)) : [])
+  const mathExt = () => (hooks.mathPreview() && isTexFile(current) ? (mathExtension ??= mathPreview(r.files)) : [])
   let mathExtension: Extension | undefined
-  const spellExt = () => { const sp = hooks.spell(); return spellcheck(sp.on, sp.lang, !!current && /\.(tex|ltx)$/i.test(current)) }
+  const spellExt = () => { const sp = hooks.spell(); return spellcheck(sp.on, sp.lang, isTexFile(current)) }
   let authorsOn = false
 
   // "Who wrote this": a gutter with the author of most of each line.
@@ -140,7 +141,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             EditorView.lineWrapping,
             dark ? oneDark : [],
             yCollab(yt, r.awareness, { undoManager: new Y.UndoManager(yt) }),
-            latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []), addReference: writable ? hooks.addReference : undefined, checks: () => hooks.checks() && !!current && /\.(tex|ltx)$/i.test(current) }),
+            latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []), addReference: writable ? hooks.addReference : undefined, checks: () => hooks.checks() && isTexFile(current) }),
             imageDropExtension(r, writable),
             spellSlot.of(spellExt()),
             editorMenu(hooks.menu),

@@ -237,6 +237,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     "That username and password don't open a list on this server.": 'Ce nom d’utilisateur et ce mot de passe n’ouvrent aucune liste sur ce serveur.',
     'Username or email:': 'Nom d’utilisateur ou e-mail\xa0:',
     'Password:': 'Mot de passe\xa0:',
+    'Working…': 'Calcul en cours…',
     'Project list…':
         'Liste de projets…',
     'A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.':

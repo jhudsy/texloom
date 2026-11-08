@@ -122,7 +122,7 @@ main.no-left > aside, main.no-left > .split:first-of-type { visibility: hidden; 
 main.no-right > .right, main.no-right > .split:last-of-type { visibility: hidden; overflow: hidden; }
 main.no-editor > .editor-area { visibility: hidden; overflow: hidden; }
 body.resizing { cursor: col-resize; user-select: none; }
-body.resizing iframe, body.resizing canvas, body.resizing .cm-editor { pointer-events: none; }
+body.resizing canvas, body.resizing .cm-editor { pointer-events: none; }
 aside, .editor { border-right: none; }
 .pane-toggle { padding: 2px 8px; }
 .pane-toggle.off { color: var(--muted); }

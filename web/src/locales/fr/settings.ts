@@ -129,6 +129,7 @@ const fr: Catalog = {
 
   // remove
   'Remove': 'Supprimer',
+  'code expired': 'code expiré',
   '{{n}} changes from this browser haven’t reached the server or anyone else yet and will be lost.': [
     '{{n}} modification de ce navigateur n’a encore atteint ni le serveur ni personne d’autre et sera perdue.',
     '{{n}} modifications de ce navigateur n’ont encore atteint ni le serveur ni personne d’autre et seront perdues.',

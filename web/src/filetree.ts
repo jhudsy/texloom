@@ -1,5 +1,5 @@
 // The project file tree: folders (collapsible), files, and file/folder operations.
-import { openContextMenu, type MenuItem } from './contextmenu'
+import { menuItems, openContextMenu, type MenuItem } from './contextmenu'
 import { isPreviewable } from './preview'
 import * as Y from 'yjs'
 import type { Replica } from './replica'
@@ -11,6 +11,8 @@ export interface FileTree {
   el: HTMLElement
   open(path: string): void
   current(): string | null
+  /** Open the main file, and keep a file open from now on. */
+  start(): void
 }
 
 const base = (p: string) => p.slice(p.lastIndexOf('/') + 1)
@@ -45,6 +47,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
   )
 
   // ---- rendering ------------------------------------------------------------
+  let started = false // the first file opens from start(), once the page around it exists
   function render() {
     const files = allFiles(r)
     const folders = allFolders(r)
@@ -66,7 +69,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     walk('', 0)
     list.replaceChildren(...rows)
     where.textContent = writable && folder ? t('Adding to: {{folder}}/', { folder }) : ''
-    if (!current || !files.includes(current)) {
+    if (started && (!current || !files.includes(current))) {
       const pick = main ?? files[0] ?? null
       if (pick !== current) openFile(pick)
     }
@@ -79,17 +82,18 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
   }
 
   function rowMenu(path: string, isDir: boolean, isBin: boolean): MenuItem[] {
-    if (isDir) return writable ? [[t('New file here'), () => newFile(path)], [t('Rename or move'), () => rename(path, true)], [t('Delete'), () => remove(path, true)]] : []
+    if (isDir) return menuItems(writable && [t('New file here'), () => newFile(path)], writable && [t('Rename or move'), () => rename(path, true)], writable && [t('Delete'), () => remove(path, true)])
     const insert = writable ? menu.insert() : null
     const latex = /\.tex$/i.test(path) ? `\\input{${path.replace(/\.tex$/i, '')}}` : IMAGE_RE.test(path) ? `\\includegraphics{${path}}` : null
-    return [
+    return menuItems(
       [t('Open'), () => openFile(path)],
-      ...(isPreviewable(path) ? [[t('Show in Preview'), () => menu.preview(path)] as MenuItem] : []),
-      ...(insert && latex ? [[t('Insert {{latex}}', { latex }), () => insert(latex)] as MenuItem] : []),
-      ...(writable && !isBin && path.endsWith('.tex') ? [[t('Set as main file'), () => r.meta.set('main', path)] as MenuItem] : []),
+      isPreviewable(path) && [t('Show in Preview'), () => menu.preview(path)],
+      insert && latex !== null && [t('Insert {{latex}}', { latex }), () => insert(latex)],
+      writable && !isBin && path.endsWith('.tex') && [t('Set as main file'), () => r.meta.set('main', path)],
       [t('Download'), () => { download(path).catch((e) => alert(String(e))) }],
-      ...(writable ? [[t('Rename or move'), () => rename(path, false)], [t('Delete'), () => remove(path, false)]] as MenuItem[] : []),
-    ]
+      writable && [t('Rename or move'), () => rename(path, false)],
+      writable && [t('Delete'), () => remove(path, false)],
+    )
   }
 
   function row(path: string, depth: number, isDir: boolean, open: boolean, isMain: boolean): HTMLElement {
@@ -220,5 +224,5 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
 
   r.files.observe(render); r.bin.observe(render); r.dirs.observe(render); r.meta.observe(render)
   render()
-  return { el, open: openFile, current: () => current }
+  return { el, open: openFile, current: () => current, start: () => { started = true; render() } }
 }

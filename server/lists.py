@@ -30,6 +30,9 @@ class Lists:
         self.db.execute(
             "CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, seq INTEGER NOT NULL, data BLOB NOT NULL, "
             "owner TEXT NOT NULL, seen REAL NOT NULL)")
+        # owner and seen sit after the blob: without these, reading them walks every entry's pages
+        self.db.execute("CREATE INDEX IF NOT EXISTS lists_owner ON lists(owner, seq)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS lists_seen ON lists(seen)")
         self.db.commit()
 
     def get(self, lid: str) -> tuple[int, bytes, str] | None:
@@ -42,6 +45,10 @@ class Lists:
             with self.db:
                 self.db.execute("UPDATE lists SET seen=? WHERE id=?", (now, lid))
         return row[0], row[1], row[2]
+
+    def meta(self, lid: str) -> tuple[int, str] | None:
+        """(sequence number, owner) of an entry, without reading its contents."""
+        return self.db.execute("SELECT seq, owner FROM lists WHERE id=?", (lid, )).fetchone()
 
     def put(self, lid: str, seq: int, data: bytes, owner: str) -> None:
         with self.db:

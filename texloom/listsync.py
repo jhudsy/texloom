@@ -27,12 +27,24 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from . import registry
 from .crypto import b64d, b64e
+from .i18n import _
 
 SIGN_LABEL, CRYPT_LABEL = b"texloom list sign", b"texloom list encrypt"
 TIMEOUT = 15
 YEAR_MS = 365 * 86400_000
 # Must match web/src/listsync.ts. A password only ever opens a small entry holding the list's secret.
 SCRYPT_N, SCRYPT_R, SCRYPT_P = 2**17, 8, 1
+
+
+def explain(code: str) -> str:
+    """A ListError's code, in words."""
+    return {
+        "needs-code": _("This server needs a creation code to store a list."),
+        "code-expired": _("The creation code this list was created with has expired."),
+        "list-full": _("The server has no room for another list."),
+        "list-retired": _("This list was replaced or deleted. Use its new sync link."),
+        "wrong-password": _("That username and password don't open a list on this server."),
+    }.get(code, code)
 
 
 class ListError(Exception):
@@ -84,6 +96,10 @@ class ListKey:
         return b64e(self._signer.sign(f"list:{self.id}:{seq}:".encode() + data))
 
 
+def _canon(doc: dict) -> str:
+    return json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
 def empty() -> dict:
     return {"v": 1, "projects": {}, "gone": {}}
 
@@ -99,7 +115,7 @@ def merge(a: dict, b: dict) -> dict:
     for p in sorted({*a.get("projects", {}), *b.get("projects", {})}):
         x, y = a.get("projects", {}).get(p), b.get("projects", {}).get(p)
         if x and y:
-            new, old = (x, y) if (x.get("at", 0), json.dumps(x, sort_keys=True)) >= (y.get("at", 0), json.dumps(y, sort_keys=True)) else (y, x)
+            new, old = (x, y) if (x.get("at", 0), _canon(x)) >= (y.get("at", 0), _canon(y)) else (y, x)
             e = {**old, **{k: v for k, v in new.items() if v not in (None, "")}}
             if old.get("w") and not new.get("w"):
                 e["f"], e["w"] = old["f"], True
@@ -115,17 +131,14 @@ def _forget_old_removals(doc: dict) -> dict:
     return {**doc, "gone": {p: when for p, when in doc["gone"].items() if when >= cutoff}}
 
 
-def _canon(doc: dict) -> str:
-    return json.dumps(doc, sort_keys=True, separators=(",", ":"))
-
-
-def _request(method: str, url: str, data: bytes | None = None, headers: dict | None = None) -> tuple[int, bytes, dict]:
+def _request(method: str, url: str, data: bytes | None = None, headers: dict | None = None):
+    """(status, body, headers)."""
     req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            return r.status, r.read(), dict(r.headers)
+            return r.status, r.read(), r.headers
     except urllib.error.HTTPError as e:
-        return e.code, e.read(), dict(e.headers)
+        return e.code, e.read(), e.headers
     except (urllib.error.URLError, OSError) as e:
         raise ListError(f"can't reach the server: {e}") from None
 
@@ -139,7 +152,7 @@ def pull(key: ListKey, server: str) -> tuple[int, dict | None]:
         raise ListError("list-retired")
     if status != 200:
         raise ListError(f"server said {status}")
-    return int(headers.get("X-Seq", headers.get("x-seq", 0))), json.loads(key.decrypt(body))
+    return int(headers.get("X-Seq", 0)), json.loads(key.decrypt(body))
 
 
 def _push(key: ListKey, server: str, seq: int, doc: dict, code: str | None) -> bool:
@@ -148,7 +161,7 @@ def _push(key: ListKey, server: str, seq: int, doc: dict, code: str | None) -> b
     headers = {"X-Seq": str(seq), "X-Sig": key.sign_put(seq, data), "Content-Type": "application/octet-stream"}
     if code:
         headers["X-Create-Code"] = code
-    status, body, _ = _request("PUT", f"{server}/api/list/{key.id}", data, headers)
+    status, body, _headers = _request("PUT", f"{server}/api/list/{key.id}", data, headers)
     if status == 409:
         return False
     if status != 200:
@@ -161,7 +174,7 @@ def _push(key: ListKey, server: str, seq: int, doc: dict, code: str | None) -> b
 
 def sync(key: ListKey, server: str, local: dict, code: str | None = None) -> dict:
     """Merge `local` with the server's list, update the server if that changed it; returns the result."""
-    for _ in range(5):
+    for _attempt in range(5):
         seq, remote = pull(key, server)
         merged = _forget_old_removals(merge(remote or empty(), local))
         if remote is not None and _canon(merged) == _canon(remote):
@@ -183,7 +196,7 @@ def unlock_with_password(server: str, username: str, password: str) -> ListKey:
     """The list a username and password open."""
     unlocking = ListKey(password_secret(username, password))
     try:
-        _, entry = pull(unlocking, server)
+        _seq, entry = pull(unlocking, server)
     except ListError as e:
         if e.code != "list-retired":  # a password that was changed or removed
             raise
@@ -218,17 +231,16 @@ def save_link(link: str | None) -> None:
 
 def local_folders(server: str) -> dict:
     """This computer's synced folders on `server`, as a list."""
-    from .cli import config_path, load_config
-    from .crypto import Keys
+    from .cli import config_path, load
     doc = empty()
     for d in registry.folders():
         try:
-            keys, there = Keys.from_link(load_config(d)["link"])
+            keys, there = load(d)
             at = int(config_path(d).stat().st_mtime * 1000)
         except (OSError, ValueError, KeyError):
             continue
         if there.rstrip("/") == server.rstrip("/"):
-            doc["projects"][keys.project] = {"f": keys.link(there).split("#", 1)[1], "n": d.name, "at": at, "w": keys.writable}
+            doc["projects"][keys.project] = {"f": keys.fragment(), "n": d.name, "at": at, "w": keys.writable}
     return doc
 
 
@@ -238,10 +250,10 @@ def not_here(doc: dict, server: str) -> list[tuple[str, dict]]:
     return sorted(((p, e) for p, e in doc["projects"].items() if p not in here), key=lambda x: -x[1].get("at", 0))
 
 
-def sync_this_computer(code: str | None = None) -> tuple[ListKey, str, dict] | None:
-    """Merge this computer's folders into its saved list; None if it has no list."""
+def sync_this_computer(code: str | None = None) -> tuple[str, dict] | None:
+    """Merge this computer's folders into its saved list: (server, the list), or None if it has none."""
     link = saved_link()
     if not link:
         return None
     key, server = ListKey.from_link(link)
-    return key, server, sync(key, server, local_folders(server), code)
+    return server, sync(key, server, local_folders(server), code)

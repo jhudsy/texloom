@@ -12,10 +12,12 @@ import { $, h, saveFile } from './dom'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
-import { openContextMenu } from './contextmenu'
+import { menuItems, openContextMenu } from './contextmenu'
 import { menuTargets } from './editormenu'
 import { FilePreview, isPreviewable } from './preview'
-import { handleListHash, listDialog, startListSync, takeListHash } from './listsync'
+import { isTexFile } from './projectfiles'
+import { handleListHash, listDialog, takeListHash } from './listdialog'
+import { startListSync } from './listsync'
 import { createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
@@ -204,9 +206,9 @@ async function openProject(keys: Keys) {
     review: (file) => reviewExtension(r, file, (id) => { openReview(); review()?.focus(id) }),
     menu: {
       writable,
-      review: (kind) => { if (writable) { openReview(); review()?.add(kind) } },
+      review: addReview,
       showInPdf: () => syncToPdf(),
-      search: (text) => { if (layout.leftHidden) layout.toggleLeft(); showLeft('search'); search.focus(text) },
+      search: (text) => revealSearch(text),
       ask: () => { if (layout.rightHidden) layout.showRight(); showTab('ai') },
       file: () => editor.current(),
       ...menuTargets(r, index, gotoSource, (path) => { layout.showEditor(); tree.open(path) }),
@@ -215,13 +217,11 @@ async function openProject(keys: Keys) {
     spell: () => ({ on: device.spell, lang: String(r.meta.get('lang') ?? '') }),
     mathPreview: () => device.mathPreview,
     checks: () => device.checks,
-    onReview: (kind) => { if (writable) { openReview(); review()?.add(kind) } },
+    onReview: addReview,
   })
-  let panelsReady = false // the file tree opens the first file before the panels below exist
   const tree = createFileTree(r, writable, (p) => {
     editor.open(p)
     r.awareness.setLocalStateField('file', p) // so collaborators can jump to where you are
-    if (!panelsReady) return
     if (layout.narrow && p && !(isPreviewable(p) && !r.files.has(p))) layout.showEditor() // a text file: it opens in the editor
     previewFile(p)
     layout.closeDrawer()
@@ -229,7 +229,7 @@ async function openProject(keys: Keys) {
     preview: (p) => { preview.show(p); layout.showRight(); showTab('preview') },
     insert: () => {
       const v = editor.view()
-      if (!v || !/\.(?:tex|ltx)$/i.test(editor.current() ?? '')) return null
+      if (!v || !isTexFile(editor.current())) return null
       return (text) => { v.dispatch(v.state.replaceSelection(text)); v.focus() }
     },
   })
@@ -258,6 +258,8 @@ async function openProject(keys: Keys) {
       } catch {}
     }
   }
+  function addReview(kind: 'comment' | 'suggestion') { if (writable) { openReview(); review()?.add(kind) } }
+  function revealSearch(text?: string) { if (layout.leftHidden) layout.toggleLeft(); showLeft('search'); search.focus(text) }
   function syncToPdf() {
     const c = editor.context(), v = editor.view()
     if (!c?.file || !v) return
@@ -337,6 +339,7 @@ async function openProject(keys: Keys) {
     if (!panes[t].firstChild && makers[t]) panes[t].append(makers[t]!())
     syncArrows.hidden = t !== 'pdf'
     currentTab = t
+    if (t === 'preview') preview.visible()
     cameFromPdf = false
     if (t !== 'preview') try { localStorage.setItem('texloom.tab', t) } catch {}
   }
@@ -439,14 +442,14 @@ async function openProject(keys: Keys) {
   const allProjects = () => { location.href = '/' }
   const moreBtn = h('button', { class: 'narrow-only', title: t('More'), 'aria-label': t('More'), onclick: (e: any) => {
     const b = e.currentTarget.getBoundingClientRect()
-    openContextMenu(b.right, b.bottom + 4, [
+    openContextMenu(b.right, b.bottom + 4, menuItems(
       [t('Share'), () => shareDialog(r, server, me.name)],
-      ...(syncBtn.hidden ? [] : [[t('Sync now'), () => syncBtn.click()] as [string, () => void]]),
+      !syncBtn.hidden && [t('Sync now'), () => syncBtn.click()],
       [`⤓ ${t('Source')}`, () => zipBtn.click()],
-      ...(folderBtn.hidden ? [] : [[folderBtn.textContent ?? '', () => folderBtn.click()] as [string, () => void]]),
+      !folderBtn.hidden && [folderBtn.textContent ?? '', () => folderBtn.click()],
       [t('Settings'), () => openSettings()],
       [t('All projects'), allProjects],
-    ])
+    ))
   } }, '⋯')
   const rightBtn = h('button', { class: 'pane-toggle', onclick: () => layout.toggleRight() }, '▥')
   const splitL = h('div', { class: 'split' })
@@ -519,14 +522,12 @@ async function openProject(keys: Keys) {
   if (savedLeft === 'outline') showLeft('outline')
   const savedTab = localStorage.getItem('texloom.tab') as Tab | null
   if (savedTab && savedTab in panes && savedTab !== 'pdf') showTab(savedTab)
-  panelsReady = true
-  previewFile(editor.current())
+  tree.start()
 
   // ⌘S / Ctrl+S compiles from anywhere (the editor handles it itself when focused)
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
       e.preventDefault()
-      if (layout.leftHidden) layout.toggleLeft()
       if (layout.leftHidden) layout.toggleLeft()
       showLeft('search')
       const sel = editor.selection()
