@@ -289,7 +289,8 @@ with the server stopped, or restart the server afterwards so its storage totals 
 current (`--purge-expired-after`, inside the server, needs neither).
 
 The server also refuses to store anything when free disk drops below `--min-free`
-(default 2G), which protects other sites on the machine. Two more limits are
+(default 2G), which protects other sites on the machine. Space freed inside the
+database counts as free, because SQLite reuses it before growing the file. Two more limits are
 `--project-max-bytes` (default 200M per project, except for unlimited allowances) and
 `--max-bytes` (total). Without `--codes-file`, every project may be stored.
 

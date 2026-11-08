@@ -360,6 +360,7 @@ class Store:
         self.db = sqlite3.connect(path)
         self._revoked: dict[str, dict[str, bytes]] = {}
         self.db.execute("PRAGMA journal_mode=WAL")
+        self.page_size: int = self.db.execute("PRAGMA page_size").fetchone()[0]
         self.db.executescript(
             """
             CREATE TABLE IF NOT EXISTS log (
@@ -491,6 +492,12 @@ class Store:
 
     def free_disk(self) -> int:
         return shutil.disk_usage(self.dir).free
+
+    def free_for_data(self) -> int:
+        """Room for new data: free disk, plus pages in the database that deletions freed, which
+        SQLite fills before growing the file. Without them a purge on a nearly full disk
+        wouldn't help, since the file doesn't shrink."""
+        return self.free_disk() + self.db.execute("PRAGMA freelist_count").fetchone()[0] * self.page_size
 
     # --- log ---------------------------------------------------------------------
     def head(self, project: str) -> int:
@@ -689,7 +696,7 @@ class Relay:
                 return "quota-full" if self.store.owner(project) or owner != "default" else "needs-code"
             if allowance != UNLIMITED and self.store.usage[project] + nbytes > self.limits.project_max:
                 return "project-full"
-            if self.store.total + nbytes > self.limits.max_bytes or self.store.free_disk() - nbytes < self.limits.min_free:
+            if self.store.total + nbytes > self.limits.max_bytes or self.store.free_for_data() - nbytes < self.limits.min_free:
                 return "server-full"
         if self.store.owner(project) is None:
             self.store.register(project, owner, self.codes.label(owner) if code else "default")
@@ -1044,7 +1051,7 @@ class Relay:
         owner = row[1] if row else (self.codes.check(request.headers.get("X-Create-Code")) or "default")
         if self.codes.allowance(owner) <= 0:
             return web.json_response({"code": "code-expired" if self.codes.lapsed(owner) else "needs-code"}, status=403)
-        if self.store.free_disk() - len(data) < self.limits.min_free or (not row and not self.lists.room_for(owner)):
+        if self.store.free_for_data() - len(data) < self.limits.min_free or (not row and not self.lists.room_for(owner)):
             return web.json_response({"code": "list-full"}, status=507)
         self.lists.put(lid, seq, data, owner)
         return web.json_response({"seq": seq})
