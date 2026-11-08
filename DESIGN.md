@@ -348,6 +348,11 @@ main thread only reads `Daemon.states` and hands work (join, share, restart) to 
 
 ## Known limitations / open questions
 
+- Deleting a project for everyone: today the owner can remove the server's copy (relay mode),
+  but collaborators can keep syncing peer to peer, and a writer could switch storage back on.
+  Planned: an owner-signed "deleted" marker the server keeps, refusing all further traffic
+  for the project; collaborators' apps then show "The owner deleted this project", keep a
+  read-only copy and offer a .zip. Their files on disk stay (they are theirs).
 - Two peers who both *create* (or upload) the same path while apart: Yjs keeps one value
   per map key and deletes the other everywhere. `web/src/clashes.ts` finds the loser (a
   deleted value for the key that no later write saw: no item has it as `origin`) and

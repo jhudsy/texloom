@@ -1,5 +1,6 @@
 import type { Catalog } from '../../i18n'
 const fr: Catalog = {
+  'Remove {{name}}…': 'Supprimer {{name}}…',
   'runs a shell command (\\write18)': 'exécute une commande shell (\\write18)',
   'runs a shell command (\\ShellEscape)': 'exécute une commande shell (\\ShellEscape)',
   'reads the output of a command (\\input|)': 'lit la sortie d’une commande (\\input|)',
@@ -37,8 +38,6 @@ const fr: Catalog = {
   'Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.': 'Libellé privé pour « {{name}} » ({{code}}).\nVous seul le voyez, dans ce navigateur. Laissez vide pour utiliser le nom partagé.',
   'this project': 'ce projet',
   'Remove from this browser': 'Supprimer de ce navigateur',
-  'Remove {{name}} from this browser': 'Supprimer {{name}} de ce navigateur',
-  'Remove “{{name}}” ({{code}}) from this browser?\n\nOnly this browser’s copy is deleted. Unsynced changes made here would be lost. Collaborators, folder copies and the server’s copy are not affected.': 'Supprimer « {{name}} » ({{code}}) de ce navigateur ?\n\nSeule la copie de ce navigateur est supprimée. Les modifications faites ici et non synchronisées seraient perdues. Les collaborateurs, les copies dans un dossier et la copie du serveur ne sont pas affectés.',
   'Import files from a .zip (e.g. Overleaf) or an arXiv paper': 'Importer des fichiers depuis un .zip (par ex. Overleaf) ou un article arXiv',
   'Import': 'Importer',
   'Add a bibliography entry from a DOI or arXiv id': 'Ajouter une entrée de bibliographie à partir d’un DOI ou d’un identifiant arXiv',

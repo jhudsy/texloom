@@ -70,8 +70,11 @@ The start page lists the projects you've opened **in that browser**:
 - each shows the document's `\title`, who started it and who else you've seen in it, and
   whether you have edit or read-only access;
 - ✎ gives a project a private label that only you see;
-- ✕ removes this browser's copy only. Collaborators keep theirs, and the server's copy
-  stays unless the project is set to "Don't store anything on the server".
+- ✕ (or Settings → **Remove…**) asks what to remove: **from this browser only** (the
+  server's and collaborators' copies stay; the link brings it back), or, for the owner,
+  **from the server too** (the server deletes its encrypted copy and stops storing the
+  project; collaborators keep their copies and can still work together while online at the
+  same time). Files in folders on your computer are never deleted.
 
 The server can't read or recover links, so keep important links somewhere safe; a
 password manager works well.

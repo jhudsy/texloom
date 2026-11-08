@@ -3,7 +3,7 @@ import type { Replica, StorageMode, SyncMode } from './replica'
 import { engineCached, clearEngineCache } from './compile'
 import { h, dialog } from './dom'
 import { detectMain } from './projectfiles'
-import { t, tn, LANGUAGES, langPref, setLangPref, type Lang } from './i18n'
+import { t, LANGUAGES, langPref, setLangPref, type Lang } from './i18n'
 
 export type CompileWhere = 'browser' | 'local' | 'none'
 export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean; spell: boolean; mathPreview: boolean; checks: boolean }
@@ -200,15 +200,11 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       folderHelp(r, link)),
     h('h4', {}, t('Remove')),
     h('p', { class: 'muted small' },
-      t('Removing deletes this browser’s copy only. Collaborators keep theirs, folder copies stay until you delete the folder, and the server’s encrypted copy stays unless you choose “Don’t store anything on the server” above.')),
+      t('Remove this project from this browser, or (the owner) from the server too. Collaborators keep their copies, and folders on your computer keep their files.')),
     h('div', { class: 'row' }, h('button', { class: 'danger', onclick: async () => {
-      const warn: string[] = []
-      if (r.pending) warn.push(tn(r.pending, '{{n}} change from this browser hasn’t reached the server or anyone else yet and will be lost.', '{{n}} changes from this browser haven’t reached the server or anyone else yet and will be lost.'))
-      if (r.storage === 'relay') warn.push(t('The server keeps no copy of this project: if nobody else has one, it will be gone for good.'))
-      if (!confirm([t('Remove this project from this browser?'), ...warn].join('\n\n'))) return
       dlg.close()
       await onRemove()
-    } }, t('Remove from this browser'))),
+    } }, t('Remove…'))),
     h('div', { class: 'row end' }, cacheBtn, h('button', { class: 'primary', onclick: () => dlg.close() }, t('Done'))),
   )
 }

@@ -1,6 +1,8 @@
 import type { Catalog } from '../../i18n'
 
 const fr: Catalog = {
+  'Remove…': 'Supprimer…',
+  'Remove this project from this browser, or (the owner) from the server too. Collaborators keep their copies, and folders on your computer keep their files.': 'Supprimer ce projet de ce navigateur, ou (pour le propriétaire) du serveur aussi. Les collaborateurs gardent leurs copies, et les dossiers de votre ordinateur gardent leurs fichiers.',
   'Language': 'Langue',
   'Interface language': 'Langue de l’interface',
   'Automatic (the browser’s language)': 'Automatique (langue du navigateur)',
@@ -127,15 +129,12 @@ const fr: Catalog = {
 
   // remove
   'Remove': 'Supprimer',
-  'Removing deletes this browser’s copy only. Collaborators keep theirs, folder copies stay until you delete the folder, and the server’s encrypted copy stays unless you choose “Don’t store anything on the server” above.':
-    'La suppression n’efface que la copie de ce navigateur. Les collaborateurs gardent la leur, les copies dans un dossier restent jusqu’à ce que vous supprimiez le dossier, et la copie chiffrée du serveur est conservée, sauf si vous choisissez « Ne rien stocker sur le serveur » ci-dessus.',
   '{{n}} changes from this browser haven’t reached the server or anyone else yet and will be lost.': [
     '{{n}} modification de ce navigateur n’a encore atteint ni le serveur ni personne d’autre et sera perdue.',
     '{{n}} modifications de ce navigateur n’ont encore atteint ni le serveur ni personne d’autre et seront perdues.',
   ],
   'The server keeps no copy of this project: if nobody else has one, it will be gone for good.':
     'Le serveur ne garde aucune copie de ce projet : si personne d’autre n’en a, il sera définitivement perdu.',
-  'Remove this project from this browser?': 'Supprimer ce projet de ce navigateur ?',
   'Remove from this browser': 'Supprimer de ce navigateur',
   'Done': 'Terminé',
 }

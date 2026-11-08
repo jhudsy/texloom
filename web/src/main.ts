@@ -3,6 +3,7 @@ import * as Y from 'yjs'
 import { Keys } from './crypto'
 import { Replica } from './replica'
 import { projects, projectCode, latexTitle, whenOpened } from './projects'
+import { removeDialog } from './remove'
 import { prefs, setupDialog, settingsDialog, languagePicker, type Device } from './settings'
 import { createAssistantPanel } from './assistant/panel'
 import { setupLayout } from './layout'
@@ -119,9 +120,20 @@ function projectList(): HTMLElement {
           projects.update(r.project, { nick: v.trim() })
           location.reload()
         } }, '✎'),
-        h('button', { class: 'icon forget', title: t('Remove from this browser'), 'aria-label': t('Remove {{name}} from this browser', { name: label }), onclick: async () => {
-          if (!confirm(t('Remove “{{name}}” ({{code}}) from this browser?\n\nOnly this browser’s copy is deleted. Unsynced changes made here would be lost. Collaborators, folder copies and the server’s copy are not affected.', { name: label, code: projectCode(r.project) }))) return
-          await projects.forget(r.project); location.reload()
+        h('button', { class: 'icon forget', title: t('Remove…'), 'aria-label': t('Remove {{name}}…', { name: label }), onclick: async () => {
+          let keys: Keys | null = null
+          try { keys = Keys.fromFragment('#' + r.fragment) } catch {}
+          const folder = await savedFolder(r.project).catch(() => undefined)
+          removeDialog({ name: label, code: projectCode(r.project), owner: !!keys?.owner, onServer: !(r.atRisk || r.storage === 'relay'), folder: folder?.name ?? null },
+            async (fromServer) => {
+              if (fromServer && keys) {
+                const rep = new Replica(keys, server, 'live')
+                await rep.open()
+                try { await rep.removeFromServer() } finally { await rep.close() }
+              }
+              await projects.forget(r.project)
+              location.reload()
+            })
         } }, '✕')),
       h('div', { class: 'details muted' }, details.join(' · ')))
   }))
@@ -453,10 +465,15 @@ async function openProject(keys: Keys) {
 
   function openSettings() {
     settingsDialog(r, keys.link(server, writable), applyDevice, folderSyncSupported() && writable ? chooseFolder : null, async () => {
-      removing = true
-      await r.close()
-      await projects.forget(keys.project)
-      location.href = '/'
+      removeDialog({ name: projects.list().find((p) => p.project === keys.project)?.nick || r.meta.get('name') || t('Untitled project'), code: projectCode(keys.project),
+        owner: keys.owner, onServer: r.storage !== 'relay', pending: r.pending, folder: folder?.name ?? null },
+        async (fromServer) => {
+          if (fromServer) await r.removeFromServer()
+          removing = true
+          await r.close()
+          await projects.forget(keys.project)
+          location.href = '/'
+        })
     })
   }
   function applyDevice(d: Device) {

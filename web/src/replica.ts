@@ -262,7 +262,7 @@ export class Replica {
         break
       case 'mode':
         this.serverMode = m.m
-        if (m.m === 'relay') this.storeProblem = null // not storing is the point
+        if (m.m === 'relay') { this.storeProblem = null; this.modeAck?.(null) } // not storing is the point
         this.onStatus()
         break
       case 'err':
@@ -272,7 +272,10 @@ export class Replica {
           this.storeProblem = m.code
           this.scheduleRetry()
           this.onStatus()
-        } else console.warn('server:', m.m)
+        } else {
+          if (/mode change/.test(String(m.m))) this.modeAck?.(String(m.m))
+          console.warn('server:', m.m)
+        }
     }
   }
 
@@ -444,6 +447,26 @@ export class Replica {
       await this.uploadPending()
     }
     this.onStatus()
+  }
+
+  private modeAck: ((error: string | null) => void) | null = null
+
+  /** Owner: the server deletes its encrypted copy and stops storing this project. Resolves
+   *  once the server confirms (connecting first if needed), or rejects with its reason. */
+  async removeFromServer(timeoutMs = 20000): Promise<void> {
+    if (!this.keys.owner) throw new Error(t('only the owner can remove the server’s copy'))
+    if (!this.ws) this.connect()
+    const until = Date.now() + timeoutMs
+    while (!(this.status === 'online' && this.synced)) {
+      if (Date.now() > until) throw new Error(t('the server can’t be reached'))
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    const done = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { this.modeAck = null; reject(new Error(t('the server didn’t confirm'))) }, Math.max(1000, until - Date.now()))
+      this.modeAck = (error) => { clearTimeout(timer); this.modeAck = null; error ? reject(new Error(error)) : resolve() }
+    })
+    await this.setStorage('relay')
+    await done
   }
 
   /** Change where the project lives. 'relay' deletes the server's copy. */
