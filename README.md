@@ -104,7 +104,7 @@ the project. A personal link is shown, and can be emailed, only when you create 
 ### Your project list on other devices
 
 The start page lists the projects opened in that browser, and only there. To take the list with
-you, choose **Project list on the server…**: the list is kept on the server, encrypted, and merged
+you, choose **Sync this list…**: the list is kept on the server, encrypted, and merged
 between every browser and computer you connect. The server can't read it. Removing a project from
 the list on one device removes it on the others.
 

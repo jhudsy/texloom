@@ -18,7 +18,7 @@ import { menuTargets } from './editormenu'
 import { FilePreview, isPreviewable } from './preview'
 import { isTexFile } from './projectfiles'
 import { handleListHash, listDialog, takeListHash } from './listdialog'
-import { startListSync } from './listsync'
+import { savedSecret, startListSync } from './listsync'
 import { createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
@@ -79,6 +79,17 @@ function landing() {
   const nameIn = h('input', { value: prefs.name, placeholder: t('Your name (shown to collaborators)'), oninput: (e: any) => (prefs.name = e.target.value) })
   const linkIn = h('input', { placeholder: t('Paste a project link…'), 'aria-label': t('Project link') })
   const list = h('div', {}, projectList())
+  const syncNote = h('div', {})
+  const showSync = () => {
+    const synced = !!savedSecret()
+    syncNote.replaceChildren(
+      h('p', { class: 'muted small' }, synced
+        ? t('This list is synced between your devices, encrypted. The server can’t read it.')
+        : t('This list is kept only in this browser: clearing this site’s data deletes it.{{safari}} A project stored on the server can always be reopened from its link, so keep your links safe, or sync this list to have it on all your devices.', { safari: SAFARI_NOTE })),
+      h('p', {}, h('button', { onclick: () => listDialog(() => { showSync(); refreshProjects() }) }, synced ? t('Manage sync…') : t('Sync this list…'))),
+    )
+  }
+  showSync()
   app.append(
     h('h1', {}, brand()),
     h('p', { class: 'sub' }, t('Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.')),
@@ -97,13 +108,13 @@ function landing() {
         } catch {}
         location.hash = k.fragment()
       } }, t('New project')),
+    ),
+    h('div', { class: 'row' },
       linkIn,
       h('button', { onclick: () => { const i = linkIn.value.indexOf('#'); if (i >= 0) location.hash = linkIn.value.slice(i) } }, t('Open')),
     ),
-    h('h2', {}, t('Your projects'), h('small', { class: 'muted' }, ' ' + t('— opened in this browser'))),
-    h('p', { class: 'muted small' },
-      t('These are kept in this browser. Clearing this site’s data (or the browser’s history and site data) deletes them here.{{safari}} Keep the links somewhere safe: a project stored on the server can always be reopened from its link. Projects marked “not on server” exist only on devices.', { safari: SAFARI_NOTE })),
-    h('p', {}, h('button', { onclick: () => listDialog() }, t('Project list on the server…'))),
+    h('h2', {}, t('Your projects')),
+    syncNote,
     list,
   )
   refreshProjects = () => list.replaceChildren(projectList())
