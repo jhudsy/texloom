@@ -721,9 +721,9 @@ The German, Spanish, Brazilian Portuguese and Simplified Chinese translations we
 haven't yet been read by native speakers; corrections are very welcome.
 
 To add a language (`it`, say):
-1. Web: copy `web/src/locales/fr/` to `web/src/locales/de/` and translate the values;
-   add `'de'` to `Lang` and `LANGUAGES` in `web/src/i18n.ts` so it can be chosen.
-2. Desktop app: copy `texloom/locales/fr.py` to `de.py`, translate it, and add it to
+1. Web: copy `web/src/locales/fr/` to `web/src/locales/it/` and translate the values;
+   add `'it'` to `Lang` and `LANGUAGES` in `web/src/i18n.ts` so it can be chosen.
+2. Desktop app: copy `texloom/locales/fr.py` to `it.py`, translate it, and add it to
    `CATALOGS` in `texloom/locales/__init__.py`. If its plurals aren't "one for 1, other
    otherwise", add the rule to `PLURAL_RULES` in `texloom/i18n.py`.
 3. Check: `npm run check-i18n` in `web/` and `python scripts/check_i18n.py`. Both list
