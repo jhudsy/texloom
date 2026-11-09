@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from texloom.listsync import ListKey, _canon, b64d, b64e, merge, password_secret  # noqa: E402
+from texloom.listsync import ListKey, _canon, b64d, b64e, merge, merge_tags, password_secret, tidy_tags  # noqa: E402
 
 VECTORS = Path(__file__).with_name("listsync-vectors.json")
 E = lambda f, n, at, w, **more: {"f": f, "n": n, "at": at, "w": w, **more}  # noqa: E731
@@ -30,6 +30,24 @@ MERGES = [
     ("a client without dates doesn't lose them", doc({"a": E("f", "A", 9, True)}), doc({"a": E("f", "A", 5, True, c=2, m=8)})),
     ("non-ASCII and extras survive", doc({"é": E("f", "日本語 €", 1, False, by="José", t="“Quoted”")}), doc()),
 ]
+T = lambda tags, on=None: {"v": 1, "tags": tags, "on": on or {}}  # noqa: E731
+TAG = lambda n, at, **more: {"n": n, "at": at, **more}  # noqa: E731
+GONE = lambda at: {"n": "", "at": at, "gone": True}  # noqa: E731
+TAG_MERGES = [
+    ("the latest rename wins", T({"a": TAG("Old", 1)}), T({"a": TAG("New", 2)})),
+    ("deleting beats a rename at the same moment", T({"a": TAG("X", 2)}), T({"a": GONE(2)})),
+    ("assign and rename on two devices both survive", T({"a": TAG("New", 5)}, {"p": {"a": 1}}), T({"a": TAG("Old", 1)}, {"p": {"a": 9}})),
+    ("taking a tag off later wins", T({"a": TAG("A", 1)}, {"p": {"a": 5}}), T({"a": TAG("A", 1)}, {"p": {"a": -7}})),
+    ("assigning beats taking off at the same moment", T({}, {"p": {"a": 5}}), T({}, {"p": {"a": -5}})),
+    ("the same name made twice is one tag", T({"a": TAG("AAAI", 1)}, {"p": {"a": 3}}), T({"b": TAG("aaai ", 2)}, {"q": {"b": 4}})),
+    ("names match across accents' case, spaces and ligatures", T({"a": TAG("Étude  ﬁnale", 1)}, {"p": {"a": 3}}), T({"b": TAG("étude finale", 2)}, {"p": {"b": -4}})),
+    ("a tie is the same either way", T({"a": TAG("Zoë", 5)}), T({"a": TAG("Åsa", 5)})),
+]
+TAG_TIDIES = [
+    ("old deletions, deleted tags and unlisted projects go",
+     T({"a": TAG("A", 1), "b": GONE(32000000000000), "c": GONE(1)}, {"p": {"a": 5, "b": 32000000000000, "d": 32000000000000}, "q": {"a": 5}, "r": {"a": -1}}),
+     ["p", "r"], 32000000001000),
+]
 PASSWORDS = [("ada@example.org", "correct horse battery"), ("  Ada@Example.ORG ", "correct horse battery"), ("josé", "pässwörd ﬁne long"), ("ｗｉｄｅ", "Ａ full-width pass")]
 SECRETS = [bytes(range(32)), bytes([0xff] * 32)]
 
@@ -46,6 +64,9 @@ def build() -> dict:
         "keys": keys,
         "passwords": [{"username": u, "password": p, "secret": b64e(password_secret(u, p))} for u, p in PASSWORDS],
         "merges": [{"what": what, "a": a, "b": b, "merged": _canon(merge(a, b))} for what, a, b in MERGES],
+        "tag_merges": [{"what": what, "a": a, "b": b, "merged": _canon(merge_tags(a, b))} for what, a, b in TAG_MERGES],
+        "tag_tidies": [{"what": what, "doc": doc, "listed": listed, "now": now, "tidied": _canon(tidy_tags(doc, set(listed), now))}
+                       for what, doc, listed, now in TAG_TIDIES],
     }
 
 
@@ -69,7 +90,13 @@ def main() -> int:
     for m in v["merges"]:
         check(m["what"], _canon(merge(m["a"], m["b"])), m["merged"])
         check(m["what"] + " (other way round)", _canon(merge(m["b"], m["a"])), m["merged"])
-    print(*bad, sep="\n") if bad else print(f"listsync: {len(v['keys'])} keys, {len(v['passwords'])} passwords, {len(v['merges'])} merges match")
+    for m in v["tag_merges"]:
+        check(m["what"], _canon(merge_tags(m["a"], m["b"])), m["merged"])
+        check(m["what"] + " (other way round)", _canon(merge_tags(m["b"], m["a"])), m["merged"])
+    for m in v["tag_tidies"]:
+        check(m["what"], _canon(tidy_tags(m["doc"], set(m["listed"]), m["now"])), m["tidied"])
+    print(*bad, sep="\n") if bad else print(f"listsync: {len(v['keys'])} keys, {len(v['passwords'])} passwords, {len(v['merges'])} merges, "
+                                             f"{len(v['tag_merges'])} tag merges, {len(v['tag_tidies'])} tidies match")
     return 1 if bad else 0
 
 

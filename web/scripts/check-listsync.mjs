@@ -26,26 +26,12 @@ for (const m of v.merges) {
   check(`${m.what} (other way round)`, canon(mergeLists(m.b, m.a)), m.merged)
 }
 
-// Tags aren't in the Python client yet, so these are checked here rather than in the shared file.
-const T = (tags, on = {}) => ({ v: 1, tags, on })
-const tagCases = [
-  ['the latest rename wins', T({ a: { n: 'Old', at: 1 } }), T({ a: { n: 'New', at: 2 } }), T({ a: { n: 'New', at: 2 } })],
-  ['deleting beats a rename at the same moment', T({ a: { n: 'X', at: 2 } }), T({ a: { n: '', at: 2, gone: true } }), T({ a: { n: '', at: 2, gone: true } })],
-  ['assign and rename on two devices both survive', T({ a: { n: 'New', at: 5 } }, { p: { a: 1 } }), T({ a: { n: 'Old', at: 1 } }, { p: { a: 9 } }), T({ a: { n: 'New', at: 5 } }, { p: { a: 9 } })],
-  ['taking a tag off later wins', T({ a: { n: 'A', at: 1 } }, { p: { a: 5 } }), T({ a: { n: 'A', at: 1 } }, { p: { a: -7 } }), T({ a: { n: 'A', at: 1 } }, { p: { a: -7 } })],
-  ['assigning beats taking off at the same moment', T({}, { p: { a: 5 } }), T({}, { p: { a: -5 } }), T({}, { p: { a: 5 } })],
-  ['the same name made twice is one tag', T({ a: { n: 'AAAI', at: 1 } }, { p: { a: 3 } }), T({ b: { n: 'aaai ', at: 2 } }, { q: { b: 4 } }), T({ a: { n: 'AAAI', at: 1 }, b: { n: '', at: 2, gone: true } }, { p: { a: 3 }, q: { a: 4 } })],
-]
-for (const [what, a, b, want] of tagCases) {
-  check(what, canon(mergeTags(a, b)), canon(want))
-  check(`${what} (other way round)`, canon(mergeTags(b, a)), canon(want))
-  // an older copy can bring back a mark for a merged tag: hidden, and gone at the next tidy
-  const all = new Set(['p', 'q'])
-  check(`${what} (merged again)`, canon(tidyTags(mergeTags(mergeTags(a, b), b), all)), canon(tidyTags(want, all)))
+for (const m of v.tag_merges) {
+  check(m.what, canon(mergeTags(m.a, m.b)), m.merged)
+  check(`${m.what} (other way round)`, canon(mergeTags(m.b, m.a)), m.merged)
 }
-const now = Date.now()
-check('tidying', canon(tidyTags(T({ a: { n: 'A', at: 1 }, b: { n: '', at: now, gone: true }, c: { n: '', at: 1, gone: true } }, { p: { a: 5, b: now, d: now }, q: { a: 5 }, r: { a: -1 } }), new Set(['p', 'r']))), canon(T({ a: { n: 'A', at: 1 }, b: { n: '', at: now, gone: true } }, { p: { a: 5 } })))
+for (const m of v.tag_tidies) check(m.what, canon(tidyTags(m.doc, new Set(m.listed), m.now)), m.tidied)
 check('no tags to merge', canon(mergeTags(emptyTags(), emptyTags())), canon(emptyTags()))
 
 if (bad.length) { console.error(bad.join('\n')); process.exit(1) }
-console.log(`listsync: ${v.keys.length} keys, ${v.passwords.length} passwords, ${v.merges.length} merges and ${tagCases.length} tag merges match`)
+console.log(`listsync: ${v.keys.length} keys, ${v.passwords.length} passwords, ${v.merges.length} merges, ${v.tag_merges.length} tag merges and ${v.tag_tidies.length} tidies match`)

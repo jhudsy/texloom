@@ -6,7 +6,7 @@
    "seq": 7,
    "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
    "signature": "Mhfffj9ymKBqLLIzkjxjtIGGqqGJle_Jc-3UxpOX2E4eJ44Nnu6JLkyeaomiT5wz6B6sOCQQXx-7XIvhqZe2DQ",
-   "ciphertext": "VaXFuM6oxWEQX9c2MqN4rvG8A63TQcpIUrw8cmP7Rar4I6NydiBYTofvDXH56aH3tMmm9tQf",
+   "ciphertext": "t3LbsLubaW-qC_wnuIT-5tZ_QksyKOd0mcIWVQLiuIwWIgZnmqXOAAmOFpKajecYAwEicarK",
    "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
    "link": "https://example.org/#sync=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
   },
@@ -16,7 +16,7 @@
    "seq": 7,
    "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
    "signature": "J1ku7E7WW-gFQlwPeTbinTvWFngJW8f7u-ALt7kwrOVgvOdlB0voBr60YGxv6P9xg_TtFvLUsJkJdwWvbgsvBg",
-   "ciphertext": "c-QJYt6UPnEhjjsdB5tXgtosc_Rv51kmi1wmp4ylyAGgarRH54EdEsCe5hFxJkwbQA3FHkmZ",
+   "ciphertext": "dN6GVZZebthmGC_DOvLbV8aK1nLKUsQp04aXXn4DsnxbvQ7p6ZgwliNsTXU4bU8ootdOORsL",
    "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
    "link": "https://example.org/#sync=__________________________________________8"
   }
@@ -331,6 +331,274 @@
     "gone": {}
    },
    "merged": "{\"gone\":{},\"projects\":{\"é\":{\"at\":1,\"by\":\"José\",\"f\":\"f\",\"n\":\"日本語 €\",\"t\":\"“Quoted”\",\"w\":false}},\"v\":1}"
+  }
+ ],
+ "tag_merges": [
+  {
+   "what": "the latest rename wins",
+   "a": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "Old",
+      "at": 1
+     }
+    },
+    "on": {}
+   },
+   "b": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "New",
+      "at": 2
+     }
+    },
+    "on": {}
+   },
+   "merged": "{\"on\":{},\"tags\":{\"a\":{\"at\":2,\"n\":\"New\"}},\"v\":1}"
+  },
+  {
+   "what": "deleting beats a rename at the same moment",
+   "a": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "X",
+      "at": 2
+     }
+    },
+    "on": {}
+   },
+   "b": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "",
+      "at": 2,
+      "gone": true
+     }
+    },
+    "on": {}
+   },
+   "merged": "{\"on\":{},\"tags\":{\"a\":{\"at\":2,\"gone\":true,\"n\":\"\"}},\"v\":1}"
+  },
+  {
+   "what": "assign and rename on two devices both survive",
+   "a": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "New",
+      "at": 5
+     }
+    },
+    "on": {
+     "p": {
+      "a": 1
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "Old",
+      "at": 1
+     }
+    },
+    "on": {
+     "p": {
+      "a": 9
+     }
+    }
+   },
+   "merged": "{\"on\":{\"p\":{\"a\":9}},\"tags\":{\"a\":{\"at\":5,\"n\":\"New\"}},\"v\":1}"
+  },
+  {
+   "what": "taking a tag off later wins",
+   "a": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "A",
+      "at": 1
+     }
+    },
+    "on": {
+     "p": {
+      "a": 5
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "A",
+      "at": 1
+     }
+    },
+    "on": {
+     "p": {
+      "a": -7
+     }
+    }
+   },
+   "merged": "{\"on\":{\"p\":{\"a\":-7}},\"tags\":{\"a\":{\"at\":1,\"n\":\"A\"}},\"v\":1}"
+  },
+  {
+   "what": "assigning beats taking off at the same moment",
+   "a": {
+    "v": 1,
+    "tags": {},
+    "on": {
+     "p": {
+      "a": 5
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "tags": {},
+    "on": {
+     "p": {
+      "a": -5
+     }
+    }
+   },
+   "merged": "{\"on\":{\"p\":{\"a\":5}},\"tags\":{},\"v\":1}"
+  },
+  {
+   "what": "the same name made twice is one tag",
+   "a": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "AAAI",
+      "at": 1
+     }
+    },
+    "on": {
+     "p": {
+      "a": 3
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "tags": {
+     "b": {
+      "n": "aaai ",
+      "at": 2
+     }
+    },
+    "on": {
+     "q": {
+      "b": 4
+     }
+    }
+   },
+   "merged": "{\"on\":{\"p\":{\"a\":3},\"q\":{\"a\":4}},\"tags\":{\"a\":{\"at\":1,\"n\":\"AAAI\"},\"b\":{\"at\":2,\"gone\":true,\"n\":\"\"}},\"v\":1}"
+  },
+  {
+   "what": "names match across accents' case, spaces and ligatures",
+   "a": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "Étude  ﬁnale",
+      "at": 1
+     }
+    },
+    "on": {
+     "p": {
+      "a": 3
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "tags": {
+     "b": {
+      "n": "étude finale",
+      "at": 2
+     }
+    },
+    "on": {
+     "p": {
+      "b": -4
+     }
+    }
+   },
+   "merged": "{\"on\":{\"p\":{\"a\":-4}},\"tags\":{\"a\":{\"at\":1,\"n\":\"Étude  ﬁnale\"},\"b\":{\"at\":2,\"gone\":true,\"n\":\"\"}},\"v\":1}"
+  },
+  {
+   "what": "a tie is the same either way",
+   "a": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "Zoë",
+      "at": 5
+     }
+    },
+    "on": {}
+   },
+   "b": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "Åsa",
+      "at": 5
+     }
+    },
+    "on": {}
+   },
+   "merged": "{\"on\":{},\"tags\":{\"a\":{\"at\":5,\"n\":\"Åsa\"}},\"v\":1}"
+  }
+ ],
+ "tag_tidies": [
+  {
+   "what": "old deletions, deleted tags and unlisted projects go",
+   "doc": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "A",
+      "at": 1
+     },
+     "b": {
+      "n": "",
+      "at": 32000000000000,
+      "gone": true
+     },
+     "c": {
+      "n": "",
+      "at": 1,
+      "gone": true
+     }
+    },
+    "on": {
+     "p": {
+      "a": 5,
+      "b": 32000000000000,
+      "d": 32000000000000
+     },
+     "q": {
+      "a": 5
+     },
+     "r": {
+      "a": -1
+     }
+    }
+   },
+   "listed": [
+    "p",
+    "r"
+   ],
+   "now": 32000000001000,
+   "tidied": "{\"on\":{\"p\":{\"a\":5}},\"tags\":{\"a\":{\"at\":1,\"n\":\"A\"},\"b\":{\"at\":32000000000000,\"gone\":true,\"n\":\"\"}},\"v\":1}"
   }
  ]
 }

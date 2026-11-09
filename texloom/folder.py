@@ -33,6 +33,46 @@ IGNORE_SUFFIXES = (
     ".synctex", ".bbl", ".blg", ".bcf", ".run.xml", ".nav", ".snm", ".vrb", ".idx", ".ilg",
     ".ind", ".xdv", ".dvi", ".swp", ".swx", ".tmp", "~",
 )
+
+
+def not_project_file(rel: str, main: str = "main.tex") -> bool:
+    """Whether syncing leaves this path alone: tools' folders, LaTeX's working files, our compiled PDF."""
+    parts = rel.split("/")
+    if any(x in IGNORE_DIRS for x in parts[:-1]) or parts[0] in IGNORE_DIRS:
+        return True
+    name = parts[-1]
+    if name in IGNORE_NAMES or name.startswith(".#") or name.endswith(IGNORE_SUFFIXES):
+        return True
+    return rel == main[:-4] + ".pdf"
+
+
+def project_files(root: Path, main: str = "main.tex") -> list[str]:
+    """What is on disk that syncing would treat as this project's files."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
+        for f in filenames:
+            rel = (Path(dirpath) / f).relative_to(root).as_posix()
+            if not not_project_file(rel, main) and safe_rel(rel) and not (Path(dirpath) / f).is_symlink():
+                out.append(rel)
+    return out
+
+
+def copy_project_files(src: Path, dst: Path, main: str = "main.tex") -> None:
+    """Copy a project's files and folders, as new files: not its state, or LaTeX's working files."""
+    dst.mkdir(parents=True, exist_ok=True)
+    for dirpath, dirnames, _files in os.walk(src):
+        here = Path(dirpath)
+        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith(".") and not (here / d).is_symlink()]
+        for d in dirnames:
+            rel = (here / d).relative_to(src).as_posix()
+            if safe_rel(rel):
+                (dst / rel).mkdir(parents=True, exist_ok=True)
+    for rel in project_files(src, main):
+        (dst / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src / rel, dst / rel)
+
+
 TEXT_SUFFIXES = {
     ".tex", ".bib", ".sty", ".cls", ".bst", ".bbx", ".cbx", ".lbx", ".dtx", ".ins", ".cfg",
     ".def", ".clo", ".ltx", ".txt", ".md", ".csv", ".dat", ".tsv", ".tikz", ".pgf", ".py",
@@ -216,14 +256,7 @@ class FolderSync:
         return full
 
     def ignored(self, rel: str) -> bool:
-        parts = rel.split("/")
-        if any(x in IGNORE_DIRS for x in parts[:-1]) or parts[0] in IGNORE_DIRS:
-            return True
-        name = parts[-1]
-        if name in IGNORE_NAMES or name.startswith(".#") or name.endswith(IGNORE_SUFFIXES):
-            return True
-        main = str(self.r.meta.get("main", "main.tex"))
-        return rel == main[:-4] + ".pdf"  # our own compiled output
+        return not_project_file(rel, str(self.r.meta.get("main", "main.tex")))
 
     def disk_files(self) -> list[str]:
         out = []

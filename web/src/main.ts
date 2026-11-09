@@ -58,7 +58,10 @@ const keys = opened === 'no-key' ? null : opened
 let refreshProjects = () => {}
 /** What the start page's list is narrowed to. */
 const finding = { text: '', tags: new Set<string>(), page: 0 }
-const PAGE_SIZE = 25
+const PAGE_SIZES = [25, 50, 100, 0] // 0: everything on one page
+const PAGE_KEY = 'texloom.projectPageSize'
+let pageSize = (() => { try { const n = Number(localStorage.getItem(PAGE_KEY) ?? 25); return PAGE_SIZES.includes(n) ? n : 25 } catch { return 25 } })()
+const pageCount = (total: number) => (pageSize ? Math.max(1, Math.ceil(total / pageSize)) : 1)
 /** Projects ticked on the start page. Kept across pages and searches. */
 const selected = new Set<string>()
 let showSelection = () => {}
@@ -199,7 +202,7 @@ const canOwn = (r: Recent) => { try { return !!Keys.fromFragment('#' + r.fragmen
 const hasServerCopy = (r: Recent) => !(r.atRisk || r.storage === 'relay')
 
 /** The line above the list: select everything found, and what to do with what's selected. */
-function selectionBar(matching: Recent[]): HTMLElement {
+function selectionBar(matching: Recent[], paged: boolean): HTMLElement {
   const all = h('input', { type: 'checkbox', class: 'selectall', 'aria-label': tn(matching.length, 'Select the {{n}} project found', 'Select all {{n}} projects found'), onchange: (e: any) => {
     for (const r of matching) { if (e.target.checked) selected.add(r.project); else selected.delete(r.project) }
     refreshProjects()
@@ -225,7 +228,7 @@ function selectionBar(matching: Recent[]): HTMLElement {
     actions.hidden = !selected.size
   }
   showSelection()
-  return h('div', { class: 'selectbar' }, h('label', {}, all, count), actions)
+  return h('div', { class: 'selectbar' }, h('label', {}, all, count), actions, h('span', { class: 'spacer' }), paged ? pageSizePicker() : null)
 }
 
 function goToPage(page: number, then: string) {
@@ -235,13 +238,23 @@ function goToPage(page: number, then: string) {
   document.querySelector<HTMLElement>(then)?.focus()
 }
 
+function pageSizePicker(): HTMLElement {
+  return h('select', { class: 'pagesize', 'aria-label': t('Projects per page'), onchange: (e: any) => {
+    pageSize = Number(e.target.value)
+    try { localStorage.setItem(PAGE_KEY, String(pageSize)) } catch {}
+    finding.page = 0
+    refreshProjects()
+    document.querySelector<HTMLElement>('.pagesize')?.focus()
+  } }, ...PAGE_SIZES.map((n) => h('option', { value: n, ...(n === pageSize ? { selected: true } : {}) }, n ? t('{{n}} per page', { n }) : t('All on one page'))))
+}
+
 function pager(total: number): HTMLElement | null {
-  if (total <= PAGE_SIZE) return null
-  const last = Math.ceil(total / PAGE_SIZE) - 1
-  const from = finding.page * PAGE_SIZE + 1
+  if (pageCount(total) === 1) return null
+  const last = pageCount(total) - 1
+  const from = finding.page * pageSize + 1
   return h('nav', { class: 'pager', 'aria-label': t('Pages') },
     h('button', { class: 'prev', disabled: finding.page === 0, onclick: () => goToPage(finding.page - 1, '.pager .prev') }, t('Previous')),
-    h('span', { class: 'muted small' }, t('{{from}} to {{to}} of {{total}}', { from, to: Math.min(from + PAGE_SIZE - 1, total), total })),
+    h('span', { class: 'muted small' }, t('{{from}} to {{to}} of {{total}}', { from, to: Math.min(from + pageSize - 1, total), total })),
     h('button', { class: 'next', disabled: finding.page === last, onclick: () => goToPage(finding.page + 1, '.pager .next') }, t('Next')))
 }
 
@@ -253,8 +266,8 @@ function projectList(): HTMLElement {
   const tagsOf = tags.reader()
   const dupes = new Set(list.map(projectLabel).filter((n, i, all) => all.indexOf(n) !== i))
   const matching = list.filter((r) => found(r, projectLabel(r), tagsOf(r.project))).sort(SORTS[sorting].order)
-  finding.page = Math.min(finding.page, Math.max(0, Math.ceil(matching.length / PAGE_SIZE) - 1))
-  const page = matching.slice(finding.page * PAGE_SIZE, (finding.page + 1) * PAGE_SIZE)
+  finding.page = Math.min(finding.page, pageCount(matching.length) - 1)
+  const page = pageSize ? matching.slice(finding.page * pageSize, (finding.page + 1) * pageSize) : matching
   const rows = page.length ? h('ul', { class: 'recent' }, ...page.map((r) => {
     const label = projectLabel(r)
     const details: string[] = []
@@ -300,7 +313,7 @@ function projectList(): HTMLElement {
         ...tagsOf(r.project).map((tag) => h('button', { class: `utag${finding.tags.has(tag.id) ? ' on' : ''}`, title: t('Show only projects tagged “{{name}}”', { name: tag.name }), onclick: () => toggleFilter(tag.id) }, tag.name)),
         h('button', { class: 'addtag', 'aria-label': t('Tags for {{name}}…', { name: label }), onclick: () => pickTags([r.project], t('Tags for “{{name}}”', { name: label }), () => refreshProjects()) }, t('+ Tag'))))
   })) : h('p', { class: 'muted' }, t('No projects match your search.'))
-  return h('div', {}, bar, matching.length ? selectionBar(matching) : null, rows, pager(matching.length))
+  return h('div', {}, bar, matching.length ? selectionBar(matching, list.length > PAGE_SIZES[0]) : null, rows, pager(matching.length))
 }
 
 // ---- project view -----------------------------------------------------------------

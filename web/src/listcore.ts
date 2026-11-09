@@ -132,8 +132,8 @@ export function mergeTags(a: TagDoc, b: TagDoc): TagDoc {
 }
 
 /** Drop what is no longer needed: old deletions, marks for deleted tags, and projects that left the list. */
-export function tidyTags(doc: TagDoc, listed: Set<string>): TagDoc {
-  const cutoff = Date.now() - YEAR
+export function tidyTags(doc: TagDoc, listed: Set<string>, now = Date.now()): TagDoc {
+  const cutoff = now - YEAR
   const out = emptyTags()
   for (const [id, tag] of Object.entries(doc.tags)) if (!tag.gone || tag.at >= cutoff) out.tags[id] = tag
   for (const [p, marks] of Object.entries(doc.on)) {

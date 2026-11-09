@@ -170,8 +170,9 @@ async def refuse_if_private(server: str, code: str) -> None:
     raise FolderProblem(f"{base} is a private server: a new project needs a valid creation code from its owner")
 
 
-async def new_project(d: Path, server: str, name: str = "", code: str = "") -> Keys:
-    """Share an existing folder as a new project, and add it to the folder list."""
+async def new_project(d: Path, server: str, name: str = "", code: str = "", settings: dict | None = None) -> Keys:
+    """Share an existing folder as a new project, and add it to the folder list.
+    `settings` are further shared project settings (the main file, engine…)."""
     if config_path(d).exists():
         raise FolderProblem(f"{d} is already a texloom project")
     await refuse_if_private(server, code)
@@ -179,7 +180,13 @@ async def new_project(d: Path, server: str, name: str = "", code: str = "") -> K
     keys = Keys.generate()
     save(d, keys.link(server), code)
     r = Replica(d / STATE, keys, server, code or None)
-    r.local_change(lambda: r.meta.__setitem__("name", name or d.resolve().name))
+
+    def describe() -> None:
+        r.meta["name"] = name or d.resolve().name
+        for k, v in (settings or {}).items():
+            r.meta[k] = v
+
+    r.local_change(describe)
     r.save()
     await run(d, False, once=True)
     registry.add(d)

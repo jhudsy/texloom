@@ -134,13 +134,12 @@ one. Servers can turn lists off with `--no-project-lists`.
 
 The box above your projects searches their names and tags, and the menu beside it sorts them by
 when they were last opened or changed, when they were added, or name. Long lists are split into
-pages. Give a project tags with **+ Tag** beneath it or **Tags** in the editor's header, and click
+pages of 25, 50 or 100, or shown on one page, as you choose. Give a project tags with **+ Tag** beneath it or **Tags** in the editor's header, and click
 a tag at the top to show only projects that have it (several tags narrow it further). **Manage
 tags…** renames and deletes them, for every project at once. Tick projects to change their tags or
 remove them together, or use the box at the top to tick everything found. Tags are yours
 alone: they aren't stored in the project, so collaborators never see them. With a synced list they
-follow you to your other devices, encrypted; otherwise they stay in that browser. For now they
-appear only in the web app.
+follow you to your other devices, encrypted; otherwise they stay in that browser.
 
 **Make a copy** (⧉ next to a project, or in the editor's header) starts a new project of your own
 from the current files and settings, which suits templates. The copy has its own links and none of
@@ -375,6 +374,10 @@ browser stops if it finds the app or `texloom run` keeping the same folder.
   In the web app, **Sync to a folder…** next to a project on the start page does the same in
   one click, as does Settings → *Keep a copy in a folder* → **Open in the TeXLoom app**. The
   app asks before joining, and says if the project already has a folder on this computer.
+- The search box above the folders finds them by name or tag; beside it you sort them and filter
+  by tag. Select several (Shift or ⌘/Ctrl-click) to change their **Tags…** or **Leave…** them
+  together, and right-click for the same actions. Tags are the same ones as in the web app, through
+  your project list. **Make a copy…** starts a new project, in a new folder, from a folder's files.
 - **Share a folder…** turns an existing folder into a new project; **Add existing folder…**
   brings back one set up earlier (e.g. left, or cloned on the command line).
 - Each folder shows whether it is up to date, offline or sending changes, with its recent

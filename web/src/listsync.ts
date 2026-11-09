@@ -78,7 +78,7 @@ const tagsKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 'tex
 async function exchangeTags(secret: Uint8Array, list: ListDoc): Promise<boolean> {
   const listed = new Set(Object.keys(list.projects))
   const doc = await update<TagDoc>(await tagsKey(secret), (had) => tidyTags(mergeTags(had ?? emptyTags(), tags.doc()), listed), creationCode.get() ? undefined : emptyTags())
-  return tags.apply(doc)
+  return tags.apply(tidyTags(mergeTags(tags.doc(), doc), listed)) // tags may have changed meanwhile
 }
 
 // ---- this browser --------------------------------------------------------------------------

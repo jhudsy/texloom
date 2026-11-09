@@ -104,8 +104,22 @@ def lang_pref() -> str:
     return v if v == "en" or v in CATALOGS else "auto"
 
 
+def app_pref(key: str, default=None):
+    """A remembered setting of the desktop app."""
+    try:
+        data = json.loads(_prefs_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+    return data.get(key, default) if isinstance(data, dict) else default
+
+
 def set_lang_pref(v: str) -> None:
     """Remember the language for the next start (the running app keeps its language)."""
+    set_app_pref("lang", None if v == "auto" else v)
+
+
+def set_app_pref(key: str, value) -> None:
+    """Remember a setting; None forgets it."""
     f = _prefs_file()
     try:
         data = json.loads(f.read_text(encoding="utf-8"))
@@ -113,10 +127,10 @@ def set_lang_pref(v: str) -> None:
             data = {}
     except (OSError, ValueError):
         data = {}
-    if v == "auto":
-        data.pop("lang", None)
+    if value is None:
+        data.pop(key, None)
     else:
-        data["lang"] = v
+        data[key] = value
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(data, indent=2), encoding="utf-8")
 

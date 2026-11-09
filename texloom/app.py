@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import functools
 import getpass
 import json
 import logging
@@ -30,11 +31,12 @@ from urllib.parse import parse_qs, quote, urlparse
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
-from . import __version__, autostart, listsync, registry
-from .cli import DEFAULT_CONFIG, clone_project, load_config, new_project, peek, run, update_config
+from . import __version__, autostart, listsync, registry, tags
+from .cli import DEFAULT_CONFIG, clone_project, load, load_config, new_project, peek, run, update_config
 from .crypto import Keys
 from .daemon import CURRENT, FOLDER, Daemon, FolderProblem, FolderTag
-from .i18n import _, lang_pref, ngettext, set_lang_pref
+from .folder import copy_project_files
+from .i18n import _, app_pref, lang_pref, ngettext, set_app_pref, set_lang_pref
 from .locales import NAMES
 
 log = logging.getLogger("texloom")
@@ -664,6 +666,11 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
         lay.addWidget(QtWidgets.QLabel(_("Projects on the list that aren't on this computer:")))
+        self.find = QtWidgets.QLineEdit()
+        self.find.setPlaceholderText(_("Search by name or tag…"))
+        self.find.setClearButtonEnabled(True)
+        self.find.textChanged.connect(lambda _text: self.apply_find())
+        lay.addWidget(self.find)
         self.items = QtWidgets.QListWidget()
         self.items.itemDoubleClicked.connect(lambda _item: self.join())
         lay.addWidget(self.items, 1)
@@ -723,10 +730,20 @@ class ProjectListDialog(QtWidgets.QDialog):
             return
         server, doc, away = found
         self.status.setText(ngettext(len(doc["projects"]), "The list has {n} project.", "The list has {n} projects.", n=len(doc["projects"])))
-        for _p, entry in away:
-            item = QtWidgets.QListWidgetItem(entry.get("nick") or entry.get("n") or _("Untitled project"))
+        of = tags.reader()
+        for project, entry in away:
+            names = [t.name for t in of(project)]
+            title = entry.get("nick") or entry.get("n") or _("Untitled project")
+            item = QtWidgets.QListWidgetItem(title + (f"  ·  {', '.join(names)}" if names else ""))
             item.setData(Qt.UserRole, f"{server}/#{entry['f']}")
             self.items.addItem(item)
+        self.apply_find()
+
+    def apply_find(self) -> None:
+        words = tags.fold_search(self.find.text()).split()
+        for i in range(self.items.count()):
+            item = self.items.item(i)
+            item.setHidden(not all(w in tags.fold_search(item.text()) for w in words))
 
     def adopt(self, link: str) -> None:
         self.link.setText(link)
@@ -777,6 +794,260 @@ class ProjectListDialog(QtWidgets.QDialog):
         if item:
             self.window_.join(item.data(Qt.UserRole))
             self.refresh_list()
+
+
+class CopyFolderDialog(QtWidgets.QDialog):
+    """Start a new project from a folder's current files."""
+
+    def __init__(self, engine: Engine, src: Path, parent=None) -> None:
+        super().__init__(parent)
+        self.engine, self.src = engine, src
+        self.setWindowTitle(_("Make a copy"))
+        self.setMinimumWidth(560)
+        lay = QtWidgets.QFormLayout(self)
+        note = QtWidgets.QLabel(_("The copy is a new project of your own, with its own links, in a folder of its own. It starts "
+                                  "with the current files and settings, without the history, comments or collaborators, and "
+                                  "it counts towards your storage."))
+        note.setWordWrap(True)
+        lay.addRow(note)
+        self.name = QtWidgets.QLineEdit(_("Copy of {name}", name=project_name(src, engine)))
+        self.name.textEdited.connect(self.suggest_folder)
+        lay.addRow(_("Project name"), self.name)
+        row = QtWidgets.QHBoxLayout()
+        self.folder = QtWidgets.QLineEdit(str(self.free_folder()))
+        choose = QtWidgets.QPushButton(_("Choose…"))
+        choose.clicked.connect(self.choose)
+        row.addWidget(self.folder, 1)
+        row.addWidget(choose)
+        lay.addRow(_("Folder"), row)
+        self.code = QtWidgets.QLineEdit(str(load_config(src).get("create_code") or ""))
+        self.code.setPlaceholderText(_("only if the server asks for one"))
+        lay.addRow(_("Creation code"), self.code)
+        self.msg = QtWidgets.QLabel("")
+        self.msg.setWordWrap(True)
+        lay.addRow(self.msg)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
+        self.go = bb.addButton(_("Make a copy"), QtWidgets.QDialogButtonBox.AcceptRole)
+        self.go.clicked.connect(self.make)
+        bb.rejected.connect(self.reject)
+        lay.addRow(bb)
+
+    def free_folder(self) -> Path:
+        """Next to the original, under a name that is free and valid on every system."""
+        base = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", self.name.text()).strip(" .") or "copy"
+        for n in range(1, 1000):
+            d = self.src.parent / (base if n == 1 else f"{base} {n}")
+            if not d.exists():
+                return d
+        return self.src.parent / base
+
+    def suggest_folder(self) -> None:
+        if not self.folder.isModified():
+            self.folder.setText(str(self.free_folder()))
+
+    def choose(self) -> None:
+        d = QtWidgets.QFileDialog.getExistingDirectory(self, _("Folder"), str(self.src.parent))
+        if d:
+            self.folder.setText(d)
+            self.folder.setModified(True)
+
+    def make(self) -> None:
+        dst = Path(self.folder.text()).expanduser()
+        if not dst.is_absolute() or dst.resolve().is_relative_to(self.src.resolve()):
+            self.msg.setText(red(_("Choose a folder outside the project being copied.")))
+            return
+        if dst.exists() and (not dst.is_dir() or any(dst.iterdir())):
+            self.msg.setText(red(_("Choose a new or empty folder.")))
+            return
+        self.go.setEnabled(False)
+        self.msg.setText(_("Copying…"))
+        self.engine.submit(copy_folder(self.engine, self.src, dst, self.name.text().strip(), self.code.text().strip()),
+                           lambda _keys, err: self.finished_(dst, err))
+
+    def finished_(self, dst: Path, err) -> None:
+        if err:
+            self.msg.setText(red(_("Couldn’t copy the project: {err}", err=err)))
+            self.go.setEnabled(True)
+            return
+        self.made = dst
+        self.engine.call(self.engine.daemon.poke)
+        self.accept()
+
+
+COPIED_SETTINGS = ("main", "bib", "engine", "lang")  # as in web/src/copyproject.ts
+
+
+async def copy_folder(engine: Engine, src: Path, dst: Path, name: str, code: str) -> Keys:
+    """Runs on the sync thread, the only place a folder's shared settings can be read."""
+    st = engine.daemon.states.get(src)
+    meta = st.replica.meta if st is not None and st.replica is not None else {}
+    settings = {k: str(meta.get(k)) for k in COPIED_SETTINGS if meta.get(k)}
+    await asyncio.to_thread(copy_project_files, src, dst, settings.get("main", "main.tex"))
+    return await new_project(dst, load(src)[1], name, code, settings)
+
+
+class TagsDialog(QtWidgets.QDialog):
+    """Assign or unassign tags on one project or several, and create new ones."""
+
+    def __init__(self, projects: list[str], title: str, parent=None) -> None:
+        super().__init__(parent)
+        self.projects = projects
+        self.setWindowTitle(title)
+        self.setMinimumWidth(420)
+        lay = QtWidgets.QVBoxLayout(self)
+        note = _("Only you see your tags. They aren’t shared with collaborators.")
+        if len(projects) > 1:
+            note += " " + _("A filled box means only some of these projects have that tag.")
+        if listsync.tags_problem() == "needs-code":
+            note += " " + _("Your tags stay on this computer until you enter a creation code in Project list….")
+        label = QtWidgets.QLabel(note)
+        label.setWordWrap(True)
+        lay.addWidget(label)
+        self.input = QtWidgets.QLineEdit()
+        self.input.setPlaceholderText(_("Find or create a tag…"))
+        self.input.setMaxLength(tags.MAX_NAME)
+        self.input.textChanged.connect(lambda _text: self.render())
+        self.input.returnPressed.connect(self.commit)
+        lay.addWidget(self.input)
+        self.create = QtWidgets.QPushButton()
+        self.create.setAutoDefault(False)
+        self.create.clicked.connect(self.commit)
+        lay.addWidget(self.create)
+        self.items = QtWidgets.QListWidget()
+        self.items.itemChanged.connect(self.toggled)
+        lay.addWidget(self.items, 1)
+        row = QtWidgets.QHBoxLayout()
+        manage = QtWidgets.QPushButton(_("Manage tags…"))
+        manage.setAutoDefault(False)
+        manage.clicked.connect(self.manage)
+        close = QtWidgets.QPushButton(_("Close"))
+        close.setAutoDefault(False)
+        close.clicked.connect(self.accept)
+        row.addWidget(manage)
+        row.addStretch(1)
+        row.addWidget(close)
+        lay.addLayout(row)
+        self.render()
+
+    def typed(self) -> str:
+        return tags.clean_name(self.input.text())
+
+    def render(self) -> None:
+        want, of = listsync.fold_tag(self.typed()), tags.reader()
+        self.items.blockSignals(True)
+        self.items.clear()
+        for tag in tags.all_tags():
+            if want not in listsync.fold_tag(tag.name):
+                continue
+            n = sum(1 for p in self.projects if any(x.id == tag.id for x in of(p)))
+            it = QtWidgets.QListWidgetItem(tag.name)
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setData(Qt.UserRole, tag.id)
+            it.setCheckState(Qt.Checked if n == len(self.projects) else Qt.PartiallyChecked if n else Qt.Unchecked)
+            self.items.addItem(it)
+        self.items.blockSignals(False)
+        self.create.setVisible(bool(self.typed()) and tags.find(self.typed()) is None)
+        self.create.setText(_("Create “{name}”", name=self.typed()))
+
+    def commit(self) -> None:
+        if self.typed():
+            tag = tags.find(self.typed()) or tags.create(self.typed())
+            if tag:
+                tags.assign(self.projects, tag.id, True)
+            self.input.clear()
+            self.render()
+
+    def toggled(self, it: QtWidgets.QListWidgetItem) -> None:
+        tags.assign(self.projects, it.data(Qt.UserRole), it.checkState() == Qt.Checked)
+
+    def manage(self) -> None:
+        ManageTagsDialog(self).exec()
+        self.render()
+
+
+class ManageTagsDialog(QtWidgets.QDialog):
+    """Add, rename and delete tags."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(_("Manage tags"))
+        self.setMinimumWidth(420)
+        lay = QtWidgets.QVBoxLayout(self)
+        note = QtWidgets.QLabel(_("A change applies to every project that has the tag."))
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        self.items = QtWidgets.QListWidget()
+        self.items.itemDoubleClicked.connect(lambda _it: self.rename())
+        lay.addWidget(self.items, 1)
+        row = QtWidgets.QHBoxLayout()
+        self.add_in = QtWidgets.QLineEdit()
+        self.add_in.setPlaceholderText(_("New tag"))
+        self.add_in.setMaxLength(tags.MAX_NAME)
+        self.add_in.returnPressed.connect(self.add)
+        add = QtWidgets.QPushButton(_("Add"))
+        add.setAutoDefault(False)
+        add.clicked.connect(self.add)
+        row.addWidget(self.add_in, 1)
+        row.addWidget(add)
+        lay.addLayout(row)
+        row = QtWidgets.QHBoxLayout()
+        for text, act in ((_("Rename…"), self.rename), (_("Delete"), self.delete)):
+            b = QtWidgets.QPushButton(text)
+            b.setAutoDefault(False)
+            b.clicked.connect(act)
+            row.addWidget(b)
+        row.addStretch(1)
+        close = QtWidgets.QPushButton(_("Close"))
+        close.setAutoDefault(False)
+        close.clicked.connect(self.accept)
+        row.addWidget(close)
+        lay.addLayout(row)
+        self.render()
+
+    def render(self) -> None:
+        self.items.clear()
+        for tag in tags.all_tags():
+            n = tags.uses(tag.id)
+            it = QtWidgets.QListWidgetItem(f"{tag.name}  ·  " + ngettext(n, "{n} project", "{n} projects", n=n))
+            it.setData(Qt.UserRole, tag)
+            self.items.addItem(it)
+
+    def picked(self) -> tags.Tag | None:
+        it = self.items.currentItem()
+        return it.data(Qt.UserRole) if it else None
+
+    def add(self) -> None:
+        if tags.create(self.add_in.text()):
+            self.add_in.clear()
+            self.render()
+
+    def rename(self) -> None:
+        tag = self.picked()
+        if not tag:
+            return
+        name, ok = QtWidgets.QInputDialog.getText(self, _("Manage tags"), _("New name for “{name}”:", name=tag.name), text=tag.name)
+        clean = tags.clean_name(name)
+        if not ok or not clean or clean == tag.name:
+            return
+        other = tags.find(clean)
+        if other and other.id != tag.id and QtWidgets.QMessageBox.question(
+                self, _("Manage tags"), _("A tag called “{name}” already exists. Merge the two?", name=other.name)) != QtWidgets.QMessageBox.Yes:
+            return
+        tags.rename(tag.id, clean)
+        self.render()
+
+    def delete(self) -> None:
+        tag = self.picked()
+        if not tag:
+            return
+        n = tags.uses(tag.id)
+        if n and QtWidgets.QMessageBox.question(self, _("Manage tags"), ngettext(
+                n, "Delete the tag “{name}”? It will be taken off {n} project. The project itself isn’t changed.",
+                "Delete the tag “{name}”? It will be taken off {n} projects. The projects themselves aren’t changed.",
+                n=n, name=tag.name)) != QtWidgets.QMessageBox.Yes:
+            return
+        tags.remove(tag.id)
+        self.render()
 
 
 def folder_of(project: str) -> Path | None:
@@ -834,10 +1105,7 @@ class Window(QtWidgets.QMainWindow):
         tb.addWidget(self.lang_box)
 
         split = QtWidgets.QSplitter()
-        self.list = QtWidgets.QListWidget()
-        self.list.setMinimumWidth(240)
-        self.list.currentRowChanged.connect(lambda _i: self.show_detail())
-        split.addWidget(self.list)
+        split.addWidget(self.build_list())
         split.addWidget(self.build_detail())
         split.setStretchFactor(1, 1)
         self.setCentralWidget(split)
@@ -846,11 +1114,208 @@ class Window(QtWidgets.QMainWindow):
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(1000)
-        self.list_busy, self.list_at, self.list_folders = False, 0.0, None
+        self.list_busy, self.list_at, self.list_folders, self.tags_dirty = False, 0.0, None, False
         self.list_timer = QtCore.QTimer(self)
         self.list_timer.timeout.connect(self.keep_list_updated)
+        self.list_timer.timeout.connect(lambda: self.sorting == "changed" and self.scan_dates())
         self.list_timer.start(60_000)
         self.refresh()
+
+    # -- the list of folders
+    def build_list(self) -> QtWidgets.QWidget:
+        self.tag_filter: set[str] = set()
+        self.project_ids: dict[Path, str | None] = {}
+        self.dates: dict[Path, tuple[int, int]] = {}
+        self.scanning = False
+        w = QtWidgets.QWidget()
+        lay = QtWidgets.QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.find = QtWidgets.QLineEdit()
+        self.find.setPlaceholderText(_("Search by name or tag…"))
+        self.find.setClearButtonEnabled(True)
+        self.find.textChanged.connect(lambda _text: self.refresh())
+        lay.addWidget(self.find)
+        row = QtWidgets.QHBoxLayout()
+        self.sort_box = QtWidgets.QComboBox()
+        self.sort_box.setToolTip(_("Sort folders"))
+        for label, key in ((_("Oldest first"), "oldest"), (_("Newest first"), "newest"), (_("Last changed"), "changed"),
+                           (_("Name (A to Z)"), "az"), (_("Name (Z to A)"), "za")):
+            self.sort_box.addItem(label, key)
+        self.sort_box.setCurrentIndex(max(0, self.sort_box.findData(app_pref("folder_sort", "oldest"))))
+        self.sort_box.currentIndexChanged.connect(self.set_sorting)
+        self.sort_box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.sort_box.setMinimumContentsLength(8)  # long translations mustn't push the filter out of view
+        self.filter_btn = QtWidgets.QToolButton()
+        self.filter_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.filter_menu = QtWidgets.QMenu(self.filter_btn)
+        self.filter_menu.aboutToShow.connect(self.fill_filter_menu)
+        self.filter_btn.setMenu(self.filter_menu)
+        self.filter_btn.setStyleSheet("QToolButton::menu-indicator { image: none; }")  # it covered the text
+        row.addWidget(self.sort_box, 1)
+        row.addWidget(self.filter_btn)
+        lay.addLayout(row)
+        self.list = QtWidgets.QListWidget()
+        self.list.setMinimumWidth(240)
+        self.list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.list.itemSelectionChanged.connect(self.show_detail)
+        self.list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self.list_menu)
+        lay.addWidget(self.list, 1)
+        self.show_filter()
+        return w
+
+    @property
+    def sorting(self) -> str:
+        return self.sort_box.currentData()
+
+    def set_sorting(self, _i: int) -> None:
+        set_app_pref("folder_sort", self.sorting)
+        self.scan_dates()
+        self.refresh()
+
+    def show_filter(self) -> None:
+        names = [t.name for t in tags.all_tags() if t.id in self.tag_filter]
+        self.filter_btn.setText((_("Filter by tag ({n})", n=len(names)) if names else _("Filter by tag")) + " ▾")
+        self.filter_btn.setToolTip(", ".join(names))
+
+    def fill_filter_menu(self) -> None:
+        m = self.filter_menu
+        m.clear()
+        every = tags.all_tags()
+        for tag in every:
+            act = m.addAction(tag.name.replace("&", "&&"))
+            act.setCheckable(True)
+            act.setChecked(tag.id in self.tag_filter)
+            act.toggled.connect(lambda on, tid=tag.id: self.set_filter(tid, on))
+        if not every:
+            m.addAction(_("No tags yet")).setEnabled(False)
+        m.addSeparator()
+        if self.tag_filter:
+            m.addAction(_("Clear filter"), self.clear_filter)
+        m.addAction(_("Manage tags…"), self.manage_tags)
+
+    def set_filter(self, tid: str, on: bool) -> None:
+        (self.tag_filter.add if on else self.tag_filter.discard)(tid)
+        self.show_filter()
+        self.refresh()
+
+    def clear_filter(self) -> None:
+        self.tag_filter.clear()
+        self.show_filter()
+        self.refresh()
+
+    def project_of(self, d: Path) -> str | None:
+        if d not in self.project_ids:
+            try:
+                self.project_ids[d] = load(d)[0].project
+            except (OSError, ValueError, KeyError):
+                return None
+        return self.project_ids[d]
+
+    def shown_folders(self) -> list[Path]:
+        """The folders that match the search and filter, in the chosen order."""
+        of = tags.reader()
+        every_id = {t.id for t in tags.all_tags()}
+        if self.tag_filter - every_id:
+            self.tag_filter &= every_id
+            self.show_filter()
+        words = tags.fold_search(self.find.text()).split()
+        out = []
+        for d in self.folders():
+            p = self.project_of(d)
+            own = of(p) if p else []
+            if self.tag_filter - {t.id for t in own}:
+                continue
+            text = tags.fold_search(" ".join([project_name(d, self.engine), d.name, *(t.name for t in own)]))
+            if all(w in text for w in words):
+                out.append(d)
+        return self.in_order(out)
+
+    def in_order(self, fs: list[Path]) -> list[Path]:
+        how = self.sorting
+        if how in ("az", "za"):
+            names = QtCore.QCollator()
+            names.setNumericMode(True)
+            names.setCaseSensitivity(Qt.CaseInsensitive)
+            key = functools.cmp_to_key(lambda a, b: names.compare(project_name(a, self.engine), project_name(b, self.engine)))
+            return sorted(fs, key=key, reverse=how == "za")
+        when = 1 if how == "changed" else 0
+        return sorted(fs, key=lambda d: self.dates.get(d, (0, 0))[when], reverse=how != "oldest")
+
+    def scan_dates(self) -> None:
+        """Reading every file's date is slow, so it happens beside the window."""
+        if self.scanning:
+            return
+        self.scanning = True
+        fs = self.folders()
+
+        def work() -> None:
+            found = {}
+            try:
+                for d in fs:
+                    try:
+                        found[d] = listsync.folder_dates(d)
+                    except OSError:  # a folder that has gone
+                        found[d] = (0, 0)
+                self.dates = found
+            finally:
+                self.scanning = False
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def selected(self) -> list[Path]:
+        """What an action applies to: the selected folders, else the current one."""
+        fs = [Path(it.data(Qt.UserRole)) for it in self.list.selectedItems()]
+        return fs or ([self.current()] if self.current() else [])
+
+    def list_menu(self, pos: QtCore.QPoint) -> None:
+        it = self.list.itemAt(pos)
+        if not it:
+            return
+        if not it.isSelected():
+            self.list.setCurrentItem(it)
+        m = QtWidgets.QMenu(self)
+        m.addAction(_("Tags…"), self.edit_tags)
+        if len(self.selected()) == 1:
+            m.addAction(_("Make a copy…"), self.copy_project)
+        m.addSeparator()
+        m.addAction(_("Leave…"), self.leave)
+        m.exec(self.list.viewport().mapToGlobal(pos))
+
+    def edit_tags(self) -> None:
+        fs = self.selected()
+        projects = list(dict.fromkeys(p for p in map(self.project_of, fs) if p))
+        if not projects:
+            return
+        title = _("Tags for “{name}”", name=project_name(fs[0], self.engine)) if len(fs) == 1 else ngettext(
+            len(fs), "Tags for {n} folder", "Tags for {n} folders", n=len(fs))
+        TagsDialog(projects, title, self).exec()
+        self.tags_changed()
+
+    def manage_tags(self) -> None:
+        ManageTagsDialog(self).exec()
+        self.tags_changed()
+
+    def tags_changed(self) -> None:
+        self.tags_dirty = True
+        self.show_filter()
+        self.refresh()
+        QtCore.QTimer.singleShot(2000, self.keep_list_updated)
+
+    def copy_project(self) -> None:
+        d = self.current()
+        if not d:
+            return
+        dlg = CopyFolderDialog(self.engine, d, self)
+        if dlg.exec():
+            self.find.clear()
+            self.clear_filter()
+            self.select_folder(dlg.made)
+
+    def select_folder(self, d: Path) -> None:
+        for i in range(self.list.count()):
+            if Path(self.list.item(i).data(Qt.UserRole)) == d.resolve():
+                self.list.setCurrentRow(i)
 
     # -- detail pane
     def build_detail(self) -> QtWidgets.QWidget:
@@ -877,7 +1342,11 @@ class Window(QtWidgets.QMainWindow):
             self.current(), self, self.engine, project_name(self.current(), self.engine)).exec())
         self.b_leave = QtWidgets.QPushButton(_("Leave…"))
         self.b_leave.clicked.connect(self.leave)
-        for b in (self.b_open, self.b_web, self.b_ro):
+        self.b_tags = QtWidgets.QPushButton(_("Tags…"))
+        self.b_tags.clicked.connect(self.edit_tags)
+        self.b_copy = QtWidgets.QPushButton(_("Make a copy…"))
+        self.b_copy.clicked.connect(self.copy_project)
+        for b in (self.b_open, self.b_web, self.b_ro, self.b_tags, self.b_copy):
             btns.addWidget(b)
         btns.addStretch(1)
         btns.addWidget(self.b_leave)
@@ -886,6 +1355,9 @@ class Window(QtWidgets.QMainWindow):
         self.c_compile.clicked.connect(lambda on: self.set_option("compile", on))
         self.c_git = QtWidgets.QCheckBox(_("Keep this folder’s git repository in step (commit, pull, push)"))
         self.c_git.clicked.connect(lambda on: self.set_option("git", on))
+        self.settings = QtWidgets.QWidget()  # one folder's settings: off while several are selected
+        slay = QtWidgets.QVBoxLayout(self.settings)
+        slay.setContentsMargins(0, 0, 0, 0)
         crow = QtWidgets.QHBoxLayout()
         crow.addWidget(self.c_compile)
         crow.addStretch(1)
@@ -894,8 +1366,8 @@ class Window(QtWidgets.QMainWindow):
         self.b_scratch.clicked.connect(self.compile_from_scratch)
         self.b_scratch.setEnabled(False)  # until a folder that compiles is selected
         crow.addWidget(self.b_scratch)
-        lay.addLayout(crow)
-        lay.addWidget(self.c_git)
+        slay.addLayout(crow)
+        slay.addWidget(self.c_git)
         prow = QtWidgets.QHBoxLayout()
         prow.addWidget(QtWidgets.QLabel(_("Running programs when compiling:")))
         self.p_mode = QtWidgets.QComboBox()
@@ -907,7 +1379,8 @@ class Window(QtWidgets.QMainWindow):
         self.p_review.clicked.connect(lambda: self.current() and ProgramsDialog(self.engine, self.current(), self).exec())
         prow.addWidget(self.p_mode, 1)
         prow.addWidget(self.p_review)
-        lay.addLayout(prow)
+        slay.addLayout(prow)
+        lay.addWidget(self.settings)
         lay.addWidget(QtWidgets.QLabel(_("Activity")))
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
@@ -926,8 +1399,12 @@ class Window(QtWidgets.QMainWindow):
         return Path(it.data(Qt.UserRole)) if it else None
 
     def refresh(self) -> None:
-        fs = self.folders()
+        every = self.folders()
+        fs = self.shown_folders()
+        if not self.scanning and any(d not in self.dates for d in every):
+            self.scan_dates()
         keep = self.current()
+        picked = {str(p) for p in self.selected()}
         if [self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())] != [str(d) for d in fs]:
             self.list.blockSignals(True)
             self.list.clear()
@@ -935,28 +1412,47 @@ class Window(QtWidgets.QMainWindow):
                 it = QtWidgets.QListWidgetItem()
                 it.setData(Qt.UserRole, str(d))
                 self.list.addItem(it)
-            self.list.blockSignals(False)
             idx = next((i for i, d in enumerate(fs) if d == keep), 0 if fs else -1)
-            self.list.setCurrentRow(idx)
-        problems = 0
+            still = [i for i, d in enumerate(fs) if str(d) in picked]
+            if len(still) > 1:  # keep a selection of several across a change of order
+                for i in still:
+                    self.list.item(i).setSelected(True)
+                self.list.setCurrentRow(idx, QtCore.QItemSelectionModel.NoUpdate)
+            else:
+                self.list.setCurrentRow(idx)
+            self.list.blockSignals(False)
+        problems = sum(describe(d, self.engine)[1] == RED for d in every)
+        of = tags.reader()
         for i, d in enumerate(fs):
             short, colour, _longer = describe(d, self.engine)
-            problems += colour == RED
             it = self.list.item(i)
             name = project_name(d, self.engine)
-            it.setText(f"{name}\n{short}" + (f" · {d.name}" if d.name != name else ""))
+            own = of(self.project_of(d) or "")
+            it.setText(f"{name}\n{short}" + (f" · {d.name}" if d.name != name else "") + (f"\n{', '.join(t.name for t in own)}" if own else ""))
             it.setIcon(dot(colour))
             it.setToolTip(str(d))
         self.detail.setVisible(bool(fs))
         self.statusBar().showMessage(
             _("Paused") if self.engine.daemon.paused else
-            ngettext(len(fs), "{n} folder", "{n} folders", n=len(fs))
-            + (" · " + ngettext(problems, "{n} not syncing", "{n} not syncing", n=problems) if problems else "") if fs else
+            ngettext(len(every), "{n} folder", "{n} folders", n=len(every))
+            + (" · " + ngettext(len(fs), "{n} shown", "{n} shown", n=len(fs)) if len(fs) != len(every) else "")
+            + (" · " + ngettext(problems, "{n} not syncing", "{n} not syncing", n=problems) if problems else "") if every else
             _("No folders yet: Join project… or Share a folder…"))
         self.pause_act.setText(_("Resume syncing") if self.engine.daemon.paused else _("Pause syncing"))
         self.show_detail()
 
     def show_detail(self) -> None:
+        picked = self.selected()
+        several = len(picked) > 1
+        self.settings.setEnabled(not several)
+        for b in (self.b_open, self.b_web, self.b_ro, self.b_copy):
+            b.setEnabled(not several)
+        if several:
+            self.title.setText(ngettext(len(picked), "{n} folder selected", "{n} folders selected", n=len(picked)))
+            self.path_lbl.setText("")
+            self.status_lbl.setText("")
+            self.log.setPlainText("")
+            return
         d = self.current()
         if d is None:
             return
@@ -989,13 +1485,15 @@ class Window(QtWidgets.QMainWindow):
         JoinDialog(self.engine, self, link, from_web).exec()
         self.refresh()
 
-    def keep_list_updated(self) -> None:
-        """Keep the project list in step: when this computer's folders change, and every half hour."""
+    def keep_list_updated(self, force: bool = False) -> None:
+        """Keep the project list in step: when this computer's folders or tags change, when the window
+        comes to the front, and every half hour."""
         if self.list_busy or not listsync.saved_link():
             return
         folders = {str(d) for d in registry.folders()}
-        if folders == self.list_folders and time.time() - self.list_at < 1800:
+        if folders == self.list_folders and not force and not self.tags_dirty and time.time() - self.list_at < 1800:
             return
+        self.tags_dirty = False
 
         def work() -> None:
             try:
@@ -1036,14 +1534,22 @@ class Window(QtWidgets.QMainWindow):
                                                                 "browser and use Share there to invite people."))
 
     def leave(self) -> None:
-        d = self.current()
-        if d and QtWidgets.QMessageBox.question(
-                self, _("Leave"), _("Stop syncing “{project}”?\n\nThe folder and its files stay "
-                                    "where they are ({d}); you can delete them yourself.",
-                                    project=project_name(d, self.engine), d=d)) == QtWidgets.QMessageBox.Yes:
+        fs = self.selected()
+        if not fs:
+            return
+        ask = _("Stop syncing “{project}”?\n\nThe folder and its files stay where they are ({d}); you can delete them yourself.",
+                project=project_name(fs[0], self.engine), d=fs[0]) if len(fs) == 1 else ngettext(
+            len(fs), "Stop syncing {n} folder?\n\n{names}\n\nThe folder and its files stay where they are; you can delete it yourself.",
+            "Stop syncing {n} folders?\n\n{names}\n\nThe folders and their files stay where they are; you can delete them yourself.",
+            n=len(fs), names="\n".join(project_name(d, self.engine) for d in fs))
+        if QtWidgets.QMessageBox.question(self, _("Leave"), ask) != QtWidgets.QMessageBox.Yes:
+            return
+        for d in fs:
             registry.remove(d)
-            self.engine.call(self.engine.daemon.poke)
-            self.refresh()
+        if not listsync.saved_link():  # with a list, the project stays on it and keeps its tags
+            tags.keep_only({p for p in map(self.project_of, self.folders()) if p})
+        self.engine.call(self.engine.daemon.poke)
+        self.refresh()
 
     def compile_from_scratch(self) -> None:
         d = self.current()
@@ -1102,6 +1608,11 @@ class Window(QtWidgets.QMainWindow):
         self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
         self.raise_()
         self.activateWindow()
+
+    def changeEvent(self, e: QtCore.QEvent) -> None:
+        super().changeEvent(e)
+        if e.type() == QtCore.QEvent.ActivationChange and self.isActiveWindow() and time.time() - self.list_at > 60:
+            self.keep_list_updated(force=True)
 
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
         if QtWidgets.QSystemTrayIcon.isSystemTrayAvailable():

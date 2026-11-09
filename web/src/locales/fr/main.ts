@@ -150,5 +150,8 @@ const fr: Catalog = {
   'Tags for {{n}} projects': ['Étiquettes de {{n}} projet', 'Étiquettes de {{n}} projets'],
   '{{n}} selected ({{hidden}} not shown)': ['{{n}} sélectionné ({{hidden}} non affichés)', '{{n}} sélectionnés ({{hidden}} non affichés)'],
   '{{n}} selected': ['{{n}} sélectionné', '{{n}} sélectionnés'],
+  'Projects per page': 'Projets par page',
+  '{{n}} per page': '{{n}} par page',
+  'All on one page': 'Tous sur une page',
 }
 export default fr

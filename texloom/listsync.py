@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 import unicodedata
 import urllib.error
@@ -29,7 +30,7 @@ from . import registry
 from .crypto import b64d, b64e
 from .i18n import _
 
-SIGN_LABEL, CRYPT_LABEL = b"texloom list sign", b"texloom list encrypt"
+SIGN_LABEL, CRYPT_LABEL, TAGS_LABEL = b"texloom list sign", b"texloom list encrypt", b"texloom list tags"
 TIMEOUT = 15
 YEAR_MS = 365 * 86400_000
 # Must match web/src/listsync.ts. A password only ever opens a small entry holding the list's secret.
@@ -136,6 +137,73 @@ def _forget_old_removals(doc: dict) -> dict:
     return {**doc, "gone": {p: when for p, when in doc["gone"].items() if when >= cutoff}}
 
 
+# --- tags (web/src/listcore.ts must match) --------------------------------------------------------
+def empty_tags() -> dict:
+    return {"v": 1, "tags": {}, "on": {}}
+
+
+def fold_tag(name: str) -> str:
+    """The form in which two tag names count as the same."""
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", name)).strip().lower()
+
+
+def _later_mark(a: int, b: int) -> int:
+    return (a if abs(a) > abs(b) else b) if abs(a) != abs(b) else max(a, b)
+
+
+def merge_tags(a: dict, b: dict) -> dict:
+    """Two sets of tags as one, the same whichever way round. Each tag, and each tag on each project
+    (`on`: when last assigned, negative if taken off), takes its latest change; on a tie, deleting
+    and assigning win. Tags given the same name apart become one, with every project either had."""
+    out = empty_tags()
+    atags, btags = a.get("tags", {}), b.get("tags", {})
+    for tid in {*atags, *btags}:
+        x, y = atags.get(tid), btags.get(tid)
+        if not x or not y:
+            out["tags"][tid] = dict(x or y)
+            continue
+        if x["at"] != y["at"]:
+            first = x["at"] > y["at"]
+        elif bool(x.get("gone")) != bool(y.get("gone")):
+            first = bool(x.get("gone"))
+        else:
+            first = _canon(x) >= _canon(y)
+        out["tags"][tid] = dict(x if first else y)
+    for p in {*a.get("on", {}), *b.get("on", {})}:
+        marks = out["on"][p] = dict(a.get("on", {}).get(p, {}))
+        for tid, when in b.get("on", {}).get(p, {}).items():
+            marks[tid] = _later_mark(marks[tid], when) if tid in marks else when
+    named: dict[str, str] = {}
+    for tid in sorted(out["tags"]):
+        tag = out["tags"][tid]
+        if tag.get("gone"):
+            continue
+        keep = named.setdefault(fold_tag(tag["n"]), tid)
+        if keep == tid:
+            continue
+        out["tags"][tid] = {"n": "", "at": tag["at"], "gone": True}
+        for marks in out["on"].values():
+            if tid in marks:
+                when = marks.pop(tid)
+                marks[keep] = _later_mark(marks[keep], when) if keep in marks else when
+    return out
+
+
+def tidy_tags(doc: dict, listed: set[str], now: int | None = None) -> dict:
+    """Drop what is no longer needed: old deletions, marks for deleted tags, and projects that left the list."""
+    cutoff = (int(time.time() * 1000) if now is None else now) - YEAR_MS
+    out = empty_tags()
+    out["tags"] = {tid: tag for tid, tag in doc.get("tags", {}).items() if not tag.get("gone") or tag["at"] >= cutoff}
+    for p, marks in doc.get("on", {}).items():
+        if p not in listed:
+            continue
+        kept = {tid: when for tid, when in marks.items()
+                if tid in out["tags"] and not out["tags"][tid].get("gone") and (when > 0 or -when >= cutoff)}
+        if kept:
+            out["on"][p] = kept
+    return out
+
+
 def _request(method: str, url: str, data: bytes | None = None, headers: dict | None = None):
     """(status, body, headers)."""
     req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
@@ -189,6 +257,22 @@ def sync(key: ListKey, server: str, local: dict, code: str | None = None) -> dic
     raise ListError("the list keeps changing: try again")
 
 
+def sync_tags(key: ListKey, server: str, local: dict, listed: set[str], code: str | None = None) -> dict:
+    """Merge `local` with the tags kept beside the list (an entry of their own, so that clients which
+    don't know about tags can't lose them). A new entry needs a creation code; without one, none is
+    made until there is something to put in it."""
+    entry = ListKey(hmac.new(key.secret, TAGS_LABEL, hashlib.sha256).digest())
+    for _attempt in range(5):
+        seq, remote = pull(entry, server)
+        merged = tidy_tags(merge_tags(remote or empty_tags(), local), listed)
+        before = remote if remote is not None else None if code else empty_tags()
+        if before is not None and _canon(merged) == _canon(before):
+            return merged
+        if _push(entry, server, seq + 1, merged, code):
+            return merged
+    raise ListError("the list keeps changing: try again")
+
+
 def password_secret(username: str, password: str) -> bytes:
     """The secret a username and password stand for. Slow on purpose, and done on this computer:
     neither is ever sent anywhere."""
@@ -234,6 +318,21 @@ def save_link(link: str | None) -> None:
         json.dump({"link": link}, f)
 
 
+def folder_dates(d: Path) -> tuple[int, int]:
+    """(when this folder became a project here, when one of its files last changed), in ms."""
+    from .cli import config_path
+    from .folder import project_files
+    st = config_path(d).parent.stat()
+    born = getattr(st, "st_birthtime", None) or (st.st_ctime if os.name == "nt" else config_path(d).stat().st_mtime)
+    newest = 0.0
+    for rel in project_files(d):
+        try:
+            newest = max(newest, (d / rel).stat().st_mtime)
+        except OSError:
+            continue
+    return int(born * 1000), int((newest or born) * 1000)
+
+
 def local_folders(server: str) -> dict:
     """This computer's synced folders on `server`, as a list."""
     from .cli import config_path, load
@@ -242,10 +341,11 @@ def local_folders(server: str) -> dict:
         try:
             keys, there = load(d)
             at = int(config_path(d).stat().st_mtime * 1000)
+            created, changed = folder_dates(d)
         except (OSError, ValueError, KeyError):
             continue
         if there.rstrip("/") == server.rstrip("/"):
-            doc["projects"][keys.project] = {"f": keys.fragment(), "n": d.name, "at": at, "w": keys.writable}
+            doc["projects"][keys.project] = {"f": keys.fragment(), "n": d.name, "at": at, "w": keys.writable, "c": created, "m": changed}
     return doc
 
 
@@ -261,4 +361,44 @@ def sync_this_computer(code: str | None = None) -> tuple[str, dict] | None:
     if not link:
         return None
     key, server = ListKey.from_link(link)
-    return server, sync(key, server, local_folders(server), code)
+    doc = sync(key, server, local_folders(server), code)
+    _sync_my_tags(key, server, doc, code)
+    return server, doc
+
+
+_tags_error: str | None = None
+
+
+def tags_problem() -> str | None:
+    """Why tags aren't reaching the server, if they aren't; the list itself may be fine."""
+    return _tags_error
+
+
+def _known_code(server: str) -> str | None:
+    """A creation code this computer already uses on `server`."""
+    from .cli import load, load_config
+    for d in registry.folders():
+        try:
+            if load(d)[1].rstrip("/") == server.rstrip("/") and load_config(d).get("create_code"):
+                return load_config(d)["create_code"]
+        except (OSError, ValueError, KeyError):
+            continue
+    return None
+
+
+def _sync_my_tags(key: ListKey, server: str, doc: dict, code: str | None) -> None:
+    global _tags_error
+    from . import tags
+    from .cli import load
+    listed = set(doc["projects"])
+    here = set(listed)  # a folder on another server isn't on this list, but keeps its tags here
+    for d in registry.folders():
+        try:
+            here.add(load(d)[0].project)
+        except (OSError, ValueError, KeyError):
+            continue
+    try:
+        tags.apply(sync_tags(key, server, tags.doc(), listed, code or _known_code(server)), here)
+        _tags_error = None
+    except ListError as e:
+        _tags_error = e.code
