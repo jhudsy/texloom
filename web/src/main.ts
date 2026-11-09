@@ -2,12 +2,12 @@
 import * as Y from 'yjs'
 import { Keys } from './crypto'
 import { Replica } from './replica'
-import { projects, projectCode, latexTitle, whenOpened } from './projects'
+import { projects, projectCode, latexTitle, whenOpened, type Recent } from './projects'
 import { removeDialog } from './remove'
 import { prefs, setupDialog, settingsDialog, languagePicker, type Device } from './settings'
 import { createAssistantPanel } from './assistant/panel'
 import { setupLayout } from './layout'
-import { chooseNewProject, riskBanner, SAFARI_NOTE } from './storagenotice'
+import { askCode, chooseNewProject, riskBanner, SAFARI_NOTE } from './storagenotice'
 import { $, h, saveFile } from './dom'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
@@ -18,7 +18,10 @@ import { menuTargets } from './editormenu'
 import { FilePreview, isPreviewable } from './preview'
 import { isTexFile } from './projectfiles'
 import { handleListHash, listDialog, takeListHash } from './listdialog'
-import { savedSecret, startListSync } from './listsync'
+import { savedSecret, startListSync, tagsProblem, syncNow as syncList } from './listsync'
+import { copyDialog } from './copyproject'
+import { tags, type Tag } from './tags'
+import { manageTags, pickTags } from './tagdialogs'
 import { openInApp } from './openinapp'
 import { createEditorPane } from './editor'
 import { createOutput } from './output'
@@ -53,6 +56,9 @@ const listHash = takeListHash()
 const opened = (() => { try { return projectFromAddress() } catch (e) { alert(e); return null } })()
 const keys = opened === 'no-key' ? null : opened
 let refreshProjects = () => {}
+/** What the start page's list is narrowed to. */
+const finding = { text: '', tags: new Set<string>() }
+const foldSearch = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
 if (keys) openProject(keys)
 else landing()
 startListSync(() => refreshProjects())
@@ -80,6 +86,7 @@ function landing() {
   const nameIn = h('input', { value: prefs.name, placeholder: t('Your name (shown to collaborators)'), oninput: (e: any) => (prefs.name = e.target.value) })
   const linkIn = h('input', { placeholder: t('Paste a project link…'), 'aria-label': t('Project link') })
   const list = h('div', {}, projectList())
+  const finder = h('input', { type: 'search', class: 'finder', value: finding.text, placeholder: t('Search by name or tag…'), 'aria-label': t('Search your projects'), hidden: !projects.list().length, oninput: (e: any) => { finding.text = e.target.value; list.replaceChildren(projectList()) } })
   const syncNote = h('div', {})
   const showSync = () => {
     const synced = !!savedSecret()
@@ -116,17 +123,50 @@ function landing() {
     ),
     h('h2', {}, t('Your projects')),
     syncNote,
+    finder,
     list,
   )
-  refreshProjects = () => list.replaceChildren(projectList())
+  refreshProjects = () => {
+    finder.hidden = !projects.list().length
+    list.replaceChildren(projectList())
+  }
+}
+
+/** Every word is somewhere in the project's names or tags, and it has every chosen tag. */
+function found(r: Recent, label: string, own: Tag[]): boolean {
+  if ([...finding.tags].some((id) => !own.some((x) => x.id === id))) return false
+  const text = foldSearch([label, r.name, r.nick, r.docTitle, projectCode(r.project), ...own.map((x) => x.name)].filter(Boolean).join(' '))
+  return foldSearch(finding.text).split(/\s+/).filter(Boolean).every((word) => text.includes(word))
+}
+
+function toggleFilter(id: string) {
+  if (!finding.tags.delete(id)) finding.tags.add(id)
+  refreshProjects()
+  document.querySelector<HTMLElement>(`.tagbar [data-tag="${CSS.escape(id)}"]`)?.focus()
+}
+
+function tagBar(): HTMLElement | null {
+  const all = tags.all()
+  for (const id of finding.tags) if (!all.some((x) => x.id === id)) finding.tags.delete(id)
+  const stuck = tagsProblem() === 'needs-code'
+  if (!all.length && !stuck) return null
+  return h('div', {},
+    stuck ? h('p', { class: 'muted small' }, t('Your tags are saved only in this browser until you enter a creation code here.'), ' ',
+      h('button', { class: 'small', onclick: async () => { if (await askCode()) syncList().catch(() => {}).finally(() => refreshProjects()) } }, t('Enter code'))) : null,
+    all.length ? h('div', { class: 'tagbar', role: 'group', 'aria-label': t('Filter by tag') },
+      ...all.map((tag) => h('button', { class: `utag${finding.tags.has(tag.id) ? ' on' : ''}`, 'data-tag': tag.id, 'aria-pressed': String(finding.tags.has(tag.id)), onclick: () => toggleFilter(tag.id) }, tag.name)),
+      h('button', { class: 'addtag', onclick: () => manageTags(() => refreshProjects()) }, t('Manage tags…'))) : null)
 }
 
 function projectList(): HTMLElement {
   const list = projects.list()
   if (!list.length) return h('p', { class: 'muted' }, t('None yet. Projects you create or open from a link appear here.'))
+  const bar = tagBar()
+  const shownTags = new Map(list.map((r) => [r.project, tags.of(r.project)]))
   const shown = (r: { nick?: string; name: string }) => r.nick || (r.name && r.name !== UNTITLED ? r.name : t('Untitled project'))
   const dupes = new Set(list.map(shown).filter((n, i, all) => all.indexOf(n) !== i))
-  return h('ul', { class: 'recent' }, ...list.map((r) => {
+  const matching = list.filter((r) => found(r, shown(r), shownTags.get(r.project)!))
+  const rows = matching.length ? h('ul', { class: 'recent' }, ...matching.map((r) => {
     const label = shown(r)
     const details: string[] = []
     if (r.nick && r.name) details.push(t('shared name “{{name}}”', { name: r.name }))
@@ -147,8 +187,14 @@ function projectList(): HTMLElement {
           const v = prompt(t('Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.', { name: r.name || t('this project'), code: projectCode(r.project) }), r.nick ?? '')
           if (v === null) return
           projects.update(r.project, { nick: v.trim() })
-          location.reload()
+          refreshProjects()
         } }, '✎'),
+        h('button', { class: 'icon', title: t('Make a copy'), 'aria-label': t('Make a copy of {{name}}…', { name: label }), onclick: () => {
+          try {
+            const keys = Keys.fromFragment('#' + r.fragment)
+            if (keys) copyDialog({ name: label, by: prefs.name, server, keys })
+          } catch (e) { alert(e) }
+        } }, '⧉'),
         h('button', { class: 'icon forget', title: t('Remove…'), 'aria-label': t('Remove {{name}}…', { name: label }), onclick: async () => {
           let keys: Keys | null = null
           try { keys = Keys.fromFragment('#' + r.fragment) } catch {}
@@ -161,11 +207,15 @@ function projectList(): HTMLElement {
                 try { await rep.removeFromServer() } finally { await rep.close() }
               }
               await projects.forget(r.project)
-              location.reload()
+              refreshProjects()
             })
         } }, '✕')),
-      h('div', { class: 'details muted' }, details.join(' · ')))
-  }))
+      h('div', { class: 'details muted' }, details.join(' · ')),
+      h('div', { class: 'tags' },
+        ...shownTags.get(r.project)!.map((tag) => h('button', { class: `utag${finding.tags.has(tag.id) ? ' on' : ''}`, title: t('Show only projects tagged “{{name}}”', { name: tag.name }), onclick: () => toggleFilter(tag.id) }, tag.name)),
+        h('button', { class: 'addtag', 'aria-label': t('Tags for {{name}}…', { name: label }), onclick: () => pickTags(r.project, label, () => refreshProjects()) }, t('+ Tag'))))
+  })) : h('p', { class: 'muted' }, t('No projects match your search.'))
+  return h('div', {}, bar, rows)
 }
 
 // ---- project view -----------------------------------------------------------------
@@ -462,6 +512,8 @@ async function openProject(keys: Keys) {
   const syncNow = async () => { syncBtn.setAttribute('disabled', ''); await r.syncNow(); syncBtn.removeAttribute('disabled') }
   const syncBtn = h('button', { class: 'wide-only', onclick: syncNow }, t('Sync now'))
   const zipBtn = h('button', { class: 'wide-only', title: t('Download all files as a .zip'), onclick: () => downloadZip() }, `⤓ ${t('Source')}`)
+  const copyProject = () => copyDialog({ name: title.value, by: prefs.name, server, replica: r })
+  const copyBtn = h('button', { class: 'wide-only', title: t('Start a new project from this one’s files'), onclick: copyProject }, `⧉ ${t('Make a copy')}`)
   const shareProject = () => shareDialog(r, server, me.name)
   const shareBtn = h('button', { class: 'wide-only', onclick: shareProject }, t('Share'))
   const settingsBtn = h('button', { class: 'wide-only', title: t('Settings'), onclick: () => openSettings() }, '⚙')
@@ -469,6 +521,7 @@ async function openProject(keys: Keys) {
   const headerActions: { btn: HTMLElement; label: () => string; run: () => void }[] = [
     { btn: syncBtn, label: () => t('Sync now'), run: syncNow },
     { btn: zipBtn, label: () => `⤓ ${t('Source')}`, run: () => downloadZip() },
+    { btn: copyBtn, label: () => `⧉ ${t('Make a copy')}`, run: copyProject },
     { btn: folderBtn, label: () => folderBtn.textContent ?? '', run: () => folderMenu() },
     { btn: shareBtn, label: () => t('Share'), run: shareProject },
     { btn: settingsBtn, label: () => t('Settings'), run: () => openSettings() },

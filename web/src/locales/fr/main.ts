@@ -110,5 +110,17 @@ const fr: Catalog = {
   '{{name}}{{where}} — click to go to where they are': '{{name}}{{where}} — cliquez pour aller là où se trouve cette personne',
   'Go to {{name}}': 'Aller où se trouve {{name}}',
   'Project name (shared with collaborators) · code {{code}}': 'Nom du projet (partagé avec les collaborateurs) · code {{code}}',
+  'Search by name or tag…': 'Rechercher par nom ou étiquette…',
+  'Search your projects': 'Rechercher dans vos projets',
+  'Your tags are saved only in this browser until you enter a creation code here.': 'Vos étiquettes restent uniquement dans ce navigateur tant que vous n’y avez pas saisi de code de création.',
+  'Filter by tag': 'Filtrer par étiquette',
+  'Manage tags…': 'Gérer les étiquettes…',
+  'Make a copy': 'Faire une copie',
+  'Make a copy of {{name}}…': 'Faire une copie de {{name}}…',
+  'Show only projects tagged “{{name}}”': 'Afficher seulement les projets étiquetés « {{name}} »',
+  'Tags for {{name}}…': 'Étiquettes de {{name}}…',
+  '+ Tag': '+ Étiquette',
+  'No projects match your search.': 'Aucun projet ne correspond à votre recherche.',
+  'Start a new project from this one’s files': 'Démarrer un nouveau projet à partir des fichiers de celui-ci',
 }
 export default fr

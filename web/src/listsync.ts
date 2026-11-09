@@ -9,9 +9,10 @@
 // records those entries' signing keys, so that they can be removed.
 import { ed25519 } from '@noble/curves/ed25519.js'
 import { b64d, b64e } from './crypto'
-import { canon, emptyList, forgetOldRemovals, hmac, ListKey, mergeLists, passwordSecret, type ListDoc } from './listcore'
+import { canon, emptyList, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeTags, passwordSecret, tidyTags, type ListDoc, type TagDoc } from './listcore'
 import { projects } from './projects'
 import { creationCode } from './replica'
+import { tags } from './tags'
 
 /** The message is a code: needs-code, code-expired, list-full, list-retired, password-taken,
  *  wrong-password, no-prf, passkey-failed, busy or server. */
@@ -47,11 +48,11 @@ async function push(key: ListKey, seq: number, doc: unknown): Promise<boolean> {
 }
 
 /** Read an entry, change it, and write it back unless that changed nothing, retrying if another
- *  device got there first. */
-async function update<T>(key: ListKey, change: (had: T | null) => T): Promise<T> {
+ *  device got there first. A missing entry that would equal `blank` isn't created. */
+async function update<T>(key: ListKey, change: (had: T | null) => T, blank?: T): Promise<T> {
   for (let i = 0; i < 5; i++) {
     const had = await pull<T>(key)
-    const before = had && canon(had.doc) // `change` may alter what it is given
+    const before = had ? canon(had.doc) : blank === undefined ? null : canon(blank) // `change` may alter what it is given
     const next = change(had?.doc ?? null)
     if (before === canon(next)) return next
     if (await push(key, (had?.seq ?? 0) + 1, next)) return next
@@ -69,8 +70,20 @@ async function retire(id: string, seed: string) {
   if (!r.ok) throw new ListError('server')
 }
 
+// ---- tags ----------------------------------------------------------------------------------
+const tagsKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 'texloom list tags'))
+
+/** Merge this browser's tags with the server's. A new entry needs a creation code, which a device
+ *  that only unlocked the list may not have: so a device with one makes the entry straight away. */
+async function exchangeTags(secret: Uint8Array, list: ListDoc): Promise<boolean> {
+  const listed = new Set(Object.keys(list.projects))
+  const doc = await update<TagDoc>(await tagsKey(secret), (had) => tidyTags(mergeTags(had ?? emptyTags(), tags.doc()), listed), creationCode.get() ? undefined : emptyTags())
+  return tags.apply(doc)
+}
+
 // ---- this browser --------------------------------------------------------------------------
 let lastSynced = ''
+let tagsError: string | null = null
 let lastAttempt = 0
 let lastError: string | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -92,20 +105,30 @@ export function saveSecret(secret: Uint8Array | null) {
   } catch {}
   lastSynced = ''
   lastError = null
+  tagsError = null
 }
 
 export const lastProblem = () => lastError
+/** Why tags aren't reaching the server, if they aren't; the list itself may be fine. */
+export const tagsProblem = () => tagsError
+const localState = () => canon({ list: projects.asList(), tags: tags.doc() })
 
 export function syncNow(): Promise<void> {
   if (!savedSecret()) return Promise.resolve()
   return (running ??= (async () => {
     try {
       lastAttempt = Date.now()
-      const doc = await exchange(await ListKey.of(savedSecret()!), projects.asList())
-      const different = projects.applyList(doc)
-      lastSynced = canon(projects.asList())
+      const secret = savedSecret()!
+      const doc = await exchange(await ListKey.of(secret), projects.asList())
+      let different = projects.applyList(doc)
+      const hadError = tagsError
+      try {
+        different = await exchangeTags(secret, doc) || different
+        tagsError = null
+      } catch (e) { tagsError = e instanceof ListError ? e.message : 'network' }
+      lastSynced = localState()
       lastError = null
-      if (different) changed()
+      if (different || tagsError !== hadError) changed()
     } catch (e) {
       lastError = e instanceof ListError ? e.message : 'network'
       throw e
@@ -117,13 +140,14 @@ const syncQuietly = () => { syncNow().catch(() => {}) }
 function schedule() {
   if (!savedSecret()) return
   clearTimeout(timer)
-  timer = setTimeout(() => { if (canon(projects.asList()) !== lastSynced) syncQuietly() }, 3000)
+  timer = setTimeout(() => { if (localState() !== lastSynced) syncQuietly() }, 3000)
 }
 
 /** Keep this browser's list up to date; `onChange` runs when another device changed it. */
 export function startListSync(onChange: () => void) {
   changed = onChange
   projects.onChange(schedule)
+  tags.onChange(schedule)
   syncQuietly()
   window.addEventListener('focus', () => { if (Date.now() - lastAttempt > 60_000) syncQuietly() })
   window.addEventListener('online', syncQuietly)
@@ -254,7 +278,7 @@ export async function unlockWithPassword(username: string, password: string): Pr
 /** Delete a list and every way into it, keeping their ids out of use. */
 async function retireList(secret: Uint8Array) {
   for (const [id, slot] of Object.entries(await readSlots(secret))) await retire(id, slot.seed)
-  for (const key of [await registryKey(secret), await ListKey.of(secret)]) await retire(key.id, key.signingSeed)
+  for (const key of [await registryKey(secret), await tagsKey(secret), await ListKey.of(secret)]) await retire(key.id, key.signingSeed)
 }
 
 /** Move the list to a new secret, for when the link has got out. Everything that opened the old

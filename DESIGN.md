@@ -401,6 +401,27 @@ one to the projects it names.
   desktop app can't use a passkey, so it opens `/#unlock-for-app`, and the page returns the sync
   link through `texloom://sync?link=…`, which the app confirms before using.
 
+- Tags are a person's own and never enter a project. They live in `texloom.tags` in the browser and,
+  with a synced list, in a further entry opened by `HMAC-SHA256(K, "texloom list tags")`, separate
+  from the list so that clients which don't know about tags (the merge drops unknown top-level
+  fields) can't lose them. Document: `{"v":1,"tags":{"<id>":{"n":name,"at":ms,"gone"?:true}},"on":{"<project>":{"<id>":ms}}}`;
+  a negative time in `on` means the tag was taken off at that moment. Each tag, and each tag on each
+  project, takes its latest change, so a rename on one device and an assignment on another both
+  survive; on a tie, deleting and assigning win. Tags whose names match when folded become the one
+  with the smallest id, with every project either had. `tidyTags` drops deletions over a year old,
+  marks for deleted tags and projects no longer on the list. Creating the entry needs a creation
+  code, like any list entry, so a device with one creates it at once for devices without. Only the
+  web client (`listcore.ts`, `tags.ts`) implements this so far; the desktop app ignores the entry.
+
+## Copying a project
+
+`web/src/copyproject.ts` makes a new project (new keys, the copier as owner) from the current state
+of another: files, explicit folders, and the `main`, `bib`, `engine` and `lang` settings. History,
+saved versions, comments, members and compiled output are left behind, and binary files are read
+and stored again because each project encrypts with its own key. The copy is filled while
+disconnected, so it reaches the server only when opened, with the storage chosen for it. Anyone who
+can read a project can copy it. A copy of a project with no server copy has none either.
+
 ## Known limitations / open questions
 
 - Deleting a project for everyone: today the owner can remove the server's copy (relay mode),

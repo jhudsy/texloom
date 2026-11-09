@@ -471,16 +471,23 @@ export class Replica {
 
   private modeAck: ((error: string | null) => void) | null = null
 
+  /** Wait for the server's log to have been applied; false if that didn't happen in time. */
+  async caughtUp(timeoutMs: number): Promise<boolean> {
+    const until = Date.now() + timeoutMs
+    while (!(this.status === 'online' && this.synced)) {
+      if (Date.now() > until) return false
+      await sleep(200)
+    }
+    return true
+  }
+
   /** Owner: the server deletes its encrypted copy and stops storing this project. Resolves
    *  once the server confirms (connecting first if needed), or rejects with its reason. */
   async removeFromServer(timeoutMs = 20000): Promise<void> {
     if (!this.keys.owner) throw new Error(t('only the owner can remove the server’s copy'))
     if (!this.ws) this.connect()
     const until = Date.now() + timeoutMs
-    while (!(this.status === 'online' && this.synced)) {
-      if (Date.now() > until) throw new Error(t('the server can’t be reached'))
-      await new Promise((r) => setTimeout(r, 200))
-    }
+    if (!await this.caughtUp(timeoutMs)) throw new Error(t('the server can’t be reached'))
     const done = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => { this.modeAck = null; reject(new Error(t('the server didn’t confirm'))) }, Math.max(1000, until - Date.now()))
       this.modeAck = (error) => { clearTimeout(timer); this.modeAck = null; error ? reject(new Error(error)) : resolve() }

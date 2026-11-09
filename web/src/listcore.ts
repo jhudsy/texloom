@@ -84,6 +84,63 @@ export function forgetOldRemovals(doc: ListDoc): ListDoc {
   return { ...doc, gone: Object.fromEntries(Object.entries(doc.gone).filter(([, when]) => when >= cutoff)) }
 }
 
+// ---- tags ----------------------------------------------------------------------------------
+/** A person's tags: never in a project, and in an entry of their own so that clients which don't
+ *  know about them can't drop them. `on` holds, per project and tag, when it was last assigned,
+ *  negative if that was to take it off. */
+export interface TagDoc { v: 1; tags: Record<string, { n: string; at: number; gone?: boolean }>; on: Record<string, Record<string, number>> }
+
+export const emptyTags = (): TagDoc => ({ v: 1, tags: {}, on: {} })
+
+/** The form in which two tag names count as the same. */
+export const foldTag = (name: string) => name.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase()
+
+const laterMark = (a: number, b: number) => Math.abs(a) !== Math.abs(b) ? (Math.abs(a) > Math.abs(b) ? a : b) : Math.max(a, b)
+
+/** Two sets of tags as one, the same whichever way round. Each tag, and each tag on each project,
+ *  takes its latest change; on a tie, deleting and assigning win. Tags given the same name apart
+ *  (two devices, or a rename) become one, which has every project either had. */
+export function mergeTags(a: TagDoc, b: TagDoc): TagDoc {
+  const out = emptyTags()
+  for (const id of new Set([...Object.keys(a.tags ?? {}), ...Object.keys(b.tags ?? {})])) {
+    const x = a.tags?.[id], y = b.tags?.[id]
+    if (!x || !y) { out.tags[id] = { ...(x ?? y)! }; continue }
+    const xWins = x.at !== y.at ? x.at > y.at : !!x.gone !== !!y.gone ? !!x.gone : canon(x) >= canon(y)
+    out.tags[id] = { ...(xWins ? x : y) }
+  }
+  for (const p of new Set([...Object.keys(a.on ?? {}), ...Object.keys(b.on ?? {})])) {
+    const marks: Record<string, number> = out.on[p] = { ...a.on?.[p] }
+    for (const [id, when] of Object.entries(b.on?.[p] ?? {})) marks[id] = id in marks ? laterMark(marks[id], when) : when
+  }
+  const named = new Map<string, string>()
+  for (const id of Object.keys(out.tags).sort()) {
+    const tag = out.tags[id]
+    if (tag.gone) continue
+    const keep = named.get(foldTag(tag.n))
+    if (!keep) { named.set(foldTag(tag.n), id); continue }
+    out.tags[id] = { n: '', at: tag.at, gone: true }
+    for (const marks of Object.values(out.on)) {
+      if (!(id in marks)) continue
+      marks[keep] = keep in marks ? laterMark(marks[keep], marks[id]) : marks[id]
+      delete marks[id]
+    }
+  }
+  return out
+}
+
+/** Drop what is no longer needed: old deletions, marks for deleted tags, and projects that left the list. */
+export function tidyTags(doc: TagDoc, listed: Set<string>): TagDoc {
+  const cutoff = Date.now() - YEAR
+  const out = emptyTags()
+  for (const [id, tag] of Object.entries(doc.tags)) if (!tag.gone || tag.at >= cutoff) out.tags[id] = tag
+  for (const [p, marks] of Object.entries(doc.on)) {
+    if (!listed.has(p)) continue
+    const kept = Object.entries(marks).filter(([id, when]) => out.tags[id] && !out.tags[id].gone && (when > 0 || -when >= cutoff))
+    if (kept.length) out.on[p] = Object.fromEntries(kept)
+  }
+  return out
+}
+
 /** What a username and password stand for. Slow on purpose, and done on this device: neither is
  *  ever sent anywhere. */
 export const passwordSecret = (username: string, password: string) => scryptAsync(

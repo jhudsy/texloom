@@ -5,6 +5,7 @@ import { b64d } from './crypto'
 import { rememberFolder } from './foldersync'
 import { t, locale } from './i18n'
 import type { ListDoc, ListEntry } from './listcore'
+import { tags } from './tags'
 
 export interface Recent {
   project: string // unique id (from the link)
@@ -116,6 +117,7 @@ export const projects = {
     try { sessionStorage.removeItem(tabKeysItem(project)) } catch {}
     writeGone({ ...readGone(), [project]: Date.now() })
     write(read().filter((x) => x.project !== project))
+    tags.forgetProject(project)
     // every per-project setting (texloom.<what>.<project>) and the linked folder
     try { for (const k of Object.keys(localStorage)) if (k.startsWith('texloom.') && k.endsWith(`.${project}`)) localStorage.removeItem(k) } catch {}
     await rememberFolder(project, null).catch(() => {})

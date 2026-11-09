@@ -130,6 +130,19 @@ runs; for the helper, see `texloom projects` below (`use --password` unlocks wit
 list counts as creating something on the server, so servers that require a creation code ask for
 one. Servers can turn lists off with `--no-project-lists`.
 
+### Finding and copying projects
+
+The box above your projects searches their names and tags. Give a project tags with **+ Tag**
+beneath it, and click a tag at the top to show only projects that have it (several tags narrow it
+further). **Manage tags…** renames and deletes them, for every project at once. Tags are yours
+alone: they aren't stored in the project, so collaborators never see them. With a synced list they
+follow you to your other devices, encrypted; otherwise they stay in that browser. For now they
+appear only in the web app.
+
+**Make a copy** (⧉ next to a project, or in the editor's header) starts a new project of your own
+from the current files and settings, which suits templates. The copy has its own links and none of
+the original's history, comments or collaborators, and it counts towards your storage.
+
 ### Editor
 
 | | |
