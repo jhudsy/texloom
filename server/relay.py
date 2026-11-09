@@ -53,7 +53,7 @@ import shutil
 import sqlite3
 import sys
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Container
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,6 +97,11 @@ META_RATE, META_BURST = 1.0, 600
 SEND_TIMEOUT = 20  # seconds; a peer that doesn't read is disconnected rather than holding up others
 HELLO_WAIT = 15  # seconds a private server gives a new connection to say who it is
 RECHECK = 60  # seconds between a private server's checks that a connected project's code still counts
+BLOB_PIECE = 256 * KiB  # files go out this much at a time, so a download holds little memory
+# A catch-up reply is built whole, for each person. Big ones take turns: together they may use
+# about this much memory. Building and sending one takes about four times its stored size.
+CATCHUP_MEMORY, CATCHUP_OVERHEAD = 192 * MiB, 4
+CATCHUP_TIMEOUT = 120  # seconds to send one; it can be large, and phones can be slow
 INFLIGHT_MAX = 192 * MiB  # bytes of large frames being handled at once, server-wide
 
 
@@ -359,6 +364,7 @@ class CodeBook:
 class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path.resolve()
         self.db = sqlite3.connect(path)
         self._revoked: dict[str, dict[str, bytes]] = {}
         self.db.execute("PRAGMA journal_mode=WAL")
@@ -576,11 +582,19 @@ class Store:
                             (project, upto, data, sig, hashlib.sha256(data).digest()))
         self._recount(project)
 
-    def since(self, project: str, since: int) -> list[dict]:
+    def _since_start(self, project: str, since: int) -> int:
         snap = self.last_snapshot(project)
-        start = snap - 1 if snap and since < snap else since  # behind the snapshot: send it too
+        return snap - 1 if snap and since < snap else since  # behind the snapshot: send it too
+
+    def since_size(self, project: str, since: int) -> int:
+        """Bytes that since() would return."""
+        return self.db.execute("SELECT COALESCE(SUM(length(data) + length(sig)), 0) FROM log WHERE project=? AND seq>?",
+                               (project, self._since_start(project, since))).fetchone()[0]
+
+    def since(self, project: str, since: int) -> list[dict]:
         rows = self.db.execute(
-            "SELECT seq, snap, data, sig FROM log WHERE project=? AND seq>? ORDER BY seq", (project, start)
+            "SELECT seq, snap, data, sig FROM log WHERE project=? AND seq>? ORDER BY seq",
+            (project, self._since_start(project, since)),
         ).fetchall()
         return [{"q": q, "snap": bool(sn), "d": b64e(d), "s": b64e(s)} for q, sn, d, s in rows]
 
@@ -650,9 +664,20 @@ class Store:
             self._recount(project)
         return bool(cur.rowcount)
 
-    def get_blob(self, project: str, bid: str) -> bytes | None:
-        row = self.db.execute("SELECT data FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
-        return row[0] if row else None
+    def find_blob(self, project: str, bid: str) -> tuple[int, int] | None:
+        """Where a stored file is, and its size."""
+        return self.db.execute("SELECT rowid, length(data) FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
+
+    async def read_blob(self, rowid: int):
+        """A stored file, a piece at a time. Its own connection, so a slow download holds nothing up."""
+        db = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
+        try:
+            with db.blobopen("blob", "data", rowid, readonly=True) as blob:
+                while piece := blob.read(BLOB_PIECE):
+                    yield piece
+                    await asyncio.sleep(0)  # let live editing through between pieces
+        finally:
+            db.close()
 
 
 class Conn:
@@ -693,6 +718,41 @@ def field(msg: dict, key: str, typ: type, default=None):
     return v
 
 
+class Budget:
+    """Memory that big replies may use at once. They wait in turn; one too big for the whole
+    budget goes when nothing else is running."""
+
+    def __init__(self, limit: int):
+        self.limit, self.used = limit, 0
+        self.queue: deque[tuple[int, asyncio.Future]] = deque()
+
+    def _fits(self, n: int) -> bool:
+        return self.used == 0 or self.used + n <= self.limit
+
+    async def take(self, n: int) -> None:
+        if not n:
+            return
+        if not self.queue and self._fits(n):
+            self.used += n
+            return
+        turn = asyncio.get_running_loop().create_future()
+        self.queue.append((n, turn))
+        try:
+            await turn
+        except asyncio.CancelledError:
+            if turn.done() and not turn.cancelled():  # given its turn just as it gave up
+                self.give(n)
+            raise
+
+    def give(self, n: int) -> None:
+        self.used -= n
+        while self.queue and self._fits(self.queue[0][0]):
+            n, turn = self.queue.popleft()
+            if not turn.cancelled():
+                self.used += n
+                turn.set_result(None)
+
+
 class Relay:
     def __init__(self, store: Store, limits: Limits | None = None, codes: CodeBook | None = None, lists: bool = True,
                  private: bool = False):
@@ -707,6 +767,7 @@ class Relay:
         self.texlive = None  # TexLive, when serving TeX Live files on demand
         self.inflight = 0  # bytes of large frames being handled right now
         self.blob_reads = asyncio.Semaphore(4)  # concurrent blob uploads being read
+        self.catchup = Budget(CATCHUP_MEMORY)
 
     # --- private servers -----------------------------------------------------------
     def denied(self, project: str, code: object) -> str | None:
@@ -915,14 +976,22 @@ class Relay:
             if msg.get("code") and not conn.code_tried:  # one code check per connection
                 conn.code_tried = True
                 conn.code = self.codes.check(field(msg, "code", str))
-            since = field(msg, "since", int, 0)
-            entries = self.store.since(project, max(0, min(since, 2**62)))
-            await ws.send_json(
-                {"t": "log", "entries": entries, "head": self.store.head(project),
-                 "floor": self.store.floor(project), "count": self.store.count(project), "you": conn.id,
-                 "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
-                 "store": self.store_status(project, conn),
-                 "rv": [{"p": p, "s": b64e(sig)} for p, sig in self.store.revoked(project).items()]})
+            since = max(0, min(field(msg, "since", int, 0), 2**62))
+            size = self.store.since_size(project, since)
+            cost = size * CATCHUP_OVERHEAD if size >= MiB else 0
+            await self.catchup.take(cost)
+            try:
+                entries = self.store.since(project, since)
+                await asyncio.wait_for(ws.send_json(
+                    {"t": "log", "entries": entries, "head": self.store.head(project),
+                     "floor": self.store.floor(project), "count": self.store.count(project), "you": conn.id,
+                     "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
+                     "store": self.store_status(project, conn),
+                     "rv": [{"p": p, "s": b64e(sig)} for p, sig in self.store.revoked(project).items()]}), CATCHUP_TIMEOUT)
+            except (asyncio.TimeoutError, ConnectionError):  # it stopped reading, or has gone
+                asyncio.create_task(ws.close(code=1008, message=b"too slow"))
+            finally:
+                self.catchup.give(cost)
         elif t == "up":
             d, s = field(msg, "d", str), field(msg, "s", str)
             data, sig = b64d(d), b64d(s)
@@ -1073,10 +1142,11 @@ class Relay:
             raise web.HTTPBadRequest()
         if self.denied(project, None):
             raise web.HTTPForbidden()
-        data = self.store.get_blob(project, bid)
-        if data is None:
+        found = self.store.find_blob(project, bid)
+        if found is None:
             raise web.HTTPNotFound()
-        return web.Response(body=data, content_type="application/octet-stream", headers={
+        return web.Response(body=self.store.read_blob(found[0]), content_type="application/octet-stream", headers={
+            "Content-Length": str(found[1]),
             "Cache-Control": "public, max-age=31536000, immutable",
             "Content-Disposition": "attachment",  # ciphertext; never something to render
         })
