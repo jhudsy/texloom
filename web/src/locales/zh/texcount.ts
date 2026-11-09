@@ -17,7 +17,7 @@ const zh: Catalog = {
   'Inline maths': '行内公式',
   'Displayed maths': '行间公式',
   'File': '文件',
-  'Text': '正文',
+  'Text': '文本',
   'Other': '其他',
   'Close': '关闭',
 }

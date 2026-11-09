@@ -20,6 +20,7 @@ import { isTexFile } from './projectfiles'
 import { handleListHash, listDialog, takeListHash } from './listdialog'
 import { savedSecret, startListSync, tagsProblem, syncNow as syncList } from './listsync'
 import { copyDialog } from './copyproject'
+import { createSymbolPalette } from './symbolpalette'
 import { openPdfWindow, pdfWindowProject } from './pdfwindow'
 import { tags, type Tag } from './tags'
 import { manageTags, pickTags } from './tagdialogs'
@@ -408,6 +409,11 @@ async function openProject(keys: Keys) {
       if (v && f?.endsWith('.tex')) v.dispatch(v.state.replaceSelection(`\\cite{${key}}`))
     }),
   }, t('+ Reference')))
+
+  if (writable) {
+    const palette = createSymbolPalette({ r, view: () => editor.view(), file: () => editor.current() })
+    tree.el.querySelector('.tools')?.append(h('button', { title: t('Insert a symbol at the cursor'), onclick: () => palette.toggle() }, `Ω ${t('Symbols')}`))
+  }
 
   /** Jump to a collaborator: open their file at their cursor. */
   function jumpTo(clientId: number) {
