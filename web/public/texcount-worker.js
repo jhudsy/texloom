@@ -18,9 +18,11 @@ self.onmessage = async ({ data: { base, script, files, main, args } }) => {
     }
     FS.writeFile('/home/web_user/texcount.pl', script)
     for (const [path, text] of files) write(path, text)
-    FS.chdir(root)
+    // from the main file's folder, as LaTeX runs: that's what \input paths are relative to
+    const slash = main.lastIndexOf('/')
+    FS.chdir(slash < 0 ? root : `${root}/${main.slice(0, slash)}`)
     let status = 0
-    try { status = Module.callMain(['/home/web_user/texcount.pl', ...args, main]) } catch (e) { status = typeof e.status === 'number' ? e.status : 1 }
+    try { status = Module.callMain(['/home/web_user/texcount.pl', ...args, main.slice(slash + 1)]) } catch (e) { status = typeof e.status === 'number' ? e.status : 1 }
     self.postMessage({ status, output: output.join('\n') })
   } catch (e) {
     self.postMessage({ status: 1, output: `${output.join('\n')}\n${e}` })

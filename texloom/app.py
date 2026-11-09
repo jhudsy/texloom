@@ -911,10 +911,12 @@ async def texcount_report(st, d: Path, exe: str) -> str:
     if not main:
         raise FolderProblem(_("No .tex file with \\documentclass found."))
     text = "\n".join(str(files[p]) for p in files.keys() if p.endswith(".tex"))
-    args = [exe, "-inc", "-utf8", *texcount_language(text), f"./{main}"]
+    # from the main file's folder, as LaTeX runs: that's what \input paths are relative to
+    source = d / main
+    args = [exe, "-inc", "-utf8", *texcount_language(text), f"./{source.name}"]
 
     def run_it() -> str:
-        out = subprocess.run(args, cwd=d, env=tex_env(), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        out = subprocess.run(args, cwd=source.parent, env=tex_env(), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
         if out.returncode:
             raise FolderProblem(out.stderr.strip()[-500:] or str(out.returncode))
         return out.stdout
