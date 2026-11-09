@@ -201,6 +201,9 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **PDF in its own window:** **New window** above the PDF opens it in a separate window, for example
   on another screen. It updates when you compile, double-clicking it jumps to the source, and it
   stays in step if you reload the editor.
+- **Word counts:** the Outline tab counts the document and each section; selecting text shows its count
+  in the corner of the editor. LaTeX commands, citations, maths and comments aren't counted. Chinese and
+  Japanese are counted by the character.
 - **Compiling another file:** **Compile** compiles the open file if it has its own `\documentclass`
   (a figure or a separate document), and otherwise the main file; right-click a file to compile it.
   Only the main file's PDF is shared with collaborators.

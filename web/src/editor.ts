@@ -10,7 +10,8 @@ import { yCollab } from 'y-codemirror.next'
 import { oneDark } from '@codemirror/theme-one-dark'
 import type { Replica } from './replica'
 import { h, saveFile } from './dom'
-import { t } from './i18n'
+import { locale, t, tn } from './i18n'
+import { blankNonProse, countWords } from './navigate'
 import { latexSupport, recheck, type AddReference, type ProjectIndex } from './latex'
 import { imageDropExtension } from './pasteimage'
 import { spellcheck } from './spell'
@@ -75,6 +76,20 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
   const spellExt = () => { const sp = hooks.spell(); return spellcheck(sp.on, sp.lang, isTexFile(current)) }
   let authorsOn = false
 
+  // how many words are selected, in the corner of the editor while anything is
+  const selectionCount = h('div', { class: 'selcount', role: 'status', hidden: true })
+  let selectionTimer: ReturnType<typeof setTimeout> | undefined
+  function showSelectionCount(v: EditorView) {
+    clearTimeout(selectionTimer)
+    selectionTimer = setTimeout(() => { // dragging over a long document shouldn't count on every step
+      const text = v.state.selection.ranges.filter((x) => !x.empty).map((x) => v.state.sliceDoc(x.from, x.to)).join('\n')
+      selectionCount.hidden = !text
+      if (!text) return
+      const n = countWords(blankNonProse(text))
+      selectionCount.textContent = tn(n, '{{n}} word selected', '{{n}} words selected', { n: n.toLocaleString(locale) })
+    }, 80)
+  }
+
   // "Who wrote this": a gutter with the author of most of each line.
   const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#469990', '#9a6324']
   class AuthorMarker extends GutterMarker {
@@ -126,7 +141,8 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     if (path === current && (view || !path)) return
     current = path
     view?.destroy(); view = null
-    el.replaceChildren()
+    el.replaceChildren(selectionCount)
+    selectionCount.hidden = true
     bound = undefined
     if (!path) return
     const yt = bound = r.files.get(path)
@@ -149,6 +165,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             authorsSlot.of(authorsOn ? authorsExtension(yt) : []),
             hooks.review(path),
             flashField,
+            EditorView.updateListener.of((u) => { if (u.selectionSet || u.docChanged) showSelectionCount(u.view) }),
             Prec.high(keymap.of([
               { key: 'Mod-Alt-m', run: () => { hooks.onReview('comment'); return true } },
               { key: 'Mod-Alt-e', run: () => { hooks.onReview('suggestion'); return true } },

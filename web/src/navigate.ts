@@ -31,6 +31,9 @@ export function blankNonProse(text: string): string {
   return t.replace(INLINE_MATH, blank)
 }
 
+// Chinese and Japanese aren't written with spaces, and are counted by the character.
+const CHARACTER_COUNTED = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}ー]/gu
+
 /** Words of prose in already-blanked LaTeX (in the spirit of texcount's text words). */
 export function countWords(blanked: string): number {
   const t = blanked
@@ -38,7 +41,8 @@ export function countWords(blanked: string): number {
     .replace(/\\(?:label|ref|eqref|[cC]ref|autoref|pageref|nameref|cite\w*|nocite|includegraphics|usepackage|RequirePackage|documentclass|bibliography(?:style)?|addbibresource|input|include|subfile|begin|end|(?:re)?newcommand|newenvironment|DeclareMathOperator|url|href|[vh]space|setlength|setcounter|addtocounter|graphicspath|hypersetup|pagestyle|thispagestyle|newtheorem|providecommand)\*?\s*(?:\[[^\]]{0,300}\]\s*){0,4}(?:\{[^{}]{0,2000}\}\s*)?/g, ' ')
     .replace(/\\[A-Za-z@]+\*?/g, ' ')
     .replace(/\\./g, ' ')
-  return (t.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).filter((w) => /\p{L}/u.test(w)).length
+  const characters = t.match(CHARACTER_COUNTED)?.length ?? 0
+  return characters + (t.replace(CHARACTER_COUNTED, ' ').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).filter((w) => /\p{L}/u.test(w)).length
 }
 
 /** The argument starting at `open` ('{'), or null. */
