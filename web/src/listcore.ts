@@ -5,7 +5,7 @@ import { ed25519 } from '@noble/curves/ed25519.js'
 import { scryptAsync } from '@noble/hashes/scrypt.js'
 import { b64e } from './crypto'
 
-export interface ListEntry { f: string; n: string; at: number; w: boolean; nick?: string; t?: string; by?: string }
+export interface ListEntry { f: string; n: string; at: number; w: boolean; nick?: string; t?: string; by?: string; c?: number; m?: number }
 export interface ListDoc { v: 1; projects: Record<string, ListEntry>; gone: Record<string, number> }
 
 const YEAR = 365 * 86400_000
@@ -60,8 +60,9 @@ export function canon(x: unknown): string {
 }
 
 /** Two lists as one, the same whichever way round. The most recently opened copy of an entry
- *  wins, except that an edit link is never replaced by a read-only one; removed projects stay
- *  removed unless they were opened again afterwards. */
+ *  wins, except that an edit link is never replaced by a read-only one, and the dates keep the
+ *  earliest creation and the latest change; removed projects stay removed unless they were opened
+ *  again afterwards. */
 export function mergeLists(a: ListDoc, b: ListDoc): ListDoc {
   const out = emptyList()
   for (const doc of [a, b]) for (const [p, when] of Object.entries(doc.gone ?? {})) out.gone[p] = Math.max(out.gone[p] ?? 0, when)
@@ -73,6 +74,8 @@ export function mergeLists(a: ListDoc, b: ListDoc): ListDoc {
       const [fresh, old] = xFirst ? [x, y] : [y, x]
       e = { ...old, ...Object.fromEntries(Object.entries(fresh).filter(([, v]) => v !== undefined && v !== '')) } as ListEntry
       if (old.w && !fresh.w) { e.f = old.f; e.w = true }
+      if (x.c && y.c) e.c = Math.min(x.c, y.c)
+      if (x.m && y.m) e.m = Math.max(x.m, y.m)
     } else e = { ...(x ?? y)! }
     if (e.at > (out.gone[p] ?? 0)) out.projects[p] = e
   }

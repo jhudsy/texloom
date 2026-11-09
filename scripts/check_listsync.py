@@ -26,6 +26,8 @@ MERGES = [
     ("a removal at the same moment wins", doc({"a": E("f", "A", 6, True)}), doc(gone={"a": 6})),
     ("the latest removal is kept", doc(gone={"a": 3, "b": 9}), doc(gone={"a": 7})),
     ("a tie is the same either way", doc({"a": E("f1", "Zoë", 5, True)}), doc({"a": E("f2", "Åsa", 5, True)})),
+    ("the earliest creation and latest change are kept", doc({"a": E("f", "A", 9, True, c=3, m=4)}), doc({"a": E("f", "A", 5, True, c=2, m=8)})),
+    ("a client without dates doesn't lose them", doc({"a": E("f", "A", 9, True)}), doc({"a": E("f", "A", 5, True, c=2, m=8)})),
     ("non-ASCII and extras survive", doc({"é": E("f", "日本語 €", 1, False, by="José", t="“Quoted”")}), doc()),
 ]
 PASSWORDS = [("ada@example.org", "correct horse battery"), ("  Ada@Example.ORG ", "correct horse battery"), ("josé", "pässwörd ﬁne long"), ("ｗｉｄｅ", "Ａ full-width pass")]

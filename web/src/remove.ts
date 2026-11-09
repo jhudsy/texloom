@@ -65,3 +65,59 @@ export function removeDialog(info: RemoveInfo, remove: (fromServer: boolean) => 
     h('div', { class: 'row end' }, cancel, go))
   render()
 }
+
+export interface BulkItem extends Pick<RemoveInfo, 'name' | 'code' | 'owner' | 'onServer'> { id: string }
+
+/** Remove several projects. The server's copy goes only for those the person owns, and only if
+ *  they choose it. Anything that fails stays, and is named. */
+export function bulkRemoveDialog(items: BulkItem[], remove: (item: BulkItem, fromServer: boolean) => Promise<void>, done: () => void) {
+  const removable = items.filter((x) => x.owner && x.onServer)
+  const lastCopy = items.filter((x) => !x.onServer).length
+  let fromServer = false, busy = false
+  const option = (value: boolean, label: string, hint: string, off: boolean) =>
+    h('label', { class: off ? 'radio disabled' : 'radio' },
+      h('input', { type: 'radio', name: 'remove', checked: !value, disabled: off, onchange: () => { fromServer = value; render() } }),
+      h('span', {}, h('b', {}, label), h('small', { class: 'muted' }, hint)))
+  const warnings = h('div', { class: 'warnlist' })
+  const status = h('p', { class: 'muted small', role: 'status' })
+  const cancel = h('button', { onclick: () => dlg.close() }, t('Cancel'))
+  const go = h('button', { class: 'danger', onclick: () => run() })
+
+  function render() {
+    const w: string[] = []
+    if (lastCopy && !fromServer) w.push(tn(lastCopy, '{{n}} of these has no copy on the server: if nobody else has one, it will be gone for good.', '{{n}} of these have no copy on the server: if nobody else has one, they will be gone for good.'))
+    if (fromServer) w.push(t('Collaborators who have no copy of their own (only a link) won’t be able to open it any more.'))
+    warnings.replaceChildren(...w.map((x) => h('p', { class: 'warn small' }, '⚠ ', x)))
+    go.textContent = tn(items.length, 'Remove {{n}} project', 'Remove {{n}} projects')
+  }
+
+  async function run() {
+    busy = true
+    go.disabled = cancel.disabled = true
+    const failed: string[] = []
+    for (const [i, item] of items.entries()) {
+      status.textContent = t('Removing… ({{done}} of {{total}})', { done: i + 1, total: items.length })
+      try { await remove(item, fromServer && item.owner && item.onServer) }
+      catch (e) { failed.push(`${item.name}: ${(e as Error).message ?? e}`) }
+    }
+    busy = false
+    done()
+    if (!failed.length) { dlg.close(); return }
+    status.textContent = t('These couldn’t be removed: {{list}}', { list: failed.join('; ') })
+    cancel.disabled = false
+    cancel.textContent = t('Close')
+    go.hidden = true
+  }
+
+  const dlg = dialog('remove',
+    h('h3', {}, tn(items.length, 'Remove {{n}} project', 'Remove {{n}} projects')),
+    h('ul', { class: 'namelist' }, ...items.map((x) => h('li', {}, x.name, ' ', h('code', { class: 'pcode' }, x.code)))),
+    h('div', { class: 'radios' },
+      option(false, t('From this browser only'), t('Deletes this browser’s copies. The server’s copies and collaborators’ copies stay: open a link again to get one back.'), false),
+      option(true, t('From the server too'), tn(removable.length, 'Also deletes the encrypted copy on the server of the {{n}} you own that is stored there. Others are only removed from this browser.', 'Also deletes the encrypted copies on the server of the {{n}} you own that are stored there. Others are only removed from this browser.'), !removable.length)),
+    h('p', { class: 'muted small' }, t('Folders on this computer and their files stay: delete them yourself if you want.')),
+    warnings, status,
+    h('div', { class: 'row end' }, cancel, go))
+  dlg.addEventListener('cancel', (e) => { if (busy) e.preventDefault() })
+  render()
+}

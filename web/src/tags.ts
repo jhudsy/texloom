@@ -36,9 +36,12 @@ export const tags = {
     return live(read()).find((x) => foldTag(x.name) === want)
   },
 
-  of(project: string): Tag[] {
-    const doc = read(), marks = doc.on[project] ?? {}
-    return live(doc).filter((x) => marks[x.id] > 0)
+  of: (project: string): Tag[] => tags.reader()(project),
+
+  /** For looking up many projects: reads the stored tags once. */
+  reader(): (project: string) => Tag[] {
+    const doc = read(), all = live(doc)
+    return (project) => { const marks = doc.on[project] ?? {}; return all.filter((x) => marks[x.id] > 0) }
   },
 
   /** How many projects have this tag. */
@@ -71,10 +74,15 @@ export const tags = {
     write(doc)
   },
 
-  set(project: string, id: string, on: boolean) {
-    const doc = read(), marks = (doc.on[project] ??= {})
-    const when = stamp(Math.abs(marks[id] ?? 0))
-    marks[id] = on ? when : -when
+  /** Assign a tag to these projects, or take it off them. */
+  set(projects: string[], id: string, on: boolean) {
+    const doc = read()
+    for (const project of projects) {
+      const marks = (doc.on[project] ??= {})
+      if ((marks[id] > 0) === on) continue
+      const when = stamp(Math.abs(marks[id] ?? 0))
+      marks[id] = on ? when : -when
+    }
     write(doc)
   },
 

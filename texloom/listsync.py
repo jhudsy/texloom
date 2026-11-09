@@ -106,8 +106,9 @@ def empty() -> dict:
 
 def merge(a: dict, b: dict) -> dict:
     """Two lists as one, the same whichever way round. The most recently opened copy of an entry
-    wins, except that an edit link is never replaced by a read-only one; removed projects stay
-    removed unless they were opened again afterwards."""
+    wins, except that an edit link is never replaced by a read-only one, and the dates keep the
+    earliest creation and the latest change; removed projects stay removed unless they were opened
+    again afterwards."""
     out = empty()
     for doc in (a, b):
         for p, when in doc.get("gone", {}).items():
@@ -119,6 +120,10 @@ def merge(a: dict, b: dict) -> dict:
             e = {**old, **{k: v for k, v in new.items() if v not in (None, "")}}
             if old.get("w") and not new.get("w"):
                 e["f"], e["w"] = old["f"], True
+            if x.get("c") and y.get("c"):
+                e["c"] = min(x["c"], y["c"])
+            if x.get("m") and y.get("m"):
+                e["m"] = max(x["m"], y["m"])
         else:
             e = dict(x or y)
         if e.get("at", 0) > out["gone"].get(p, 0):

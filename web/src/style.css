@@ -41,7 +41,8 @@ header { display: flex; align-items: center; gap: 10px; padding: 6px 12px; borde
 /* TeXLoom wordmark: the "e" dropped as in the TeX logo */
 .logo { font-family: "Latin Modern Roman", "CMU Serif", Georgia, "Times New Roman", serif; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
 .logo .e { position: relative; top: .22em; margin: 0 -.08em 0 -.13em; text-transform: none; }
-.title { border-color: transparent; background: transparent; font-weight: 600; width: 22ch; }
+.title { border-color: transparent; background: transparent; font-weight: 600; width: 22ch; flex-shrink: 1; min-width: 8ch; }
+header button { white-space: nowrap; flex-shrink: 0; }
 .title:hover:not([readonly]), .title:focus { border-color: var(--line); background: var(--bg); }
 .spacer { flex: 1; }
 .badge { font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--warn); color: #fff; }
@@ -254,9 +255,21 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 @media (max-width: 560px) { /* room for the name, then the buttons */
   .recent .top { flex-wrap: wrap; }
   .recent .pname { max-width: 100%; }
+  .findrow { flex-wrap: wrap; }
+  .landing .finder { flex-basis: 100%; }
+  .sorter { max-width: 100%; }
 }
 dialog.dlg input.tagfind { width: 100%; box-sizing: border-box; margin-top: 8px; }
-.landing .finder { width: 100%; margin: 4px 0 8px; box-sizing: border-box; }
+.findrow { display: flex; gap: 8px; margin: 4px 0 8px; }
+.findrow[hidden] { display: none; }
+.landing .finder { flex: 1; min-width: 0; box-sizing: border-box; }
+.sorter { flex: 0 1 auto; max-width: 45%; }
+.selectbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; min-height: 26px; }
+.landing .selectbar label { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; }
+.selectbar .bulk { display: flex; flex-wrap: wrap; gap: 6px; }
+.selectbar .bulk[hidden] { display: none; }
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; }
+.namelist { max-height: 30vh; overflow: auto; margin: 8px 0; padding-left: 18px; overflow-wrap: anywhere; }
 .tagbar, .recent .tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .tagbar { margin-bottom: 6px; }
 .utag { font-size: 12px; line-height: 18px; padding: 0 8px; border-radius: 999px; color: var(--fg); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

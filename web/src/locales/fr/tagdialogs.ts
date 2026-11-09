@@ -19,6 +19,7 @@ const fr: Catalog = {
   'Add': 'Ajouter',
   'Delete the tag “{{name}}”? It will be taken off {{n}} projects. The projects themselves aren’t changed.': ['Supprimer l’étiquette « {{name}} » ? Elle sera retirée de {{n}} projet. Le projet lui-même n’est pas modifié.', 'Supprimer l’étiquette « {{name}} » ? Elle sera retirée de {{n}} projets. Les projets eux-mêmes ne sont pas modifiés.'],
   '{{n}} projects': ['{{n}} projet', '{{n}} projets'],
+  'A dash means only some of these projects have that tag.': 'Un tiret signifie que seuls certains de ces projets portent cette étiquette.',
 }
 
 export default fr

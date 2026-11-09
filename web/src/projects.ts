@@ -12,6 +12,8 @@ export interface Recent {
   fragment: string // link fragment with the keys
   name: string // shared project name
   at: number // last opened (ms)
+  created?: number // when this project joined the list (ms): made here, or first opened
+  modified?: number // when its files last changed, as far as this device saw (ms)
   writable: boolean
   nick?: string // private label, only in this browser
   docTitle?: string // \title{…} of the main file
@@ -29,8 +31,9 @@ export const tabKeysItem = (project: string) => `texloom.keys.${project}`
 
 const GONE = 'texloom.recentGone' // project -> when it was removed, so other devices remove it too
 let changed: (() => void) | null = null
+const MAX_KEPT = 1000 // the most recently opened; a synced list keeps the rest on the server
 const write = (list: Recent[], quietly = false) => {
-  try { localStorage.setItem(KEY, JSON.stringify(list.slice(0, 200))) } catch {}
+  try { localStorage.setItem(KEY, JSON.stringify([...list].sort((a, b) => b.at - a.at).slice(0, MAX_KEPT))) } catch {}
   if (!quietly) changed?.()
 }
 const readGone = (): Record<string, number> => { try { return JSON.parse(localStorage.getItem(GONE) || '{}') } catch { return {} } }
@@ -59,7 +62,7 @@ export const projects = {
     let r = list.find((x) => x.project === project)
     if (!r) {
       if (!patch.fragment) return
-      r = { project, fragment: patch.fragment, name: '', at: Date.now(), writable: !!patch.writable }
+      r = { project, fragment: patch.fragment, name: '', at: Date.now(), created: Date.now(), writable: !!patch.writable }
       list.push(r)
     }
     const keep = r.writable && patch.writable === false ? r.fragment : null // don't lose the edit link
@@ -78,6 +81,8 @@ export const projects = {
       if (r.nick) e.nick = r.nick
       if (r.docTitle) e.t = r.docTitle
       if (r.createdBy) e.by = r.createdBy
+      if (r.created) e.c = r.created
+      if (r.modified) e.m = r.modified
       out[r.project] = e
     }
     return { v: 1, projects: out, gone: readGone() }
@@ -86,12 +91,16 @@ export const projects = {
   /** Take on the merged list. True if what this browser shows changed. */
   applyList(doc: ListDoc): boolean {
     const before = read()
-    const keepFields = (r: Recent) => [r.project, r.fragment, r.name, r.at, r.writable, r.nick ?? '', r.docTitle ?? '', r.createdBy ?? '']
+    const keepFields = (r: Recent) => [r.project, r.fragment, r.name, r.at, r.writable, r.nick ?? '', r.docTitle ?? '', r.createdBy ?? '', r.created ?? 0, r.modified ?? 0]
     const same = (l: Recent[]) => JSON.stringify(l.map(keepFields).sort())
-    const next = Object.entries(doc.projects).map(([project, e]): Recent => ({
-      ...before.find((x) => x.project === project),
-      project, fragment: e.f, name: e.n ?? '', at: e.at, writable: !!e.w, nick: e.nick, docTitle: e.t, createdBy: e.by,
-    })).sort((a, b) => b.at - a.at)
+    const next = Object.entries(doc.projects).map(([project, e]): Recent => {
+      const had = before.find((x) => x.project === project)
+      return {
+        ...had,
+        project, fragment: e.f, name: e.n ?? '', at: e.at, writable: !!e.w, nick: e.nick, docTitle: e.t, createdBy: e.by,
+        created: e.c ?? had?.created ?? e.at, modified: e.m ?? had?.modified,
+      }
+    }).sort((a, b) => b.at - a.at)
     write(next, true)
     writeGone(doc.gone)
     return same(before) !== same(next)
@@ -123,6 +132,9 @@ export const projects = {
     await rememberFolder(project, null).catch(() => {})
   },
 }
+
+// Entries from before dates were kept: when they were last opened is the best guess there is.
+if (read().some((r) => !r.created)) write(read().map((r) => ({ ...r, created: r.created ?? r.at })), true)
 
 /** Pull a plain-text title out of a LaTeX source, if it has \title{…}. */
 export function latexTitle(src: string): string | undefined {

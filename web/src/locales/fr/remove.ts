@@ -14,5 +14,14 @@ const fr: Catalog = {
   'The server keeps no copy already.': 'Le serveur ne garde déjà aucune copie.',
   'The folder “{{folder}}” on this computer and its files stay: delete it yourself if you want.': 'Le dossier « {{folder}} » de cet ordinateur et ses fichiers restent : supprimez-le vous-même si vous le souhaitez.',
   'Folders kept in sync by the TeXLoom app stay too: use Leave… there to stop syncing one.': 'Les dossiers synchronisés par l’application TeXLoom restent aussi : utilisez « Quitter… » dans l’application pour arrêter d’en synchroniser un.',
+  'Deletes this browser’s copies. The server’s copies and collaborators’ copies stay: open a link again to get one back.': 'Supprime les copies de ce navigateur. Les copies du serveur et celles des collaborateurs restent : rouvrez un lien pour en récupérer une.',
+  'Folders on this computer and their files stay: delete them yourself if you want.': 'Les dossiers de cet ordinateur et leurs fichiers restent : supprimez-les vous-même si vous le souhaitez.',
+  'Removing… ({{done}} of {{total}})': 'Suppression… ({{done}} sur {{total}})',
+  'These couldn’t be removed: {{list}}': 'Impossible de supprimer : {{list}}',
+  'Cancel': 'Annuler',
+  'Close': 'Fermer',
+  '{{n}} of these have no copy on the server: if nobody else has one, they will be gone for good.': ['{{n}} d’entre eux n’a pas de copie sur le serveur : si personne d’autre n’en a, il sera perdu définitivement.', '{{n}} d’entre eux n’ont pas de copie sur le serveur : si personne d’autre n’en a, ils seront perdus définitivement.'],
+  'Remove {{n}} projects': ['Supprimer {{n}} projet', 'Supprimer {{n}} projets'],
+  'Also deletes the encrypted copies on the server of the {{n}} you own that are stored there. Others are only removed from this browser.': ['Supprime aussi la copie chiffrée sur le serveur du projet dont vous êtes propriétaire et qui y est stocké. Les autres sont seulement supprimés de ce navigateur.', 'Supprime aussi les copies chiffrées sur le serveur des {{n}} projets dont vous êtes propriétaire et qui y sont stockés. Les autres sont seulement supprimés de ce navigateur.'],
 }
 export default fr

@@ -385,9 +385,12 @@ one to the projects it names.
   value + 1, otherwise 409 and the client merges and retries) and `X-Sig`, a signature over
   `list:<id>:<seq>:` + blob. `DELETE` is signed over `listdel:<id>`. A new list needs what a new
   project needs (`X-Create-Code`) and belongs to that code, so purging the code removes it.
-- Document: `{"v":1,"projects":{"<id>":{"f":fragment,"n":name,"at":ms,"w":bool,"nick"?,"t"?,"by"?}},"gone":{"<id>":ms}}`.
+- Document: `{"v":1,"projects":{"<id>":{"f":fragment,"n":name,"at":ms,"w":bool,"nick"?,"t"?,"by"?,"c"?:ms,"m"?:ms}},"gone":{"<id>":ms}}`.
+  `c` is when the project joined the list and `m` when a device last saw its files change (the
+  server can't tell, and at most every few minutes, because each write syncs the list).
   Merging keeps the latest `gone` time per project and the most recently opened entry, never
-  replaces an edit link with a read-only one, and drops a project removed after it was last opened.
+  replaces an edit link with a read-only one, keeps the earliest `c` and latest `m`, and drops a
+  project removed after it was last opened.
   Removal records are forgotten after a year.
 - Other ways in are entries of the same kind holding `{"v":1,"wrap":<K>}`, opened by their own
   secret. A password's secret is `scrypt(password, "texloom list password v1:" + username, N=2^17,

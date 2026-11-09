@@ -6,7 +6,7 @@
    "seq": 7,
    "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
    "signature": "Mhfffj9ymKBqLLIzkjxjtIGGqqGJle_Jc-3UxpOX2E4eJ44Nnu6JLkyeaomiT5wz6B6sOCQQXx-7XIvhqZe2DQ",
-   "ciphertext": "J-Dxu1yfBRtru9iSIzLVB20IAyWQyMzDYwpIDH7h8mhOCzrLUcusXOMfTYHizmaQ1QZhcmkW",
+   "ciphertext": "VaXFuM6oxWEQX9c2MqN4rvG8A63TQcpIUrw8cmP7Rar4I6NydiBYTofvDXH56aH3tMmm9tQf",
    "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
    "link": "https://example.org/#sync=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
   },
@@ -16,7 +16,7 @@
    "seq": 7,
    "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
    "signature": "J1ku7E7WW-gFQlwPeTbinTvWFngJW8f7u-ALt7kwrOVgvOdlB0voBr60YGxv6P9xg_TtFvLUsJkJdwWvbgsvBg",
-   "ciphertext": "aP8jvA6qQ1SLH5zTwTZfKUmpmjn17vCUCPShUWAVmIJcW3K7dyq9OcjpvzKHKiM0jcZ5_KT_",
+   "ciphertext": "c-QJYt6UPnEhjjsdB5tXgtosc_Rv51kmi1wmp4ylyAGgarRH54EdEsCe5hFxJkwbQA3FHkmZ",
    "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
    "link": "https://example.org/#sync=__________________________________________8"
   }
@@ -246,6 +246,68 @@
     "gone": {}
    },
    "merged": "{\"gone\":{},\"projects\":{\"a\":{\"at\":5,\"f\":\"f2\",\"n\":\"Åsa\",\"w\":true}},\"v\":1}"
+  },
+  {
+   "what": "the earliest creation and latest change are kept",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f",
+      "n": "A",
+      "at": 9,
+      "w": true,
+      "c": 3,
+      "m": 4
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f",
+      "n": "A",
+      "at": 5,
+      "w": true,
+      "c": 2,
+      "m": 8
+     }
+    },
+    "gone": {}
+   },
+   "merged": "{\"gone\":{},\"projects\":{\"a\":{\"at\":9,\"c\":2,\"f\":\"f\",\"m\":8,\"n\":\"A\",\"w\":true}},\"v\":1}"
+  },
+  {
+   "what": "a client without dates doesn't lose them",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f",
+      "n": "A",
+      "at": 9,
+      "w": true
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "f",
+      "n": "A",
+      "at": 5,
+      "w": true,
+      "c": 2,
+      "m": 8
+     }
+    },
+    "gone": {}
+   },
+   "merged": "{\"gone\":{},\"projects\":{\"a\":{\"at\":9,\"c\":2,\"f\":\"f\",\"m\":8,\"n\":\"A\",\"w\":true}},\"v\":1}"
   },
   {
    "what": "non-ASCII and extras survive",

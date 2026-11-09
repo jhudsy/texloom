@@ -132,9 +132,12 @@ one. Servers can turn lists off with `--no-project-lists`.
 
 ### Finding and copying projects
 
-The box above your projects searches their names and tags. Give a project tags with **+ Tag**
-beneath it, and click a tag at the top to show only projects that have it (several tags narrow it
-further). **Manage tags…** renames and deletes them, for every project at once. Tags are yours
+The box above your projects searches their names and tags, and the menu beside it sorts them by
+when they were last opened or changed, when they were added, or name. Long lists are split into
+pages. Give a project tags with **+ Tag** beneath it or **Tags** in the editor's header, and click
+a tag at the top to show only projects that have it (several tags narrow it further). **Manage
+tags…** renames and deletes them, for every project at once. Tick projects to change their tags or
+remove them together, or use the box at the top to tick everything found. Tags are yours
 alone: they aren't stored in the project, so collaborators never see them. With a synced list they
 follow you to your other devices, encrypted; otherwise they stay in that browser. For now they
 appear only in the web app.

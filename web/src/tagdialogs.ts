@@ -4,13 +4,13 @@ import { t, tn } from './i18n'
 import { foldTag } from './listcore'
 import { cleanTagName, MAX_TAG_NAME, tags, type Tag } from './tags'
 
-/** Assign or unassign tags on a project, and create new ones. */
-export function pickTags(project: string, label: string, changed: () => void) {
+/** Assign or unassign tags on one project or several, and create new ones. */
+export function pickTags(projects: string[], title: string, changed: () => void) {
   const typed = () => cleanTagName(input.value)
   const commit = () => {
     if (!typed()) return
     const tag = tags.find(typed()) ?? tags.create(typed())
-    if (tag) tags.set(project, tag.id, true)
+    if (tag) tags.set(projects, tag.id, true)
     input.value = ''
     render(); changed()
   }
@@ -21,18 +21,22 @@ export function pickTags(project: string, label: string, changed: () => void) {
   const items = h('ul', { class: 'taglist' })
   const create = h('button', { hidden: true, onclick: commit })
   function render() {
-    const want = foldTag(typed()), mine = new Set(tags.of(project).map((x) => x.id))
+    const want = foldTag(typed()), of = tags.reader()
+    const has = (id: string) => projects.filter((p) => of(p).some((x) => x.id === id)).length
     const all = tags.all(), shown = all.filter((x) => foldTag(x.name).includes(want))
-    items.replaceChildren(...shown.map((tag) => h('li', {}, h('label', {},
-      h('input', { type: 'checkbox', checked: mine.has(tag.id), onchange: (e: any) => { tags.set(project, tag.id, e.target.checked); changed() } }),
-      h('span', {}, tag.name)))))
+    items.replaceChildren(...shown.map((tag) => {
+      const n = has(tag.id)
+      const box = h('input', { type: 'checkbox', checked: n === projects.length, onchange: (e: any) => { tags.set(projects, tag.id, e.target.checked); changed() } })
+      box.indeterminate = n > 0 && n < projects.length // on some of them
+      return h('li', {}, h('label', {}, box, h('span', {}, tag.name)))
+    }))
     if (!all.length) items.replaceChildren(h('li', { class: 'muted small' }, t('No tags yet. Type a name to create one.')))
     create.hidden = !typed() || !!tags.find(typed())
     create.textContent = t('Create “{{name}}”', { name: typed() })
   }
   const dlg = dialog('settings',
-    h('h3', {}, t('Tags for “{{name}}”', { name: label })),
-    h('p', { class: 'muted small' }, t('Only you see your tags. They aren’t shared with collaborators.')),
+    h('h3', {}, title),
+    h('p', { class: 'muted small' }, t('Only you see your tags. They aren’t shared with collaborators.'), projects.length > 1 ? ' ' + t('A dash means only some of these projects have that tag.') : ''),
     input, create, items,
     h('div', { class: 'row end' },
       h('button', { onclick: () => manageTags(() => { render(); changed() }) }, t('Manage tags…')),
