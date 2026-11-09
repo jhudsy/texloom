@@ -294,6 +294,18 @@ related-work section"`. Edits appear live in collaborators' browsers.
 
 Either way the PDF goes into the `out` map, so other peers just view it.
 
+### Moving to a new TeX Live release
+
+The in-browser engine's formats are built from one release, so everything follows it. It keeps
+working after the next release comes out: the server then uses that year's `tlnet-final` archive.
+To move, once `texlyre-busytex` publishes a build of the new release:
+
+1. Update `texlyre-busytex` in `web/package.json`, and add its asset checksum to `deploy/install.sh`.
+2. Set `YEAR` in `server/texlive.py`. On the next start, the server drops the old release's cached
+   packages and index, and `--texlive-init` builds the new index. Browsers discard the old engine
+   when the new service worker activates, because its version changed.
+3. Update "TeX Live 2026" in `web/src/settings.ts` (and its translations), `README.md` and this file.
+
 ## In-editor assistant
 
 A chat panel (`web/src/assistant/`) that acts on the project like another collaborator.

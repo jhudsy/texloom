@@ -20,10 +20,12 @@ function serviceWorker(): Plugin {
       const built = walk(out).map((f) => '/' + relative(out, f).split('\\').join('/'))
         .filter((f) => f !== '/index.html' && f !== '/sw.js' && !/\.(woff|ttf)$/.test(f))
       const shell = [...new Set(['/', '/index.html', ...built])].sort()
-      const version = createHash('sha256').update(shell.join('\n')).digest('hex').slice(0, 12)
+      const engine = readFileSync(new URL('./node_modules/texlyre-busytex/package.json', import.meta.url), 'utf8')
+      const version = createHash('sha256').update(shell.join('\n') + engine).digest('hex').slice(0, 12)
       const src = readFileSync(new URL('./sw-template.js', import.meta.url), 'utf8')
         .replace('__VERSION__', JSON.stringify(version))
         .replace('__SHELL__', JSON.stringify(shell))
+        .replace('__ENGINE__', JSON.stringify(JSON.parse(readFileSync(new URL('./node_modules/texlyre-busytex/package.json', import.meta.url), 'utf8')).version))
       writeFileSync(join(out, 'sw.js'), src)
     },
   }

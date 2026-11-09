@@ -128,9 +128,22 @@ class TexLive:
         self.slots = asyncio.Semaphore(3)  # packages downloading at once
         self.refreshed = 0.0
         self.used = 0
+        self._forget_other_release()
         self._open()
 
     # --- the index ------------------------------------------------------------------
+    def _forget_other_release(self) -> None:
+        """After moving to a new engine: another release's files must not be served to it."""
+        try:
+            year = json.loads((self.root / "repo.json").read_text()).get("year")
+        except (OSError, ValueError):
+            return
+        if year != YEAR:
+            log.info("dropping the cached TeX Live %s files: the engine is now %d", year, YEAR)
+            shutil.rmtree(self.files, ignore_errors=True)
+            (self.root / "index.db").unlink(missing_ok=True)
+            (self.root / "repo.json").unlink(missing_ok=True)
+
     def _open(self) -> None:
         db = self.root / "index.db"
         if not db.exists():
@@ -158,11 +171,13 @@ class TexLive:
 
     def index_sources(self) -> list[str]:
         """Where to (re)build the index from: configured mirrors first, then the redirector
-        (so the pin follows the server if it moves), the pinned mirror last (it may be
-        mid-update when a refresh is needed)."""
+        (so the pin follows the server if it moves), the pinned mirror (it may be mid-update
+        when a refresh is needed), and finally the archive: once the live repository moves to
+        the next release, that is the only place this one still exists."""
         pinned = self.meta.get("mirror")
-        rest = [h.format(year=YEAR) for h in HISTORIC] if self.meta.get("historic") else [CTAN]
-        return list(dict.fromkeys([*self.extra_mirrors, *rest, *([pinned] if pinned else [])]))
+        archive = [h.format(year=YEAR) for h in HISTORIC]
+        rest = archive if self.meta.get("historic") else [CTAN]
+        return list(dict.fromkeys([*self.extra_mirrors, *rest, *([pinned] if pinned else []), *archive]))
 
     @staticmethod
     async def _download(session: ClientSession, url: str, limit: int) -> tuple[bytes, str]:
@@ -289,9 +304,10 @@ class TexLive:
         # every mirror that answered has another version: the package changed since the index
         if mismatched and time.time() - self.refreshed > 600:
             log.info("%s changed upstream: refreshing the index", pkg)
+            was = self.meta.get("mirror")
             await self.build_index(self.index_sources())
             row = self.db.execute("SELECT sha, size FROM pkgs WHERE name=?", (pkg,)).fetchone()
-            if row and row[0] != sha:
+            if row and (row[0] != sha or self.meta.get("mirror") != was):  # a new version, or a new place to look
                 return await self._fetch_container(pkg, row[0], row[1])
         raise RuntimeError(f"couldn't fetch {pkg}: " + "; ".join(tried))
 
