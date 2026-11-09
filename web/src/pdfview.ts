@@ -20,6 +20,9 @@ const savedZoom = () => {
 }
 // Zoomed in, a whole document at full sharpness wouldn't fit in a browser's memory for canvases.
 const MAX_PAGE_PIXELS = 6e6, MIN_PAGE_PIXELS = 2e6, MAX_DOCUMENT_PIXELS = 2e8
+// Printing draws its own copy of each page. The site's security rules allow no frames, which
+// handing the PDF to the browser's own viewer for printing would need.
+const PRINT_DPI = 300, MAX_PRINT_PIXELS = 16e6
 
 export class PdfView {
   readonly el: HTMLDivElement
@@ -30,8 +33,12 @@ export class PdfView {
   /** Where the PDF was last clicked (what “go to source” uses), in PDF points. */
   private lastClick: { page: number; x: number; y: number } | null = null
   private menu: (() => void) | null = null
-  /** Zoom out, the current zoom (which goes back to normal size), zoom in. Shown once there is a PDF. */
+  /** Which page, zoom out, the current zoom (which goes back to normal size), zoom in, print. Shown once there is a PDF. */
   readonly controls: HTMLElement
+  private pageBox: HTMLInputElement
+  private pageTotal: HTMLElement
+  private printBtn: HTMLButtonElement
+  private pageFrame = 0
   private zoomOut: HTMLButtonElement
   private zoomReset: HTMLButtonElement
   private zoomIn: HTMLButtonElement
@@ -65,7 +72,10 @@ export class PdfView {
       this.lastClick = at
       this.openMenu(e.clientX, e.clientY, [[t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)], ...(this.menuExtras?.() ?? [])])
     })
-    this.el.addEventListener('scroll', () => this.closeMenu(), { passive: true })
+    this.el.addEventListener('scroll', () => {
+      this.closeMenu()
+      this.pageFrame ||= requestAnimationFrame(() => { this.pageFrame = 0; this.showPage() })
+    }, { passive: true })
     // Ctrl or ⌘ + scroll; a trackpad pinch arrives as Ctrl + scroll
     this.el.addEventListener('wheel', (e) => {
       if (!e.ctrlKey && !e.metaKey) return
@@ -76,9 +86,86 @@ export class PdfView {
     this.zoomOut = h('button', { title: t('Zoom out'), 'aria-label': t('Zoom out'), onclick: () => this.step(-1) }, '−')
     this.zoomReset = h('button', { class: 'pct', title: t('Back to normal size'), onclick: () => this.setZoom(1) })
     this.zoomIn = h('button', { title: t('Zoom in'), 'aria-label': t('Zoom in'), onclick: () => this.step(1) }, '+')
-    this.controls = h('span', { class: 'pdfzoom', role: 'group', 'aria-label': t('PDF zoom'), hidden: true }, this.zoomOut, this.zoomReset, this.zoomIn)
+    this.pageBox = h('input', {
+      class: 'pagebox', inputmode: 'numeric', autocomplete: 'off', title: t('Go to page'), 'aria-label': t('Go to page'),
+      onfocus: () => this.pageBox.select(),
+      onblur: () => this.showPage(),
+      onkeydown: (e: KeyboardEvent) => {
+        if (e.key === 'Enter') { e.preventDefault(); this.goToPage(Number(this.pageBox.value)); this.pageBox.blur() }
+        else if (e.key === 'Escape') this.pageBox.blur()
+      },
+    })
+    this.pageTotal = h('span', { class: 'muted' })
+    this.printBtn = h('button', { title: t('Print the PDF'), onclick: () => { this.print().catch((e) => { this.printDone(); alert(t('Couldn’t prepare the PDF for printing: {{error}}', { error: e })) }) } }, t('Print'))
+    this.controls = h('span', { class: 'pdfcontrols', hidden: true },
+      h('span', { class: 'pdfpage' }, this.pageBox, this.pageTotal),
+      h('span', { class: 'pdfzoom', role: 'group', 'aria-label': t('PDF zoom') }, this.zoomOut, this.zoomReset, this.zoomIn),
+      this.printBtn)
     this.showZoom()
   }
+
+  /** The page in the middle of the view. */
+  private currentPage(): number {
+    const mid = this.el.getBoundingClientRect().top + this.el.clientHeight / 2
+    const i = this.pages.findIndex((p) => p.wrap.getBoundingClientRect().bottom >= mid)
+    return i < 0 ? this.pages.length : i + 1
+  }
+
+  private showPage() {
+    if (this.pages.length && document.activeElement !== this.pageBox) this.pageBox.value = String(this.currentPage())
+  }
+
+  private goToPage(n: number) {
+    if (!Number.isInteger(n) || !this.pages.length) return
+    const p = this.pages[Math.min(this.pages.length, Math.max(1, n)) - 1]
+    this.el.scrollTop += p.wrap.getBoundingClientRect().top - this.el.getBoundingClientRect().top - 12
+  }
+
+  /** Draw every page for the printer and open the browser's print dialog. */
+  private async print() {
+    if (!this.last || this.printBtn.disabled) return
+    this.printBtn.disabled = true
+    const label = this.printBtn.textContent
+    this.printDone = () => { this.printBtn.disabled = false; this.printBtn.textContent = label }
+    const task = pdfjs.getDocument({ data: this.last.slice() })
+    const sheets = h('div', { class: 'print-sheets' })
+    const urls: string[] = []
+    let size = ''
+    try {
+      const doc = await task.promise
+      for (let i = 1; i <= doc.numPages; i++) {
+        this.printBtn.textContent = t('Preparing… ({{done}} of {{total}})', { done: i, total: doc.numPages })
+        const page = await doc.getPage(i)
+        const base = page.getViewport({ scale: 1 })
+        if (i === 1) size = `${base.width}pt ${base.height}pt`
+        const vp = page.getViewport({ scale: Math.min(PRINT_DPI / 72, Math.sqrt(MAX_PRINT_PIXELS / (base.width * base.height))) })
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.floor(vp.width)
+        canvas.height = Math.floor(vp.height)
+        await page.render({ canvas, viewport: vp, intent: 'print' }).promise
+        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'))
+        canvas.width = canvas.height = 0 // a long document won't fit in memory as canvases
+        if (!blob) throw new Error('canvas')
+        const url = URL.createObjectURL(blob)
+        urls.push(url)
+        sheets.append(h('img', { src: url, alt: '' }))
+      }
+    } finally { void task.destroy() }
+    const style = h('style', {}, `@media print { @page { size: ${size}; margin: 0; } }`)
+    document.head.append(style)
+    document.body.append(sheets)
+    await Promise.all([...sheets.querySelectorAll('img')].map((img) => img.decode()))
+    document.body.classList.add('printing')
+    window.addEventListener('afterprint', () => {
+      document.body.classList.remove('printing')
+      sheets.remove()
+      style.remove()
+      urls.forEach((url) => URL.revokeObjectURL(url))
+      this.printDone()
+    }, { once: true })
+    window.print()
+  }
+  private printDone: () => void = () => {}
 
   private showZoom() {
     this.zoomReset.textContent = `${Math.round(this.zoom * 100)}%`
@@ -203,6 +290,8 @@ export class PdfView {
     this.el.scrollTop = scrollFrac * this.el.scrollHeight
     this.el.scrollLeft = scrollAcross * this.el.scrollWidth
     this.controls.hidden = false
+    this.pageTotal.textContent = `/ ${info.length}`
+    this.showPage()
     } finally { void task.destroy() } // otherwise each document keeps a worker for the life of the tab
   }
 }
