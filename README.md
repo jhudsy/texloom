@@ -257,7 +257,8 @@ K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
 - Anyone with a project's link can open and edit it; codes only govern **storage of new
   projects**. A code is entered once per browser (**New project** asks, or ⚙ Settings →
   Creation code…). The folder helper takes `texloom new … --code`, `create_code` in
-  `.texloom/config.json`, or the `TEXLOOM_CODE` environment variable.
+  `.texloom/config.json`. `TEXLOOM_CODE` is read only when creating something new, so it can't reach
+  whichever server a link you open points at.
 - The file is re-read when it changes. Deleting a line revokes a code: its projects stay
   stored, but new changes then count against `default`.
 - `until=` (optional) is the last day, in UTC, that a code is valid. After that it counts as

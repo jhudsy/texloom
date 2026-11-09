@@ -89,7 +89,7 @@ async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | 
 async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, git: bool) -> None:
     cfg = {**DEFAULT_CONFIG, **load_config(d)}
     keys, server = load(d)
-    code = cfg["create_code"] or os.environ.get("TEXLOOM_CODE", "")
+    code = cfg["create_code"]  # never the environment's: a project's link decides which server hears it
     replica = Replica(d / STATE, keys, server, code or None)
     import platform
     opts = {"engine": cfg["engine"], "latexmk_args": cfg["latexmk_args"],
@@ -253,7 +253,7 @@ def allow_programs(d: Path, yes: bool) -> None:
 
 def projects_command(a) -> None:
     from .listsync import ListError, ListKey, explain, local_folders, not_here, save_link, sync, sync_this_computer, unlock_with_password
-    code = a.code or os.environ.get("TEXLOOM_CODE") or None
+    code = a.code or (os.environ.get("TEXLOOM_CODE") if a.action == "new" else None) or None
     try:
         if a.action == "off":
             save_link(None)
@@ -285,7 +285,7 @@ def projects_command(a) -> None:
     except ValueError as e:
         sys.exit(str(e))
     except ListError as e:
-        sys.exit(explain(e.code) + (" Use --code or TEXLOOM_CODE." if e.code == "needs-code" else ""))
+        sys.exit(explain(e.code) + (" Use --code." if e.code == "needs-code" else ""))
     if result is None:
         print("No project list yet. Start one with `texloom projects new --server URL`,\n"
               "or use an existing one with `texloom projects use '<sync link>'`.")
@@ -430,11 +430,11 @@ def main() -> None:
         from .mcp import serve
         if "#" in a.target:
             keys, server = Keys.from_link(a.target)
-            code = os.environ.get("TEXLOOM_CODE", "")
+            code = ""
         else:
             d = Path(a.target)
             keys, server = load(d)
-            code = load_config(d).get("create_code") or os.environ.get("TEXLOOM_CODE", "")
+            code = load_config(d).get("create_code", "")
         try:
             asyncio.run(serve(keys, server, a.name[:64], code or None, a.suggest_only))
         except KeyboardInterrupt:

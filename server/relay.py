@@ -52,6 +52,7 @@ import secrets
 import shutil
 import sqlite3
 import sys
+import tempfile
 import time
 from collections import defaultdict, deque
 from collections.abc import Container
@@ -102,6 +103,10 @@ BLOB_PIECE = 256 * KiB  # files go out this much at a time, so a download holds 
 # about this much memory. Building and sending one takes about four times its stored size.
 CATCHUP_MEMORY, CATCHUP_OVERHEAD = 192 * MiB, 4
 CATCHUP_TIMEOUT = 120  # seconds to send one; it can be large, and phones can be slow
+UPLOAD_TIME = 600  # seconds an upload may take; slow ones use only a connection and a temporary file
+# Bytes that connections have sent and the server hasn't finished with, across all connections:
+# a WebSocket frame is held whole until it's complete, and anyone can start one.
+HELD_MAX = 192 * MiB
 INFLIGHT_MAX = 192 * MiB  # bytes of large frames being handled at once, server-wide
 
 
@@ -689,6 +694,7 @@ class Conn:
         self.code_tried = False
         self.hellos: list[float] = []
         self.recheck = 0.0  # private servers: when to check the project's code again
+        self.held = 0  # bytes received and not yet finished with (see Metered)
         self.window_start = time.monotonic()
         self.msgs = 0
         self.bytes = 0
@@ -716,6 +722,36 @@ def field(msg: dict, key: str, typ: type, default=None):
     if not isinstance(v, typ) or isinstance(v, bool) and typ is int:
         raise BadMessage(f"bad field {key!r}")
     return v
+
+
+class Metered(asyncio.Protocol):
+    """Counts what a WebSocket connection has sent, and cuts off a connection holding a lot
+    when the total is too high, so unfinished messages can't exhaust the server's memory."""
+
+    def __init__(self, inner, relay: "Relay", conn: "Conn", transport):
+        self.inner, self.relay, self.conn, self.transport = inner, relay, conn, transport
+
+    def data_received(self, data: bytes) -> None:
+        self.conn.held += len(data)
+        self.relay.held += len(data)
+        if self.relay.held > HELD_MAX and self.conn.held > MiB:
+            log.info("dropping a connection: too much unfinished data on the server")
+            self.transport.abort()
+            return
+        self.inner.data_received(data)
+
+    def connection_lost(self, exc) -> None:
+        self.relay.settle(self.conn)
+        self.inner.connection_lost(exc)
+
+    def eof_received(self):
+        return self.inner.eof_received()
+
+    def pause_writing(self) -> None:
+        self.inner.pause_writing()
+
+    def resume_writing(self) -> None:
+        self.inner.resume_writing()
 
 
 class Budget:
@@ -766,8 +802,8 @@ class Relay:
         self._next_id = 1
         self.texlive = None  # TexLive, when serving TeX Live files on demand
         self.inflight = 0  # bytes of large frames being handled right now
-        self.blob_reads = asyncio.Semaphore(4)  # concurrent blob uploads being read
         self.catchup = Budget(CATCHUP_MEMORY)
+        self.held = 0  # bytes held for connections, see Metered
 
     # --- private servers -----------------------------------------------------------
     def denied(self, project: str, code: object) -> str | None:
@@ -788,10 +824,11 @@ class Relay:
             self.store.register(project, valid, self.codes.label(valid))
         return None
 
-    async def _admit(self, project: str, ws: web.WebSocketResponse) -> dict | None:
+    async def _admit(self, project: str, ws: web.WebSocketResponse, conn: Conn) -> dict | None:
         """On a private server a connection does nothing until its hello is accepted. Returns the hello."""
         try:
             raw = await asyncio.wait_for(ws.receive(), HELLO_WAIT)
+            self.settle(conn)
             msg = json.loads(raw.data) if raw.type == WSMsgType.TEXT and len(raw.data) <= FRAME_LIMITS["hello"] else None
         except (asyncio.TimeoutError, ValueError, TypeError):
             msg = None
@@ -804,6 +841,11 @@ class Relay:
             await ws.close(code=1008, message=b"private server")
             return None
         return msg
+
+    def settle(self, conn: Conn) -> None:
+        """What this connection sent has been dealt with."""
+        self.held -= conn.held
+        conn.held = 0
 
     # --- storage policy ------------------------------------------------------------
     def may_store(self, project: str, nbytes: int, code: str | None) -> str | None:
@@ -909,10 +951,12 @@ class Relay:
         await ws.prepare(request)
         conn = self.conns[ws] = Conn(self._next_id)
         self._next_id += 1
+        if request.transport:
+            request.transport.set_protocol(Metered(request.transport.get_protocol(), self, conn, request.transport))
         first = None
         if self.private:
             try:
-                first = await self._admit(project, ws)
+                first = await self._admit(project, ws, conn)
             finally:
                 if first is None:
                     self.conns.pop(ws, None)
@@ -926,6 +970,7 @@ class Relay:
             if first:
                 await self.handle(project, ws, conn, "hello", first)
             async for raw in ws:
+                self.settle(conn)
                 if raw.type != WSMsgType.TEXT:
                     continue
                 if not conn.allow(len(raw.data)):
@@ -1097,9 +1142,24 @@ class Relay:
             raise web.HTTPForbidden(text="bad signature")
         if not (len(sig) == 64 or 162 <= len(sig) <= 417):  # an owner or personal-link signature
             raise web.HTTPForbidden(text="bad signature")
-        async with self.blob_reads:  # only a few large bodies in memory at once
-            data = await request.read()
-        if len(data) > MAX_BLOB or not verify(project, f"blob:{bid}:".encode() + data, sig, self.store.revoked(project)):
+        # Read to a temporary file, so a slow or stalled upload holds up nobody else, and only
+        # one large file is in memory at a time.
+        size = 0
+        with tempfile.SpooledTemporaryFile(max_size=MiB, dir=self.store.dir) as spool:
+            try:
+                async with asyncio.timeout(UPLOAD_TIME):
+                    async for piece in request.content.iter_chunked(64 * KiB):
+                        size += len(piece)
+                        if size > MAX_BLOB:
+                            raise web.HTTPRequestEntityTooLarge(max_size=MAX_BLOB, actual_size=size)
+                        if size > MiB and self.store.free_disk() < self.limits.min_free:
+                            return web.json_response({"code": "server-full"}, status=507)
+                        spool.write(piece)
+            except TimeoutError:
+                raise web.HTTPRequestTimeout() from None
+            spool.seek(0)
+            data = spool.read()
+        if not verify(project, f"blob:{bid}:".encode() + data, sig, self.store.revoked(project)):
             raise web.HTTPForbidden(text="bad signature")
         if self.store.relay_only(project):
             raise web.HTTPConflict(text="project is relay-only: blobs are exchanged peer to peer")

@@ -124,6 +124,7 @@ ExecStart=$APP_DIR/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /v
 Restart=on-failure
 UMask=0077
 MemoryMax=768M
+LimitNOFILE=8192
 TasksMax=128
 NoNewPrivileges=true
 CapabilityBoundingSet=
@@ -164,6 +165,7 @@ limit_req_zone \$binary_remote_addr zone=texloom_list:1m rate=1r/s;
 map \$request_method \$texloom_put_key { PUT \$binary_remote_addr; default ""; }
 limit_req_zone \$texloom_put_key zone=texloom_upload:10m rate=10r/s;
 limit_conn_zone \$binary_remote_addr zone=texloom_ws:10m;
+limit_conn_zone \$binary_remote_addr zone=texloom_blob:10m;
 
 server {
     listen 80;
@@ -193,6 +195,7 @@ server {
     }
     # encrypted file blobs (images, PDFs)
     location /blob/ {
+        limit_conn texloom_blob 20;
         limit_req zone=texloom_upload burst=40;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
@@ -315,6 +318,11 @@ if "zone=texloom_list:" not in site:
     zone = "limit_req_zone $binary_remote_addr zone=texloom_list:1m rate=1r/s;\n"
     code_zone = site.index("limit_req_zone $binary_remote_addr zone=texloom_code:")
     site = site[:code_zone] + zone + site[code_zone:]
+    open(path, "w").write(site)
+if "zone=texloom_blob:" not in site:
+    at = site.index("limit_conn_zone $binary_remote_addr zone=texloom_ws:")
+    site = site[:at] + "limit_conn_zone $binary_remote_addr zone=texloom_blob:10m;\n" + site[at:]
+    site = site.replace("    location /blob/ {\n", "    location /blob/ {\n        limit_conn texloom_blob 20;\n", 1)
     open(path, "w").write(site)
 anchor = "    location /api/ {"
 missing = "".join(b for k, b in blocks.items() if k not in site)

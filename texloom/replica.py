@@ -393,7 +393,7 @@ class Replica:
         self._warned.add(code)
         log.warning({
             "needs-code": "NOT SAVED ON SERVER: this server needs a creation code to store new projects. "
-                          "Add \"create_code\" to .texloom/config.json (or set TEXLOOM_CODE) and restart. "
+                          "Add \"create_code\" to .texloom/config.json and restart. "
                           "Changes still reach collaborators who are online.",
             "code-expired": "NOT SAVED ON SERVER: this project's creation code has expired; renewing it restores storage.",
             "quota-full": "NOT SAVED ON SERVER: the storage allowance of this project's creation code is used up.",
@@ -494,7 +494,7 @@ class Replica:
                     log.warning("NOT SYNCING: this server is private, and this project's creation code has expired or been removed."
                                 if self.denied == "code-expired" else
                                 "NOT SYNCING: this server is private, and this project needs a creation code. "
-                                "Add \"create_code\" to .texloom/config.json (or set TEXLOOM_CODE) and restart.")
+                                "Add \"create_code\" to .texloom/config.json and restart.")
             elif m.get("code") in ("needs-code", "quota-full", "project-full", "server-full"):
                 self._storage_warning(m["code"])  # kept in the outbox; retried on reconnect
             else:
