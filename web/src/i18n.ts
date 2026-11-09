@@ -5,7 +5,7 @@
 //
 // The language is fixed for the page's life: chosen in Settings, else the browser's.
 
-export type Lang = 'en' | 'fr'
+export type Lang = 'en' | 'de' | 'es' | 'fr' | 'pt' | 'zh'
 /** A plain text, or a count's forms: [one, other] for languages with two (English, French,
  *  German, Spanish…), or one per plural category the language uses (Intl.PluralRules:
  *  zero, one, two, few, many, other), e.g. Polish { one, few, many, other }. */
@@ -13,7 +13,10 @@ type Entry = string | [one: string, other: string] | ({ other: string } & Partia
 export type Catalog = Record<string, Entry>
 
 const LANG_KEY = 'texloom.lang'
-export const LANGUAGES: { id: Lang; name: string }[] = [{ id: 'en', name: 'English' }, { id: 'fr', name: 'Français' }]
+export const LANGUAGES: { id: Lang; name: string }[] = [
+  { id: 'en', name: 'English' }, { id: 'de', name: 'Deutsch' }, { id: 'es', name: 'Español' }, { id: 'fr', name: 'Français' },
+  { id: 'pt', name: 'Português (Brasil)' }, { id: 'zh', name: '简体中文' },
+]
 
 /** The chosen language ('auto': the browser's). */
 export function langPref(): Lang | 'auto' {

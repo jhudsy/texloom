@@ -1,0 +1,25 @@
+import type { Catalog } from '../../i18n'
+
+const pt: Catalog = {
+  'Find or create a tag…': 'Encontrar ou criar uma etiqueta…',
+  'No tags yet. Type a name to create one.': 'Ainda não há etiquetas. Digite um nome para criar uma.',
+  'Create “{{name}}”': 'Criar “{{name}}”',
+  'Tags for “{{name}}”': 'Etiquetas de “{{name}}”',
+  'Only you see your tags. They aren’t shared with collaborators.': 'Só você vê suas etiquetas. Elas não são compartilhadas com os colaboradores.',
+  'Manage tags…': 'Gerenciar etiquetas…',
+  'Close': 'Fechar',
+  'New tag': 'Nova etiqueta',
+  'A tag called “{{name}}” already exists. Merge the two?': 'Já existe uma etiqueta chamada “{{name}}”. Juntar as duas?',
+  'Name of the tag “{{name}}”': 'Nome da etiqueta “{{name}}”',
+  'Delete the tag “{{name}}”': 'Excluir a etiqueta “{{name}}”',
+  'Delete': 'Excluir',
+  'No tags yet.': 'Ainda não há etiquetas.',
+  'Manage tags': 'Gerenciar etiquetas',
+  'Rename a tag by editing its name. The change applies to every project that has it.': 'Para renomear uma etiqueta, edite o nome dela. A alteração vale para todos os projetos que a têm.',
+  'Add': 'Adicionar',
+  'Delete the tag “{{name}}”? It will be taken off {{n}} projects. The projects themselves aren’t changed.': ['Excluir a etiqueta “{{name}}”? Ela será retirada de {{n}} projeto. O projeto em si não muda.', 'Excluir a etiqueta “{{name}}”? Ela será retirada de {{n}} projetos. Os projetos em si não mudam.'],
+  '{{n}} projects': ['{{n}} projeto', '{{n}} projetos'],
+  'A dash means only some of these projects have that tag.': 'Um traço significa que apenas alguns destes projetos têm essa etiqueta.',
+}
+
+export default pt

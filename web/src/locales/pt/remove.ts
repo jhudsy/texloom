@@ -1,0 +1,29 @@
+import type { Catalog } from '../../i18n'
+
+const pt: Catalog = {
+  'Removing the server’s copy…': 'Removendo a cópia do servidor…',
+  'Removing…': 'Removendo…',
+  'Couldn’t remove it: {{error}}': 'Não foi possível remover: {{error}}',
+  'Collaborators who have no copy of their own (only a link) won’t be able to open it any more.': 'Colaboradores que não têm cópia própria (só um link) não conseguirão mais abri-lo.',
+  'Remove from the server and this browser': 'Remover do servidor e deste navegador',
+  'Remove “{{name}}”': 'Remover “{{name}}”',
+  'From this browser only': 'Somente deste navegador',
+  'Deletes this browser’s copy. The server’s copy and collaborators’ copies stay: open the link again to get it back.': 'Exclui a cópia deste navegador. A cópia do servidor e as dos colaboradores permanecem: abra o link novamente para recuperá-lo.',
+  'From the server too': 'Do servidor também',
+  'Deletes the encrypted copy on the server and stops it storing this project, then removes it from this browser. Collaborators keep their copies and can still work together while online at the same time.': 'Exclui a cópia criptografada do servidor e faz com que ele pare de armazenar este projeto; depois o remove deste navegador. Os colaboradores mantêm suas cópias e ainda podem trabalhar juntos enquanto estiverem on-line ao mesmo tempo.',
+  'Only the owner can remove the server’s copy.': 'Somente o proprietário pode remover a cópia do servidor.',
+  'The server keeps no copy already.': 'O servidor já não guarda cópia.',
+  'The folder “{{folder}}” on this computer and its files stay: delete it yourself if you want.': 'A pasta “{{folder}}” neste computador e seus arquivos permanecem: exclua-a você mesmo, se quiser.',
+  'Folders kept in sync by the TeXLoom app stay too: use Leave… there to stop syncing one.': 'As pastas sincronizadas pelo aplicativo TeXLoom também permanecem: use Sair… nele para parar de sincronizar uma.',
+  'Deletes this browser’s copies. The server’s copies and collaborators’ copies stay: open a link again to get one back.': 'Exclui as cópias deste navegador. As cópias do servidor e as dos colaboradores permanecem: abra um link novamente para recuperar uma.',
+  'Folders on this computer and their files stay: delete them yourself if you want.': 'As pastas neste computador e seus arquivos permanecem: exclua-as você mesmo, se quiser.',
+  'Removing… ({{done}} of {{total}})': 'Removendo… ({{done}} de {{total}})',
+  'These couldn’t be removed: {{list}}': 'Não foi possível remover: {{list}}',
+  'Cancel': 'Cancelar',
+  'Close': 'Fechar',
+  '{{n}} of these have no copy on the server: if nobody else has one, they will be gone for good.': ['{{n}} deles não tem cópia no servidor: se ninguém mais tiver, ele será perdido para sempre.', '{{n}} deles não têm cópia no servidor: se ninguém mais tiver, eles serão perdidos para sempre.'],
+  'Remove {{n}} projects': ['Remover {{n}} projeto', 'Remover {{n}} projetos'],
+  'Also deletes the encrypted copies on the server of the {{n}} you own that are stored there. Others are only removed from this browser.': ['Também exclui a cópia criptografada no servidor do projeto seu armazenado lá. Os demais são apenas removidos deste navegador.', 'Também exclui as cópias criptografadas no servidor dos {{n}} projetos seus armazenados lá. Os demais são apenas removidos deste navegador.'],
+}
+
+export default pt

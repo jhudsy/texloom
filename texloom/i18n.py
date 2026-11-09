@@ -45,7 +45,7 @@ def _polish(n: int) -> str:
 
 PLURAL_RULES: dict[str, Callable[[int], str]] = {
     "fr": lambda n: "one" if n in (0, 1) else "other",
-    "pt_BR": lambda n: "one" if n in (0, 1) else "other",
+    "pt": lambda n: "one" if n in (0, 1) else "other",
     "pl": _polish,
     "ru": _slavic_east, "uk": _slavic_east, "be": _slavic_east,
     "cs": lambda n: "one" if n == 1 else "few" if 2 <= n <= 4 else "other",

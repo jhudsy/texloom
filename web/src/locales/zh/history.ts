@@ -1,0 +1,37 @@
+import type { Catalog } from '../../i18n'
+
+const zh: Catalog = {
+  'changed': '已更改',
+  'deleted since': '此后已删除',
+  'added since': '此后已添加',
+  'changed (file)': '已更改（文件）',
+  'changed type': '类型已更改',
+  'Show who wrote each line': '显示每行的作者',
+  'Which versions': '显示哪些版本',
+  'All versions': '所有版本',
+  'Named only': '仅已命名版本',
+  'Name this version (e.g. “Submitted to journal”):': '为此版本命名（例如“已投稿”）：',
+  'Save version…': '保存版本…',
+  'Who wrote this': '作者',
+  'No named versions yet.': '还没有已命名的版本。',
+  'No versions yet. Versions are saved automatically a couple of minutes after you stop editing; use “Save version…” to name one.': '还没有版本。停止编辑几分钟后会自动保存版本；使用“保存版本…”可为版本命名。',
+  'Auto-saved': '自动保存',
+  'This version can’t be reconstructed ({{error}}). It predates full history.': '无法重建此版本（{{error}}）。它早于完整历史记录。',
+  'Give this version a name (named versions are kept for good)': '为此版本命名（已命名的版本会永久保留）',
+  'Rename…': '重命名…',
+  'Name…': '命名…',
+  'Restore all files…': '恢复所有文件…',
+  'Changed since this version (click a file to compare):': '自此版本以来的更改（点击文件进行比较）：',
+  'Nothing has changed since this version.': '自此版本以来没有更改。',
+  'Rename this version (leave empty to remove the name):': '重命名此版本（留空可移除名称）：',
+  '← Files': '← 文件',
+  'Restore this file': '恢复此文件',
+  'Binary file: compare by opening it.': '二进制文件：请打开后比较。',
+  'Red: in the version from {{when}} · Green: now': '红色：{{when}} 的版本 · 绿色：当前',
+  'Restore {{path}} to this version? The current text is replaced (and stays in history).': '将 {{path}} 恢复到此版本？当前文本将被替换（并保留在历史记录中）。',
+  'Restore every file to this version? Files added since are removed. Everything stays in history.': '将所有文件恢复到此版本？此后添加的文件将被移除。所有内容都保留在历史记录中。',
+  'Restored version from {{when}}': '已恢复 {{when}} 的版本',
+  '… {{n}} unchanged lines': { other: '… {{n}} 行未更改' },
+}
+
+export default zh

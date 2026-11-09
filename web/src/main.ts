@@ -613,7 +613,7 @@ async function openProject(keys: Keys) {
   const syncBtn = h('button', { class: 'wide-only', onclick: syncNow }, t('Sync now'))
   const zipBtn = h('button', { class: 'wide-only', title: t('Download all files as a .zip'), onclick: () => downloadZip() }, `⤓ ${t('Source')}`)
   const copyProject = () => copyDialog({ name: title.value, by: prefs.name, server, replica: r })
-  const copyBtn = h('button', { class: 'wide-only', title: t('Start a new project from this one’s files'), onclick: copyProject }, `⧉ ${t('Make a copy')}`)
+  const copyBtn = h('button', { class: 'wide-only', title: t('Start a new project from this one’s files'), 'aria-label': t('Make a copy'), onclick: copyProject }, '⧉ ', h('span', { class: 'lbl' }, t('Make a copy')))
   const tagsLabel = () => { const n = tags.of(keys.project).length; return n ? t('Tags ({{n}})', { n }) : t('Tags') }
   const showTags = () => {
     tagsBtn.textContent = tagsLabel()

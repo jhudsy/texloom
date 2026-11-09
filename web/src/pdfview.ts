@@ -8,6 +8,7 @@ import { openContextMenu, type MenuItem } from './contextmenu'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 export { pdfjs }
+const openPdf = (data: Uint8Array) => pdfjs.getDocument({ data: data.slice(), cMapUrl: new URL('/cmaps/', location.href).href, cMapPacked: true })
 
 const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3] // 1 fits the page to the pane
 const MIN_ZOOM = ZOOM_STEPS[0], MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1]
@@ -127,7 +128,7 @@ export class PdfView {
     this.printBtn.disabled = true
     const label = this.printBtn.textContent
     this.printDone = () => { this.printBtn.disabled = false; this.printBtn.textContent = label }
-    const task = pdfjs.getDocument({ data: this.last.slice() })
+    const task = openPdf(this.last)
     const sheets = h('div', { class: 'print-sheets' })
     const urls: string[] = []
     let size = ''
@@ -255,7 +256,7 @@ export class PdfView {
   async show(data: Uint8Array) {
     this.last = data
     const gen = ++this.gen
-    const task = pdfjs.getDocument({ data: data.slice() })
+    const task = openPdf(data)
     const doc = await task.promise
     try {
       if (gen !== this.gen) return

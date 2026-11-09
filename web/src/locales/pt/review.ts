@@ -1,0 +1,36 @@
+import type { Catalog } from '../../i18n'
+
+const pt: Catalog = {
+  'The text this suggestion refers to no longer exists.': 'O texto a que esta sugestão se refere não existe mais.',
+  'The text has changed since this was suggested.\n\nNow: “{{now}}”\nSuggested replacement: “{{suggested}}”\n\nApply anyway?': 'O texto mudou desde esta sugestão.\n\nAgora: “{{now}}”\nSubstituição sugerida: “{{suggested}}”\n\nAplicar mesmo assim?',
+  'Suggested replacement': 'Substituição sugerida',
+  '{{name}} suggests a change': '{{name}} sugere uma alteração',
+  'Show resolved': 'Mostrar resolvidos',
+  'Comment on the selected text (⌘⌥M / Ctrl+Alt+M)': 'Comentar o texto selecionado (⌘⌥M / Ctrl+Alt+M)',
+  '💬 Comment': '💬 Comentar',
+  'Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)': 'Sugerir uma substituição para o texto selecionado (⌘⌥E / Ctrl+Alt+E)',
+  '✎ Suggest': '✎ Sugerir',
+  'Open a text file and select some text first.': 'Abra primeiro um arquivo de texto e selecione um trecho.',
+  'Select the text you want to comment on.': 'Selecione o texto que você quer comentar.',
+  'Comment:': 'Comentário:',
+  'Replace “{{text}}” with:': 'Substituir “{{text}}” por:',
+  'Reply…': 'Responder…',
+  'Reply': 'Responder',
+  'Show in the editor': 'Mostrar no editor',
+  'The text it referred to was deleted': 'O texto a que se referia foi excluído',
+  '(insert here)': '(inserir aqui)',
+  '(delete)': '(excluir)',
+  'Suggestion accepted': 'Sugestão aceita',
+  'Suggestion rejected': 'Sugestão rejeitada',
+  'Resolved': 'Resolvido',
+  'Reopen': 'Reabrir',
+  'Accept': 'Aceitar',
+  'Reject': 'Rejeitar',
+  'Resolve': 'Resolver',
+  'Delete': 'Excluir',
+  'Delete this for everyone?': 'Excluir isto para todos?',
+  'No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.': 'Nenhum comentário ou sugestão em aberto. Selecione texto no editor e use 💬 Comentar ou ✎ Sugerir.',
+  'No open comments or suggestions.': 'Nenhum comentário ou sugestão em aberto.',
+}
+
+export default pt

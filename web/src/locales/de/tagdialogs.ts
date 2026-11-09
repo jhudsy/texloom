@@ -1,0 +1,25 @@
+import type { Catalog } from '../../i18n'
+
+const de: Catalog = {
+  'Find or create a tag…': 'Schlagwort suchen oder erstellen …',
+  'No tags yet. Type a name to create one.': 'Noch keine Schlagwörter. Geben Sie einen Namen ein, um eines zu erstellen.',
+  'Create “{{name}}”': '„{{name}}“ erstellen',
+  'Tags for “{{name}}”': 'Schlagwörter für „{{name}}“',
+  'Only you see your tags. They aren’t shared with collaborators.': 'Nur Sie sehen Ihre Schlagwörter. Sie werden nicht mit Mitwirkenden geteilt.',
+  'Manage tags…': 'Schlagwörter verwalten …',
+  'Close': 'Schließen',
+  'New tag': 'Neues Schlagwort',
+  'A tag called “{{name}}” already exists. Merge the two?': 'Ein Schlagwort namens „{{name}}“ existiert bereits. Beide zusammenführen?',
+  'Name of the tag “{{name}}”': 'Name des Schlagworts „{{name}}“',
+  'Delete the tag “{{name}}”': 'Schlagwort „{{name}}“ löschen',
+  'Delete': 'Löschen',
+  'No tags yet.': 'Noch keine Schlagwörter.',
+  'Manage tags': 'Schlagwörter verwalten',
+  'Rename a tag by editing its name. The change applies to every project that has it.': 'Benennen Sie ein Schlagwort um, indem Sie seinen Namen bearbeiten. Die Änderung gilt für alle Projekte, die es haben.',
+  'Add': 'Hinzufügen',
+  'Delete the tag “{{name}}”? It will be taken off {{n}} projects. The projects themselves aren’t changed.': ['Schlagwort „{{name}}“ löschen? Es wird von {{n}} Projekt entfernt. Das Projekt selbst bleibt unverändert.', 'Schlagwort „{{name}}“ löschen? Es wird von {{n}} Projekten entfernt. Die Projekte selbst bleiben unverändert.'],
+  '{{n}} projects': ['{{n}} Projekt', '{{n}} Projekte'],
+  'A dash means only some of these projects have that tag.': 'Ein Strich bedeutet, dass nur einige dieser Projekte dieses Schlagwort haben.',
+}
+
+export default de

@@ -26,7 +26,7 @@ no copy at all. No accounts: you share a link. (The command-line tools are calle
   labels; a preview of the equation under the cursor; a checker for common mistakes, with
   one-click fixes; spell check that skips LaTeX; search and replace across files; an outline with
   word counts; paste or drop images; add references from a DOI or arXiv id.
-- In English or French: the browser's language is used, or choose one in Settings (the
+- In English, French, German, Spanish, Brazilian Portuguese or Simplified Chinese: the browser's language is used, or choose one in Settings (the
   desktop app follows the system language, or the language menu in its toolbar).
 - Start from templates, or import a `.zip` (e.g. from Overleaf) or an arXiv paper's source.
 - Read-only links, and personal edit links that can be revoked one by one.
@@ -609,7 +609,8 @@ browser to the provider.
 
 **Project settings** are shared with everyone who has an edit link:
 - main file
-- engine (pdfLaTeX, XeLaTeX or LuaLaTeX)
+- engine (pdfLaTeX, XeLaTeX or LuaLaTeX; if none is chosen, documents using ctex, xeCJK or fontspec
+  compile with XeLaTeX in the browser, so Chinese works without changing anything)
 - bibliography tool (detect automatically, BibTeX, Biber or none)
 - server storage:
   - **Keep an encrypted copy** (default)
@@ -716,7 +717,10 @@ English is the key, and text without a translation shows in English. Each langua
 language's forms: `['{{n}} fichier', '{{n}} fichiers']`, or one per plural category for
 languages with more (Polish: `{ one, few, many, other }`).
 
-To add a language (`de`, say):
+The German, Spanish, Brazilian Portuguese and Simplified Chinese translations were drafted by AI and
+haven't yet been read by native speakers; corrections are very welcome.
+
+To add a language (`it`, say):
 1. Web: copy `web/src/locales/fr/` to `web/src/locales/de/` and translate the values;
    add `'de'` to `Lang` and `LANGUAGES` in `web/src/i18n.ts` so it can be chosen.
 2. Desktop app: copy `texloom/locales/fr.py` to `de.py`, translate it, and add it to

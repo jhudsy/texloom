@@ -43,6 +43,7 @@ header { display: flex; align-items: center; gap: 10px; padding: 6px 12px; borde
 .logo .e { position: relative; top: .22em; margin: 0 -.08em 0 -.13em; text-transform: none; }
 .title { border-color: transparent; background: transparent; font-weight: 600; width: 22ch; flex-shrink: 1; min-width: 8ch; }
 header button { white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 1150px) { header .lbl { display: none; } } /* longer languages need the room */
 .title:hover:not([readonly]), .title:focus { border-color: var(--line); background: var(--bg); }
 .spacer { flex: 1; }
 .badge { font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--warn); color: #fff; }

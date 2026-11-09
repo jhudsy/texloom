@@ -1,0 +1,36 @@
+import type { Catalog } from '../../i18n'
+
+const de: Catalog = {
+  'The text this suggestion refers to no longer exists.': 'Der Text, auf den sich dieser Vorschlag bezieht, existiert nicht mehr.',
+  'The text has changed since this was suggested.\n\nNow: “{{now}}”\nSuggested replacement: “{{suggested}}”\n\nApply anyway?': 'Der Text hat sich seit diesem Vorschlag geändert.\n\nJetzt: „{{now}}“\nVorgeschlagener Ersatz: „{{suggested}}“\n\nTrotzdem anwenden?',
+  'Suggested replacement': 'Vorgeschlagener Ersatz',
+  '{{name}} suggests a change': '{{name}} schlägt eine Änderung vor',
+  'Show resolved': 'Erledigte anzeigen',
+  'Comment on the selected text (⌘⌥M / Ctrl+Alt+M)': 'Ausgewählten Text kommentieren (⌘⌥M / Strg+Alt+M)',
+  '💬 Comment': '💬 Kommentieren',
+  'Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)': 'Ersatz für den ausgewählten Text vorschlagen (⌘⌥E / Strg+Alt+E)',
+  '✎ Suggest': '✎ Vorschlagen',
+  'Open a text file and select some text first.': 'Öffnen Sie zuerst eine Textdatei und wählen Sie Text aus.',
+  'Select the text you want to comment on.': 'Wählen Sie den Text aus, den Sie kommentieren möchten.',
+  'Comment:': 'Kommentar:',
+  'Replace “{{text}}” with:': '„{{text}}“ ersetzen durch:',
+  'Reply…': 'Antworten …',
+  'Reply': 'Antworten',
+  'Show in the editor': 'Im Editor anzeigen',
+  'The text it referred to was deleted': 'Der Text, auf den es sich bezog, wurde gelöscht',
+  '(insert here)': '(hier einfügen)',
+  '(delete)': '(löschen)',
+  'Suggestion accepted': 'Vorschlag angenommen',
+  'Suggestion rejected': 'Vorschlag abgelehnt',
+  'Resolved': 'Erledigt',
+  'Reopen': 'Wieder öffnen',
+  'Accept': 'Annehmen',
+  'Reject': 'Ablehnen',
+  'Resolve': 'Als erledigt markieren',
+  'Delete': 'Löschen',
+  'Delete this for everyone?': 'Für alle löschen?',
+  'No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.': 'Keine offenen Kommentare oder Vorschläge. Wählen Sie Text im Editor aus und dann 💬 Kommentieren oder ✎ Vorschlagen.',
+  'No open comments or suggestions.': 'Keine offenen Kommentare oder Vorschläge.',
+}
+
+export default de

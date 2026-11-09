@@ -1,0 +1,34 @@
+import type { Catalog } from '../../i18n'
+
+const es: Catalog = {
+  'New file in the selected folder': 'Archivo nuevo en la carpeta seleccionada',
+  '+ File': '+ Archivo',
+  'New folder in the selected folder': 'Carpeta nueva en la carpeta seleccionada',
+  '+ Folder': '+ Carpeta',
+  'Upload files into the selected folder': 'Subir archivos a la carpeta seleccionada',
+  'Upload': 'Subir',
+  'Drag to move · drop files from your computer onto a folder to upload · ★ = main file': 'Arrastra para mover · suelta archivos de tu ordenador sobre una carpeta para subirlos · ★ = archivo principal',
+  'Adding to: {{folder}}/': 'Añadiendo a: {{folder}}/',
+  '{{action}}: {{path}}': '{{action}}: {{path}}',
+  'Preview': 'Vista previa',
+  'Insert {{latex}}': 'Insertar {{latex}}',
+  'Download': 'Descargar',
+  'Open': 'Abrir',
+  'New file here': 'Archivo nuevo aquí',
+  'Set as main file': 'Establecer como archivo principal',
+  'Rename or move': 'Renombrar o mover',
+  'Delete': 'Eliminar',
+  '{{path}} already exists.': '{{path}} ya existe.',
+  'That isn’t a valid path. Use letters, numbers, - _ . and / between folders.': 'Esa ruta no es válida. Usa letras, números, - _ . y / entre carpetas.',
+  'New file name (you can include folders, e.g. sections/intro.tex)': 'Nombre del archivo nuevo (puedes incluir carpetas, p. ej., sections/intro.tex)',
+  'New folder name': 'Nombre de la carpeta nueva',
+  'Rename or move folder to': 'Renombrar o mover la carpeta a',
+  'Rename or move file to': 'Renombrar o mover el archivo a',
+  'A folder can’t be moved into itself.': 'Una carpeta no se puede mover dentro de sí misma.',
+  'Delete {{path}}? (It stays in history.)': '¿Eliminar {{path}}? (Se conserva en el historial).',
+  'Delete the folder {{path}} and the {{n}} files in it? (It stays in history.)': ['¿Eliminar la carpeta {{path}} y el archivo que contiene? (Se conserva en el historial).', '¿Eliminar la carpeta {{path}} y los {{n}} archivos que contiene? (Se conserva en el historial).'],
+  'Delete the folder {{path}}? (It stays in history.)': '¿Eliminar la carpeta {{path}}? (Se conserva en el historial).',
+  'Skipped {{name}}: unsupported name.': 'Se omitió {{name}}: nombre no admitido.',
+}
+
+export default es

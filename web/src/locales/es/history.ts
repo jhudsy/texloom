@@ -1,0 +1,37 @@
+import type { Catalog } from '../../i18n'
+
+const es: Catalog = {
+  'changed': 'modificado',
+  'deleted since': 'eliminado desde entonces',
+  'added since': 'añadido desde entonces',
+  'changed (file)': 'modificado (archivo)',
+  'changed type': 'tipo cambiado',
+  'Show who wrote each line': 'Mostrar quién escribió cada línea',
+  'Which versions': 'Qué versiones',
+  'All versions': 'Todas las versiones',
+  'Named only': 'Solo con nombre',
+  'Name this version (e.g. “Submitted to journal”):': 'Pon nombre a esta versión (p. ej., «Enviada a la revista»):',
+  'Save version…': 'Guardar versión…',
+  'Who wrote this': 'Quién escribió esto',
+  'No named versions yet.': 'Aún no hay versiones con nombre.',
+  'No versions yet. Versions are saved automatically a couple of minutes after you stop editing; use “Save version…” to name one.': 'Aún no hay versiones. Se guardan automáticamente un par de minutos después de que dejes de editar; usa «Guardar versión…» para ponerle nombre a una.',
+  'Auto-saved': 'Guardado automático',
+  'This version can’t be reconstructed ({{error}}). It predates full history.': 'Esta versión no se puede reconstruir ({{error}}). Es anterior al historial completo.',
+  'Give this version a name (named versions are kept for good)': 'Pon nombre a esta versión (las versiones con nombre se conservan para siempre)',
+  'Rename…': 'Renombrar…',
+  'Name…': 'Poner nombre…',
+  'Restore all files…': 'Restaurar todos los archivos…',
+  'Changed since this version (click a file to compare):': 'Cambios desde esta versión (haz clic en un archivo para compararlo):',
+  'Nothing has changed since this version.': 'Nada ha cambiado desde esta versión.',
+  'Rename this version (leave empty to remove the name):': 'Renombrar esta versión (déjalo vacío para quitar el nombre):',
+  '← Files': '← Archivos',
+  'Restore this file': 'Restaurar este archivo',
+  'Binary file: compare by opening it.': 'Archivo binario: ábrelo para compararlo.',
+  'Red: in the version from {{when}} · Green: now': 'Rojo: en la versión de {{when}} · Verde: ahora',
+  'Restore {{path}} to this version? The current text is replaced (and stays in history).': '¿Restaurar {{path}} a esta versión? El texto actual se sustituye (y se conserva en el historial).',
+  'Restore every file to this version? Files added since are removed. Everything stays in history.': '¿Restaurar todos los archivos a esta versión? Se quitarán los archivos añadidos después. Todo se conserva en el historial.',
+  'Restored version from {{when}}': 'Versión de {{when}} restaurada',
+  '… {{n}} unchanged lines': ['… {{n}} línea sin cambios', '… {{n}} líneas sin cambios'],
+}
+
+export default es

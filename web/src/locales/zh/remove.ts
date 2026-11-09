@@ -1,0 +1,29 @@
+import type { Catalog } from '../../i18n'
+
+const zh: Catalog = {
+  'Removing the server’s copy…': '正在移除服务器上的副本…',
+  'Removing…': '正在移除…',
+  'Couldn’t remove it: {{error}}': '无法移除：{{error}}',
+  'Collaborators who have no copy of their own (only a link) won’t be able to open it any more.': '没有自己副本（只有链接）的协作者将无法再打开它。',
+  'Remove from the server and this browser': '从服务器和此浏览器中移除',
+  'Remove “{{name}}”': '移除“{{name}}”',
+  'From this browser only': '仅从此浏览器中移除',
+  'Deletes this browser’s copy. The server’s copy and collaborators’ copies stay: open the link again to get it back.': '删除此浏览器中的副本。服务器和协作者的副本仍保留：再次打开链接即可恢复。',
+  'From the server too': '同时从服务器移除',
+  'Deletes the encrypted copy on the server and stops it storing this project, then removes it from this browser. Collaborators keep their copies and can still work together while online at the same time.': '删除服务器上的加密副本并使其停止保存此项目，然后从此浏览器中移除。协作者保留各自的副本，同时在线时仍可协作。',
+  'Only the owner can remove the server’s copy.': '只有所有者才能移除服务器上的副本。',
+  'The server keeps no copy already.': '服务器已不保留副本。',
+  'The folder “{{folder}}” on this computer and its files stay: delete it yourself if you want.': '这台电脑上的文件夹“{{folder}}”及其文件仍保留：如有需要，请自行删除。',
+  'Folders kept in sync by the TeXLoom app stay too: use Leave… there to stop syncing one.': '由 TeXLoom 应用同步的文件夹也会保留：要停止同步，请在应用中使用“退出…”。',
+  'Deletes this browser’s copies. The server’s copies and collaborators’ copies stay: open a link again to get one back.': '删除此浏览器中的副本。服务器和协作者的副本仍保留：再次打开链接即可恢复。',
+  'Folders on this computer and their files stay: delete them yourself if you want.': '这台电脑上的文件夹及其文件仍保留：如有需要，请自行删除。',
+  'Removing… ({{done}} of {{total}})': '正在移除…（{{done}}/{{total}}）',
+  'These couldn’t be removed: {{list}}': '以下项目无法移除：{{list}}',
+  'Cancel': '取消',
+  'Close': '关闭',
+  '{{n}} of these have no copy on the server: if nobody else has one, they will be gone for good.': { other: '其中 {{n}} 个在服务器上没有副本：如果其他人也没有，它们将永久丢失。' },
+  'Remove {{n}} projects': { other: '移除 {{n}} 个项目' },
+  'Also deletes the encrypted copies on the server of the {{n}} you own that are stored there. Others are only removed from this browser.': { other: '同时删除服务器上由你拥有的 {{n}} 个项目的加密副本。其他项目仅从此浏览器中移除。' },
+}
+
+export default zh

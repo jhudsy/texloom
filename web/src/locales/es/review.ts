@@ -1,0 +1,36 @@
+import type { Catalog } from '../../i18n'
+
+const es: Catalog = {
+  'The text this suggestion refers to no longer exists.': 'El texto al que se refiere esta sugerencia ya no existe.',
+  'The text has changed since this was suggested.\n\nNow: “{{now}}”\nSuggested replacement: “{{suggested}}”\n\nApply anyway?': 'El texto ha cambiado desde que se hizo esta sugerencia.\n\nAhora: «{{now}}»\nSustitución sugerida: «{{suggested}}»\n\n¿Aplicar de todos modos?',
+  'Suggested replacement': 'Sustitución sugerida',
+  '{{name}} suggests a change': '{{name}} sugiere un cambio',
+  'Show resolved': 'Mostrar resueltos',
+  'Comment on the selected text (⌘⌥M / Ctrl+Alt+M)': 'Comentar el texto seleccionado (⌘⌥M / Ctrl+Alt+M)',
+  '💬 Comment': '💬 Comentar',
+  'Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)': 'Sugerir una sustitución para el texto seleccionado (⌘⌥E / Ctrl+Alt+E)',
+  '✎ Suggest': '✎ Sugerir',
+  'Open a text file and select some text first.': 'Abre primero un archivo de texto y selecciona algo de texto.',
+  'Select the text you want to comment on.': 'Selecciona el texto que quieras comentar.',
+  'Comment:': 'Comentario:',
+  'Replace “{{text}}” with:': 'Sustituir «{{text}}» por:',
+  'Reply…': 'Responder…',
+  'Reply': 'Responder',
+  'Show in the editor': 'Mostrar en el editor',
+  'The text it referred to was deleted': 'El texto al que se refería se ha eliminado',
+  '(insert here)': '(insertar aquí)',
+  '(delete)': '(eliminar)',
+  'Suggestion accepted': 'Sugerencia aceptada',
+  'Suggestion rejected': 'Sugerencia rechazada',
+  'Resolved': 'Resuelto',
+  'Reopen': 'Reabrir',
+  'Accept': 'Aceptar',
+  'Reject': 'Rechazar',
+  'Resolve': 'Resolver',
+  'Delete': 'Eliminar',
+  'Delete this for everyone?': '¿Eliminar esto para todos?',
+  'No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.': 'No hay comentarios ni sugerencias abiertos. Selecciona texto en el editor y luego 💬 Comentar o ✎ Sugerir.',
+  'No open comments or suggestions.': 'No hay comentarios ni sugerencias abiertos.',
+}
+
+export default es

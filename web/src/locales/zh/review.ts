@@ -1,0 +1,36 @@
+import type { Catalog } from '../../i18n'
+
+const zh: Catalog = {
+  'The text this suggestion refers to no longer exists.': '此建议所指的文本已不存在。',
+  'The text has changed since this was suggested.\n\nNow: “{{now}}”\nSuggested replacement: “{{suggested}}”\n\nApply anyway?': '提出此建议后文本已更改。\n\n当前：“{{now}}”\n建议替换为：“{{suggested}}”\n\n仍要应用吗？',
+  'Suggested replacement': '建议替换为',
+  '{{name}} suggests a change': '{{name}} 建议修改',
+  'Show resolved': '显示已解决',
+  'Comment on the selected text (⌘⌥M / Ctrl+Alt+M)': '评论所选文本（⌘⌥M / Ctrl+Alt+M）',
+  '💬 Comment': '💬 评论',
+  'Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)': '为所选文本建议替换内容（⌘⌥E / Ctrl+Alt+E）',
+  '✎ Suggest': '✎ 建议',
+  'Open a text file and select some text first.': '请先打开文本文件并选择一些文本。',
+  'Select the text you want to comment on.': '请选择要评论的文本。',
+  'Comment:': '评论：',
+  'Replace “{{text}}” with:': '将“{{text}}”替换为：',
+  'Reply…': '回复…',
+  'Reply': '回复',
+  'Show in the editor': '在编辑器中显示',
+  'The text it referred to was deleted': '其所指的文本已被删除',
+  '(insert here)': '（在此插入）',
+  '(delete)': '（删除）',
+  'Suggestion accepted': '建议已接受',
+  'Suggestion rejected': '建议已拒绝',
+  'Resolved': '已解决',
+  'Reopen': '重新打开',
+  'Accept': '接受',
+  'Reject': '拒绝',
+  'Resolve': '解决',
+  'Delete': '删除',
+  'Delete this for everyone?': '为所有人删除此内容？',
+  'No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.': '没有未解决的评论或建议。在编辑器中选择文本，然后点击 💬 评论或 ✎ 建议。',
+  'No open comments or suggestions.': '没有未解决的评论或建议。',
+}
+
+export default zh

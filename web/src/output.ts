@@ -5,7 +5,7 @@ import type { Device } from './settings'
 import { h, saveFile, verticalResizer } from './dom'
 import { PdfView } from './pdfview'
 import { pdfWindowLink } from './pdfwindow'
-import { compileInBrowser, browserCompileAvailable, type Progress, CompileStopped, stopBrowserCompile } from './compile'
+import { compileInBrowser, defaultEngine, browserCompileAvailable, type Progress, CompileStopped, stopBrowserCompile } from './compile'
 import { allFiles, fileBase, mainFile } from './projectfiles'
 import { parseLog, type Problem } from './latexlog'
 import { SyncTex } from './synctex'
@@ -190,8 +190,9 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     showProgress({ phase: 'download', percent: 0 })
     try {
       const t0 = performance.now()
-      const res = await compileInBrowser(await r.snapshotFiles(), main,
-        { engine: r.meta.get('engine') || 'pdflatex', bib: r.meta.get('bib') || 'auto' }, (p) => showProgress(p))
+      const files = await r.snapshotFiles()
+      const res = await compileInBrowser(files, main,
+        { engine: r.meta.get('engine') || defaultEngine(files), bib: r.meta.get('bib') || 'auto' }, (p) => showProgress(p))
       const secs = ((performance.now() - t0) / 1000).toFixed(1)
       show(res.pdf, res.log, `${res.pdf ? '✓' : t('✗ errors')} · ${t('in browser')} · ${t('{{secs}}s', { secs })}`, !!res.pdf, res.synctex)
       if (writable && res.pdf) { // publish so collaborators see it without compiling

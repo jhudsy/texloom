@@ -29,9 +29,24 @@ function serviceWorker(): Plugin {
   }
 }
 
+/** Serve PDF.js's character maps at /cmaps/. Without them it can't draw CID fonts that name an
+ *  Adobe character collection, which is what XeLaTeX writes for Chinese, Japanese and Korean. */
+function pdfjsCmaps(): Plugin {
+  const dir = new URL('./node_modules/pdfjs-dist/cmaps/', import.meta.url)
+  return {
+    name: 'texloom-pdfjs-cmaps',
+    generateBundle() {
+      for (const fileName of readdirSync(dir)) this.emitFile({ type: 'asset', fileName: `cmaps/${fileName}`, source: readFileSync(new URL(fileName, dir)) })
+    },
+    configureServer(server) {
+      server.middlewares.use('/cmaps', (req, res) => { res.end(readFileSync(new URL(`.${req.url}`, dir))) })
+    },
+  }
+}
+
 // In development, the Python relay runs on :8787 and Vite proxies to it.
 export default defineConfig({
-  plugins: [serviceWorker()],
+  plugins: [pdfjsCmaps(), serviceWorker()],
   server: {
     port: 5173,
     proxy: {

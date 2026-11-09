@@ -1,0 +1,38 @@
+import type { Catalog } from '../../i18n'
+
+const pt: Catalog = {
+  'Safari may also delete a site’s data after about 7 days without a visit.': 'O Safari também pode excluir os dados de um site após cerca de 7 dias sem visitas.',
+  'e.g. 3PYW-WTHZ-PRCF': 'ex.: 3PYW-WTHZ-PRCF',
+  'Creation code': 'Código de criação',
+  'Code accepted. Its storage allowance is {{total}} MB, of which {{used}} MB is used.': 'Código aceito. Seu espaço de armazenamento é de {{total}} MB, dos quais {{used}} MB estão em uso.',
+  'That code isn’t valid on this server.': 'Esse código não é válido neste servidor.',
+  'Couldn’t reach the server; try again when online.': 'Não foi possível acessar o servidor; tente novamente quando estiver on-line.',
+  'This server stores new projects only for people with a creation code from its owner. You only need it once per browser; opening and editing projects shared with you never needs one.': 'Este servidor só armazena novos projetos de quem tem um código de criação fornecido pelo proprietário. Você só precisa dele uma vez por navegador; abrir e editar projetos compartilhados com você nunca exige código.',
+  'Code': 'Código',
+  'Cancel': 'Cancelar',
+  'Save code': 'Salvar código',
+  'New project': 'Novo projeto',
+  'This server keeps an encrypted copy of new projects only for people with a creation code.': 'Este servidor só mantém uma cópia criptografada de novos projetos para quem tem um código de criação.',
+  'I have a code': 'Tenho um código',
+  'The server keeps an encrypted copy, so collaborators get your changes even when you’re offline, and the link always restores the project.': 'O servidor mantém uma cópia criptografada, então os colaboradores recebem suas alterações mesmo com você off-line, e o link sempre restaura o projeto.',
+  'Continue without a server copy': 'Continuar sem cópia no servidor',
+  'Changes reach collaborators only while you’re both online. The project lives in your browser (and theirs): clearing browser data deletes your copy.': 'As alterações só chegam aos colaboradores enquanto vocês estiverem on-line ao mesmo tempo. O projeto fica no seu navegador (e nos deles): limpar os dados do navegador exclui sua cópia.',
+  'Not saved on the server: storing new projects here needs a creation code.': 'Não salvo no servidor: armazenar novos projetos aqui requer um código de criação.',
+  'Not saved on the server: the creation code this project was created with has expired. Renewing it restores storage.': 'Não salvo no servidor: o código de criação com que este projeto foi criado expirou. Renová-lo restaura o armazenamento.',
+  'Not saved on the server: the storage allowance of the creation code this project was created with is used up.': 'Não salvo no servidor: o espaço do código de criação com que este projeto foi criado se esgotou.',
+  'Not saved on the server: this project has reached the server’s {{mb}} MB limit.': 'Não salvo no servidor: este projeto atingiu o limite de {{mb}} MB do servidor.',
+  'Not saved on the server: the server is out of space. Changes are kept here and retried every few minutes.': 'Não salvo no servidor: o servidor está sem espaço. As alterações ficam aqui e são reenviadas a cada poucos minutos.',
+  'This project isn’t stored on the server (Settings → Server storage).': 'Este projeto não está armazenado no servidor (Configurações → Armazenamento no servidor).',
+  'Its copies are in this browser and with collaborators: clearing this browser’s data deletes yours.': 'As cópias dele estão neste navegador e com os colaboradores: limpar os dados deste navegador exclui a sua.',
+  'Keep a folder copy to be safe.': 'Mantenha uma cópia em uma pasta por segurança.',
+  'Enter code': 'Inserir código',
+  'Folder copy…': 'Cópia em pasta…',
+  'Hide until next time': 'Ocultar até a próxima vez',
+  'Hide this warning': 'Ocultar este aviso',
+  'This server is private: new projects need a creation code from its owner. You only need it once per browser; opening projects shared with you never needs one.': 'Este servidor é privado: novos projetos exigem um código de criação fornecido pelo proprietário. Você só precisa dele uma vez por navegador; abrir projetos compartilhados com você nunca exige código.',
+  'Not syncing: this server is private, and the creation code this project was created with has expired or been removed. Renewing it restores access.': 'Sem sincronizar: este servidor é privado, e o código de criação com que este projeto foi criado expirou ou foi removido. Renová-lo restaura o acesso.',
+  'Not syncing: this server is private, and this project needs a creation code from its owner.': 'Sem sincronizar: este servidor é privado, e este projeto precisa de um código de criação fornecido pelo proprietário.',
+  'Your copy here is safe and you can keep working, but nobody else gets your changes.': 'Sua cópia aqui está segura e você pode continuar trabalhando, mas ninguém mais recebe suas alterações.',
+}
+
+export default pt

@@ -95,6 +95,13 @@ export function requestedFiles(files: Map<string, string | Uint8Array>): string[
   return [...out].filter((n) => !local.has(n))
 }
 
+/** The engine when the project hasn't chosen one. ctex, xeCJK and fontspec can't work on pdfLaTeX,
+ *  where they stop with an error that doesn't say what to do. */
+export function defaultEngine(files: Map<string, string | Uint8Array>): 'xelatex' | 'pdflatex' {
+  const needsUnicode = /^(?:ctex(?:art|rep|book|beamer)?|xeCJK|fontspec)\.(?:cls|sty)$/
+  return requestedFiles(files).some((n) => needsUnicode.test(n)) ? 'xelatex' : 'pdflatex'
+}
+
 /** The one optional bundle this project needs. */
 async function levelFor(files: Map<string, string | Uint8Array>): Promise<Level | null> {
   if (await texliveEndpoint()) return null // basic, plus single files from the server
