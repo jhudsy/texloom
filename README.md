@@ -356,8 +356,9 @@ browser stops if it finds the app or `texloom run` keeping the same folder.
 `texloom app`. It keeps all your project folders in sync from the menu bar or tray:
 - **Join project…** takes a link (from the Share dialog or an email), shows the project's
   name and your access, and puts it in a folder you choose (`~/TeXLoom/<name>` by default).
-  In the web app, Settings → *Keep a copy in a folder* → **Open in the TeXLoom app** does
-  the same in one click; the app asks before joining.
+  In the web app, **Sync to a folder…** next to a project on the start page does the same in
+  one click, as does Settings → *Keep a copy in a folder* → **Open in the TeXLoom app**. The
+  app asks before joining, and says if the project already has a folder on this computer.
 - **Share a folder…** turns an existing folder into a new project; **Add existing folder…**
   brings back one set up earlier (e.g. left, or cloned on the command line).
 - Each folder shows whether it is up to date, offline or sending changes, with its recent

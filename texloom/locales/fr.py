@@ -126,6 +126,9 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
         "outils LaTeX exécutent comme des programmes, mais ne compilez avec vos propres outils que si vous faites "
         "confiance à tous ceux qui peuvent modifier le projet.",
     "Join": "Rejoindre",
+    "Show folder": "Afficher le dossier",
+    "Add another copy": "Ajouter une autre copie",
+    "Already syncing in {d}.": "Déjà synchronisé dans {d}.",
     "Put the project in…": "Placer le projet dans…",
     "That isn't a TeXLoom project link ({e}).": "Ce n’est pas un lien de projet TeXLoom ({e}).",
     "Looking it up…": "Recherche en cours…",

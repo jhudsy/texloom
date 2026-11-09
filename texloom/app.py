@@ -433,6 +433,13 @@ class JoinDialog(QtWidgets.QDialog):
         self.what = QtWidgets.QLabel("")
         self.what.setWordWrap(True)
         lay.addWidget(self.what)
+        self.already = QtWidgets.QLabel("")
+        self.already.setWordWrap(True)
+        self.already.setTextFormat(Qt.PlainText)
+        self.already.setStyleSheet(f"color: {AMBER}")
+        self.already.hide()
+        lay.addWidget(self.already)
+        self.existing: Path | None = None
         lay.addWidget(QtWidgets.QLabel(_("Folder on this computer:")))
         frow = QtWidgets.QHBoxLayout()
         self.folder = QtWidgets.QLineEdit("")
@@ -453,9 +460,12 @@ class JoinDialog(QtWidgets.QDialog):
         self.join = self.buttons.addButton(_("Join"), QtWidgets.QDialogButtonBox.AcceptRole)
         self.join.setEnabled(False)
         self.join.clicked.connect(self.do_join)
+        self.show_existing = self.buttons.addButton(_("Show folder"), QtWidgets.QDialogButtonBox.ActionRole)
+        self.show_existing.hide()
+        self.show_existing.clicked.connect(self.reveal_existing)
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)
-        self.link.textChanged.connect(lambda: (self.join.setEnabled(False), self.what.setText("")))
+        self.link.textChanged.connect(lambda: (self.join.setEnabled(False), self.what.setText(""), self.mark_existing(None)))
         if link:
             QtCore.QTimer.singleShot(0, self.do_peek)
 
@@ -465,6 +475,20 @@ class JoinDialog(QtWidgets.QDialog):
         if d:
             name = Path(self.folder.text()).name if self.folder.text() else slug(self.info["name"] if self.info else "project")
             self.folder.setText(str(Path(d) / name))
+
+    def mark_existing(self, d: Path | None) -> None:
+        """Say if this project already has a folder here. A second copy stays possible, but isn't the default."""
+        self.existing = d
+        self.already.setText(_("Already syncing in {d}.", d=d) if d else "")
+        self.already.setVisible(d is not None)
+        self.show_existing.setVisible(d is not None)
+        self.join.setText(_("Add another copy") if d else _("Join"))
+        self.join.setDefault(d is None)
+        self.show_existing.setDefault(d is not None)
+
+    def reveal_existing(self) -> None:
+        open_path(self.existing)
+        self.accept()
 
     def do_peek(self) -> None:
         link = self.link.text().strip()
@@ -491,6 +515,7 @@ class JoinDialog(QtWidgets.QDialog):
         if not self.folder.text():
             self.folder.setText(str(default_parent() / slug(info["name"] or "project")))
         self.join.setEnabled(True)
+        self.mark_existing(folder_of(Keys.from_link(self.link.text().strip())[0].project))
 
     def do_join(self) -> None:
         d = Path(self.folder.text()).expanduser()
@@ -752,6 +777,17 @@ class ProjectListDialog(QtWidgets.QDialog):
         if item:
             self.window_.join(item.data(Qt.UserRole))
             self.refresh_list()
+
+
+def folder_of(project: str) -> Path | None:
+    """The folder on this computer that already syncs this project, if any."""
+    for d in registry.folders():
+        try:
+            if Keys.from_link(load_config(d)["link"])[0].project == project:
+                return d
+        except Exception:  # noqa: BLE001 - a folder that has gone, or isn't set up
+            continue
+    return None
 
 
 def known_server() -> str:

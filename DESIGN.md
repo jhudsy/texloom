@@ -368,7 +368,8 @@ main thread only reads `Daemon.states` and hands work (join, share, restart) to 
 - **One copy per user:** a local socket; a second launch hands over its arguments and exits.
 - **texloom://join?link=<encoded link>** opens the join dialog with the link filled in
   (registered by the macOS bundle, in HKCU on Windows, by a .desktop file on Linux). It
-  stays on the machine, and nothing is joined without confirming in the app.
+  stays on the machine, and nothing is joined without confirming in the app. A page can't tell
+  whether the app is installed, so the web app always says what to do if nothing happens.
 
 ## Project lists
 

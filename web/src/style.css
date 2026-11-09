@@ -152,6 +152,7 @@ html.narrow dialog.dlg { padding: 14px 16px; max-height: 92dvh; }
   .landing { margin-top: 4vh; }
 }
 @media (pointer: coarse) {
+  .recent .to-app { display: none; } /* the app is for computers */
   button { min-height: 40px; touch-action: manipulation; }
   input, select, textarea, .editor .cm-editor { font-size: 16px; } /* smaller text makes iOS zoom in when focused */
   .peer { min-height: 0; }
@@ -249,6 +250,7 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 .recent .icon { border: none; background: transparent; color: var(--muted); padding: 0 4px; }
 .recent .icon:hover { color: var(--fg); }
 .recent .forget:hover { color: var(--err); }
+.recent .to-app { white-space: nowrap; }
 
 /* storage warnings */
 .risk { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 6px 12px; font-size: 13px;

@@ -1,4 +1,5 @@
 // Per-device settings, the first-open setup dialog and the settings dialog.
+import { DOWNLOAD_APP, openInApp } from './openinapp'
 import type { Replica, StorageMode, SyncMode } from './replica'
 import { engineCached, clearEngineCache } from './compile'
 import { h, dialog } from './dom'
@@ -48,9 +49,8 @@ function folderHelp(r: Replica, link: string): HTMLElement {
   return h('div', { class: 'cmds' },
     h('p', { class: 'muted' }, t('A web page can’t keep a folder in sync while it’s closed. The TeXLoom app can, for all your projects, from the menu bar or tray, and starting at login if you like:')),
     h('div', { class: 'row' },
-      // Hands this link to the app on this computer (texloom:// links open it). It asks before joining.
-      h('a', { class: 'button primary', href: `texloom://join?link=${encodeURIComponent(link)}` }, t('Open in the TeXLoom app')),
-      h('a', { class: 'small', href: 'https://github.com/jhudsy/texloom/releases/latest', target: '_blank', rel: 'noopener' }, t('Download the app'))),
+      h('button', { class: 'primary', onclick: () => openInApp(link) }, t('Open in the TeXLoom app')),
+      h('a', { class: 'small', href: DOWNLOAD_APP, target: '_blank', rel: 'noopener' }, t('Download the app'))),
     h('p', { class: 'muted' }, t('Or with the texloom command-line helper:')),
     h('pre', {}, `texloom clone '${link}' ~/papers/${name}\ntexloom start      # ${t('syncs all your folders; `texloom autostart on` runs it at login')}`),
     h('p', { class: 'muted' }, t('Edit the files with anything (Claude Code, vim, VS Code); changes flow both ways. Install: see the README.')))

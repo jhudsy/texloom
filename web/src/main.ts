@@ -19,6 +19,7 @@ import { FilePreview, isPreviewable } from './preview'
 import { isTexFile } from './projectfiles'
 import { handleListHash, listDialog, takeListHash } from './listdialog'
 import { savedSecret, startListSync } from './listsync'
+import { openInApp } from './openinapp'
 import { createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
@@ -141,6 +142,7 @@ function projectList(): HTMLElement {
         h('span', { class: `tag ${r.writable ? '' : 'ro'}` }, r.writable ? t('edit') : t('read-only')),
         r.atRisk || r.storage === 'relay' ? h('span', { class: 'tag warn', title: t('The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.') }, t('not on server')) : null,
         h('span', { class: 'spacer' }),
+        h('button', { class: 'to-app small', title: t('Keep this project in a folder on this computer, using the TeXLoom app'), 'aria-label': t('Sync {{name}} to a folder…', { name: label }), onclick: () => openInApp(`${server}/#${r.fragment}`) }, t('Sync to a folder…')),
         h('button', { class: 'icon', title: t('Private label (only you see it)'), 'aria-label': t('Label {{name}}', { name: label }), onclick: () => {
           const v = prompt(t('Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.', { name: r.name || t('this project'), code: projectCode(r.project) }), r.nick ?? '')
           if (v === null) return
