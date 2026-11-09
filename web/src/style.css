@@ -314,13 +314,19 @@ dialog.dlg input.tagfind { width: 100%; box-sizing: border-box; margin-top: 8px;
 .namelist { max-height: 30vh; overflow: auto; margin: 8px 0; padding-left: 18px; overflow-wrap: anywhere; }
 .tagbar, .recent .tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .tagbar { margin-bottom: 6px; }
-.utag { font-size: 12px; line-height: 18px; padding: 0 8px; border-radius: 999px; color: var(--fg); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.utag.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.utag { font-size: 12px; line-height: 18px; padding: 0 8px; border-radius: 999px; color: var(--fg); background: color-mix(in srgb, var(--tag, var(--accent)) 26%, transparent); border: 1px solid color-mix(in srgb, var(--tag, var(--accent)) 70%, var(--line)); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.utag.on { background: var(--tag, var(--accent)); border-color: var(--tag, var(--accent)); color: var(--bg); }
+.tc-red { --tag: #b3261e; } .tc-orange { --tag: #b4530a; } .tc-yellow { --tag: #8a6a00; } .tc-green { --tag: #2e7d32; } .tc-teal { --tag: #00796b; } .tc-blue { --tag: #1565c0; } .tc-indigo { --tag: #3f51b5; } .tc-purple { --tag: #7b1fa2; } .tc-pink { --tag: #c2185b; } .tc-grey { --tag: #5f6b76; }
+@media (prefers-color-scheme: dark) { .tc-red { --tag: #f28b82; } .tc-orange { --tag: #f6ad6b; } .tc-yellow { --tag: #e6c35c; } .tc-green { --tag: #81c995; } .tc-teal { --tag: #6fd0c0; } .tc-blue { --tag: #8ab4f8; } .tc-indigo { --tag: #a5b0f5; } .tc-purple { --tag: #d7aefb; } .tc-pink { --tag: #f48fb1; } .tc-grey { --tag: #aab4be; } }
+.tagdot { display: inline-block; width: 12px; height: 12px; padding: 0; border: none; border-radius: 50%; background: var(--tag); flex-shrink: 0; }
+button.tagdot { width: 20px; height: 20px; }
+.tagcolours { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; padding: 4px 2px; }
+.tagcolours .on { outline: 2px solid var(--fg); outline-offset: 2px; }
 .addtag { font-size: 12px; line-height: 18px; padding: 0 6px; border: 1px dashed var(--line); border-radius: 999px; background: transparent; color: var(--muted); white-space: nowrap; }
 .addtag:hover { color: var(--fg); }
 .taglist { list-style: none; padding: 0; margin: 10px 0; max-height: 45vh; overflow: auto; }
 dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; padding: 3px 0; font-size: inherit; color: var(--fg); overflow-wrap: anywhere; }
-.taglist li.managed { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.taglist li.managed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 3px 0; }
 .taglist li.managed input { flex: 1; min-width: 0; }
 .taglist li.managed span { white-space: nowrap; }
 

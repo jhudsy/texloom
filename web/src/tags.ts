@@ -4,8 +4,16 @@
 import { locale } from './i18n'
 import { canon, emptyTags, foldTag, mergeTags, type TagDoc } from './listcore'
 
-export interface Tag { id: string; name: string }
+/** The order and length matter: a tag nobody has chosen a colour for gets one from its id, the
+ *  same on every device, and changing this list would repaint those tags. */
+export const TAG_COLOURS = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'indigo', 'purple', 'pink', 'grey'] as const
+export type TagColour = typeof TAG_COLOURS[number]
+
+export interface Tag { id: string; name: string; colour: TagColour }
 export const MAX_TAG_NAME = 60
+
+const colourFromId = (id: string) => TAG_COLOURS[[...id].reduce((sum, c) => (sum * 31 + c.charCodeAt(0)) >>> 0, 0) % TAG_COLOURS.length]
+const colourOf = (id: string, chosen?: string) => TAG_COLOURS.find((c) => c === chosen) ?? colourFromId(id)
 
 const KEY = 'texloom.tags'
 const read = (): TagDoc => { try { return { ...emptyTags(), ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return emptyTags() } }
@@ -20,7 +28,7 @@ const newId = () => {
   const out = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(6))))
   return out.replace(/\+/g, '-').replace(/\//g, '_')
 }
-const live = (doc: TagDoc): Tag[] => Object.entries(doc.tags).filter(([, x]) => !x.gone).map(([id, x]) => ({ id, name: x.n }))
+const live = (doc: TagDoc): Tag[] => Object.entries(doc.tags).filter(([, x]) => !x.gone).map(([id, x]) => ({ id, name: x.n, colour: colourOf(id, x.c) }))
   .sort((a, b) => a.name.localeCompare(b.name, locale))
 
 export const cleanTagName = (name: string) => name.normalize('NFC').replace(/\s+/g, ' ').trim().slice(0, MAX_TAG_NAME)
@@ -55,15 +63,22 @@ export const tags = {
     const doc = read(), id = newId()
     doc.tags[id] = { n: clean, at: stamp() }
     write(doc)
-    return { id, name: clean }
+    return { id, name: clean, colour: colourOf(id) }
   },
 
   /** Rename a tag. To the name of another tag, it becomes that tag, keeping that tag's spelling. */
   rename(id: string, name: string) {
     const clean = cleanTagName(name), doc = read(), other = tags.find(clean)
     if (!clean || !doc.tags[id] || doc.tags[id].gone) return
-    doc.tags[id] = { n: other && other.id !== id ? other.name : clean, at: stamp(doc.tags[id].at) }
+    doc.tags[id] = { ...doc.tags[id], n: other && other.id !== id ? other.name : clean, at: stamp(doc.tags[id].at) }
     write(mergeTags(doc, doc))
+  },
+
+  setColour(id: string, colour: TagColour) {
+    const doc = read()
+    if (!doc.tags[id] || doc.tags[id].gone) return
+    doc.tags[id] = { ...doc.tags[id], c: colour, at: stamp(doc.tags[id].at) }
+    write(doc)
   },
 
   remove(id: string) {

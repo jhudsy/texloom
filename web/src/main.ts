@@ -162,7 +162,7 @@ function tagBar(): HTMLElement | null {
       h('button', { class: 'small', onclick: async () => { if (await askCode()) syncList().catch(() => {}).finally(() => refreshProjects()) } }, t('Enter code'))) : null,
     all.length ? h('div', { class: 'tagbar', role: 'group', 'aria-label': t('Filter by tag') },
       h('span', { class: 'muted small' }, t('Filter by tag:')),
-      ...all.map((tag) => h('button', { class: `utag${finding.tags.has(tag.id) ? ' on' : ''}`, 'data-tag': tag.id, 'aria-pressed': String(finding.tags.has(tag.id)), onclick: () => toggleFilter(tag.id) }, tag.name)),
+      ...all.map((tag) => h('button', { class: `utag tc-${tag.colour}${finding.tags.has(tag.id) ? ' on' : ''}`, 'data-tag': tag.id, 'aria-pressed': String(finding.tags.has(tag.id)), onclick: () => toggleFilter(tag.id) }, tag.name)),
       finding.tags.size ? h('button', { class: 'addtag', onclick: () => { finding.tags.clear(); finding.page = 0; refreshProjects() } }, t('Clear filter')) : null,
       h('button', { class: 'addtag', onclick: () => manageTags(() => refreshProjects()) }, t('Manage tags…'))) : null)
 }
@@ -313,7 +313,7 @@ function projectList(): HTMLElement {
         } }, '✕')),
       h('div', { class: 'details muted' }, details.join(' · ')),
       h('div', { class: 'tags' },
-        ...tagsOf(r.project).map((tag) => h('button', { class: `utag${finding.tags.has(tag.id) ? ' on' : ''}`, title: t('Show only projects tagged “{{name}}”', { name: tag.name }), onclick: () => toggleFilter(tag.id) }, tag.name)),
+        ...tagsOf(r.project).map((tag) => h('button', { class: `utag tc-${tag.colour}${finding.tags.has(tag.id) ? ' on' : ''}`, title: t('Show only projects tagged “{{name}}”', { name: tag.name }), onclick: () => toggleFilter(tag.id) }, tag.name)),
         h('button', { class: 'addtag', 'aria-label': t('Tags for {{name}}…', { name: label }), onclick: () => pickTags([r.project], t('Tags for “{{name}}”', { name: label }), () => refreshProjects()) }, t('+ Tag'))))
   })) : h('p', { class: 'muted' }, t('No projects match your search.'))
   return h('div', {}, bar, matching.length ? selectionBar(matching, list.length > PAGE_SIZES[0]) : null, rows, pager(matching.length))

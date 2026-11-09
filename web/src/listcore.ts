@@ -90,8 +90,8 @@ export function forgetOldRemovals(doc: ListDoc): ListDoc {
 // ---- tags ----------------------------------------------------------------------------------
 /** A person's tags: never in a project, and in an entry of their own so that clients which don't
  *  know about them can't drop them. `on` holds, per project and tag, when it was last assigned,
- *  negative if that was to take it off. */
-export interface TagDoc { v: 1; tags: Record<string, { n: string; at: number; gone?: boolean }>; on: Record<string, Record<string, number>> }
+ *  negative if that was to take it off. A tag's `c` is the colour chosen for it, if any. */
+export interface TagDoc { v: 1; tags: Record<string, { n: string; at: number; gone?: boolean; c?: string }>; on: Record<string, Record<string, number>> }
 
 export const emptyTags = (): TagDoc => ({ v: 1, tags: {}, on: {} })
 

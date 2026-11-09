@@ -20,6 +20,19 @@ const zh: Catalog = {
   'Delete the tag “{{name}}”? It will be taken off {{n}} projects. The projects themselves aren’t changed.': { other: '删除标签“{{name}}”？它将从 {{n}} 个项目中移除。项目本身不会更改。' },
   '{{n}} projects': { other: '{{n}} 个项目' },
   'A dash means only some of these projects have that tag.': '横线表示这些项目中只有部分带有该标签。',
+  'Red': '红色',
+  'Orange': '橙色',
+  'Yellow': '黄色',
+  'Green': '绿色',
+  'Teal': '青色',
+  'Blue': '蓝色',
+  'Indigo': '靛蓝',
+  'Purple': '紫色',
+  'Pink': '粉色',
+  'Grey': '灰色',
+  'Colour': '颜色',
+  'Change the colour of “{{name}}”': '更改“{{name}}”的颜色',
+  'Click a dot to change a tag’s colour.': '点击圆点可更改标签的颜色。',
 }
 
 export default zh

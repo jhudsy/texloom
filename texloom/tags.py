@@ -122,7 +122,7 @@ def rename(tid: str, name: str) -> None:
         tag = data["tags"].get(tid)
         other = find(clean) if clean else None
         if clean and tag and not tag.get("gone"):
-            data["tags"][tid] = {"n": other.name if other and other.id != tid else clean, "at": _stamp(tag["at"])}
+            data["tags"][tid] = {**tag, "n": other.name if other and other.id != tid else clean, "at": _stamp(tag["at"])}
             _write(merge_tags(data, data))
 
 

@@ -20,6 +20,19 @@ const pt: Catalog = {
   'Delete the tag “{{name}}”? It will be taken off {{n}} projects. The projects themselves aren’t changed.': ['Excluir a etiqueta “{{name}}”? Ela será retirada de {{n}} projeto. O projeto em si não muda.', 'Excluir a etiqueta “{{name}}”? Ela será retirada de {{n}} projetos. Os projetos em si não mudam.'],
   '{{n}} projects': ['{{n}} projeto', '{{n}} projetos'],
   'A dash means only some of these projects have that tag.': 'Um traço significa que apenas alguns destes projetos têm essa etiqueta.',
+  'Red': 'Vermelho',
+  'Orange': 'Laranja',
+  'Yellow': 'Amarelo',
+  'Green': 'Verde',
+  'Teal': 'Turquesa',
+  'Blue': 'Azul',
+  'Indigo': 'Índigo',
+  'Purple': 'Roxo',
+  'Pink': 'Rosa',
+  'Grey': 'Cinza',
+  'Colour': 'Cor',
+  'Change the colour of “{{name}}”': 'Alterar a cor de “{{name}}”',
+  'Click a dot to change a tag’s colour.': 'Clique em um ponto para alterar a cor de uma etiqueta.',
 }
 
 export default pt

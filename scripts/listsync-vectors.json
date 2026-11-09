@@ -6,7 +6,7 @@
    "seq": 7,
    "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
    "signature": "Mhfffj9ymKBqLLIzkjxjtIGGqqGJle_Jc-3UxpOX2E4eJ44Nnu6JLkyeaomiT5wz6B6sOCQQXx-7XIvhqZe2DQ",
-   "ciphertext": "t3LbsLubaW-qC_wnuIT-5tZ_QksyKOd0mcIWVQLiuIwWIgZnmqXOAAmOFpKajecYAwEicarK",
+   "ciphertext": "A-j35o792zTnO33bDBc1ekBfyWcehgL8NZHbqn307BLcvyy3vjcCllVUz46k3y-QIvqZd4N2",
    "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
    "link": "https://example.org/#sync=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
   },
@@ -16,7 +16,7 @@
    "seq": 7,
    "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
    "signature": "J1ku7E7WW-gFQlwPeTbinTvWFngJW8f7u-ALt7kwrOVgvOdlB0voBr60YGxv6P9xg_TtFvLUsJkJdwWvbgsvBg",
-   "ciphertext": "dN6GVZZebthmGC_DOvLbV8aK1nLKUsQp04aXXn4DsnxbvQ7p6ZgwliNsTXU4bU8ootdOORsL",
+   "ciphertext": "lD5j1CYuszJ_ozkH0j9w8XtobnNMFdAZ_elyw0vV42LF_tt49CSaIHyzuT6U61qpfXJX7O5o",
    "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
    "link": "https://example.org/#sync=__________________________________________8"
   }
@@ -468,6 +468,31 @@
     }
    },
    "merged": "{\"on\":{\"p\":{\"a\":5}},\"tags\":{},\"v\":1}"
+  },
+  {
+   "what": "a colour travels with the tag's latest change",
+   "a": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "A",
+      "at": 1
+     }
+    },
+    "on": {}
+   },
+   "b": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "A",
+      "at": 2,
+      "c": "red"
+     }
+    },
+    "on": {}
+   },
+   "merged": "{\"on\":{},\"tags\":{\"a\":{\"at\":2,\"c\":\"red\",\"n\":\"A\"}},\"v\":1}"
   },
   {
    "what": "the same name made twice is one tag",

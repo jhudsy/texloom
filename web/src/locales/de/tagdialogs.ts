@@ -20,6 +20,19 @@ const de: Catalog = {
   'Delete the tag “{{name}}”? It will be taken off {{n}} projects. The projects themselves aren’t changed.': ['Schlagwort „{{name}}“ löschen? Es wird von {{n}} Projekt entfernt. Das Projekt selbst bleibt unverändert.', 'Schlagwort „{{name}}“ löschen? Es wird von {{n}} Projekten entfernt. Die Projekte selbst bleiben unverändert.'],
   '{{n}} projects': ['{{n}} Projekt', '{{n}} Projekte'],
   'A dash means only some of these projects have that tag.': 'Ein Strich bedeutet, dass nur einige dieser Projekte dieses Schlagwort haben.',
+  'Red': 'Rot',
+  'Orange': 'Orange',
+  'Yellow': 'Gelb',
+  'Green': 'Grün',
+  'Teal': 'Türkis',
+  'Blue': 'Blau',
+  'Indigo': 'Indigo',
+  'Purple': 'Lila',
+  'Pink': 'Rosa',
+  'Grey': 'Grau',
+  'Colour': 'Farbe',
+  'Change the colour of “{{name}}”': 'Farbe von „{{name}}“ ändern',
+  'Click a dot to change a tag’s colour.': 'Klicken Sie auf einen Punkt, um die Farbe eines Schlagworts zu ändern.',
 }
 
 export default de

@@ -20,6 +20,19 @@ const es: Catalog = {
   'Delete the tag “{{name}}”? It will be taken off {{n}} projects. The projects themselves aren’t changed.': ['¿Eliminar la etiqueta «{{name}}»? Se quitará de {{n}} proyecto. El proyecto en sí no cambia.', '¿Eliminar la etiqueta «{{name}}»? Se quitará de {{n}} proyectos. Los proyectos en sí no cambian.'],
   '{{n}} projects': ['{{n}} proyecto', '{{n}} proyectos'],
   'A dash means only some of these projects have that tag.': 'Un guion significa que solo algunos de estos proyectos tienen esa etiqueta.',
+  'Red': 'Rojo',
+  'Orange': 'Naranja',
+  'Yellow': 'Amarillo',
+  'Green': 'Verde',
+  'Teal': 'Turquesa',
+  'Blue': 'Azul',
+  'Indigo': 'Índigo',
+  'Purple': 'Morado',
+  'Pink': 'Rosa',
+  'Grey': 'Gris',
+  'Colour': 'Color',
+  'Change the colour of “{{name}}”': 'Cambiar el color de «{{name}}»',
+  'Click a dot to change a tag’s colour.': 'Haz clic en un punto para cambiar el color de una etiqueta.',
 }
 
 export default es

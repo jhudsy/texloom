@@ -39,6 +39,7 @@ TAG_MERGES = [
     ("assign and rename on two devices both survive", T({"a": TAG("New", 5)}, {"p": {"a": 1}}), T({"a": TAG("Old", 1)}, {"p": {"a": 9}})),
     ("taking a tag off later wins", T({"a": TAG("A", 1)}, {"p": {"a": 5}}), T({"a": TAG("A", 1)}, {"p": {"a": -7}})),
     ("assigning beats taking off at the same moment", T({}, {"p": {"a": 5}}), T({}, {"p": {"a": -5}})),
+    ("a colour travels with the tag's latest change", T({"a": TAG("A", 1)}), T({"a": {**TAG("A", 2), "c": "red"}})),
     ("the same name made twice is one tag", T({"a": TAG("AAAI", 1)}, {"p": {"a": 3}}), T({"b": TAG("aaai ", 2)}, {"q": {"b": 4}})),
     ("names match across accents' case, spaces and ligatures", T({"a": TAG("Étude  ﬁnale", 1)}, {"p": {"a": 3}}), T({"b": TAG("étude finale", 2)}, {"p": {"b": -4}})),
     ("a tie is the same either way", T({"a": TAG("Zoë", 5)}), T({"a": TAG("Åsa", 5)})),

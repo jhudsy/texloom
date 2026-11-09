@@ -2,7 +2,12 @@
 import { dialog, h } from './dom'
 import { t, tn } from './i18n'
 import { foldTag } from './listcore'
-import { cleanTagName, MAX_TAG_NAME, tags, type Tag } from './tags'
+import { cleanTagName, MAX_TAG_NAME, TAG_COLOURS, tags, type Tag, type TagColour } from './tags'
+
+const COLOUR_NAMES: Record<TagColour, () => string> = {
+  red: () => t('Red'), orange: () => t('Orange'), yellow: () => t('Yellow'), green: () => t('Green'), teal: () => t('Teal'),
+  blue: () => t('Blue'), indigo: () => t('Indigo'), purple: () => t('Purple'), pink: () => t('Pink'), grey: () => t('Grey'),
+}
 
 /** Assign or unassign tags on one project or several, and create new ones. */
 export function pickTags(projects: string[], title: string, changed: () => void) {
@@ -28,7 +33,7 @@ export function pickTags(projects: string[], title: string, changed: () => void)
       const n = has(tag.id)
       const box = h('input', { type: 'checkbox', checked: n === projects.length, onchange: (e: any) => { tags.set(projects, tag.id, e.target.checked); changed() } })
       box.indeterminate = n > 0 && n < projects.length // on some of them
-      return h('li', {}, h('label', {}, box, h('span', {}, tag.name)))
+      return h('li', {}, h('label', {}, box, h('span', { class: `tagdot tc-${tag.colour}` }), h('span', {}, tag.name)))
     }))
     if (!all.length) items.replaceChildren(h('li', { class: 'muted small' }, t('No tags yet. Type a name to create one.')))
     create.hidden = !typed() || !!tags.find(typed())
@@ -54,6 +59,21 @@ export function manageTags(changed: () => void) {
     onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); add() } },
   })
   const items = h('ul', { class: 'taglist' })
+  let picking: string | null = null // the tag whose colours are showing
+
+  /** Show or hide a tag's colours, keeping the keyboard on its dot. */
+  function pick(id: string | null, focusOn: string) {
+    picking = id
+    render()
+    items.querySelector<HTMLElement>(`[data-swatch="${CSS.escape(focusOn)}"]`)?.focus()
+  }
+
+  function colours(tag: Tag): HTMLElement {
+    return h('div', { class: 'tagcolours', role: 'group', 'aria-label': t('Colour') }, ...TAG_COLOURS.map((colour) => h('button', {
+      class: `tagdot tc-${colour}${colour === tag.colour ? ' on' : ''}`, title: COLOUR_NAMES[colour](), 'aria-label': COLOUR_NAMES[colour](), 'aria-pressed': String(colour === tag.colour),
+      onclick: () => { tags.setColour(tag.id, colour); changed(); pick(null, tag.id) },
+    })))
+  }
 
   function rename(tag: Tag, input: HTMLInputElement) {
     const name = cleanTagName(input.value), other = tags.find(name)
@@ -78,16 +98,20 @@ export function manageTags(changed: () => void) {
     items.replaceChildren(...all.map((tag) => {
       const n = tags.uses(tag.id)
       const name: HTMLInputElement = h('input', { value: tag.name, 'aria-label': t('Name of the tag “{{name}}”', { name: tag.name }), maxlength: MAX_TAG_NAME, onchange: () => rename(tag, name) })
-      return h('li', { class: 'managed' }, name,
+      const label = t('Change the colour of “{{name}}”', { name: tag.name })
+      return h('li', { class: 'managed' },
+        h('button', { class: `tagdot tc-${tag.colour}`, 'data-swatch': tag.id, title: label, 'aria-label': label, 'aria-expanded': String(picking === tag.id), onclick: () => pick(picking === tag.id ? null : tag.id, tag.id) }),
+        name,
         h('span', { class: 'muted small' }, tn(n, '{{n}} project', '{{n}} projects')),
-        h('button', { 'aria-label': t('Delete the tag “{{name}}”', { name: tag.name }), onclick: () => remove(tag) }, t('Delete')))
+        h('button', { 'aria-label': t('Delete the tag “{{name}}”', { name: tag.name }), onclick: () => remove(tag) }, t('Delete')),
+        picking === tag.id ? colours(tag) : null)
     }))
     if (!all.length) items.replaceChildren(h('li', { class: 'muted small' }, t('No tags yet.')))
   }
 
   const dlg = dialog('settings',
     h('h3', {}, t('Manage tags')),
-    h('p', { class: 'muted small' }, t('Rename a tag by editing its name. The change applies to every project that has it.')),
+    h('p', { class: 'muted small' }, t('Rename a tag by editing its name. The change applies to every project that has it.'), ' ', t('Click a dot to change a tag’s colour.')),
     items,
     h('div', { class: 'row' }, addIn, h('button', { onclick: add }, t('Add'))),
     h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => dlg.close() }, t('Close'))),
