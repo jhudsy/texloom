@@ -20,6 +20,7 @@ import { isTexFile } from './projectfiles'
 import { handleListHash, listDialog, takeListHash } from './listdialog'
 import { savedSecret, startListSync, tagsProblem, syncNow as syncList } from './listsync'
 import { copyDialog } from './copyproject'
+import { openPdfWindow, pdfWindowProject } from './pdfwindow'
 import { tags, type Tag } from './tags'
 import { manageTags, pickTags } from './tagdialogs'
 import { openInApp } from './openinapp'
@@ -52,7 +53,8 @@ if ('serviceWorker' in navigator && !noSW && (location.protocol === 'https:' || 
 }
 
 window.addEventListener('hashchange', () => location.reload())
-const listHash = takeListHash()
+const pdfWindowFor = pdfWindowProject() // this page is only a window showing a project's PDF
+const listHash = pdfWindowFor ? null : takeListHash()
 const opened = (() => { try { return projectFromAddress() } catch (e) { alert(e); return null } })()
 const keys = opened === 'no-key' ? null : opened
 let refreshProjects = () => {}
@@ -878,8 +880,11 @@ async function openProject(keys: Keys) {
 }
 
 // Last, so that everything above is defined by the time the page is built.
-if (keys) openProject(keys)
-else landing()
-startListSync(() => refreshProjects())
-if (listHash) handleListHash(listHash)
-if (opened === 'no-key') missingKeysDialog()
+if (pdfWindowFor) openPdfWindow(pdfWindowFor)
+else {
+  if (keys) openProject(keys)
+  else landing()
+  startListSync(() => refreshProjects())
+  if (listHash) handleListHash(listHash)
+  if (opened === 'no-key') missingKeysDialog()
+}

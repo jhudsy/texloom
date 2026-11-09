@@ -4,6 +4,7 @@ import type { Replica } from './replica'
 import type { Device } from './settings'
 import { h, saveFile, verticalResizer } from './dom'
 import { PdfView } from './pdfview'
+import { pdfWindowLink } from './pdfwindow'
 import { compileInBrowser, browserCompileAvailable, type Progress, CompileStopped, stopBrowserCompile } from './compile'
 import { allFiles, fileBase, mainFile } from './projectfiles'
 import { parseLog, type Problem } from './latexlog'
@@ -33,6 +34,7 @@ export interface Output {
 export function createOutput(r: Replica, writable: boolean, device: () => Device, userName: () => string,
   goto: (file: string, line: number, flash?: boolean) => void): Output {
   const pdfView = new PdfView()
+  const pdfWindow = pdfWindowLink(r.keys.project, () => String(r.meta.get('name') ?? ''), (at) => pdfView.onPick?.(at.page, at.x, at.y))
   const info = h('div', { class: 'pdfinfo muted' }, t('No PDF yet.'))
   const progress = h('div', { class: 'progress', hidden: true }, h('div', { class: 'bar' }), h('span', {}))
   const logPre = h('pre', { class: 'log', hidden: true })
@@ -76,10 +78,13 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     compileBtn.classList.toggle('primary', !stop)
     compileBtn.classList.toggle('danger', !!stop)
   }
+  const windowBtn = h('button', { class: 'to-window wide-only', title: t('Open the PDF in a separate window, for example on another screen. It updates when you compile.'), onclick: () => {
+    if (!pdfWindow.open()) info.textContent = t('Your browser blocked the new window: allow pop-ups for this site and try again.')
+  } }, `↗ ${t('New window')}`)
   const summary = h('button', { class: 'psummary', title: t('Show problems'), hidden: true, onclick: () => { setLogOpen(true); showLogView(false) } })
 
   const pane = h('div', { class: 'pane output' },
-    h('div', { class: 'pdfbar' }, info, summary, h('span', { class: 'spacer' }), pdfView.controls, dlBtn, logBtn),
+    h('div', { class: 'pdfbar' }, info, summary, h('span', { class: 'spacer' }), pdfView.controls, windowBtn, dlBtn, logBtn),
     progress, pdfView.el, logBox)
   verticalResizer(logSplit, logBox, 'texloom.logHeight', 60, 180)
   setLogOpen(localStorage.getItem(LOG_KEY) === '1')
@@ -122,6 +127,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       pdfError = null
       dlBtn.removeAttribute('disabled')
       pdfView.show(pdf).catch((e) => { console.error('PDF render failed', e); pdfError = t('PDF error: {{error}}', { error: e }); info.textContent = pdfError })
+      pdfWindow.pdf(pdf)
     }
     logPre.textContent = log
     lastLog = log
@@ -244,7 +250,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     if (!synctexBytes) return false
     syncTex().then((st) => {
       const at = st?.toPdf(file, line)
-      if (at) pdfView.highlight(at.page, at.x, at.y, at.w, at.h)
+      if (at) { pdfView.highlight(at.page, at.x, at.y, at.w, at.h); pdfWindow.mark(at.page, at.x, at.y, at.w, at.h) }
       else info.textContent = t('That line isn’t in the PDF (yet): compile first?')
     })
     return true

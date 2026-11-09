@@ -198,6 +198,9 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   there.
 - **Panes:** drag the dividers between the file list, the editor and the PDF/assistant
   panel; ☰ and ▥ hide the side panes.
+- **PDF in its own window:** **New window** above the PDF opens it in a separate window, for example
+  on another screen. It updates when you compile, double-clicking it jumps to the source, and it
+  stays in step if you reload the editor.
 - **PDF zoom:** − and + above the PDF change its size, and the percentage goes back to normal
   size; ⌘ or Ctrl + scroll, or pinching on a trackpad, does the same. The zoom is remembered.
 - **Compile log:** **Log** shows it under the PDF; drag its top edge to resize.
