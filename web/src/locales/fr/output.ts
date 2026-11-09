@@ -46,5 +46,10 @@ const fr: Catalog = {
   'Go to source': 'Aller à la source',
   'Show the editor’s line in the PDF (⌘⌥→ / Ctrl+Alt+→)': 'Afficher dans le PDF la ligne de l’éditeur (⌘⌥→ / Ctrl+Alt+→)',
   'Show in PDF': 'Afficher dans le PDF',
+  'Stop': 'Arrêter',
+  'Stop this compile': 'Arrêter cette compilation',
+  'Stop waiting': 'Ne plus attendre',
+  'Stop waiting for your texloom helper. It finishes any compile it has started.': 'Ne plus attendre votre assistant texloom. Il terminera toute compilation déjà commencée.',
+  'Compile stopped.': 'Compilation arrêtée.',
 }
 export default fr

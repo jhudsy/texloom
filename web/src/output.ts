@@ -4,7 +4,7 @@ import type { Replica } from './replica'
 import type { Device } from './settings'
 import { h, saveFile, verticalResizer } from './dom'
 import { PdfView } from './pdfview'
-import { compileInBrowser, browserCompileAvailable, type Progress } from './compile'
+import { compileInBrowser, browserCompileAvailable, type Progress, CompileStopped, stopBrowserCompile } from './compile'
 import { allFiles, fileBase, mainFile } from './projectfiles'
 import { parseLog, type Problem } from './latexlog'
 import { SyncTex } from './synctex'
@@ -64,7 +64,18 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   }
   const logBtn = h('button', { title: t('Show/hide the compile log'), onclick: () => setLogOpen(!!logBox.hidden) }, t('Log'))
   const dlBtn = h('button', { title: t('Download the PDF'), disabled: true, onclick: () => lastPdf && saveFile(`${fileBase(r)}.pdf`, lastPdf, 'application/pdf') }, '⤓ PDF')
-  const compileBtn = h('button', { class: 'primary', title: t('Compile (⌘S / Ctrl+S)'), onclick: () => compile() }, t('Compile'))
+  const compileBtn = h('button', { class: 'primary', title: t('Compile (⌘S / Ctrl+S)'), onclick: (e: Event) => {
+    if (stopRunning) { e.stopImmediatePropagation(); stopRunning() } else compile() // stopping shouldn't change what's on show
+  } }, t('Compile')) as HTMLButtonElement
+  let stopRunning: (() => void) | null = null
+  /** While something is compiling, the Compile button stops it. */
+  const setRunning = (stop: (() => void) | null, label = t('Stop'), title = t('Stop this compile')) => {
+    stopRunning = stop
+    compileBtn.textContent = stop ? label : t('Compile')
+    compileBtn.title = stop ? title : t('Compile (⌘S / Ctrl+S)')
+    compileBtn.classList.toggle('primary', !stop)
+    compileBtn.classList.toggle('danger', !!stop)
+  }
   const summary = h('button', { class: 'psummary', title: t('Show problems'), hidden: true, onclick: () => { setLogOpen(true); showLogView(false) } })
 
   const pane = h('div', { class: 'pane output' },
@@ -164,12 +175,12 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     if (d.compile === 'none') return interactive ? fail((t) => t('Compiling is turned off on this device (⚙ Settings → Compiling).')) : null
     const main = mainFile(r)
     if (!main) return fail((t) => t('No .tex file with \\documentclass found.'))
-    if (compileBtn.hasAttribute('disabled')) return fail((t) => t('A compile is already running; try again in a moment.'))
+    if (stopRunning) return fail((t) => t('A compile is already running; try again in a moment.'))
     if (d.compile === 'local') return compileLocally(fail, fromScratch)
     if (!(await browserCompileAvailable())) {
       return fail((t) => t('In-browser compilation is not installed on this server.\n\nChoose “Compile with my own TeX” in ⚙ Settings and run:\n  texloom run <folder> --compile'))
     }
-    compileBtn.textContent = t('Compiling…'); compileBtn.setAttribute('disabled', '')
+    setRunning(stopBrowserCompile)
     showProgress({ phase: 'download', percent: 0 })
     try {
       const t0 = performance.now()
@@ -184,10 +195,14 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       }
       return { ok: !!res.pdf, log: res.log }
     } catch (e) {
+      if (e instanceof CompileStopped) {
+        info.textContent = t('Compile stopped.')
+        return { ok: false, log: 'The compile was stopped.' }
+      }
       return fail((t) => t('Compile failed: {{error}}', { error: e }))
     } finally {
       showProgress(null)
-      compileBtn.textContent = t('Compile'); compileBtn.removeAttribute('disabled')
+      setRunning(null)
     }
   }
 
@@ -197,14 +212,18 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     let acked = false
     r.onCompileAck = (p) => { acked = true; showProgress({ phase: 'compile' }, t('Compiling with {{name}}…', { name: p.by })) }
     const before = r.out.get('latest')?.at
+    let stopped = false
+    setRunning(() => { stopped = true }, t('Stop waiting'), t('Stop waiting for your texloom helper. It finishes any compile it has started.'))
     try {
       for (let i = 0; i < 240; i++) {
         await new Promise((res) => setTimeout(res, 250))
+        if (stopped) return { ok: false, log: 'Stopped waiting for the texloom helper.' }
         if (r.out.get('latest')?.at !== before) break
         if (i === 20 && !acked) return fail((t) => t('No texloom helper with --compile answered.\n\nOn a computer with TeX, run:\n  texloom run <folder> --compile'))
       }
     } finally {
       showProgress(null)
+      setRunning(null)
     }
     const o = r.out.get('latest')
     if (!o || o.at === before) return fail((t) => t('The local helper did not finish compiling within 60 s.'))
@@ -218,7 +237,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     const d = device()
     if (!d.autoCompile || d.compile === 'none' || typeof tr.origin === 'symbol') return
     clearTimeout(autoTimer)
-    autoTimer = setTimeout(() => { if (!compileBtn.hasAttribute('disabled')) compile() }, 2500)
+    autoTimer = setTimeout(() => { if (!stopRunning) compile() }, 2500)
   })
 
   function showInPdf(file: string, line: number): boolean {

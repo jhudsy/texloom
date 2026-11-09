@@ -150,15 +150,48 @@ async function withTexLog(r: BusyTexRunner, main: string, log: string): Promise<
   }
 }
 
-export async function compileInBrowser(
+export class CompileStopped extends Error {}
+type Job = { stopped: boolean; inEngine: boolean; stop: (e: Error) => void }
+let job: Job | null = null
+
+/** Stop the compile in progress. While it's still downloading, the download carries on for next time. */
+export function stopBrowserCompile() {
+  if (!job) return
+  job.stopped = true
+  if (job.inEngine) { // TeX can only be stopped by ending its worker; the next compile starts a new one
+    runner?.then((r) => r.terminate()).catch(() => {})
+    runner = null
+    runnerLevel = null
+  }
+  job.stop(new CompileStopped())
+}
+
+type CompileResult = { pdf: Uint8Array | null; log: string; synctex: Uint8Array | null }
+
+export function compileInBrowser(
   files: Map<string, string | Uint8Array>,
   main: string,
   opts: { engine?: string; bib?: string } = {},
   onProgress?: (p: Progress) => void,
-): Promise<{ pdf: Uint8Array | null; log: string; synctex: Uint8Array | null }> {
+): Promise<CompileResult> {
+  const mine: Job = { stopped: false, inEngine: false, stop: () => {} }
+  job = mine
+  const stopped = new Promise<never>((_, reject) => { mine.stop = reject })
+  return Promise.race([compiling(mine, files, main, opts, onProgress), stopped]).finally(() => { if (job === mine) job = null })
+}
+
+async function compiling(
+  mine: Job,
+  files: Map<string, string | Uint8Array>,
+  main: string,
+  opts: { engine?: string; bib?: string },
+  onProgress?: (p: Progress) => void,
+): Promise<CompileResult> {
   progressCb = onProgress
   try {
     const r = await getRunner(await levelFor(files))
+    if (mine.stopped) throw new CompileStopped()
+    mine.inEngine = true
     onProgress?.({ phase: 'compile' })
     const all = [...files.values()].filter((v): v is string => typeof v === 'string').join('\n')
     let biber = false, bibtex = false
@@ -182,6 +215,6 @@ export async function compileInBrowser(
     if (!res.success) log = await withTexLog(r, main, log)
     return { pdf: res.success && res.pdf ? res.pdf : null, log, synctex: res.synctex ?? null }
   } finally {
-    progressCb = undefined
+    if (progressCb === onProgress) progressCb = undefined // a stopped compile may end after a new one began
   }
 }
