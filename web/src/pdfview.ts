@@ -3,10 +3,23 @@
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { t } from './i18n'
+import { h } from './dom'
 import { openContextMenu, type MenuItem } from './contextmenu'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 export { pdfjs }
+
+const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3] // 1 fits the page to the pane
+const MIN_ZOOM = ZOOM_STEPS[0], MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1]
+const ZOOM_KEY = 'texloom.pdfZoom'
+const savedZoom = () => {
+  try {
+    const z = Number(localStorage.getItem(ZOOM_KEY))
+    return z >= MIN_ZOOM && z <= MAX_ZOOM ? z : 1
+  } catch { return 1 }
+}
+// Zoomed in, a whole document at full sharpness wouldn't fit in a browser's memory for canvases.
+const MAX_PAGE_PIXELS = 6e6, MIN_PAGE_PIXELS = 2e6, MAX_DOCUMENT_PIXELS = 2e8
 
 export class PdfView {
   readonly el: HTMLDivElement
@@ -17,7 +30,14 @@ export class PdfView {
   /** Where the PDF was last clicked (what “go to source” uses), in PDF points. */
   private lastClick: { page: number; x: number; y: number } | null = null
   private menu: (() => void) | null = null
-  private pages: { wrap: HTMLDivElement; scale: number }[] = []
+  /** Zoom out, the current zoom (which goes back to normal size), zoom in. Shown once there is a PDF. */
+  readonly controls: HTMLElement
+  private zoomOut: HTMLButtonElement
+  private zoomReset: HTMLButtonElement
+  private zoomIn: HTMLButtonElement
+  private zoom = savedZoom()
+  private zoomTimer: ReturnType<typeof setTimeout> | undefined
+  private pages: { wrap: HTMLDivElement; scale: number; canvas: HTMLCanvasElement; points: number }[] = []
   private gen = 0
   private last: Uint8Array | null = null
   private renderedWidth = 0
@@ -46,6 +66,52 @@ export class PdfView {
       this.openMenu(e.clientX, e.clientY, [[t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)], ...(this.menuExtras?.() ?? [])])
     })
     this.el.addEventListener('scroll', () => this.closeMenu(), { passive: true })
+    // Ctrl or ⌘ + scroll; a trackpad pinch arrives as Ctrl + scroll
+    this.el.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const box = this.el.getBoundingClientRect()
+      this.setZoom(this.zoom * Math.exp(-e.deltaY * 0.01), e.clientX - box.left, e.clientY - box.top)
+    }, { passive: false })
+    this.zoomOut = h('button', { title: t('Zoom out'), 'aria-label': t('Zoom out'), onclick: () => this.step(-1) }, '−')
+    this.zoomReset = h('button', { class: 'pct', title: t('Back to normal size'), onclick: () => this.setZoom(1) })
+    this.zoomIn = h('button', { title: t('Zoom in'), 'aria-label': t('Zoom in'), onclick: () => this.step(1) }, '+')
+    this.controls = h('span', { class: 'pdfzoom', role: 'group', 'aria-label': t('PDF zoom'), hidden: true }, this.zoomOut, this.zoomReset, this.zoomIn)
+    this.showZoom()
+  }
+
+  private showZoom() {
+    this.zoomReset.textContent = `${Math.round(this.zoom * 100)}%`
+    this.zoomOut.disabled = this.zoom <= MIN_ZOOM
+    this.zoomIn.disabled = this.zoom >= MAX_ZOOM
+    this.el.classList.toggle('zoomed', this.zoom > 1) // wider than the pane: scrolls sideways
+  }
+
+  private step(direction: 1 | -1) {
+    const next = direction > 0 ? ZOOM_STEPS.find((z) => z > this.zoom + 0.001) : [...ZOOM_STEPS].reverse().find((z) => z < this.zoom - 0.001)
+    if (next) this.setZoom(next)
+  }
+
+  /** Width of a page at this zoom, in CSS pixels. A very narrow pane scrolls sideways instead of failing. */
+  private pageWidth() { return Math.max(160, this.el.clientWidth - 24) * this.zoom }
+
+  /** Resize what's on show at once, keeping (x, y) in the pane where it is, and draw it sharply a moment later. */
+  private setZoom(zoom: number, x = this.el.clientWidth / 2, y = this.el.clientHeight / 2) {
+    this.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
+    try { localStorage.setItem(ZOOM_KEY, String(this.zoom)) } catch {}
+    const across = (this.el.scrollLeft + x) / Math.max(1, this.el.scrollWidth)
+    const down = (this.el.scrollTop + y) / Math.max(1, this.el.scrollHeight)
+    this.showZoom()
+    if (!this.pages.length) return
+    const width = this.pageWidth()
+    for (const p of this.pages) {
+      p.canvas.style.width = `${Math.floor(width)}px`
+      p.scale = width / p.points
+    }
+    this.el.scrollLeft = across * this.el.scrollWidth - x
+    this.el.scrollTop = down * this.el.scrollHeight - y
+    clearTimeout(this.zoomTimer)
+    this.zoomTimer = setTimeout(() => { if (this.last) this.show(this.last).catch(() => {}) }, 300)
   }
 
   /** The page and PDF-point position under a mouse event, if it's on a page. */
@@ -107,16 +173,18 @@ export class PdfView {
     try {
       if (gen !== this.gen) return
     const scrollFrac = this.el.scrollTop / Math.max(1, this.el.scrollHeight)
+    const scrollAcross = this.el.scrollLeft / Math.max(1, this.el.scrollWidth)
     if (!this.el.clientWidth) return // hidden: render when it becomes visible
     this.renderedWidth = this.el.clientWidth
-    const width = Math.max(160, this.el.clientWidth - 24) // a very narrow pane scrolls sideways instead of failing
+    const width = this.pageWidth()
+    const maxPixels = Math.min(MAX_PAGE_PIXELS, Math.max(MIN_PAGE_PIXELS, MAX_DOCUMENT_PIXELS / doc.numPages))
     const pages = document.createDocumentFragment()
-    const info: { wrap: HTMLDivElement; scale: number }[] = []
+    const info: typeof this.pages = []
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i)
       const base = page.getViewport({ scale: 1 })
       const vp = page.getViewport({ scale: width / base.width })
-      const dpr = window.devicePixelRatio || 1
+      const dpr = Math.min(window.devicePixelRatio || 1, Math.sqrt(maxPixels / (vp.width * vp.height)))
       const canvas = document.createElement('canvas')
       canvas.width = Math.floor(vp.width * dpr)
       canvas.height = Math.floor(vp.height * dpr)
@@ -128,11 +196,13 @@ export class PdfView {
       wrap.className = 'page'
       wrap.append(canvas)
       pages.append(wrap)
-      info.push({ wrap, scale: vp.width / base.width })
+      info.push({ wrap, scale: vp.width / base.width, canvas, points: base.width })
     }
     this.pages = info
     this.el.replaceChildren(pages)
     this.el.scrollTop = scrollFrac * this.el.scrollHeight
+    this.el.scrollLeft = scrollAcross * this.el.scrollWidth
+    this.controls.hidden = false
     } finally { void task.destroy() } // otherwise each document keeps a worker for the life of the tab
   }
 }

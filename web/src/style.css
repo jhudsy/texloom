@@ -83,8 +83,13 @@ aside .hint { font-size: 12px; padding: 8px 10px; }
 
 .right { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .pdfbar { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
-.pdf { flex: 1; overflow: auto; background: #7d7d7d; padding: 12px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.pdf canvas { max-width: 100%; height: auto !important; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .4); }
+.pdf { flex: 1; overflow: auto; background: #7d7d7d; padding: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.pdf canvas { display: block; height: auto !important; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .4); }
+.pdf:not(.zoomed) canvas { max-width: 100%; }
+.pdfzoom { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.pdfzoom[hidden] { display: none; }
+.pdfzoom button { min-width: 26px; padding-left: 4px; padding-right: 4px; }
+.pdfzoom .pct { min-width: 46px; font-variant-numeric: tabular-nums; }
 /* compile log, below the PDF */
 .logbox { display: flex; flex-direction: column; min-height: 60px; flex: none; }
 .logbox[hidden] { display: none; }
@@ -329,7 +334,7 @@ dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: cen
 .log[hidden] { display: none; }
 .psummary { font-size: 12px; padding: 1px 8px; border-radius: 999px; color: var(--warn); }
 .psummary.has-errors { color: var(--err); border-color: color-mix(in srgb, var(--err) 50%, var(--line)); }
-.pdf .page { position: relative; flex: none; }
+.pdf .page { position: relative; flex: none; margin: 0 auto; } /* auto margins centre it, yet let a wide page scroll to its left edge */
 .pdf-mark { position: absolute; background: color-mix(in srgb, #ffd400 45%, transparent); outline: 2px solid #e6b800; border-radius: 3px; pointer-events: none; animation: pdfmark 2.5s ease-out forwards; }
 @keyframes pdfmark { 0%, 70% { opacity: 1 } 100% { opacity: 0 } }
 

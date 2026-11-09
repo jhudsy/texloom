@@ -84,6 +84,7 @@ export class FilePreview {
     if (PDF.test(path)) {
       const view = new PdfView()
       box.append(view.el)
+      name.insertBefore(view.controls, name.lastChild)
       this.drawWhenSeen(() => {
         src.data().then((data) => view.show(data)).catch((e) => { if (gen === this.gen) box.append(h('p', { class: 'err' }, String(e))) })
       })

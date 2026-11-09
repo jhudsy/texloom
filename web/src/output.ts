@@ -79,7 +79,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const summary = h('button', { class: 'psummary', title: t('Show problems'), hidden: true, onclick: () => { setLogOpen(true); showLogView(false) } })
 
   const pane = h('div', { class: 'pane output' },
-    h('div', { class: 'pdfbar' }, info, summary, h('span', { class: 'spacer' }), dlBtn, logBtn),
+    h('div', { class: 'pdfbar' }, info, summary, h('span', { class: 'spacer' }), pdfView.controls, dlBtn, logBtn),
     progress, pdfView.el, logBox)
   verticalResizer(logSplit, logBox, 'texloom.logHeight', 60, 180)
   setLogOpen(localStorage.getItem(LOG_KEY) === '1')
