@@ -11,6 +11,8 @@ const zh: Catalog = {
   'Log': '日志',
   'Download the PDF': '下载 PDF',
   'Compile (⌘S / Ctrl+S)': '编译（⌘S / Ctrl+S）',
+  'Compile {{file}} (⌘S / Ctrl+S)': '编译 {{file}}（⌘S / Ctrl+S）',
+  'Your texloom helper compiles only the main file. Use “Set as main file”, or compile in this browser (⚙ Settings → Compiling).': 'texloom 辅助程序只编译主文件。请使用“设为主文件”，或在此浏览器中编译（⚙ 设置 → 编译）。',
   'Compile': '编译',
   'Show problems': '显示问题',
   'No source line for that spot.': '该位置没有对应的源代码行。',

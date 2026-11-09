@@ -364,7 +364,7 @@ async function openProject(keys: Keys) {
   // ---- components ----
   const index = new ProjectIndex(r)
   const gotoSource = (file: string, line: number, flash = false) => { layout.showEditor(); tree.open(file); setTimeout(() => editor.goto(line, 0, flash), 0) }
-  const output = createOutput(r, writable, () => device, () => me.name, gotoSource)
+  const output = createOutput(r, writable, () => device, () => me.name, gotoSource, () => tree.current())
   const editor = createEditorPane(r, writable, index, {
     onCompile: () => output.compile(),
     onSync: () => syncToPdf(),
@@ -391,6 +391,7 @@ async function openProject(keys: Keys) {
     showFile(p)
   }, {
     preview: (p) => { preview.show(p); showInPanel(true); layout.reveal('right'); showTab('pdf') },
+    compile: (p) => { showInPanel(false); layout.reveal('right'); showTab('pdf'); output.compile(true, false, p) },
     insert: () => {
       const v = editor.view()
       if (!v || !isTexFile(editor.current())) return null

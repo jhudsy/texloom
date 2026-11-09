@@ -7,7 +7,7 @@ const de: Catalog = {
   '+ Folder': '+ Ordner',
   'Upload files into the selected folder': 'Dateien in den ausgewählten Ordner hochladen',
   'Upload': 'Hochladen',
-  'Drag to move · drop files from your computer onto a folder to upload · ★ = main file': 'Ziehen zum Verschieben · Dateien vom Computer auf einen Ordner ziehen zum Hochladen · ★ = Hauptdatei',
+  'Drag to move · drop files or folders from your computer onto a folder to upload · ★ = main file': 'Ziehen zum Verschieben · Dateien oder Ordner vom Computer auf einen Ordner ziehen zum Hochladen · ★ = Hauptdatei',
   'Adding to: {{folder}}/': 'Hinzufügen zu: {{folder}}/',
   '{{action}}: {{path}}': '{{action}}: {{path}}',
   'Preview': 'Vorschau',
@@ -29,6 +29,11 @@ const de: Catalog = {
   'Delete the folder {{path}} and the {{n}} files in it? (It stays in history.)': ['Ordner {{path}} und die darin enthaltene Datei löschen? (Bleibt im Verlauf erhalten.)', 'Ordner {{path}} und die {{n}} darin enthaltenen Dateien löschen? (Bleibt im Verlauf erhalten.)'],
   'Delete the folder {{path}}? (It stays in history.)': 'Ordner {{path}} löschen? (Bleibt im Verlauf erhalten.)',
   'Skipped {{name}}: unsupported name.': '{{name}} übersprungen: Name nicht unterstützt.',
+  'Reading the folder…': 'Ordner wird gelesen …',
+  'Adding files… ({{done}} of {{total}})': 'Dateien werden hinzugefügt … ({{done}} von {{total}})',
+  '{{n}} files already exist and will be replaced: {{files}}. The old versions stay in History.': ['{{n}} Datei ist bereits vorhanden und wird ersetzt: {{files}}. Die alte Version bleibt im Verlauf.', '{{n}} Dateien sind bereits vorhanden und werden ersetzt: {{files}}. Die alten Versionen bleiben im Verlauf.'],
+  'This adds {{mb}} MB in {{n}} files. It counts towards your storage, and collaborators will have to download it.': ['Dadurch kommen {{mb}} MB in {{n}} Datei hinzu. Das zählt zu Ihrem Speicherplatz, und Mitwirkende müssen sie herunterladen.', 'Dadurch kommen {{mb}} MB in {{n}} Dateien hinzu. Das zählt zu Ihrem Speicherplatz, und Mitwirkende müssen sie herunterladen.'],
+  'Continue?': 'Fortfahren?',
 }
 
 export default de

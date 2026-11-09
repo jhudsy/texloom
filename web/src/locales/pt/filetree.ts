@@ -7,7 +7,7 @@ const pt: Catalog = {
   '+ Folder': '+ Pasta',
   'Upload files into the selected folder': 'Enviar arquivos para a pasta selecionada',
   'Upload': 'Enviar',
-  'Drag to move · drop files from your computer onto a folder to upload · ★ = main file': 'Arraste para mover · solte arquivos do seu computador em uma pasta para enviar · ★ = arquivo principal',
+  'Drag to move · drop files or folders from your computer onto a folder to upload · ★ = main file': 'Arraste para mover · solte arquivos ou pastas do seu computador em uma pasta para enviar · ★ = arquivo principal',
   'Adding to: {{folder}}/': 'Adicionando a: {{folder}}/',
   '{{action}}: {{path}}': '{{action}}: {{path}}',
   'Preview': 'Visualizar',
@@ -29,6 +29,11 @@ const pt: Catalog = {
   'Delete the folder {{path}} and the {{n}} files in it? (It stays in history.)': ['Excluir a pasta {{path}} e o arquivo dentro dela? (Ela continua no histórico.)', 'Excluir a pasta {{path}} e os {{n}} arquivos dentro dela? (Ela continua no histórico.)'],
   'Delete the folder {{path}}? (It stays in history.)': 'Excluir a pasta {{path}}? (Ela continua no histórico.)',
   'Skipped {{name}}: unsupported name.': '{{name}} ignorado: nome não permitido.',
+  'Reading the folder…': 'Lendo a pasta…',
+  'Adding files… ({{done}} of {{total}})': 'Adicionando arquivos… ({{done}} de {{total}})',
+  '{{n}} files already exist and will be replaced: {{files}}. The old versions stay in History.': ['{{n}} arquivo já existe e será substituído: {{files}}. A versão antiga continua no Histórico.', '{{n}} arquivos já existem e serão substituídos: {{files}}. As versões antigas continuam no Histórico.'],
+  'This adds {{mb}} MB in {{n}} files. It counts towards your storage, and collaborators will have to download it.': ['Isto adiciona {{mb}} MB em {{n}} arquivo. Conta para o seu armazenamento, e os colaboradores terão de baixá-lo.', 'Isto adiciona {{mb}} MB em {{n}} arquivos. Conta para o seu armazenamento, e os colaboradores terão de baixá-los.'],
+  'Continue?': 'Continuar?',
 }
 
 export default pt

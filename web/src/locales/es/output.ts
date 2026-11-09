@@ -11,6 +11,8 @@ const es: Catalog = {
   'Log': 'Registro',
   'Download the PDF': 'Descargar el PDF',
   'Compile (⌘S / Ctrl+S)': 'Compilar (⌘S / Ctrl+S)',
+  'Compile {{file}} (⌘S / Ctrl+S)': 'Compilar {{file}} (⌘S / Ctrl+S)',
+  'Your texloom helper compiles only the main file. Use “Set as main file”, or compile in this browser (⚙ Settings → Compiling).': 'Tu asistente texloom solo compila el archivo principal. Usa «Establecer como archivo principal» o compila en este navegador (⚙ Ajustes → Compilación).',
   'Compile': 'Compilar',
   'Show problems': 'Mostrar los problemas',
   'No source line for that spot.': 'No hay ninguna línea de fuente para ese punto.',

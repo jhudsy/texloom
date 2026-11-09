@@ -194,13 +194,16 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **Offline:** after the first visit the app (and, after one compile, the TeX engine) works
   offline; browsers offer to install it as an app.
 - **Files:** the tree has folders. New files and folders go into the selected folder,
-  you can drag to move, and dropping files from your computer onto a folder uploads them
-  there.
+  you can drag to move, and dropping files or whole folders from your computer onto a folder uploads them
+  there (you're asked first if files would be replaced, or if it's a very large amount).
 - **Panes:** drag the dividers between the file list, the editor and the PDF/assistant
   panel; ☰ and ▥ hide the side panes.
 - **PDF in its own window:** **New window** above the PDF opens it in a separate window, for example
   on another screen. It updates when you compile, double-clicking it jumps to the source, and it
   stays in step if you reload the editor.
+- **Compiling another file:** **Compile** compiles the open file if it has its own `\documentclass`
+  (a figure or a separate document), and otherwise the main file; right-click a file to compile it.
+  Only the main file's PDF is shared with collaborators.
 - **PDF zoom:** − and + above the PDF change its size, and the percentage goes back to normal
   size; ⌘ or Ctrl + scroll, or pinching on a trackpad, does the same. The zoom is remembered.
 - **Pages and printing:** the box above the PDF shows the current page; type a number and press

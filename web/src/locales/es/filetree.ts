@@ -7,7 +7,7 @@ const es: Catalog = {
   '+ Folder': '+ Carpeta',
   'Upload files into the selected folder': 'Subir archivos a la carpeta seleccionada',
   'Upload': 'Subir',
-  'Drag to move · drop files from your computer onto a folder to upload · ★ = main file': 'Arrastra para mover · suelta archivos de tu ordenador sobre una carpeta para subirlos · ★ = archivo principal',
+  'Drag to move · drop files or folders from your computer onto a folder to upload · ★ = main file': 'Arrastra para mover · suelta archivos o carpetas de tu ordenador sobre una carpeta para subirlos · ★ = archivo principal',
   'Adding to: {{folder}}/': 'Añadiendo a: {{folder}}/',
   '{{action}}: {{path}}': '{{action}}: {{path}}',
   'Preview': 'Vista previa',
@@ -29,6 +29,11 @@ const es: Catalog = {
   'Delete the folder {{path}} and the {{n}} files in it? (It stays in history.)': ['¿Eliminar la carpeta {{path}} y el archivo que contiene? (Se conserva en el historial).', '¿Eliminar la carpeta {{path}} y los {{n}} archivos que contiene? (Se conserva en el historial).'],
   'Delete the folder {{path}}? (It stays in history.)': '¿Eliminar la carpeta {{path}}? (Se conserva en el historial).',
   'Skipped {{name}}: unsupported name.': 'Se omitió {{name}}: nombre no admitido.',
+  'Reading the folder…': 'Leyendo la carpeta…',
+  'Adding files… ({{done}} of {{total}})': 'Añadiendo archivos… ({{done}} de {{total}})',
+  '{{n}} files already exist and will be replaced: {{files}}. The old versions stay in History.': ['{{n}} archivo ya existe y se sustituirá: {{files}}. La versión anterior se conserva en el Historial.', '{{n}} archivos ya existen y se sustituirán: {{files}}. Las versiones anteriores se conservan en el Historial.'],
+  'This adds {{mb}} MB in {{n}} files. It counts towards your storage, and collaborators will have to download it.': ['Esto añade {{mb}} MB en {{n}} archivo. Cuenta para tu almacenamiento y los colaboradores tendrán que descargarlo.', 'Esto añade {{mb}} MB en {{n}} archivos. Cuenta para tu almacenamiento y los colaboradores tendrán que descargarlos.'],
+  'Continue?': '¿Continuar?',
 }
 
 export default es

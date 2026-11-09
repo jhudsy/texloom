@@ -6,7 +6,7 @@ import { h, saveFile, verticalResizer } from './dom'
 import { PdfView } from './pdfview'
 import { pdfWindowLink } from './pdfwindow'
 import { compileInBrowser, defaultEngine, browserCompileAvailable, type Progress, CompileStopped, stopBrowserCompile } from './compile'
-import { allFiles, fileBase, mainFile } from './projectfiles'
+import { allFiles, fileBase, mainFile, isDocument } from './projectfiles'
 import { parseLog, type Problem } from './latexlog'
 import { SyncTex } from './synctex'
 import { t, tn, locale } from './i18n'
@@ -19,7 +19,7 @@ const english: typeof t = (en, vars) => (vars ? en.replace(/\{\{(\w+)\}\}/g, (m,
 export interface Output {
   pane: HTMLElement
   compileBtn: HTMLButtonElement
-  compile(interactive?: boolean): Promise<CompileOut>
+  compile(interactive?: boolean, fromScratch?: boolean, file?: string): Promise<CompileOut>
   lastLog(): string
   pdfView: PdfView
   problems(): Problem[]
@@ -32,7 +32,7 @@ export interface Output {
 }
 
 export function createOutput(r: Replica, writable: boolean, device: () => Device, userName: () => string,
-  goto: (file: string, line: number, flash?: boolean) => void): Output {
+  goto: (file: string, line: number, flash?: boolean) => void, selected: () => string | null): Output {
   const pdfView = new PdfView()
   const pdfWindow = pdfWindowLink(r.keys.project, () => String(r.meta.get('name') ?? ''), (at) => pdfView.onPick?.(at.page, at.x, at.y))
   const info = h('div', { class: 'pdfinfo muted' }, t('No PDF yet.'))
@@ -65,7 +65,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     try { localStorage.setItem(LOG_KEY, open ? '1' : '') } catch {}
   }
   const logBtn = h('button', { title: t('Show/hide the compile log'), onclick: () => setLogOpen(!!logBox.hidden) }, t('Log'))
-  const dlBtn = h('button', { title: t('Download the PDF'), disabled: true, onclick: () => lastPdf && saveFile(`${fileBase(r)}.pdf`, lastPdf, 'application/pdf') }, '⤓ PDF')
+  const dlBtn = h('button', { title: t('Download the PDF'), disabled: true, onclick: () => lastPdf && saveFile(`${pdfName ?? fileBase(r)}.pdf`, lastPdf, 'application/pdf') }, '⤓ PDF')
   const compileBtn = h('button', { class: 'primary', title: t('Compile (⌘S / Ctrl+S)'), onclick: (e: Event) => {
     if (stopRunning) { e.stopImmediatePropagation(); stopRunning() } else compile() // stopping shouldn't change what's on show
   } }, t('Compile')) as HTMLButtonElement
@@ -81,6 +81,11 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const windowBtn = h('button', { class: 'to-window wide-only', title: t('Open the PDF in a separate window, for example on another screen. It updates when you compile.'), onclick: () => {
     if (!pdfWindow.open()) info.textContent = t('Your browser blocked the new window: allow pop-ups for this site and try again.')
   } }, `↗ ${t('New window')}`)
+  compileBtn.addEventListener('pointerenter', () => { // says which file, when it isn't the main one
+    if (stopRunning || device().compile === 'local') return
+    const file = target()
+    compileBtn.title = file && file !== mainFile(r) ? t('Compile {{file}} (⌘S / Ctrl+S)', { file }) : t('Compile (⌘S / Ctrl+S)')
+  })
   const summary = h('button', { class: 'psummary', title: t('Show problems'), hidden: true, onclick: () => { setLogOpen(true); showLogView(false) } })
 
   const pane = h('div', { class: 'pane output' },
@@ -120,6 +125,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     for (const fn of onProblems) fn()
   }
 
+  let pdfName: string | null = null // the file name for downloading a PDF that isn't the main document's
   function show(pdf: Uint8Array | null, log: string, text: string, ok: boolean, stx?: Uint8Array | null) {
     if (stx !== undefined) { synctexBytes = stx; synctex = null }
     if (pdf) {
@@ -141,6 +147,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
 
   // collaborators' (or the folder helper's) latest published output
   const renderLatest = async () => {
+    pdfName = null
     const o = r.out.get('latest')
     if (!o) return
     const dec = new TextDecoder()
@@ -172,17 +179,20 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   /** Compile per this device's setting. `interactive` shows alerts (button, ⌘S) instead of returning them (assistant).
    *  A failure message is a function of the translator: alerts are in the interface language, while the
    *  returned log (read by the assistant) stays in English. */
-  async function compile(interactive = true, fromScratch = false): Promise<CompileOut> {
+  async function compile(interactive = true, fromScratch = false, file?: string): Promise<CompileOut> {
     const fail: Fail = (msg) => {
       if (interactive) alert(msg(t))
       return { ok: false, log: msg(english) }
     }
     const d = device()
     if (d.compile === 'none') return interactive ? fail((t) => t('Compiling is turned off on this device (⚙ Settings → Compiling).')) : null
-    const main = mainFile(r)
+    const main = target(interactive ? file : undefined)
     if (!main) return fail((t) => t('No .tex file with \\documentclass found.'))
     if (stopRunning) return fail((t) => t('A compile is already running; try again in a moment.'))
-    if (d.compile === 'local') return compileLocally(fail, fromScratch)
+    if (d.compile === 'local') {
+      if (file && file !== mainFile(r)) return fail((t) => t('Your texloom helper compiles only the main file. Use “Set as main file”, or compile in this browser (⚙ Settings → Compiling).'))
+      return compileLocally(fail, fromScratch)
+    }
     if (!(await browserCompileAvailable())) {
       return fail((t) => t('In-browser compilation is not installed on this server.\n\nChoose “Compile with my own TeX” in ⚙ Settings and run:\n  texloom run <folder> --compile'))
     }
@@ -194,8 +204,10 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       const res = await compileInBrowser(files, main,
         { engine: r.meta.get('engine') || defaultEngine(files), bib: r.meta.get('bib') || 'auto' }, (p) => showProgress(p))
       const secs = ((performance.now() - t0) / 1000).toFixed(1)
-      show(res.pdf, res.log, `${res.pdf ? '✓' : t('✗ errors')} · ${t('in browser')} · ${t('{{secs}}s', { secs })}`, !!res.pdf, res.synctex)
-      if (writable && res.pdf) { // publish so collaborators see it without compiling
+      const another = main !== mainFile(r) // shown here only: collaborators keep the main document
+      pdfName = another ? main.slice(main.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '') : null
+      show(res.pdf, res.log, `${res.pdf ? '✓' : t('✗ errors')} · ${another ? `${main} · ` : ''}${t('in browser')} · ${t('{{secs}}s', { secs })}`, !!res.pdf, res.synctex)
+      if (writable && res.pdf && !another) { // publish so collaborators see it without compiling
         const [pdfId, logId, stxId] = await Promise.all([r.putBlob(res.pdf, 'output'), r.putBlob(new TextEncoder().encode(res.log), 'output'),
           res.synctex ? r.putBlob(res.synctex, 'output') : null])
         r.out.set('latest', { pdf: pdfId, log: logId, ...(stxId ? { synctex: stxId } : {}), ok: true, by: t('{{name}} (browser)', { name: userName() }), at: Date.now() / 1000, main })
@@ -236,6 +248,12 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     if (!o || o.at === before) return fail((t) => t('The local helper did not finish compiling within 60 s.'))
     const log = o.log ? new TextDecoder().decode(await r.getBlob(o.log)) : ''
     return { ok: !!o.ok, log }
+  }
+
+  /** What a compile applies to: `file`, else the open file if it is a document in its own right, else the main file. */
+  function target(file?: string): string | null {
+    const wanted = file ?? selected()
+    return isDocument(r, wanted) ? wanted : mainFile(r)
   }
 
   // optional auto-compile after a pause in typing (local edits only)

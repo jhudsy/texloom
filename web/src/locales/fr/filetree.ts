@@ -6,7 +6,7 @@ const fr: Catalog = {
   '+ Folder': '+ Dossier',
   'Upload files into the selected folder': 'Ajouter des fichiers de votre ordinateur dans le dossier sélectionné',
   'Upload': 'Ajouter des fichiers',
-  'Drag to move · drop files from your computer onto a folder to upload · ★ = main file': 'Glissez pour déplacer · déposez des fichiers de votre ordinateur sur un dossier pour les ajouter · ★ = fichier principal',
+  'Drag to move · drop files or folders from your computer onto a folder to upload · ★ = main file': 'Glissez pour déplacer · déposez des fichiers ou dossiers de votre ordinateur sur un dossier pour les ajouter · ★ = fichier principal',
   'Adding to: {{folder}}/': 'Ajout dans : {{folder}}/',
   '{{action}}: {{path}}': '{{action}} : {{path}}',
   'Preview': 'Aperçu',
@@ -28,5 +28,10 @@ const fr: Catalog = {
   'Delete the folder {{path}} and the {{n}} files in it? (It stays in history.)': ['Supprimer le dossier {{path}} et le fichier qu’il contient ? (Il reste dans l’historique.)', 'Supprimer le dossier {{path}} et les {{n}} fichiers qu’il contient ? (Il reste dans l’historique.)'],
   'Delete the folder {{path}}? (It stays in history.)': 'Supprimer le dossier {{path}} ? (Il reste dans l’historique.)',
   'Skipped {{name}}: unsupported name.': '{{name}} ignoré : nom non pris en charge.',
+  'Reading the folder…': 'Lecture du dossier…',
+  'Adding files… ({{done}} of {{total}})': 'Ajout des fichiers… ({{done}} sur {{total}})',
+  '{{n}} files already exist and will be replaced: {{files}}. The old versions stay in History.': ['{{n}} fichier existe déjà et sera remplacé : {{files}}. L’ancienne version reste dans l’historique.', '{{n}} fichiers existent déjà et seront remplacés : {{files}}. Les anciennes versions restent dans l’historique.'],
+  'This adds {{mb}} MB in {{n}} files. It counts towards your storage, and collaborators will have to download it.': ['Cela ajoute {{mb}} Mo en {{n}} fichier. Cela compte dans votre espace de stockage, et les collaborateurs devront le télécharger.', 'Cela ajoute {{mb}} Mo en {{n}} fichiers. Cela compte dans votre espace de stockage, et les collaborateurs devront les télécharger.'],
+  'Continue?': 'Continuer ?',
 }
 export default fr

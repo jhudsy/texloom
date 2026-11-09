@@ -4,7 +4,7 @@ import * as Y from 'yjs'
 import { unzipSync } from 'fflate'
 import type { Replica } from './replica'
 import { dialog, h } from './dom'
-import { cleanPath, detectMain, isText, putBinary, putText } from './projectfiles'
+import { cleanPath, confirmAdding, detectMain, isText, putBinary, putText } from './projectfiles'
 import { latexTitle } from './projects'
 import { t, tn } from './i18n'
 
@@ -209,8 +209,11 @@ const JUNK = /(^|\/)(__MACOSX|\.DS_Store|Thumbs\.db|\.git|\.svn|\.texloom)(\/|$)
 const BUILD = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex\.gz|synctex|blg|bcf|run\.xml|nav|snm|vrb|xdv|dvi)$/i
 const TEXTISH = /\.(tex|bib|bbl|sty|cls|bst|cfg|def|clo|ltx|txt|md|dtx|ins|tikz|pgf|csv|dat)$/i
 
+/** Things a folder or archive holds that aren't part of a LaTeX project. */
+export const isJunk = (path: string) => JUNK.test(path) || BUILD.test(path)
+
 /** Unpack and add files to the project. Returns the number added and skipped. */
-export async function importEntries(r: Replica, entries: Record<string, Uint8Array>, opts: { replaceAll?: boolean } = {}): Promise<{ added: number; skipped: string[] }> {
+export async function importEntries(r: Replica, entries: Record<string, Uint8Array>, opts: { replaceAll?: boolean } = {}): Promise<{ added: number; skipped: string[] } | null> {
   let names = Object.keys(entries).filter((n) => !n.endsWith('/') && !JUNK.test(n))
   // a single top-level folder (GitHub "repo-main/", some Overleaf exports) is dropped
   const tops = new Set(names.map((n) => n.split('/')[0]))
@@ -223,6 +226,8 @@ export async function importEntries(r: Replica, entries: Record<string, Uint8Arr
     if (path.toLowerCase().endsWith('.pdf') && names.some((m) => m.slice(strip) === path.replace(/\.pdf$/i, '.tex'))) { skipped.push(n); continue } // compiled output
     files.push({ path, data: entries[n] })
   }
+  // Replacing everything was asked for by ticking the box, so only the size is worth asking about
+  if (!confirmAdding(r, files.map((f) => f.path), files.reduce((sum, f) => sum + f.data.length, 0), !opts.replaceAll)) return null
   const blobs = new Map<string, string>()
   const texts = new Map<string, string>()
   for (const f of files) {
@@ -299,7 +304,8 @@ export function importDialog(r: Replica, opts: { onDone?: () => void; fresh?: bo
     busy(true); msg.className = 'muted small'; msg.textContent = t('Reading {{name}}…', { name: f.name })
     try {
       const entries = unzipSync(new Uint8Array(await f.arrayBuffer()))
-      finish(await importEntries(r, entries, { replaceAll: replace.checked }), f.name)
+      const added = await importEntries(r, entries, { replaceAll: replace.checked })
+      if (added) finish(added, f.name); else msg.textContent = ''
     } catch (e) { fail(e instanceof Error && /invalid zip|unexpected EOF/i.test(e.message) ? t('That isn’t a readable .zip file.') : e) } finally { busy(false) }
   })
   async function fromArxiv() {
@@ -308,7 +314,9 @@ export function importDialog(r: Replica, opts: { onDone?: () => void; fresh?: bo
     busy(true); msg.className = 'muted small'; msg.textContent = t('Fetching arXiv:{{id}}…', { id })
     try {
       const entries = unzipSync(await fetchArxivZip(id))
-      finish(await importEntries(r, entries, { replaceAll: replace.checked }), `arXiv:${id}`)
+      const added = await importEntries(r, entries, { replaceAll: replace.checked })
+      if (!added) { msg.textContent = ''; return }
+      finish(added, `arXiv:${id}`)
       if (!r.meta.get('name') || r.meta.get('name') === 'Untitled project') r.meta.set('name', `arXiv ${id}`)
     } catch (e) { fail(e) } finally { busy(false) }
   }

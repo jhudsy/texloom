@@ -5,7 +5,8 @@ import * as Y from 'yjs'
 import type { Replica } from './replica'
 import { h, saveFile } from './dom'
 import { t, tn } from './i18n'
-import { allFiles, allFolders, cleanPath, deletePath, exists, IMAGE_RE, mainFile, movePath, newFolder, putFile } from './projectfiles'
+import { allFiles, allFolders, cleanPath, confirmAdding, deletePath, exists, IMAGE_RE, isDocument, mainFile, movePath, newFolder, putFile } from './projectfiles'
+import { isJunk } from './templates'
 
 export interface FileTree {
   el: HTMLElement
@@ -21,6 +22,7 @@ const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name)
 
 export interface FileTreeMenu {
   preview(path: string): void
+  compile(path: string): void
   /** Put LaTeX at the editor's cursor; absent when no .tex file is open. */
   insert(): ((text: string) => void) | null
 }
@@ -33,7 +35,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
   const saveCollapsed = () => { try { localStorage.setItem(KEY, JSON.stringify([...collapsed])) } catch {} }
 
   const list = h('ul', { class: 'files', role: 'tree' })
-  const uploadIn = h('input', { type: 'file', multiple: true, hidden: true, onchange: (e: any) => { upload([...e.target.files], folder); e.target.value = '' } })
+  const uploadIn = h('input', { type: 'file', multiple: true, hidden: true, onchange: (e: any) => { upload([...e.target.files].map((file) => ({ file, rel: file.name })), [], folder); e.target.value = '' } })
   const where = h('div', { class: 'where muted small' })
   const el = h('div', { class: 'filetree' },
     writable ? h('div', { class: 'tools' },
@@ -43,7 +45,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
       uploadIn) : null,
     where,
     list,
-    h('div', { class: 'hint muted' }, writable ? t('Drag to move · drop files from your computer onto a folder to upload · ★ = main file') : ''),
+    h('div', { class: 'hint muted' }, writable ? t('Drag to move · drop files or folders from your computer onto a folder to upload · ★ = main file') : ''),
   )
 
   // ---- rendering ------------------------------------------------------------
@@ -88,6 +90,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     return menuItems(
       [t('Open'), () => openFile(path)],
       isPreviewable(path) && [t('Preview'), () => menu.preview(path)],
+      isDocument(r, path) && [t('Compile'), () => menu.compile(path)],
       insert && latex !== null && !/[{}\\%#]/.test(path) && [t('Insert {{latex}}', { latex }), () => insert(latex)],
       writable && !isBin && path.endsWith('.tex') && [t('Set as main file'), () => r.meta.set('main', path)],
       [t('Download'), () => { download(path).catch((e) => alert(String(e))) }],
@@ -98,7 +101,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
 
   function row(path: string, depth: number, isDir: boolean, open: boolean, isMain: boolean): HTMLElement {
     const isBin = r.bin.has(path)
-    const icon = isDir ? (open ? '▾' : '▸') : isMain ? '★' : isBin ? '▣' : '¶'
+    const icon = isDir ? '' : isMain ? '★' : isBin ? '▣' : '¶' // a folder's triangle is drawn in style.css
     const li = h('li', {
       class: `${!isDir && path === current ? 'active' : ''} ${isDir && path === folder ? 'folder-sel' : ''} ${isDir ? 'dir' : ''}`,
       role: 'treeitem', 'aria-expanded': isDir ? String(open) : null, title: path,
@@ -112,7 +115,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
         } else openFile(path)
       },
     },
-      h('span', { class: 'icon' }, icon),
+      h('span', { class: isDir ? 'icon tri' : 'icon' }, icon),
       h('span', { class: 'path' }, base(path)))
     li.addEventListener('contextmenu', (e) => {
       e.preventDefault()
@@ -154,8 +157,34 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
       if (current === moved) current = to
       return
     }
+    // directories can only be read from these, and only during the drop event itself
+    const entries = [...(e.dataTransfer?.items ?? [])].filter((i) => i.kind === 'file').map((i) => i.webkitGetAsEntry?.()).filter(Boolean) as FileSystemEntry[]
+    if (entries.some((x) => x.isDirectory)) { addEntries(entries, dir).catch((err) => alert(String(err))); return }
     const files = [...(e.dataTransfer?.files ?? [])]
-    if (files.length) upload(files, dir)
+    if (files.length) upload(files.map((file) => ({ file, rel: file.name })), [], dir)
+  }
+
+  /** Everything under dropped files and folders, with paths starting at what was dropped. */
+  async function addEntries(entries: FileSystemEntry[], dir: string) {
+    const files: { file: File; rel: string }[] = [], dirs: string[] = []
+    let skipped = 0
+    const walk = async (entry: FileSystemEntry, rel: string): Promise<void> => {
+      if (isJunk(rel)) { skipped++; return }
+      if (entry.isFile) {
+        files.push({ file: await new Promise<File>((res, rej) => (entry as FileSystemFileEntry).file(res, rej)), rel })
+        return
+      }
+      dirs.push(rel)
+      const reader = (entry as FileSystemDirectoryEntry).createReader()
+      for (;;) { // each call gives only some of a folder's entries (100 in Chrome), then none
+        const batch = await new Promise<FileSystemEntry[]>((res, rej) => reader.readEntries(res, rej))
+        if (!batch.length) break
+        for (const child of batch) await walk(child, `${rel}/${child.name}`)
+      }
+    }
+    where.textContent = t('Reading the folder…')
+    for (const entry of entries) await walk(entry, entry.name)
+    await upload(files, dirs, dir, skipped)
   }
 
   function openFile(path: string | null) {
@@ -213,13 +242,20 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     if (folder === path || folder.startsWith(path + '/')) folder = parent(path)
   }
 
-  async function upload(files: File[], dir: string) {
-    for (const f of files) {
-      const rel = (f as any).webkitRelativePath || f.name
+  /** Add files, and any folders (so that empty ones arrive too). `skipped`: already left out. */
+  async function upload(files: { file: File; rel: string }[], dirs: string[], dir: string, skipped = 0) {
+    const refused: string[] = []
+    if (!confirmAdding(r, files.map((f) => cleanPath(join(dir, f.rel))).filter((p): p is string => !!p), files.reduce((sum, f) => sum + f.file.size, 0))) { render(); return }
+    for (const d of dirs) { const path = cleanPath(join(dir, d)); if (path && !exists(r, path)) newFolder(r, path) }
+    for (const [i, { file, rel }] of files.entries()) {
+      if (files.length > 1) where.textContent = t('Adding files… ({{done}} of {{total}})', { done: i + 1, total: files.length })
       const path = cleanPath(join(dir, rel))
-      if (!path) { alert(t('Skipped {{name}}: unsupported name.', { name: f.name })); continue }
-      await putFile(r, path, new Uint8Array(await f.arrayBuffer()))
+      if (!path) { refused.push(rel); continue }
+      await putFile(r, path, new Uint8Array(await file.arrayBuffer()))
     }
+    render()
+    if (refused.length === 1 && !skipped) alert(t('Skipped {{name}}: unsupported name.', { name: refused[0] }))
+    else if (refused.length || skipped) alert(tn(refused.length + skipped, 'Skipped {{n}} (build files or unsupported names).', 'Skipped {{n}} (build files or unsupported names).'))
   }
 
   r.files.observe(render); r.bin.observe(render); r.dirs.observe(render); r.meta.observe(render)

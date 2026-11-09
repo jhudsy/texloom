@@ -7,7 +7,7 @@ const zh: Catalog = {
   '+ Folder': '+ 文件夹',
   'Upload files into the selected folder': '将文件上传到所选文件夹',
   'Upload': '上传',
-  'Drag to move · drop files from your computer onto a folder to upload · ★ = main file': '拖动可移动 · 将电脑上的文件拖到文件夹即可上传 · ★ = 主文件',
+  'Drag to move · drop files or folders from your computer onto a folder to upload · ★ = main file': '拖动可移动 · 将电脑上的文件或文件夹拖到文件夹即可上传 · ★ = 主文件',
   'Adding to: {{folder}}/': '添加到：{{folder}}/',
   '{{action}}: {{path}}': '{{action}}：{{path}}',
   'Preview': '预览',
@@ -29,6 +29,11 @@ const zh: Catalog = {
   'Delete the folder {{path}} and the {{n}} files in it? (It stays in history.)': { other: '删除文件夹 {{path}} 及其中的 {{n}} 个文件？（仍保留在历史记录中。）' },
   'Delete the folder {{path}}? (It stays in history.)': '删除文件夹 {{path}}？（仍保留在历史记录中。）',
   'Skipped {{name}}: unsupported name.': '已跳过 {{name}}：不支持的名称。',
+  'Reading the folder…': '正在读取文件夹…',
+  'Adding files… ({{done}} of {{total}})': '正在添加文件…（{{done}}/{{total}}）',
+  '{{n}} files already exist and will be replaced: {{files}}. The old versions stay in History.': { other: '{{n}} 个文件已存在，将被替换：{{files}}。旧版本保留在历史记录中。' },
+  'This adds {{mb}} MB in {{n}} files. It counts towards your storage, and collaborators will have to download it.': { other: '这将添加 {{n}} 个文件，共 {{mb}} MB。这会计入你的存储空间，协作者也需要下载这些文件。' },
+  'Continue?': '是否继续？',
 }
 
 export default zh

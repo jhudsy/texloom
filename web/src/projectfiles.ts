@@ -5,6 +5,7 @@ import * as Y from 'yjs'
 import { zipSync, type Zippable } from 'fflate'
 import type { Replica } from './replica'
 import { setText } from './diff'
+import { t, tn } from './i18n'
 
 export const IMAGE_RE = /\.(png|jpe?g|gif|svg|webp|pdf|eps|ps|bmp|tiff?)$/i
 
@@ -45,6 +46,10 @@ export function detectMain(paths: Iterable<string>, textOf: (p: string) => strin
     .sort((a, b) => Number(a !== 'main.tex') - Number(b !== 'main.tex') || depth(a) - depth(b) || (a < b ? -1 : a > b ? 1 : 0))
   return tex.find((p) => textOf(p).includes('\\documentclass')) ?? null
 }
+
+/** Whether a file can be compiled by itself. An \input chapter has no \documentclass of its own. */
+export const isDocument = (r: Replica, path: string | null | undefined): path is string =>
+  isTexFile(path) && r.files.has(path!) && /^[^%\n]*\\documentclass/m.test(r.files.get(path!)!.toString())
 
 /** The file compiled as the document: the chosen one, else detectMain(). */
 export function mainFile(r: Replica): string | null {
@@ -94,6 +99,22 @@ const under = (p: string, folder: string) => p.startsWith(folder + '/')
 
 export function newFolder(r: Replica, path: string) {
   r.dirs.set(path, true)
+}
+
+const LARGE_BYTES = 50 * 1024 * 1024, LARGE_FILES = 300
+
+/** Before adding files: ask if some would be replaced, or if there is a very large amount. False if not to go ahead. */
+export function confirmAdding(r: Replica, paths: string[], bytes: number, replacing = true): boolean {
+  const lines: string[] = []
+  const taken = replacing ? paths.filter((p) => r.files.has(p) || r.bin.has(p)) : []
+  if (taken.length) {
+    const files = taken.slice(0, 5).join(', ') + (taken.length > 5 ? ', …' : '')
+    lines.push(tn(taken.length, '{{n}} file already exists and will be replaced: {{files}}. The old version stays in History.', '{{n}} files already exist and will be replaced: {{files}}. The old versions stay in History.', { files }))
+  }
+  if (bytes >= LARGE_BYTES || paths.length >= LARGE_FILES) {
+    lines.push(tn(paths.length, 'This adds {{mb}} MB in {{n}} file. It counts towards your storage, and collaborators will have to download it.', 'This adds {{mb}} MB in {{n}} files. It counts towards your storage, and collaborators will have to download it.', { mb: Math.ceil(bytes / 1048576) }))
+  }
+  return !lines.length || confirm(`${lines.join('\n\n')}\n\n${t('Continue?')}`)
 }
 
 /** Move/rename a file or a folder (with everything in it). */

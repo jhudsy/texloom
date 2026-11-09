@@ -68,7 +68,10 @@ aside .tools { display: flex; gap: 6px; padding: 8px; flex-wrap: wrap; }
 .files li { display: flex; align-items: center; gap: 6px; padding: 3px 10px; cursor: pointer; white-space: nowrap; }
 .files li:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
 .files li.active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
-.files .icon { width: 1em; color: var(--muted); text-align: center; }
+.files .icon { width: 1.3em; flex: none; color: var(--muted); text-align: center; line-height: 1; }
+.files li.dir .icon { width: 18px; }
+.files .icon.tri::before { content: ''; display: inline-block; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; vertical-align: middle; }
+.files li[aria-expanded="true"] .icon.tri::before { transform: rotate(90deg); }
 .files .path { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .files .acts { display: none; gap: 2px; }
 .files li:hover .acts { display: flex; }
