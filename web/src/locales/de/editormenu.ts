@@ -6,6 +6,7 @@ const de: Catalog = {
   'Suggest a change…': 'Änderung vorschlagen …',
   'Search the project': 'Projekt durchsuchen',
   'Ask the assistant': 'Assistent fragen',
+  'Insert a symbol…': 'Symbol einfügen…',
   'Go to label {{key}}': 'Zum Label {{key}} springen',
   'Find uses of {{key}}': 'Verwendungen von {{key}} finden',
   'Go to bibliography entry {{key}}': 'Zum Literatureintrag {{key}} springen',

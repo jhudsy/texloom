@@ -14,14 +14,13 @@ const de: Catalog = {
   'Search symbols…': 'Symbole suchen …',
   'Recent': 'Zuletzt verwendet',
   'Symbols': 'Symbole',
-  'Close': 'Schließen',
   'A dot means the symbol needs a package, which is added to your document when you use it.': 'Ein Punkt bedeutet, dass das Symbol ein Paket benötigt, das beim Verwenden zu Ihrem Dokument hinzugefügt wird.',
   'Open a .tex file first.': 'Öffnen Sie zuerst eine .tex-Datei.',
   'Added {{line}} to {{main}}.': '{{line}} zu {{main}} hinzugefügt.',
   'This symbol needs {{line}} in your preamble.': 'Dieses Symbol benötigt {{line}} in Ihrer Präambel.',
   '{{cmd}} (needs {{line}})': '{{cmd}} (benötigt {{line}})',
   'No symbols found.': 'Keine Symbole gefunden.',
-  'Insert a symbol at the cursor': 'Symbol am Cursor einfügen',
+  'Insert a symbol at the cursor (⌘⌥S / Ctrl+Alt+S)': 'Symbol am Cursor einfügen (⌘⌥S / Strg+Alt+S)',
 }
 
 export default de

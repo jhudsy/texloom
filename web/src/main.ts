@@ -376,6 +376,7 @@ async function openProject(keys: Keys) {
       review: addReview,
       showInPdf: () => syncToPdf(),
       search: (text) => revealSearch(text),
+      symbols: () => showSymbols(),
       ask: () => { layout.reveal('right'); showTab('ai') },
       file: () => editor.current(),
       ...menuTargets(r, index, gotoSource, (path) => { layout.showEditor(); tree.open(path) }),
@@ -385,6 +386,7 @@ async function openProject(keys: Keys) {
     mathPreview: () => device.mathPreview,
     checks: () => device.checks,
     onReview: addReview,
+    onSymbols: () => showSymbols(),
   })
   const tree = createFileTree(r, writable, (p) => {
     editor.open(p)
@@ -410,11 +412,6 @@ async function openProject(keys: Keys) {
     }),
   }, t('+ Reference')))
 
-  if (writable) {
-    const palette = createSymbolPalette({ r, view: () => editor.view(), file: () => editor.current() })
-    tree.el.querySelector('.tools')?.append(h('button', { title: t('Insert a symbol at the cursor'), onclick: () => palette.toggle() }, `Ω ${t('Symbols')}`))
-  }
-
   /** Jump to a collaborator: open their file at their cursor. */
   function jumpTo(clientId: number) {
     const st = r.awareness.getStates().get(clientId)
@@ -431,6 +428,7 @@ async function openProject(keys: Keys) {
   }
   function addReview(kind: 'comment' | 'suggestion') { if (writable) { openReview(); review()?.add(kind) } }
   function revealSearch(text?: string) { layout.reveal('left'); showLeft('search'); search.focus(text) }
+  function showSymbols() { layout.reveal('left'); showLeft('symbols') }
   function syncToPdf() {
     const c = editor.context(), v = editor.view()
     if (!c?.file || !v) return
@@ -524,27 +522,31 @@ async function openProject(keys: Keys) {
     try { localStorage.setItem('texloom.tab', t) } catch {}
   }
 
-  // left-hand tabs: files, search across files, outline with word count
-  type LeftTab = 'files' | 'search' | 'outline'
+  // left-hand tabs: files, search across files, outline with word count, symbols
+  type LeftTab = 'files' | 'search' | 'outline' | 'symbols'
   const search = createSearchPanel(r, writable, revealAt)
   const outlinePanel = createOutlinePanel(r, revealAt, () => {
     const s = editor.selection()
     return s && s.to > s.from ? countWords(blankNonProse(s.text)) : null
   })
+  const palette = createSymbolPalette({ r, view: () => editor.view(), file: () => editor.current(), inserted: () => layout.closeDrawer() })
   const leftPanes: Record<LeftTab, HTMLElement> = {
     files: h('div', { class: 'lpane' }, tree.el),
     search: h('div', { class: 'lpane', hidden: true }, search.el),
     outline: h('div', { class: 'lpane', hidden: true }, outlinePanel.el),
+    symbols: h('div', { class: 'lpane', hidden: true }, palette.el),
   }
   const leftBtns: Record<LeftTab, HTMLButtonElement> = {
     files: h('button', { class: 'tab active', onclick: () => showLeft('files') }, t('Files')),
     search: h('button', { class: 'tab', title: t('Search all files (⌘⇧F / Ctrl+Shift+F)'), onclick: () => showLeft('search') }, t('Search')),
     outline: h('button', { class: 'tab', title: t('Sections and word count'), onclick: () => showLeft('outline') }, t('Outline')),
+    symbols: h('button', { class: 'tab symtab', hidden: !writable, title: t('Insert a symbol at the cursor (⌘⌥S / Ctrl+Alt+S)'), 'aria-label': t('Symbols'), onclick: () => showLeft('symbols') }, 'Ω'),
   }
   function showLeft(t: LeftTab) {
     for (const k of Object.keys(leftPanes) as LeftTab[]) { leftPanes[k].hidden = k !== t; leftBtns[k].classList.toggle('active', k === t) }
     if (t === 'outline') outlinePanel.refresh()
     if (t === 'search') search.focus()
+    if (t === 'symbols') palette.refresh()
     try { localStorage.setItem('texloom.ltab', t) } catch {}
   }
 
@@ -696,7 +698,7 @@ async function openProject(keys: Keys) {
     mainEl,
   )
   mainEl.append(
-    h('aside', {}, h('div', { class: 'tabs' }, leftBtns.files, leftBtns.search, leftBtns.outline), leftPanes.files, leftPanes.search, leftPanes.outline),
+    h('aside', {}, h('div', { class: 'tabs' }, leftBtns.files, leftBtns.search, leftBtns.outline, leftBtns.symbols), leftPanes.files, leftPanes.search, leftPanes.outline, leftPanes.symbols),
     splitL,
     h('div', { class: 'editor-area' }, editor.el, writable ? latexKeys() : null),
     splitR,
@@ -714,7 +716,7 @@ async function openProject(keys: Keys) {
     rightBtn.setAttribute('aria-pressed', String(right))
   }
   const savedLeft = localStorage.getItem('texloom.ltab') as LeftTab | null
-  if (savedLeft === 'outline') showLeft('outline')
+  if (savedLeft === 'outline' || (savedLeft === 'symbols' && writable)) showLeft(savedLeft)
   const savedTab = localStorage.getItem('texloom.tab') as Tab | null
   if (savedTab && savedTab in panes && savedTab !== 'pdf') showTab(savedTab)
   tree.start()

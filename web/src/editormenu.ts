@@ -58,6 +58,7 @@ export interface EditorMenuHost {
   review(kind: 'comment' | 'suggestion'): void
   showInPdf(): void
   search(text: string): void
+  symbols(): void
   ask(): void
   /** What to do for a target, or null when the project doesn't have it. */
   gotoLabel(key: string): (() => void) | null
@@ -72,6 +73,7 @@ function selectionItems(host: EditorMenuHost, text: string, canShow: boolean): M
     host.writable && [t('Add a comment…'), () => host.review('comment')],
     host.writable && [t('Suggest a change…'), () => host.review('suggestion')],
     !text.includes('\n') && [t('Search the project'), () => host.search(text)],
+    host.writable && isTexFile(host.file()) && [t('Insert a symbol…'), host.symbols],
     [t('Ask the assistant'), host.ask],
   )
 }
@@ -92,6 +94,7 @@ function commandItems(host: EditorMenuHost, hit: Hit, canShow: boolean): MenuIte
     if (target) out.push([t('Open {{file}}', { file: target.path }), target.open])
   }
   if (canShow) out.push([t('Show in PDF'), host.showInPdf])
+  if (host.writable) out.push([t('Insert a symbol…'), host.symbols]) // a command is only found in a .tex file
   return out
 }
 

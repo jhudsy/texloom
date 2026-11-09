@@ -206,7 +206,8 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   Japanese are counted by the character.
   **Detailed count…** there runs [TeXCount](https://ctan.org/pkg/texcount) on your device for a breakdown of
   text, headers, captions and maths (the desktop app's **Word count…** uses your own TeX installation's copy).
-- **Symbols:** **Ω Symbols** opens a palette of mathematical and text symbols. Clicking one types it at the
+- **Symbols:** the **Ω** tab beside Files, Search and Outline (⌘⌥S / Ctrl+Alt+S from the editor) holds mathematical
+  and text symbols. Clicking one types it at the
   cursor, in `$…$` if you aren't already in maths. Hovering shows the command and any package it needs, and
   using it adds that package to your preamble if it's missing.
 - **Compiling another file:** **Compile** compiles the open file if it has its own `\documentclass`

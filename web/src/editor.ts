@@ -56,6 +56,7 @@ export interface EditorHooks {
   problems: (file: string) => Problem[] // last compile's problems for a file
   review: (file: string) => Extension // comment/suggestion highlights
   onReview: (kind: 'comment' | 'suggestion') => void // ⌘⌥M / ⌘⌥E
+  onSymbols: () => void // ⌘⌥S
   menu: EditorMenuHost // right-click on selected text and LaTeX commands
   addReference: AddReference // from \cite{ completion
   spell: () => { on: boolean; lang: string }
@@ -169,6 +170,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             Prec.high(keymap.of([
               { key: 'Mod-Alt-m', run: () => { hooks.onReview('comment'); return true } },
               { key: 'Mod-Alt-e', run: () => { hooks.onReview('suggestion'); return true } },
+              { key: 'Mod-Alt-s', run: () => { if (writable) hooks.onSymbols(); return writable }, preventDefault: true },
             ])),
             EditorState.readOnly.of(!writable),
             EditorView.editable.of(writable),

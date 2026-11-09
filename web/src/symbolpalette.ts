@@ -1,5 +1,5 @@
-// A floating palette of symbols. It stays open while you work, and clicking a symbol types it at
-// the editor's cursor; one that needs a package gets that package added to the preamble.
+// The symbols tab of the left-hand pane. It stays open while you work, and clicking a symbol types
+// it at the editor's cursor; one that needs a package gets that package added to the preamble.
 import type { EditorView } from '@codemirror/view'
 import { h } from './dom'
 import { t } from './i18n'
@@ -46,23 +46,20 @@ function addPackage(r: Replica, file: string, pkg: string): boolean {
   return true
 }
 
-export interface PaletteHost { r: Replica; view(): EditorView | null; file(): string | null }
+export interface PaletteHost { r: Replica; view(): EditorView | null; file(): string | null; inserted(): void }
 
-export function createSymbolPalette({ r, view, file }: PaletteHost): { toggle(): void } {
+export function createSymbolPalette({ r, view, file, inserted }: PaletteHost): { el: HTMLElement; refresh(): void } {
   let group = SYMBOLS[0].id, query = ''
   const status = h('p', { class: 'muted small', role: 'status' })
   const search = h('input', { type: 'search', placeholder: t('Search symbols…'), 'aria-label': t('Search symbols…'), oninput: (e: any) => { query = e.target.value.trim().toLowerCase(); render() } })
   const tabs = h('div', { class: 'symtabs', role: 'group' })
   const recent = h('div', { class: 'symgrid' })
   const recentRow = h('div', { class: 'symrecent' }, h('div', { class: 'muted small' }, t('Recent')), recent)
-  const grid = h('div', { class: 'symgrid' })
-  const panel = h('section', { class: 'sympalette', hidden: true, 'aria-label': t('Symbols'), onkeydown: (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); hide() } } },
-    h('div', { class: 'symhead' }, h('b', {}, t('Symbols')), search, h('button', { class: 'icon', 'aria-label': t('Close'), title: t('Close'), onclick: () => hide() }, '✕')),
+  const grid = h('div', { class: 'symgrid symall' })
+  const el = h('section', { class: 'sympalette', 'aria-label': t('Symbols'), onkeydown: (e: KeyboardEvent) => { if (e.key === 'Escape') view()?.focus() } },
+    h('div', { class: 'symhead' }, search),
     tabs, recentRow, grid, status,
     h('p', { class: 'muted small' }, t('A dot means the symbol needs a package, which is added to your document when you use it.')))
-  document.body.append(panel)
-
-  const hide = () => { panel.hidden = true; view()?.focus() }
 
   /** The document a package belongs in: the open one, else the main file. */
   const target = () => (isDocument(r, file()) ? file() : mainFile(r))
@@ -96,6 +93,7 @@ export function createSymbolPalette({ r, view, file }: PaletteHost): { toggle():
     const list = [sym.latex, ...readRecent().filter((x) => x !== sym.latex)].slice(0, MAX_RECENT)
     try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch {}
     showRecent()
+    if (!status.textContent) inserted() // on a phone, get out of the way unless there's something to read
   }
 
   const isTextSymbol = (sym: Symbol) => !!SYMBOLS.find((g) => g.symbols.includes(sym))?.text
@@ -121,10 +119,5 @@ export function createSymbolPalette({ r, view, file }: PaletteHost): { toggle():
     showRecent()
   }
 
-  return { toggle() {
-    panel.hidden = !panel.hidden
-    if (panel.hidden) { view()?.focus(); return }
-    status.textContent = ''
-    render()
-  } }
+  return { el, refresh() { status.textContent = ''; render() } }
 }
