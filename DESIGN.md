@@ -422,7 +422,7 @@ one to the projects it names.
   fields) can't lose them. Document: `{"v":1,"tags":{"<id>":{"n":name,"at":ms,"gone"?:true,"c"?:colour}},"on":{"<project>":{"<id>":ms}}}`;
   a negative time in `on` means the tag was taken off at that moment. `c` is a colour someone chose;
   without it (or if it's unknown here) the colour comes from a hash of the id, so it is the same
-  everywhere and costs nothing to store, which is why `TAG_COLOURS` must keep its order and length. Each tag, and each tag on each
+  everywhere and costs nothing to store, which is why `TAG_COLOURS` (in `listcore.ts` and `listsync.py`, checked by the shared vectors) must keep its order and length. Each tag, and each tag on each
   project, takes its latest change, so a rename on one device and an assignment on another both
   survive; on a tie, deleting and assigning win. Tags whose names match when folded become the one
   with the smallest id, with every project either had. `tidyTags` drops deletions over a year old,

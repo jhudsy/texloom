@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from texloom.listsync import ListKey, _canon, b64d, b64e, merge, merge_tags, password_secret, tidy_tags  # noqa: E402
+from texloom.listsync import ListKey, _canon, b64d, b64e, merge, merge_tags, password_secret, tag_colour, tidy_tags  # noqa: E402
 
 VECTORS = Path(__file__).with_name("listsync-vectors.json")
 E = lambda f, n, at, w, **more: {"f": f, "n": n, "at": at, "w": w, **more}  # noqa: E731
@@ -33,6 +33,7 @@ MERGES = [
 T = lambda tags, on=None: {"v": 1, "tags": tags, "on": on or {}}  # noqa: E731
 TAG = lambda n, at, **more: {"n": n, "at": at, **more}  # noqa: E731
 GONE = lambda at: {"n": "", "at": at, "gone": True}  # noqa: E731
+TAG_COLOURS = [("aB3_-xyz", None), ("0000", None), ("Zz9-", None), ("q", None), ("Kf8wLm2P", None), ("aB3_-xyz", "pink"), ("aB3_-xyz", "chartreuse")]
 TAG_MERGES = [
     ("the latest rename wins", T({"a": TAG("Old", 1)}), T({"a": TAG("New", 2)})),
     ("deleting beats a rename at the same moment", T({"a": TAG("X", 2)}), T({"a": GONE(2)})),
@@ -66,6 +67,7 @@ def build() -> dict:
         "passwords": [{"username": u, "password": p, "secret": b64e(password_secret(u, p))} for u, p in PASSWORDS],
         "merges": [{"what": what, "a": a, "b": b, "merged": _canon(merge(a, b))} for what, a, b in MERGES],
         "tag_merges": [{"what": what, "a": a, "b": b, "merged": _canon(merge_tags(a, b))} for what, a, b in TAG_MERGES],
+        "tag_colours": [{"id": tid, "chosen": chosen, "colour": tag_colour(tid, chosen)} for tid, chosen in TAG_COLOURS],
         "tag_tidies": [{"what": what, "doc": doc, "listed": listed, "now": now, "tidied": _canon(tidy_tags(doc, set(listed), now))}
                        for what, doc, listed, now in TAG_TIDIES],
     }
@@ -94,6 +96,8 @@ def main() -> int:
     for m in v["tag_merges"]:
         check(m["what"], _canon(merge_tags(m["a"], m["b"])), m["merged"])
         check(m["what"] + " (other way round)", _canon(merge_tags(m["b"], m["a"])), m["merged"])
+    for m in v["tag_colours"]:
+        check(f"colour of {m['id']}", tag_colour(m["id"], m["chosen"]), m["colour"])
     for m in v["tag_tidies"]:
         check(m["what"], _canon(tidy_tags(m["doc"], set(m["listed"]), m["now"])), m["tidied"])
     print(*bad, sep="\n") if bad else print(f"listsync: {len(v['keys'])} keys, {len(v['passwords'])} passwords, {len(v['merges'])} merges, "

@@ -6,7 +6,7 @@
    "seq": 7,
    "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
    "signature": "Mhfffj9ymKBqLLIzkjxjtIGGqqGJle_Jc-3UxpOX2E4eJ44Nnu6JLkyeaomiT5wz6B6sOCQQXx-7XIvhqZe2DQ",
-   "ciphertext": "A-j35o792zTnO33bDBc1ekBfyWcehgL8NZHbqn307BLcvyy3vjcCllVUz46k3y-QIvqZd4N2",
+   "ciphertext": "Ww9QV877UNnXJP1ybdZ1qiJm2DLKtIs3OLNrR8puUfBT637yOu7qcQ3kM3N39iOpqqJdoolG",
    "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
    "link": "https://example.org/#sync=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
   },
@@ -16,7 +16,7 @@
    "seq": 7,
    "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
    "signature": "J1ku7E7WW-gFQlwPeTbinTvWFngJW8f7u-ALt7kwrOVgvOdlB0voBr60YGxv6P9xg_TtFvLUsJkJdwWvbgsvBg",
-   "ciphertext": "lD5j1CYuszJ_ozkH0j9w8XtobnNMFdAZ_elyw0vV42LF_tt49CSaIHyzuT6U61qpfXJX7O5o",
+   "ciphertext": "doPbw1CFA6sMDTYtjHTPKr98BYbmyoqzBdNn2QDy_3WmuXIFRc231pjl4j7FQzi-XenM7uGC",
    "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
    "link": "https://example.org/#sync=__________________________________________8"
   }
@@ -581,6 +581,43 @@
     "on": {}
    },
    "merged": "{\"on\":{},\"tags\":{\"a\":{\"at\":5,\"n\":\"Åsa\"}},\"v\":1}"
+  }
+ ],
+ "tag_colours": [
+  {
+   "id": "aB3_-xyz",
+   "chosen": null,
+   "colour": "purple"
+  },
+  {
+   "id": "0000",
+   "chosen": null,
+   "colour": "yellow"
+  },
+  {
+   "id": "Zz9-",
+   "chosen": null,
+   "colour": "teal"
+  },
+  {
+   "id": "q",
+   "chosen": null,
+   "colour": "green"
+  },
+  {
+   "id": "Kf8wLm2P",
+   "chosen": null,
+   "colour": "orange"
+  },
+  {
+   "id": "aB3_-xyz",
+   "chosen": "pink",
+   "colour": "pink"
+  },
+  {
+   "id": "aB3_-xyz",
+   "chosen": "chartreuse",
+   "colour": "purple"
   }
  ],
  "tag_tidies": [

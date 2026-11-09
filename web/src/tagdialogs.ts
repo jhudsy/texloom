@@ -1,8 +1,8 @@
 // The windows for choosing a project's tags and for looking after the tags themselves.
 import { dialog, h } from './dom'
 import { t, tn } from './i18n'
-import { foldTag } from './listcore'
-import { cleanTagName, MAX_TAG_NAME, TAG_COLOURS, tags, type Tag, type TagColour } from './tags'
+import { foldTag, TAG_COLOURS, type TagColour } from './listcore'
+import { cleanTagName, MAX_TAG_NAME, tags, type Tag } from './tags'
 
 const COLOUR_NAMES: Record<TagColour, () => string> = {
   red: () => t('Red'), orange: () => t('Orange'), yellow: () => t('Yellow'), green: () => t('Green'), teal: () => t('Teal'),

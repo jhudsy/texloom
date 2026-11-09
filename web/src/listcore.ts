@@ -95,6 +95,14 @@ export interface TagDoc { v: 1; tags: Record<string, { n: string; at: number; go
 
 export const emptyTags = (): TagDoc => ({ v: 1, tags: {}, on: {} })
 
+/** The order and length matter: a tag nobody has chosen a colour for gets one from its id, the
+ *  same on every device, and changing this list would repaint those tags. */
+export const TAG_COLOURS = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'indigo', 'purple', 'pink', 'grey'] as const
+export type TagColour = typeof TAG_COLOURS[number]
+
+export const tagColour = (id: string, chosen?: string): TagColour => TAG_COLOURS.find((c) => c === chosen)
+  ?? TAG_COLOURS[[...id].reduce((sum, c) => (sum * 31 + c.charCodeAt(0)) >>> 0, 0) % TAG_COLOURS.length]
+
 /** The form in which two tag names count as the same. */
 export const foldTag = (name: string) => name.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase()
 

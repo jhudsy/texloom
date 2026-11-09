@@ -188,6 +188,80 @@ def dot(colour: str) -> QtGui.QIcon:
     return QtGui.QIcon(pm)
 
 
+# Each tag colour for light and dark windows: the same as .tc-* in web/src/style.css.
+TAG_HEX = {
+    "red": ("#b3261e", "#f28b82"), "orange": ("#b4530a", "#f6ad6b"), "yellow": ("#8a6a00", "#e6c35c"), "green": ("#2e7d32", "#81c995"),
+    "teal": ("#00796b", "#6fd0c0"), "blue": ("#1565c0", "#8ab4f8"), "indigo": ("#3f51b5", "#a5b0f5"), "purple": ("#7b1fa2", "#d7aefb"),
+    "pink": ("#c2185b", "#f48fb1"), "grey": ("#5f6b76", "#aab4be"),
+}
+TAGS_ROLE = Qt.UserRole + 1  # a project row's tags, for ProjectRows to draw
+
+
+def tag_hex(colour: str) -> str:
+    return TAG_HEX[colour][QtWidgets.QApplication.palette().color(QtGui.QPalette.Window).lightness() < 128]
+
+
+def colour_names() -> dict[str, str]:
+    return {"red": _("Red"), "orange": _("Orange"), "yellow": _("Yellow"), "green": _("Green"), "teal": _("Teal"),
+            "blue": _("Blue"), "indigo": _("Indigo"), "purple": _("Purple"), "pink": _("Pink"), "grey": _("Grey")}
+
+
+class ProjectRows(QtWidgets.QStyledItemDelegate):
+    """A project's row, with its tags drawn as coloured pills on the last line of its text."""
+
+    PADDING = 7
+
+    def with_blank_line(self, option, index) -> QtWidgets.QStyleOptionViewItem:
+        """The row's text with its last line, the tags, left blank for the pills."""
+        opt = QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = "\u2028".join([*index.data(Qt.DisplayRole).split("\n")[:-1], " "])  # Qt's own line break in a delegate
+        return opt
+
+    def sizeHint(self, option, index) -> QtCore.QSize:
+        if not index.data(TAGS_ROLE):
+            return super().sizeHint(option, index)
+        opt = self.with_blank_line(option, index)  # so that long tags don't widen the list: they're cut off to fit instead
+        return opt.widget.style().sizeFromContents(QtWidgets.QStyle.CT_ItemViewItem, opt, QtCore.QSize(), opt.widget) + QtCore.QSize(0, 6)
+
+    def paint(self, painter, option, index) -> None:
+        own = index.data(TAGS_ROLE)
+        if not own:
+            super().paint(painter, option, index)
+            return
+        opt = self.with_blank_line(option, index)
+        style = opt.widget.style()
+        style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+        area = style.subElementRect(QtWidgets.QStyle.SE_ItemViewItemText, opt, opt.widget)
+        fm, line = opt.fontMetrics, opt.fontMetrics.lineSpacing()
+        top = area.center().y() + line // 2
+        text = opt.palette.color(QtGui.QPalette.HighlightedText if opt.state & QtWidgets.QStyle.State_Selected else QtGui.QPalette.Text)
+        x, right, height = area.left(), min(area.right(), opt.widget.viewport().rect().right() - 4), fm.height() + 2
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        for i, tag in enumerate(own):
+            label, width = tag.name, fm.horizontalAdvance(tag.name) + 2 * self.PADDING
+            more = f"+{len(own) - i}"
+            if x + width > right - (fm.horizontalAdvance(more) + 6 if i < len(own) - 1 else 0):
+                if i:
+                    painter.setPen(text)
+                    painter.drawText(QtCore.QRect(x, top, right - x, height), Qt.AlignLeft | Qt.AlignVCenter, more)
+                    break
+                width = right - x
+                label = fm.elidedText(tag.name, Qt.ElideRight, width - 2 * self.PADDING)
+            colour = QtGui.QColor(tag_hex(tag.colour))
+            colour.setAlphaF(0.7)
+            painter.setPen(colour)
+            colour.setAlphaF(0.26)
+            painter.setBrush(colour)
+            pill = QtCore.QRectF(x + 0.5, top + 0.5, width - 1, height - 1)
+            painter.drawRoundedRect(pill, height / 2, height / 2)
+            painter.setPen(text)
+            painter.drawText(pill, Qt.AlignCenter, label)
+            x += width + 4
+        painter.restore()
+
+
 def open_path(p: Path | str) -> None:
     QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(p)))
 
@@ -978,7 +1052,7 @@ class TagsDialog(QtWidgets.QDialog):
             if want not in listsync.fold_tag(tag.name):
                 continue
             n = sum(1 for p in self.projects if any(x.id == tag.id for x in of(p)))
-            it = QtWidgets.QListWidgetItem(tag.name)
+            it = QtWidgets.QListWidgetItem(dot(tag_hex(tag.colour)), tag.name)
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setData(Qt.UserRole, tag.id)
             it.setCheckState(Qt.Checked if n == len(self.projects) else Qt.PartiallyChecked if n else Qt.Unchecked)
@@ -1034,6 +1108,13 @@ class ManageTagsDialog(QtWidgets.QDialog):
             b.setAutoDefault(False)
             b.clicked.connect(act)
             row.addWidget(b)
+        self.colour_btn = QtWidgets.QPushButton(_("Colour"))
+        self.colour_btn.setAutoDefault(False)
+        self.colour_menu = QtWidgets.QMenu(self.colour_btn)
+        self.colour_menu.aboutToShow.connect(self.fill_colours)
+        self.colour_btn.setMenu(self.colour_menu)
+        self.items.currentItemChanged.connect(lambda now, _before: self.colour_btn.setEnabled(now is not None))
+        row.addWidget(self.colour_btn)
         row.addStretch(1)
         close = QtWidgets.QPushButton(_("Close"))
         close.setAutoDefault(False)
@@ -1043,12 +1124,31 @@ class ManageTagsDialog(QtWidgets.QDialog):
         self.render()
 
     def render(self) -> None:
+        was = self.picked()
         self.items.clear()
+        self.colour_btn.setEnabled(False)
         for tag in tags.all_tags():
             n = tags.uses(tag.id)
-            it = QtWidgets.QListWidgetItem(f"{tag.name}  ·  " + ngettext(n, "{n} project", "{n} projects", n=n))
+            it = QtWidgets.QListWidgetItem(dot(tag_hex(tag.colour)), f"{tag.name}  ·  " + ngettext(n, "{n} project", "{n} projects", n=n))
             it.setData(Qt.UserRole, tag)
             self.items.addItem(it)
+            if was and tag.id == was.id:
+                self.items.setCurrentItem(it)
+
+    def fill_colours(self) -> None:
+        self.colour_menu.clear()
+        tag = self.picked()
+        for colour, name in colour_names().items() if tag else ():
+            act = self.colour_menu.addAction(dot(tag_hex(colour)), name)
+            act.setCheckable(True)
+            act.setChecked(colour == tag.colour)
+            act.triggered.connect(functools.partial(self.set_colour, colour))
+
+    def set_colour(self, colour: str, _checked: bool = False) -> None:
+        tag = self.picked()
+        if tag:
+            tags.set_colour(tag.id, colour)
+            self.render()
 
     def picked(self) -> tags.Tag | None:
         it = self.items.currentItem()
@@ -1193,6 +1293,7 @@ class Window(QtWidgets.QMainWindow):
         row.addWidget(self.filter_btn)
         lay.addLayout(row)
         self.list = QtWidgets.QListWidget()
+        self.list.setItemDelegate(ProjectRows(self.list))
         self.list.setMinimumWidth(240)
         self.list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.list.itemSelectionChanged.connect(self.show_detail)
@@ -1221,7 +1322,7 @@ class Window(QtWidgets.QMainWindow):
         m.clear()
         every = tags.all_tags()
         for tag in every:
-            act = m.addAction(tag.name.replace("&", "&&"))
+            act = m.addAction(dot(tag_hex(tag.colour)), tag.name.replace("&", "&&"))
             act.setCheckable(True)
             act.setChecked(tag.id in self.tag_filter)
             act.toggled.connect(lambda on, tid=tag.id: self.set_filter(tid, on))
@@ -1503,6 +1604,7 @@ class Window(QtWidgets.QMainWindow):
             name = project_name(d, self.engine)
             own = of(self.project_of(d) or "")
             it.setText(f"{name}\n{short}" + (f" · {d.name}" if d.name != name else "") + (f"\n{', '.join(t.name for t in own)}" if own else ""))
+            it.setData(TAGS_ROLE, tuple(own))
             it.setIcon(dot(colour))
             it.setToolTip(str(d))
         self.detail.setVisible(bool(fs))

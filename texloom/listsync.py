@@ -142,6 +142,21 @@ def empty_tags() -> dict:
     return {"v": 1, "tags": {}, "on": {}}
 
 
+# The order and length matter: a tag nobody has chosen a colour for gets one from its id, the same
+# on every device, and changing this list would repaint those tags.
+TAG_COLOURS = ("red", "orange", "yellow", "green", "teal", "blue", "indigo", "purple", "pink", "grey")
+
+
+def tag_colour(tid: str, chosen: str | None = None) -> str:
+    """The colour a tag shows: the one chosen for it if this version knows it, else one from its id."""
+    if chosen in TAG_COLOURS:
+        return chosen
+    total = 0
+    for ch in tid:
+        total = (total * 31 + ord(ch)) & 0xFFFFFFFF
+    return TAG_COLOURS[total % len(TAG_COLOURS)]
+
+
 def fold_tag(name: str) -> str:
     """The form in which two tag names count as the same."""
     return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", name)).strip().lower()

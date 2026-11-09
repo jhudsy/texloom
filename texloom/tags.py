@@ -17,7 +17,7 @@ from typing import Callable
 
 from . import registry
 from .crypto import b64e
-from .listsync import _canon, empty_tags, fold_tag, merge_tags, tidy_tags
+from .listsync import _canon, empty_tags, fold_tag, merge_tags, tag_colour, tidy_tags
 
 MAX_NAME = 60
 _lock = threading.RLock()  # the window changes tags while a background thread syncs them
@@ -27,6 +27,7 @@ _lock = threading.RLock()  # the window changes tags while a background thread s
 class Tag:
     id: str
     name: str
+    colour: str
 
 
 def _file():
@@ -70,7 +71,7 @@ def fold_search(text: str) -> str:
 
 
 def _live(data: dict) -> list[Tag]:
-    return sorted((Tag(tid, t["n"]) for tid, t in data["tags"].items() if not t.get("gone")), key=_sort_key)
+    return sorted((Tag(tid, t["n"], tag_colour(tid, t.get("c"))) for tid, t in data["tags"].items() if not t.get("gone")), key=_sort_key)
 
 
 def all_tags() -> list[Tag]:
@@ -111,7 +112,7 @@ def create(name: str) -> Tag | None:
         data, tid = doc(), b64e(os.urandom(6))
         data["tags"][tid] = {"n": clean, "at": _stamp()}
         _write(data)
-        return Tag(tid, clean)
+        return Tag(tid, clean, tag_colour(tid))
 
 
 def rename(tid: str, name: str) -> None:
@@ -124,6 +125,15 @@ def rename(tid: str, name: str) -> None:
         if clean and tag and not tag.get("gone"):
             data["tags"][tid] = {**tag, "n": other.name if other and other.id != tid else clean, "at": _stamp(tag["at"])}
             _write(merge_tags(data, data))
+
+
+def set_colour(tid: str, colour: str) -> None:
+    with _lock:
+        data = doc()
+        tag = data["tags"].get(tid)
+        if tag and not tag.get("gone"):
+            data["tags"][tid] = {**tag, "c": colour, "at": _stamp(tag["at"])}
+            _write(data)
 
 
 def remove(tid: str) -> None:

@@ -2,18 +2,10 @@
 // encrypted entry on the server if the list is synced: listsync.ts). They are never written
 // into a project, so collaborators don't see them.
 import { locale } from './i18n'
-import { canon, emptyTags, foldTag, mergeTags, type TagDoc } from './listcore'
-
-/** The order and length matter: a tag nobody has chosen a colour for gets one from its id, the
- *  same on every device, and changing this list would repaint those tags. */
-export const TAG_COLOURS = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'indigo', 'purple', 'pink', 'grey'] as const
-export type TagColour = typeof TAG_COLOURS[number]
+import { canon, emptyTags, foldTag, mergeTags, tagColour, type TagColour, type TagDoc } from './listcore'
 
 export interface Tag { id: string; name: string; colour: TagColour }
 export const MAX_TAG_NAME = 60
-
-const colourFromId = (id: string) => TAG_COLOURS[[...id].reduce((sum, c) => (sum * 31 + c.charCodeAt(0)) >>> 0, 0) % TAG_COLOURS.length]
-const colourOf = (id: string, chosen?: string) => TAG_COLOURS.find((c) => c === chosen) ?? colourFromId(id)
 
 const KEY = 'texloom.tags'
 const read = (): TagDoc => { try { return { ...emptyTags(), ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return emptyTags() } }
@@ -28,7 +20,7 @@ const newId = () => {
   const out = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(6))))
   return out.replace(/\+/g, '-').replace(/\//g, '_')
 }
-const live = (doc: TagDoc): Tag[] => Object.entries(doc.tags).filter(([, x]) => !x.gone).map(([id, x]) => ({ id, name: x.n, colour: colourOf(id, x.c) }))
+const live = (doc: TagDoc): Tag[] => Object.entries(doc.tags).filter(([, x]) => !x.gone).map(([id, x]) => ({ id, name: x.n, colour: tagColour(id, x.c) }))
   .sort((a, b) => a.name.localeCompare(b.name, locale))
 
 export const cleanTagName = (name: string) => name.normalize('NFC').replace(/\s+/g, ' ').trim().slice(0, MAX_TAG_NAME)
@@ -63,7 +55,7 @@ export const tags = {
     const doc = read(), id = newId()
     doc.tags[id] = { n: clean, at: stamp() }
     write(doc)
-    return { id, name: clean, colour: colourOf(id) }
+    return { id, name: clean, colour: tagColour(id) }
   },
 
   /** Rename a tag. To the name of another tag, it becomes that tag, keeping that tag's spelling. */

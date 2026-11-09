@@ -395,7 +395,7 @@ browser stops if it finds the app or `texloom run` keeping the same folder.
   one click, as does Settings → *Keep a copy in a folder* → **Open in the TeXLoom app**. The
   app asks before joining, and says if the project already has a folder on this computer.
 - The search box above the folders finds them by name or tag; beside it you sort them and filter
-  by tag. Select several (Shift or ⌘/Ctrl-click) to change their **Tags…** or **Leave…** them
+  by tag. Tags show in colour, which **Manage tags…** lets you change. Select several (Shift or ⌘/Ctrl-click) to change their **Tags…** or **Leave…** them
   together, and right-click for the same actions. Tags are the same ones as in the web app, through
   your project list. **Make a copy…** starts a new project, in a new folder, from a folder's files.
 - **Share a folder…** turns an existing folder into a new project; **Add existing folder…**
