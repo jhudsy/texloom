@@ -7,6 +7,7 @@ import {
   removeSlot, replaceList, savedSecret, saveSecret, setPassword, syncNow, unlockWithPasskey, unlockWithPassword, type Slot,
 } from './listsync'
 import { projects } from './projects'
+import { creationCode } from './replica'
 import { askCode, serverInfo } from './storagenotice'
 
 function explain(code: string | null): string {
@@ -31,9 +32,27 @@ async function withCode<T>(step: () => Promise<T>): Promise<T | null> {
   try { return await step() }
   catch (e) {
     if (!(e instanceof ListError && e.message === 'needs-code')) throw e
-    if (!await askCode(t('This server keeps project lists only for people with a creation code from its owner.'))) return null
+    if (!await askCode(CODE_FOR_LIST())) return null
     return step()
   }
+}
+
+const CODE_FOR_LIST = () => t('This server keeps project lists only for people with a creation code from its owner.')
+
+/** Ask for a needed creation code up front, before making something that can't be taken back. */
+async function haveCode(): Promise<boolean> {
+  return (await serverInfo())?.creation !== 'code' || !!creationCode.get() || askCode(CODE_FOR_LIST())
+}
+
+/** Start a new list, first giving it a way in if there is one, so that a refused password leaves
+ *  nothing behind. False if it wasn't started. */
+async function startList(addWay?: (secret: Uint8Array) => Promise<unknown>): Promise<boolean> {
+  const fresh = newSecret()
+  if (addWay && !await withCode(() => addWay(fresh).then(() => true))) return false
+  let done: boolean | null = null
+  try { done = await withCode(() => adopt(fresh).then(() => true)) }
+  finally { if (!done) saveSecret(null) }
+  return !!done
 }
 
 const NO_RECOVERY = () => t('There is no way to recover a lost list. The server can’t read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren’t deleted, but you’ll need each project’s own link to open it.')
@@ -73,11 +92,12 @@ function askPassword(setting: boolean): Promise<{ username: string; password: st
   })
 }
 
-export function listDialog() {
+export function listDialog(onClose?: () => void) {
   const body = h('div', {})
   const ways = h('div', { class: 'list-ways' })
   const msg = h('p', { class: 'err small', role: 'status' })
   const dlg = dialog('settings', h('h3', {}, t('Project list')), body, msg, h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Close'))))
+  if (onClose) dlg.addEventListener('close', onClose)
   const say = (text: string) => { msg.textContent = text }
 
   /** A button whose work may fail, after which the dialog shows the new state. */
@@ -143,14 +163,32 @@ export function listDialog() {
       h('p', {}, t('Keep the list of your projects on the server, encrypted, so it follows you to other computers and browsers. The server can’t read it.')),
       h('p', { class: 'muted small' }, t('It is opened by a sync link, and optionally by a passkey or a password.')),
       h('p', { class: 'recovery-warning', role: 'note' }, NO_RECOVERY()),
+      h('h5', {}, t('Start a new list')),
       h('div', { class: 'row' },
-        btn(t('Start a new list'), async () => {
-          const fresh = newSecret()
-          let done: boolean | null = null
-          try { done = await withCode(() => adopt(fresh).then(() => true)) }
-          finally { if (!done) saveSecret(null) }
-          if (done) say(t('List started. Copy its sync link and keep it safe.'))
-        }, { class: 'primary' }),
+        passkeySupported() ? btn(t('Start with a passkey'), async () => {
+          if (!await haveCode()) return
+          const unlocking = await createPasskey()
+          if (unlocking && await startList((secret) => addSlot(secret, unlocking, 'passkey'))) say(t('List started. Copy its sync link and keep it safe: it’s your way back in if you lose this passkey.'))
+        }, { class: 'primary' }) : '',
+        btn(t('Start with a password'), async () => {
+          if (!await haveCode()) return
+          const asked = await askPassword(true)
+          if (!asked) return
+          say(t('Working…'))
+          try {
+            const started = await startList((secret) => setPassword(secret, asked.username, asked.password))
+            say(started ? t('List started. Copy its sync link and keep it safe: it’s your way back in if you forget this password.') : '')
+          } catch (e) {
+            if (!(e instanceof ListError && e.message === 'password-taken')) throw e
+            say(t('That username and password are already in use. If the list is yours, use “Unlock with a password” instead.'))
+          }
+        }, passkeySupported() ? {} : { class: 'primary' }),
+        btn(t('Sync link only'), async () => {
+          if (await startList()) say(t('List started. Copy its sync link and keep it safe.'))
+        }),
+      ),
+      h('h5', {}, t('Open a list you already have')),
+      h('div', { class: 'row' },
         passkeySupported() ? btn(t('Unlock with a passkey'), async () => {
           const unlocked = await unlockWithPasskey()
           if (unlocked === 'none') say(t('That passkey doesn’t open a list on this server.'))

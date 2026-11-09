@@ -38,6 +38,16 @@ const fr: Catalog = {
     'Une liste perdue ne peut pas être récupérée. Le serveur ne peut pas la lire, donc personne ne peut la réinitialiser pour vous. Si vous perdez le lien de synchronisation et toutes vos clés d’accès, et oubliez tout mot de passe, la liste est définitivement perdue. Vos projets ne sont pas supprimés, mais il vous faudra le lien de chaque projet pour l’ouvrir.',
   'List started. Copy its sync link and keep it safe.': 'Liste créée. Copiez son lien de synchronisation et gardez-le en lieu sûr.',
   'Start a new list': 'Créer une liste',
+  'Start with a passkey': 'Commencer avec une clé d’accès',
+  'Start with a password': 'Commencer avec un mot de passe',
+  'Sync link only': 'Lien de synchronisation seul',
+  'Open a list you already have': 'Ouvrir une liste existante',
+  'List started. Copy its sync link and keep it safe: it’s your way back in if you lose this passkey.':
+    'Liste créée. Copiez son lien de synchronisation et gardez-le en lieu sûr : il vous permettra de la retrouver si vous perdez cette clé d’accès.',
+  'List started. Copy its sync link and keep it safe: it’s your way back in if you forget this password.':
+    'Liste créée. Copiez son lien de synchronisation et gardez-le en lieu sûr : il vous permettra de la retrouver si vous oubliez ce mot de passe.',
+  'That username and password are already in use. If the list is yours, use “Unlock with a password” instead.':
+    'Ce nom d’utilisateur et ce mot de passe sont déjà utilisés. Si la liste est la vôtre, utilisez plutôt « Déverrouiller avec un mot de passe ».',
   'Unlock with a passkey': 'Déverrouiller avec une clé d’accès',
   'Use this link': 'Utiliser ce lien',
   'This server doesn’t keep project lists.': 'Ce serveur ne conserve pas de listes de projets.',
