@@ -6,6 +6,7 @@ import { Replica } from './replica'
 import { dialog, h } from './dom'
 import { projects } from './projects'
 import { t, locale } from './i18n'
+import { privateServerAllows } from './storagenotice'
 
 function copyRow(text: string, mail?: { subject: string; body: string }) {
   const inp = h('input', { value: text, readonly: true, onfocus: (e: any) => e.target.select() })
@@ -153,7 +154,7 @@ export function shareDialog(r: Replica, server: string, me: string) {
 
 /** Copy the project into new keys (re-encrypting files), retire the old one, open the new one. */
 export async function rotateKeys(old: Replica, server: string) {
-  if (!old.keys.owner) return
+  if (!old.keys.owner || !(await privateServerAllows())) return // the new keys are a new project
   if (!confirm(t('Move this project to new keys?\n\nAll current links (yours included) will point to a retired copy. You get a new owner link and create new links for collaborators.'))) return
   let retiring = false
   const note = dialog('settings', h('h3', {}, t('Moving to new keys…')), h('p', { class: 'muted' }, t('Re-encrypting files. Keep this tab open.')))

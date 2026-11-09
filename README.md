@@ -299,6 +299,26 @@ A refused change is never lost:
 - the sender keeps it and retries;
 - the editor shows a warning that the project isn't saved on the server.
 
+
+### Private servers
+
+By default anyone who can reach your server can use it for live projects, though they can't read
+anyone else's. To keep it for your own group, add `--private` (or `TEXLOOM_PRIVATE=1`), which
+needs a `--codes-file`:
+
+- Only projects created with a valid creation code may connect, even without server storage. The
+  `default` line doesn't count.
+- People with such a project's link need nothing else. Give a code to whoever creates projects,
+  and links to everyone else.
+- When a code expires or is removed, its projects stop syncing until it's renewed. Copies on
+  people's devices carry on working.
+- Projects from before the server went private are re-registered the first time someone opens one
+  with a valid code.
+
+The web app and TeX files can still be downloaded by anyone, and `--no-arxiv` turns off importing
+through the server. For a server nobody outside can even see, put it behind a VPN such as
+Tailscale or WireGuard, or a firewall.
+
 ### Idle projects, admin page, arXiv import
 
 - `--evict-idle-days N` (or `TEXLOOM_EVICT_IDLE_DAYS`) drops the stored copy of projects nobody has opened for N days
@@ -654,6 +674,9 @@ python scripts/check_listsync.py
 cd web && npm run check-listsync
 npm run check-versions  # saved versions: every one opens exactly, and storing them stays small
 ```
+
+To see what a relay can take, `uv run python scripts/loadtest.py all` starts its own throwaway server
+and reports latency, CPU and memory for each scenario. Results depend on the machine.
 
 ### Translations
 

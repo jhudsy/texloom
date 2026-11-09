@@ -7,8 +7,19 @@ import { t } from './i18n'
 const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent)
 export const SAFARI_NOTE = isSafari ? ' ' + t('Safari may also delete a site’s data after about 7 days without a visit.') : ''
 
-export async function serverInfo(): Promise<{ creation: 'open' | 'code'; projectMaxBytes: number; projectLists?: boolean } | null> {
+export async function serverInfo(): Promise<{ creation: 'open' | 'code'; projectMaxBytes: number; projectLists?: boolean; private?: boolean } | null> {
   try { const r = await fetch('/api/info'); return r.ok ? await r.json() : null } catch { return null }
+}
+
+const PRIVATE_INTRO = () => t('This server is private: new projects need a creation code from its owner. You only need it once per browser; opening projects shared with you never needs one.')
+
+/** On a private server, make sure this browser holds a valid creation code (asking if not).
+ *  False means nothing new may be created here. Anywhere else, or offline, there's nothing to check. */
+export async function privateServerAllows(): Promise<boolean> {
+  if (!(await serverInfo())?.private) return true
+  const code = creationCode.get()
+  const r = code ? await fetch('/api/code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then((x) => x.json()).catch(() => null) : null
+  return r?.ok === true || askCode(PRIVATE_INTRO())
 }
 
 /** Ask for a creation code, check it with the server, save it. Resolves true if a valid code was saved. */
@@ -44,6 +55,7 @@ export function askCode(intro?: string): Promise<boolean> {
 
 /** "New project": on servers that need a code, ask for one or offer a project without a server copy. */
 export async function chooseNewProject(): Promise<'server' | 'relay' | null> {
+  if (!(await privateServerAllows())) return null
   const info = await serverInfo()
   if (!info || info.creation === 'open' || creationCode.get()) return 'server'
   return new Promise((resolve) => {
@@ -67,6 +79,18 @@ export function riskBanner(r: Replica, writable: boolean, openSettings: () => vo
   const el = h('div', { class: 'risk', hidden: true, role: 'status' })
   let dismissed = false
   const render = () => {
+    if (r.denied && !dismissed) {
+      el.replaceChildren(
+        h('span', {}, h('b', {}, '⚠ '), r.denied === 'code-expired'
+          ? t('Not syncing: this server is private, and the creation code this project was created with has expired or been removed. Renewing it restores access.')
+          : t('Not syncing: this server is private, and this project needs a creation code from its owner.'),
+          ' ' + t('Your copy here is safe and you can keep working, but nobody else gets your changes.')),
+        h('span', { class: 'actions' },
+          r.denied === 'needs-code' ? h('button', { class: 'primary', onclick: async () => { if (await askCode(PRIVATE_INTRO())) r.reconnect() } }, t('Enter code')) : '',
+          h('button', { title: t('Hide until next time'), 'aria-label': t('Hide this warning'), onclick: () => { dismissed = true; render() } }, '✕')))
+      el.hidden = false
+      return
+    }
     const relay = r.storage === 'relay'
     const p = relay ? null : r.storeProblem // relay-only projects aren't meant to be stored
     if (!writable || dismissed || (!p && !relay)) { el.hidden = true; return }

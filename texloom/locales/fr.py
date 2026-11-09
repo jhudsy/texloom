@@ -37,6 +37,11 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     "This project has reached the server's size limit.": "Ce projet a atteint la taille maximale autorisée par le serveur.",
     "The server is out of space: changes are kept here and retried.": "Le serveur n’a plus d’espace : les modifications sont conservées ici et renvoyées plus tard.",
     "Not saved on the server": "Non enregistré sur le serveur",
+    "Not syncing": "Synchronisation arrêtée",
+    "This server is private, and this project's creation code has expired or been removed. Renewing it restores access.":
+        "Ce serveur est privé, et le code de création de ce projet a expiré ou a été retiré. Le renouveler rétablit l’accès.",
+    "This server is private, and this project needs a creation code: add it to the folder's .texloom/config.json as \"create_code\" and restart the app.":
+        "Ce serveur est privé, et ce projet nécessite un code de création : ajoutez-le au fichier .texloom/config.json du dossier sous le nom « create_code », puis redémarrez l’application.",
     "Collaborators who are online still get your changes.": "Les collaborateurs en ligne reçoivent quand même vos modifications.",
 
     # -- folder status

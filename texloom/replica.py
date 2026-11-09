@@ -57,6 +57,7 @@ class Replica:
         self.pending_mode: str | None = None  # storage change not yet sent to the server
         self.code_expired = False  # the server says this project's creation code has expired
         self.store_refusal: str | None = None  # what the server last said; see store_problem
+        self.denied: str | None = None  # a private server turned this project away: why
         self.refused: str | None = None  # the server's reason for rejecting the last change sent
         self._blob_waiters: dict[str, list[asyncio.Future]] = {}
         self.before_remote: Callable[[], Awaitable[None]] | None = None
@@ -436,6 +437,7 @@ class Replica:
     async def _handle(self, m: dict) -> None:
         t = m.get("t")
         if t == "log":
+            self.denied = None
             self.code_expired = bool((m.get("store") or {}).get("codeExpired"))
             self.server_mode = m.get("mode", "server")
             self._revoked(m.get("rv", []))
@@ -485,7 +487,15 @@ class Replica:
             self.refused = None
             self.save()
         elif t == "err":
-            if m.get("code") in ("needs-code", "quota-full", "project-full", "server-full"):
+            if m.get("denied"):
+                self.denied = str(m.get("code"))
+                if "denied" not in self._warned:
+                    self._warned.add("denied")
+                    log.warning("NOT SYNCING: this server is private, and this project's creation code has expired or been removed."
+                                if self.denied == "code-expired" else
+                                "NOT SYNCING: this server is private, and this project needs a creation code. "
+                                "Add \"create_code\" to .texloom/config.json (or set TEXLOOM_CODE) and restart.")
+            elif m.get("code") in ("needs-code", "quota-full", "project-full", "server-full"):
                 self._storage_warning(m["code"])  # kept in the outbox; retried on reconnect
             else:
                 log.warning("server: %s", m.get("m"))

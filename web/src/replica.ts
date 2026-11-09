@@ -101,6 +101,8 @@ export class Replica {
   private refusal: StoreProblem = null // what the server last said; see storeProblem
   storeInfo: StoreInfo | null = null
   /** Why the server isn't storing changes. It refuses with quota-full when a code has expired, which older clients understand. */
+  /** A private server turned this project away: why. Everything here keeps working on this device. */
+  denied: 'needs-code' | 'code-expired' | null = null
   get storeProblem(): StoreProblem { return this.refusal === 'quota-full' && this.storeInfo?.codeExpired ? 'code-expired' : this.refusal }
   onStatus: () => void = () => {}
   onCompileAck: (info: { by: string }) => void = () => {}
@@ -188,6 +190,13 @@ export class Replica {
   }
 
   // ---- connection ----------------------------------------------------------
+  private retry: ReturnType<typeof setTimeout> | undefined
+  /** Try again now, after a private server refused and a code has since been entered. */
+  reconnect() {
+    clearTimeout(this.retry)
+    if (!this.ws) this.connect()
+  }
+
   private connect() {
     if (this.closed) return
     const url = this.server.replace(/^http/, 'ws') + `/ws/${this.keys.project}`
@@ -206,13 +215,16 @@ export class Replica {
       this.inflight.clear()
       this.peers = 0
       this.status = this.syncMode === 'manual' ? 'paused' : 'offline'; this.onStatus()
-      if (!this.closed && this.syncMode === 'live') setTimeout(() => this.connect(), (this.backoff = Math.min(this.backoff * 2, 30000)))
+      if (this.closed || this.syncMode !== 'live') return
+      // A refusal won't change in seconds; renewing a code or entering one calls reconnect().
+      this.retry = setTimeout(() => this.connect(), this.denied ? 5 * 60_000 : (this.backoff = Math.min(this.backoff * 2, 30000)))
     }
   }
 
   private async handle(m: any) {
     switch (m.t) {
       case 'log':
+        this.denied = null
         this.serverMode = m.mode
         this.peers = m.peers ?? 0
         this.storeInfo = m.store ?? null
@@ -270,7 +282,10 @@ export class Replica {
         this.onStatus()
         break
       case 'err':
-        if (STORE_PROBLEMS.has(m.code)) {
+        if (m.denied) {
+          this.denied = m.code
+          this.onStatus()
+        } else if (STORE_PROBLEMS.has(m.code)) {
           // Not stored, but already relayed to anyone online. Keep it in the outbox; retry later.
           if (m.id) this.inflight.delete(m.id)
           this.refusal = m.code

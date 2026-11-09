@@ -48,6 +48,14 @@ const fr: Catalog = {
   'Folder copy…': 'Copie dans un dossier…',
   'Hide until next time': 'Masquer jusqu’à la prochaine fois',
   'Hide this warning': 'Masquer cet avertissement',
+  'This server is private: new projects need a creation code from its owner. You only need it once per browser; opening projects shared with you never needs one.':
+    'Ce serveur est privé : les nouveaux projets nécessitent un code de création fourni par son propriétaire. Il suffit de le saisir une fois par navigateur ; ouvrir un projet partagé avec vous n’en demande jamais.',
+  'Not syncing: this server is private, and the creation code this project was created with has expired or been removed. Renewing it restores access.':
+    'Synchronisation arrêtée : ce serveur est privé, et le code de création de ce projet a expiré ou a été retiré. Le renouveler rétablit l’accès.',
+  'Not syncing: this server is private, and this project needs a creation code from its owner.':
+    'Synchronisation arrêtée : ce serveur est privé, et ce projet nécessite un code de création fourni par son propriétaire.',
+  'Your copy here is safe and you can keep working, but nobody else gets your changes.':
+    'Votre copie locale est intacte et vous pouvez continuer à travailler, mais personne d’autre ne reçoit vos modifications.',
 }
 
 export default fr

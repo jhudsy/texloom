@@ -142,6 +142,10 @@ def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
     r = st.replica
     if r is None:
         return _("Starting…"), GREY, ""
+    if r.denied:
+        return _("Not syncing"), RED, (_("This server is private, and this project's creation code has expired or been removed. Renewing it restores access.")
+                                       if r.denied == "code-expired" else
+                                       _("This server is private, and this project needs a creation code: add it to the folder's .texloom/config.json as \"create_code\" and restart the app."))
     if not r.connected.is_set():
         return _("Offline"), AMBER, _("Can't reach the server. Changes here are kept and sent when it's back.")
     if not r.synced.is_set():

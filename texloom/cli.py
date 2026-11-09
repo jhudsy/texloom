@@ -152,10 +152,29 @@ async def clone_project(link: str, d: Path) -> None:
     registry.add(d)
 
 
+async def refuse_if_private(server: str, code: str) -> None:
+    """A private server only takes new projects from people with a valid creation code. If it
+    can't be asked, carry on: the server still decides when the project connects."""
+    import aiohttp
+    base = server.rstrip("/")
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as http:
+            async with http.get(f"{base}/api/info") as r:
+                if not r.ok or not (await r.json()).get("private"):
+                    return
+            async with http.post(f"{base}/api/code", json={"code": code}) as r:
+                if (await r.json()).get("ok"):
+                    return
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+        return
+    raise FolderProblem(f"{base} is a private server: a new project needs a valid creation code from its owner")
+
+
 async def new_project(d: Path, server: str, name: str = "", code: str = "") -> Keys:
     """Share an existing folder as a new project, and add it to the folder list."""
     if config_path(d).exists():
         raise FolderProblem(f"{d} is already a texloom project")
+    await refuse_if_private(server, code)
     d.mkdir(parents=True, exist_ok=True)
     keys = Keys.generate()
     save(d, keys.link(server), code)

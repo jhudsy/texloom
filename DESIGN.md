@@ -162,6 +162,13 @@ command only when its user *changes* the setting, queuing it if offline; it neve
 "corrects" the server on connect, so a stale replica can't undo someone else's
 switch. Switching back to `server` re-uploads a full snapshot and all blobs.
 
+**Private servers** (`--private`). A connection does nothing until its `hello` is accepted (a silent
+one is dropped after 15 s). A project is admitted if its owner is a current creation code. One with no
+code yet (unregistered, or `default`/`existing`) gets the first valid code offered; one whose code has
+lapsed is refused until it's renewed, and can't be taken over by another code. A refusal is
+`{t:"err", code, denied:true}` followed by a close. Open connections are checked again about once a
+minute. File uploads and downloads and new project lists follow the same rule.
+
 **Storage allowances.** The server can't inspect content and project ids are free to
 mint, so storage is governed by allowances in a codes file: `<code|default> <0|size|unlimited>
 [until=YYYY-MM-DD] [label]`.

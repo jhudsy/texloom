@@ -95,6 +95,8 @@ GONE_COST = 100  # bytes a remembered edit counts for
 # so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
 META_RATE, META_BURST = 1.0, 600
 SEND_TIMEOUT = 20  # seconds; a peer that doesn't read is disconnected rather than holding up others
+HELLO_WAIT = 15  # seconds a private server gives a new connection to say who it is
+RECHECK = 60  # seconds between a private server's checks that a connected project's code still counts
 INFLIGHT_MAX = 192 * MiB  # bytes of large frames being handled at once, server-wide
 
 
@@ -417,6 +419,10 @@ class Store:
                 self.usage[project] += n or 0
         self.total = sum(self.usage.values())
         self.owners: dict[str, str] = dict(self.db.execute("SELECT project, owner FROM projects"))
+        self.owner_bytes: dict[str, int] = defaultdict(int)  # checked on every stored edit: kept, not added up
+        for project, n in self.usage.items():
+            if project in self.owners:
+                self.owner_bytes[self.owners[project]] += n
         self.seen: dict[str, float] = {p: max(s, c) for p, s, c in self.db.execute("SELECT project, seen, created FROM projects")}
         self.dir = path.parent
         self.meta_tokens, self.meta_at = float(META_BURST), time.monotonic()
@@ -429,8 +435,28 @@ class Store:
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO projects(project, created, label, owner) VALUES (?,?,?,?)",
                             (project, time.time(), label, owner))
-        self.owners[project] = owner
+        self._own(project, owner)
         log.info("registered project %s… (%s)", project[:8], label)
+
+    def claim(self, project: str, owner: str) -> None:
+        """Move a project created without a code to `owner` (a private server's re-registration)."""
+        with self.db:
+            self.db.execute("UPDATE projects SET owner=? WHERE project=?", (owner, project))
+        self._own(project, owner)
+        log.info("project %s… now belongs to a creation code", project[:8])
+
+    def _own(self, project: str, owner: str) -> None:
+        n = self.usage.get(project, 0)
+        if project in self.owners:
+            self.owner_bytes[self.owners[project]] -= n
+        self.owner_bytes[owner] += n
+        self.owners[project] = owner
+
+    def _grew(self, project: str, n: int) -> None:
+        self.usage[project] += n
+        self.total += n
+        if project in self.owners:
+            self.owner_bytes[self.owners[project]] += n
 
     def meta_budget(self) -> bool:
         """Take one unit from the server-wide budget for rows that store nothing (see META_RATE)."""
@@ -475,7 +501,7 @@ class Store:
         return freed
 
     def owner_usage(self, owner: str) -> int:
-        return sum(self.usage.get(p, 0) for p, o in self.owners.items() if o == owner)
+        return self.owner_bytes.get(owner, 0)
 
     def stored_by(self, owner: str) -> list[str]:
         """Projects registered to this owner that have something stored."""
@@ -487,8 +513,7 @@ class Store:
         n += self.db.execute("SELECT COALESCE(SUM(length(data)), 0) FROM blob WHERE project=?",
                              (project,)).fetchone()[0]
         n += GONE_COST * self.db.execute("SELECT COUNT(*) FROM gone WHERE project=?", (project,)).fetchone()[0]
-        self.total += n - self.usage[project]
-        self.usage[project] = n
+        self._grew(project, n - self.usage[project])
 
     def free_disk(self) -> int:
         return shutil.disk_usage(self.dir).free
@@ -524,8 +549,7 @@ class Store:
                             (project, seq, data, sig, hashlib.sha256(data).digest()))
             self.db.execute("INSERT INTO head(project, seq) VALUES (?,?) "
                             "ON CONFLICT(project) DO UPDATE SET seq=excluded.seq", (project, seq))
-        self.usage[project] += len(data) + len(sig)
-        self.total += len(data) + len(sig)
+        self._grew(project, len(data) + len(sig))
         return seq
 
     def last_snapshot(self, project: str) -> int:
@@ -611,8 +635,7 @@ class Store:
             cur = self.db.execute("INSERT OR IGNORE INTO blob(project, id, data, kind) VALUES (?,?,?,?)",
                                   (project, bid, data, kind))
         if cur.rowcount:
-            self.usage[project] += len(data)
-            self.total += len(data)
+            self._grew(project, len(data))
 
     def mark_file(self, project: str, bid: str) -> None:
         """Content uploaded as a project file is a file, even if it was first stored as output."""
@@ -640,6 +663,7 @@ class Conn:
         self.code: str | None = None
         self.code_tried = False
         self.hellos: list[float] = []
+        self.recheck = 0.0  # private servers: when to check the project's code again
         self.window_start = time.monotonic()
         self.msgs = 0
         self.bytes = 0
@@ -670,8 +694,10 @@ def field(msg: dict, key: str, typ: type, default=None):
 
 
 class Relay:
-    def __init__(self, store: Store, limits: Limits | None = None, codes: CodeBook | None = None, lists: bool = True):
+    def __init__(self, store: Store, limits: Limits | None = None, codes: CodeBook | None = None, lists: bool = True,
+                 private: bool = False):
         self.store = store
+        self.private = private  # only projects created with a valid creation code may use this server
         self.lists = Lists(store.db) if lists else None
         self.limits = limits or Limits()
         self.codes = codes or CodeBook(None)
@@ -681,6 +707,42 @@ class Relay:
         self.texlive = None  # TexLive, when serving TeX Live files on demand
         self.inflight = 0  # bytes of large frames being handled right now
         self.blob_reads = asyncio.Semaphore(4)  # concurrent blob uploads being read
+
+    # --- private servers -----------------------------------------------------------
+    def denied(self, project: str, code: object) -> str | None:
+        """On a private server, why this project may not use it (None if it may). A project
+        belongs to a creation code, so people with its link need nothing else. One that has no
+        code yet gets the first valid one offered; one whose code has lapsed waits for a renewal."""
+        if not self.private:
+            return None
+        owner = self.store.owner(project)
+        if owner and owner not in ("default", "existing"):
+            return "code-expired" if self.codes.lapsed(owner) else None
+        valid = self.codes.check(code)
+        if not valid:
+            return "needs-code"
+        if owner:
+            self.store.claim(project, valid)
+        else:
+            self.store.register(project, valid, self.codes.label(valid))
+        return None
+
+    async def _admit(self, project: str, ws: web.WebSocketResponse) -> dict | None:
+        """On a private server a connection does nothing until its hello is accepted. Returns the hello."""
+        try:
+            raw = await asyncio.wait_for(ws.receive(), HELLO_WAIT)
+            msg = json.loads(raw.data) if raw.type == WSMsgType.TEXT and len(raw.data) <= FRAME_LIMITS["hello"] else None
+        except (asyncio.TimeoutError, ValueError, TypeError):
+            msg = None
+        if not isinstance(msg, dict) or msg.get("t") != "hello":
+            await ws.close(code=1008, message=b"hello first")
+            return None
+        why = self.denied(project, msg.get("code"))
+        if why:
+            await ws.send_json({"t": "err", "code": why, "denied": True, "m": "this server is private"})
+            await ws.close(code=1008, message=b"private server")
+            return None
+        return msg
 
     # --- storage policy ------------------------------------------------------------
     def may_store(self, project: str, nbytes: int, code: str | None) -> str | None:
@@ -739,6 +801,9 @@ class Relay:
             log.info("purged %d project(s) of code %s… (%s), expired %d day(s) ago%s", n, c[:4],
                      fmt_size(freed), days, f"; {skipped} open, left for later" if skipped else "")
 
+    def _open(self) -> bool:
+        return not self.private and self.codes.open_creation
+
     def store_status(self, project: str, conn: Conn) -> dict:
         owner = self.store.owner(project)
         allowance = self.codes.allowance(owner or conn.code or "default")
@@ -747,8 +812,8 @@ class Relay:
             # its creation code has expired or was removed (the refusal itself stays quota-full,
             # which older clients understand)
             "codeExpired": bool(owner and self.codes.lapsed(owner)),
-            "creation": "open" if self.codes.open_creation else "code",
-            "canCreate": self.codes.open_creation or bool(conn.code),
+            "creation": "open" if self._open() else "code",
+            "canCreate": self._open() or bool(conn.code),
             "used": self.store.usage.get(project, 0),
             "projectMax": self.limits.project_max if allowance != UNLIMITED else None,
             "allowance": None if allowance == UNLIMITED else allowance,
@@ -781,18 +846,37 @@ class Relay:
             raise web.HTTPServiceUnavailable(text="too many connections")
         ws = web.WebSocketResponse(heartbeat=30, max_msg_size=MAX_FRAME)
         await ws.prepare(request)
-        room = self.rooms[project]
-        room.add(ws)
         conn = self.conns[ws] = Conn(self._next_id)
         self._next_id += 1
+        first = None
+        if self.private:
+            try:
+                first = await self._admit(project, ws)
+            finally:
+                if first is None:
+                    self.conns.pop(ws, None)
+            if first is None:
+                return ws
+            conn.recheck = time.monotonic() + RECHECK
+        room = self.rooms[project]
+        room.add(ws)
         log.info("join %s… (%d peers)", project[:8], len(room))
         try:
+            if first:
+                await self.handle(project, ws, conn, "hello", first)
             async for raw in ws:
                 if raw.type != WSMsgType.TEXT:
                     continue
                 if not conn.allow(len(raw.data)):
                     await ws.close(code=1008, message=b"rate limit")
                     break
+                if self.private and time.monotonic() >= conn.recheck:
+                    conn.recheck = time.monotonic() + RECHECK
+                    why = self.denied(project, conn.code)
+                    if why:
+                        await ws.send_json({"t": "err", "code": why, "denied": True, "m": "this server is private"})
+                        await ws.close(code=1008, message=b"private server")
+                        break
                 size = len(raw.data) if len(raw.data) > MiB else 0
                 if size and self.inflight + size > INFLIGHT_MAX:  # the server is busy with big frames
                     await ws.send_json({"t": "err", "m": "server busy: try again"})
@@ -935,6 +1019,9 @@ class Relay:
             raise web.HTTPBadRequest()
         if (request.content_length or 0) > MAX_BLOB:
             raise web.HTTPRequestEntityTooLarge(max_size=MAX_BLOB, actual_size=request.content_length or 0)
+        why = self.denied(project, request.headers.get("X-Create-Code"))  # before reading a large body
+        if why:
+            return web.json_response({"code": why}, status=403)
         try:
             sig = b64d(request.headers.get("X-Sig", ""))
         except (ValueError, binascii.Error):
@@ -984,6 +1071,8 @@ class Relay:
         project, bid = request.match_info["project"], request.match_info["id"]
         if not PROJECT_RE.match(project) or not BLOB_RE.match(bid):
             raise web.HTTPBadRequest()
+        if self.denied(project, None):
+            raise web.HTTPForbidden()
         data = self.store.get_blob(project, bid)
         if data is None:
             raise web.HTTPNotFound()
@@ -996,7 +1085,8 @@ class Relay:
         self.codes._load()
         d = self.codes.default if self.codes.path else UNLIMITED
         return web.json_response({
-            "creation": "open" if self.codes.open_creation else "code",
+            "private": self.private,
+            "creation": "open" if self._open() else "code",
             "defaultAllowance": None if d == UNLIMITED else d,
             "projectMaxBytes": self.limits.project_max,
             "projectLists": self.lists is not None,
@@ -1049,7 +1139,7 @@ class Relay:
         if seq != current + 1:  # someone else updated it: the client merges and tries again
             return web.json_response({"seq": current}, status=409)
         owner = row[1] if row else (self.codes.check(request.headers.get("X-Create-Code")) or "default")
-        if self.codes.allowance(owner) <= 0:
+        if self.codes.allowance(owner) <= 0 or (self.private and owner == "default"):
             return web.json_response({"code": "code-expired" if self.codes.lapsed(owner) else "needs-code"}, status=403)
         if self.store.free_for_data() - len(data) < self.limits.min_free or (not row and not self.lists.room_for(owner)):
             return web.json_response({"code": "list-full"}, status=507)
@@ -1112,8 +1202,8 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
              limits: Limits | None = None, codes: CodeBook | None = None, arxiv: bool = True,
              admin_token: str = "", evict_days: float = 0, texlive: Path | None = None,
              texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None,
-             purge_days: float | None = None, lists: bool = True) -> web.Application:
-    relay = Relay(Store(db), limits, codes, lists)
+             purge_days: float | None = None, lists: bool = True, private: bool = False) -> web.Application:
+    relay = Relay(Store(db), limits, codes, lists, private)
     if texlive:  # TeX Live files on demand for the in-browser engine
         from .texlive import TexLive
         tl = TexLive(texlive, texlive_max, (limits or Limits()).min_free, texlive_mirrors)
@@ -1203,6 +1293,9 @@ def main() -> None:
                    help="delete the stored copies of projects whose creation code expired more than DAYS days "
                         "ago (checked hourly; default: never, or TEXLOOM_PURGE_EXPIRED_AFTER). Their files stay "
                         "on people's devices")
+    p.add_argument("--private", action="store_true", default=os.environ.get("TEXLOOM_PRIVATE", "") not in ("", "0"),
+                   help="only projects created with a valid creation code may use this server, even without "
+                        "storage; people with such a project's link need nothing else (needs --codes-file)")
     p.add_argument("--no-project-lists", action="store_true",
                    help="don't store people's encrypted project lists (the sync link and passkey features)")
     p.add_argument("--no-arxiv", action="store_true", help="disable importing arXiv sources through this server")
@@ -1283,14 +1376,18 @@ def main() -> None:
                    os.environ.get("TEXLOOM_ADMIN_TOKEN", "").strip())
     if admin_token and len(admin_token) < 16:
         sys.exit("the admin token must be at least 16 characters")
+    if a.private and not codes.path:
+        sys.exit("--private needs --codes-file: it's the creation codes that decide who may use the server")
     limits = Limits(a.max_bytes, a.min_free, a.project_max_bytes)
+    if a.private:
+        log.info("private server: only projects with a valid creation code may connect")
     log.info("limits: total %s, keep %s free, %s per project; %s",
              fmt_size(limits.max_bytes), fmt_size(limits.min_free), fmt_size(limits.project_max),
              f"allowances from {', '.join(map(str, a.codes_file))}" if codes.path else "no codes file: every project may be stored")
     web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv,
                         admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
                         texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
-                        purge_days=a.purge_expired_after, lists=not a.no_project_lists), host=a.host, port=a.port)
+                        purge_days=a.purge_expired_after, lists=not a.no_project_lists, private=a.private), host=a.host, port=a.port)
 
 
 if __name__ == "__main__":
