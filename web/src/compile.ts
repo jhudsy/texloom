@@ -12,7 +12,7 @@ let available: Promise<boolean> | null = null
 export type Progress = { phase: 'download' | 'compile'; percent?: number; loaded?: number; total?: number }
 
 /** Does the server (or the offline cache) have this TeX asset? */
-async function hasAsset(path: string): Promise<boolean> {
+export async function hasAsset(path: string): Promise<boolean> {
   try { if ('caches' in self && (await caches.match(path))) return true } catch {}
   return fetch(path, { method: 'HEAD' }).then((r) => r.ok).catch(() => false)
 }

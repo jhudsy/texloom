@@ -210,4 +210,11 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     '{n} shown': {'other': '显示 {n} 个'},
     '{n} folders selected': {'other': '已选择 {n} 个文件夹'},
     'Stop syncing {n} folders?\n\n{names}\n\nThe folders and their files stay where they are; you can delete them yourself.': {'other': '停止同步 {n} 个文件夹？\n\n{names}\n\n文件夹及其文件保持原位；你可以自行删除。'},
+    'Word count…': '字数统计…',
+    'Count the words with TeXCount, from your own TeX installation': '使用你自己安装的 TeX 中的 TeXCount 统计字数',
+    'Word count': '字数统计',
+    'TeXCount wasn’t found. It comes with TeX Live and most TeX installations.': '未找到 TeXCount。TeX Live 和大多数 TeX 发行版都附带它。',
+    'TeXCount couldn’t count this folder: {err}': 'TeXCount 无法统计此文件夹：{err}',
+    'Word count of “{name}”': '“{name}”的字数统计',
+    'No .tex file with \\documentclass found.': '未找到包含 \\documentclass 的 .tex 文件。',
 }

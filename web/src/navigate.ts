@@ -4,6 +4,7 @@ import type { Replica } from './replica'
 import { h } from './dom'
 import { mainFile } from './projectfiles'
 import { t, tn, locale } from './i18n'
+import { texCountDialog } from './texcount'
 import { COMMENT, envClose, envOpen, INLINE_MATH, MATH_OPEN, mathClose, spans } from './texscan'
 
 export type Reveal = (file: string, from: number, to: number) => void
@@ -122,7 +123,8 @@ export function outline(r: Replica): Outline {
 export function createOutlinePanel(r: Replica, reveal: Reveal, selectionWords: () => number | null): { el: HTMLElement; refresh(): void } {
   const list = h('ul', { class: 'outline' })
   const count = h('div', { class: 'wordcount muted small' })
-  const el = h('div', { class: 'navpanel' }, count, list)
+  const detailed = h('button', { class: 'small', title: t('Text, headers, captions and maths, counted by TeXCount'), onclick: () => texCountDialog(r) }, t('Detailed count…'))
+  const el = h('div', { class: 'navpanel' }, h('div', { class: 'wordcount-row' }, count, detailed), list)
   let timer: ReturnType<typeof setTimeout> | undefined
 
   function refresh() {

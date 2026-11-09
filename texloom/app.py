@@ -36,6 +36,7 @@ from .cli import DEFAULT_CONFIG, clone_project, load, load_config, new_project, 
 from .crypto import Keys
 from .daemon import CURRENT, FOLDER, Daemon, FolderProblem, FolderTag
 from .folder import copy_project_files
+from .paths import main_file, tex_env
 from .i18n import _, app_pref, lang_pref, ngettext, set_app_pref, set_lang_pref
 from .locales import NAMES
 
@@ -886,6 +887,41 @@ async def copy_folder(engine: Engine, src: Path, dst: Path, name: str, code: str
     return await new_project(dst, load(src)[1], name, code, settings)
 
 
+def find_texcount() -> str | None:
+    """TeXCount from this computer's TeX. Apps opened from the Finder don't get TeX on their PATH."""
+    return shutil.which("texcount") or shutil.which("texcount", path="/Library/TeX/texbin:/usr/texbin:/usr/local/bin:/opt/homebrew/bin")
+
+
+def texcount_language(text: str) -> list[str]:
+    """TeXCount counts one script at a time, so the text chooses which (web/src/texcount.ts too)."""
+    code = {ord(c) for c in text if ord(c) > 0x2FFF}
+    if any(0x3040 <= c <= 0x30FF for c in code):
+        return ["-japanese"]
+    if any(0x3400 <= c <= 0x9FFF or 0x20000 <= c <= 0x2FFFF for c in code):
+        return ["-chinese"]
+    if any(0xAC00 <= c <= 0xD7A3 for c in code):
+        return ["-korean-words"]
+    return []
+
+
+async def texcount_report(st, d: Path, exe: str) -> str:
+    """Runs on the sync thread, the only place a folder's project can be read. TeXCount only reads text."""
+    files, meta = st.replica.files, st.replica.meta
+    main = main_file(files, meta)
+    if not main:
+        raise FolderProblem(_("No .tex file with \\documentclass found."))
+    text = "\n".join(str(files[p]) for p in files.keys() if p.endswith(".tex"))
+    args = [exe, "-inc", "-utf8", *texcount_language(text), f"./{main}"]
+
+    def run_it() -> str:
+        out = subprocess.run(args, cwd=d, env=tex_env(), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        if out.returncode:
+            raise FolderProblem(out.stderr.strip()[-500:] or str(out.returncode))
+        return out.stdout
+
+    return await asyncio.to_thread(run_it)
+
+
 class TagsDialog(QtWidgets.QDialog):
     """Assign or unassign tags on one project or several, and create new ones."""
 
@@ -1312,6 +1348,39 @@ class Window(QtWidgets.QMainWindow):
             self.clear_filter()
             self.select_folder(dlg.made)
 
+    def word_count(self) -> None:
+        d = self.current()
+        exe = find_texcount()
+        if not d:
+            return
+        if not exe:
+            QtWidgets.QMessageBox.information(self, _("Word count"), _("TeXCount wasn’t found. It comes with TeX Live and most TeX installations."))
+            return
+        st = self.engine.daemon.states.get(d)
+        if st is None or st.replica is None:
+            self.statusBar().showMessage(_("This folder isn’t running yet: try again in a moment."), 5000)
+            return
+        name = project_name(d, self.engine)
+
+        def show(report, err) -> None:
+            if err:
+                QtWidgets.QMessageBox.warning(self, _("Word count"), _("TeXCount couldn’t count this folder: {err}", err=err))
+                return
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle(_("Word count of “{name}”", name=name))
+            dlg.resize(560, 460)
+            lay = QtWidgets.QVBoxLayout(dlg)
+            text = QtWidgets.QPlainTextEdit(report)
+            text.setReadOnly(True)
+            text.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
+            lay.addWidget(text, 1)
+            close = QtWidgets.QPushButton(_("Close"))
+            close.clicked.connect(dlg.accept)
+            lay.addWidget(close, 0, Qt.AlignRight)
+            dlg.exec()
+
+        self.engine.submit(texcount_report(st, d, exe), show)
+
     def select_folder(self, d: Path) -> None:
         for i in range(self.list.count()):
             if Path(self.list.item(i).data(Qt.UserRole)) == d.resolve():
@@ -1346,7 +1415,10 @@ class Window(QtWidgets.QMainWindow):
         self.b_tags.clicked.connect(self.edit_tags)
         self.b_copy = QtWidgets.QPushButton(_("Make a copy…"))
         self.b_copy.clicked.connect(self.copy_project)
-        for b in (self.b_open, self.b_web, self.b_ro, self.b_tags, self.b_copy):
+        self.b_count = QtWidgets.QPushButton(_("Word count…"))
+        self.b_count.setToolTip(_("Count the words with TeXCount, from your own TeX installation"))
+        self.b_count.clicked.connect(self.word_count)
+        for b in (self.b_open, self.b_web, self.b_ro, self.b_tags, self.b_copy, self.b_count):
             btns.addWidget(b)
         btns.addStretch(1)
         btns.addWidget(self.b_leave)
@@ -1445,7 +1517,7 @@ class Window(QtWidgets.QMainWindow):
         picked = self.selected()
         several = len(picked) > 1
         self.settings.setEnabled(not several)
-        for b in (self.b_open, self.b_web, self.b_ro, self.b_copy):
+        for b in (self.b_open, self.b_web, self.b_ro, self.b_copy, self.b_count):
             b.setEnabled(not several)
         if several:
             self.title.setText(ngettext(len(picked), "{n} folder selected", "{n} folders selected", n=len(picked)))

@@ -308,4 +308,11 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     '{n} shown': ('{n} affiché', '{n} affichés'),
     '{n} folders selected': ('{n} dossier sélectionné', '{n} dossiers sélectionnés'),
     'Stop syncing {n} folders?\n\n{names}\n\nThe folders and their files stay where they are; you can delete them yourself.': ('Arrêter de synchroniser {n} dossier ?\n\n{names}\n\nLe dossier et ses fichiers restent où ils sont ; vous pouvez le supprimer vous-même.', 'Arrêter de synchroniser {n} dossiers ?\n\n{names}\n\nLes dossiers et leurs fichiers restent où ils sont ; vous pouvez les supprimer vous-même.'),
+    'Word count…': 'Nombre de mots…',
+    'Count the words with TeXCount, from your own TeX installation': 'Compter les mots avec TeXCount, depuis votre propre installation de TeX',
+    'Word count': 'Nombre de mots',
+    'TeXCount wasn’t found. It comes with TeX Live and most TeX installations.': 'TeXCount est introuvable. Il est fourni avec TeX Live et la plupart des installations de TeX.',
+    'TeXCount couldn’t count this folder: {err}': 'TeXCount n’a pas pu compter ce dossier : {err}',
+    'Word count of “{name}”': 'Nombre de mots de « {name} »',
+    'No .tex file with \\documentclass found.': 'Aucun fichier .tex avec \\documentclass trouvé.',
 }

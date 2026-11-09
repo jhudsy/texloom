@@ -405,7 +405,10 @@ aside .tab { padding: 4px 8px; }
 .results mark { background: rgba(255, 200, 0, .45); color: inherit; }
 .results .hit button { padding: 0 4px; visibility: hidden; }
 .results .hit:hover button { visibility: visible; }
-.wordcount { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.wordcount-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.texcount { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.texcount td, .texcount th { padding: 3px 4px; border-bottom: 1px solid var(--line); text-align: left; overflow-wrap: anywhere; }
+.texcount .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .outline li { display: flex; gap: 6px; padding: 3px 8px; cursor: pointer; align-items: baseline; }
 .outline .otitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .outline .lvl0 { font-weight: 600; }

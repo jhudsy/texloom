@@ -204,6 +204,8 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **Word counts:** the Outline tab counts the document and each section; selecting text shows its count
   in the corner of the editor. LaTeX commands, citations, maths and comments aren't counted. Chinese and
   Japanese are counted by the character.
+  **Detailed count…** there runs [TeXCount](https://ctan.org/pkg/texcount) on your device for a breakdown of
+  text, headers, captions and maths (the desktop app's **Word count…** uses your own TeX installation's copy).
 - **Compiling another file:** **Compile** compiles the open file if it has its own `\documentclass`
   (a figure or a separate document), and otherwise the main file; right-click a file to compile it.
   Only the main file's PDF is shared with collaborators.
@@ -746,3 +748,6 @@ Early prototype. Not yet built:
 ## License
 
 AGPL-3.0-or-later. In-browser TeX uses [texlyre-busytex](https://github.com/TeXlyre/texlyre-busytex) (AGPL-3.0); the equation preview uses [KaTeX](https://katex.org) (MIT).
+
+`web/public/vendor/texcount.pl` is TeXcount 3.1.1 by Einar Andreas Rodland, included unmodified under the
+LaTeX Project Public License.
