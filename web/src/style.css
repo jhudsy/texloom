@@ -30,6 +30,7 @@ input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-r
 .landing .sub { color: var(--muted); margin-top: 0; }
 .landing label { display: flex; flex-direction: column; gap: 4px; margin: 24px 0 16px; color: var(--muted); }
 .landing h2 { font-size: 15px; margin-top: 32px; }
+.landing .row + .row { margin-top: 10px; }
 .recent { list-style: none; padding: 0; }
 .recent a { color: var(--fg); font-weight: 500; }
 
@@ -248,7 +249,6 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 .recent .icon { border: none; background: transparent; color: var(--muted); padding: 0 4px; }
 .recent .icon:hover { color: var(--fg); }
 .recent .forget:hover { color: var(--err); }
-.landing h2 small { font-weight: normal; }
 
 /* storage warnings */
 .risk { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 6px 12px; font-size: 13px;
