@@ -58,11 +58,11 @@ export const tags = {
     return { id, name: clean }
   },
 
-  /** Rename a tag. To the name of another tag, it becomes that tag. */
+  /** Rename a tag. To the name of another tag, it becomes that tag, keeping that tag's spelling. */
   rename(id: string, name: string) {
-    const clean = cleanTagName(name), doc = read()
+    const clean = cleanTagName(name), doc = read(), other = tags.find(clean)
     if (!clean || !doc.tags[id] || doc.tags[id].gone) return
-    doc.tags[id] = { n: clean, at: stamp(doc.tags[id].at) }
+    doc.tags[id] = { n: other && other.id !== id ? other.name : clean, at: stamp(doc.tags[id].at) }
     write(mergeTags(doc, doc))
   },
 

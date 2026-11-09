@@ -115,13 +115,14 @@ def create(name: str) -> Tag | None:
 
 
 def rename(tid: str, name: str) -> None:
-    """Rename a tag. To the name of another tag, it becomes that tag."""
+    """Rename a tag. To the name of another tag, it becomes that tag, keeping that tag's spelling."""
     clean = clean_name(name)
     with _lock:
         data = doc()
         tag = data["tags"].get(tid)
+        other = find(clean) if clean else None
         if clean and tag and not tag.get("gone"):
-            data["tags"][tid] = {"n": clean, "at": _stamp(tag["at"])}
+            data["tags"][tid] = {"n": other.name if other and other.id != tid else clean, "at": _stamp(tag["at"])}
             _write(merge_tags(data, data))
 
 
