@@ -34,6 +34,7 @@ export interface EditorPane {
   relint(): void
   gotoOffset(pos: number): void
   context(): { file: string; selection: string; fromLine: number; toLine: number } | null
+  onContextChange(f: () => void): void
   selection(): { file: string; from: number; to: number; text: string } | null
   reveal(from: number, to: number): void
   refreshSpell(): void
@@ -138,7 +139,11 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     }
   })
 
-  function open(path: string | null) {
+  const contextWatchers: (() => void)[] = []
+  const contextChanged = () => contextWatchers.forEach((f) => f())
+  function open(path: string | null) { show(path); contextChanged() }
+
+  function show(path: string | null) {
     if (path === current && (view || !path)) return
     current = path
     view?.destroy(); view = null
@@ -166,7 +171,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             authorsSlot.of(authorsOn ? authorsExtension(yt) : []),
             hooks.review(path),
             flashField,
-            EditorView.updateListener.of((u) => { if (u.selectionSet || u.docChanged) showSelectionCount(u.view) }),
+            EditorView.updateListener.of((u) => { if (u.selectionSet || u.docChanged) { showSelectionCount(u.view); contextChanged() } }),
             Prec.high(keymap.of([
               { key: 'Mod-Alt-m', run: () => { hooks.onReview('comment'); return true } },
               { key: 'Mod-Alt-e', run: () => { hooks.onReview('suggestion'); return true } },
@@ -237,5 +242,5 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
 
   const refreshSpell = () => { if (view) view.dispatch({ effects: [spellSlot.reconfigure(spellExt()), mathSlot.reconfigure(mathExt())] }) }
 
-  return { el, open, context, selection, reveal, refreshSpell, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { view?.dispatch({ effects: recheck.of(null) }) } }
+  return { el, open, onContextChange: (f: () => void) => { contextWatchers.push(f) }, context, selection, reveal, refreshSpell, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { view?.dispatch({ effects: recheck.of(null) }) } }
 }

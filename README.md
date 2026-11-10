@@ -398,7 +398,7 @@ browser stops if it finds the app or `texloom run` keeping the same folder.
   by tag. Tags show in colour, which **Manage tags…** lets you change. Select several (Shift or ⌘/Ctrl-click) to change their **Tags…** or **Leave…** them
   together, and right-click for the same actions. Tags are the same ones as in the web app, through
   your project list. **Make a copy…** starts a new project, in a new folder, from a folder's files.
-  **Connect an AI tool…** on the right-click menu shows how to connect a tool you already use through [MCP](#agents-mcp).
+  **Connect an AI tool via MCP…** on the right-click menu shows how to connect a tool you already use through [MCP](#agents-mcp).
 - **Share a folder…** turns an existing folder into a new project; **Add existing folder…**
   brings back one set up earlier (e.g. left, or cloned on the command line).
 - Each folder shows whether it is up to date, offline or sending changes, with its recent
@@ -614,10 +614,10 @@ Providers (pick one in the tab; settings via ⚙):
   (`lms server start --cors`). Ollama accepts `localhost` pages by default; from another
   site, set `OLLAMA_ORIGINS`. Use a model with tool calling (for example a Qwen 3.x model).
 
-Conversations are saved in your browser, per project: 🕘 lists them to read, continue (on the provider and
+Conversations are saved in your browser, per project: **Past conversations** lists them to read, continue (on the provider and
 model they used) or delete, and they're removed if you remove the project from this browser.
 
-**Connect your own AI tool…** in the tab shows how to connect a tool you already use through
+**Connect an AI tool via MCP…** in the tab shows how to connect a tool you already use through
 [MCP](#agents-mcp) instead, such as Claude Code. It runs under your own account with that tool, so it
 needs no API key here.
 

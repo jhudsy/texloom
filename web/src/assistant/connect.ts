@@ -25,7 +25,7 @@ export function connectToolDialog(writable: boolean, link: (write: boolean) => s
   const install = codeBlock(() => INSTALL)
   install.update(); update()
   const dlg = dialog('settings',
-    h('h3', {}, t('Connect your own AI tool')),
+    h('h3', {}, t('Connect an AI tool via MCP')),
     h('p', { class: 'muted small' }, t('Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.')),
     h('h4', {}, t('Install the TeXLoom command-line helper once')),
     install.el,

@@ -33,6 +33,7 @@ export interface PanelHost {
   lastLog: () => string
   userName: () => string
   link: (write: boolean) => string // the project's edit or read-only link
+  onContextChange: (f: () => void) => void // the open file or the selection changed
 }
 
 // --- tiny, safe markdown (escape first, then a few constructs) ----------------
@@ -87,7 +88,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   const sendBtn = h('button', { class: 'primary', onclick: () => (abort ? stop() : send()) }, t('Send')) as HTMLButtonElement
   const reviewChk = h('input', { type: 'checkbox', 'aria-label': t('Ask before applying edits'), checked: aiPrefs.reviewEdits, onchange: (e: any) => (aiPrefs.reviewEdits = e.target.checked) }) as HTMLInputElement
   const ctxChip = h('span', { class: 'ctx muted' })
-  const historyBtn = h('button', { title: t('Past conversations'), 'aria-label': t('Past conversations'), onclick: () => historyDialog() }, '🕘') as HTMLButtonElement
+  const historyBtn = h('button', { onclick: () => historyDialog() }, t('Past conversations')) as HTMLButtonElement
 
   const refreshModels = () => {
     modelIn.value = cfg.model
@@ -98,13 +99,12 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!abort) send() }
   })
-  input.addEventListener('focus', () => renderCtx())
 
   const panel = h('div', { class: 'assistant' },
     h('div', { class: 'ai-bar' }, providerSel, modelIn, modelList,
-      historyBtn,
       h('button', { title: t('Assistant settings'), onclick: () => configDialog() }, '⚙'),
-      h('button', { title: t('Start a new conversation'), onclick: () => newChat(true) }, t('New'))),
+    ),
+    h('div', { class: 'ai-bar' }, h('button', { onclick: () => newChat(true) }, t('New conversation')), historyBtn),
     log,
     h('div', { class: 'ai-compose' },
       h('div', { class: 'row' }, ctxChip, h('span', { class: 'spacer' }),
@@ -197,7 +197,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     render()
   }
 
-  const connectButton = () => h('button', { class: 'small connect-tool', onclick: () => connectToolDialog(host.writable, host.link) }, t('Connect your own AI tool…'))
+  const connectButton = () => h('button', { class: 'small connect-tool', onclick: () => connectToolDialog(host.writable, host.link) }, t('Connect an AI tool via MCP…'))
 
   function intro() {
     log.replaceChildren(h('div', { class: 'ai-note' }, [
@@ -208,6 +208,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     ].filter(Boolean).join(' '), h('div', {}, connectButton())))
   }
   intro()
+  renderCtx()
+  host.onContextChange(renderCtx)
 
   function switchProvider(id: string) {
     providerId = id

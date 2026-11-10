@@ -1,8 +1,8 @@
 import type { Catalog } from '../../i18n'
 
 const zh: Catalog = {
-  'Connect your own AI tool…': '连接您自己的 AI 工具…',
-  'Connect your own AI tool': '连接您自己的 AI 工具',
+  'Connect an AI tool via MCP…': '通过 MCP 连接 AI 工具…',
+  'Connect an AI tool via MCP': '通过 MCP 连接 AI 工具',
   'Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.': '支持 MCP 的工具（如 Claude Code、Claude Desktop 或 Cursor）可以像协作者一样处理此项目。它们在您的电脑上使用您自己的账户运行，因此这里无需 API 密钥。',
   'Install the TeXLoom command-line helper once': '安装一次 TeXLoom 命令行工具',
   'How to install uv': '如何安装 uv',

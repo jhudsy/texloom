@@ -1,8 +1,8 @@
 import type { Catalog } from '../../i18n'
 
 const de: Catalog = {
-  'Connect your own AI tool…': 'Eigenes KI-Werkzeug verbinden …',
-  'Connect your own AI tool': 'Eigenes KI-Werkzeug verbinden',
+  'Connect an AI tool via MCP…': 'KI-Werkzeug über MCP verbinden …',
+  'Connect an AI tool via MCP': 'KI-Werkzeug über MCP verbinden',
   'Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.': 'Werkzeuge mit MCP-Unterstützung wie Claude Code, Claude Desktop oder Cursor können wie Mitwirkende an diesem Projekt arbeiten. Sie laufen auf Ihrem Computer mit Ihrem eigenen Konto, daher wird hier kein API-Schlüssel benötigt.',
   'Install the TeXLoom command-line helper once': 'Installieren Sie einmalig das TeXLoom-Befehlszeilenprogramm',
   'How to install uv': 'So installieren Sie uv',

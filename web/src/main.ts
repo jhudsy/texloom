@@ -488,6 +488,7 @@ async function openProject(keys: Keys) {
       replica: r, writable, editorContext: editor.context,
       compile: () => output.compile(false), lastLog: output.lastLog, userName: () => me.name,
       link: (write) => keys.link(server, write && writable),
+      onContextChange: editor.onContextChange,
     }),
     review: () => (reviewPanel = createReviewPanel({
       replica: r, writable, userName: () => me.name, selection: () => editor.selection(),

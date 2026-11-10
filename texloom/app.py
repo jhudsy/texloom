@@ -882,7 +882,7 @@ class ConnectToolDialog(QtWidgets.QDialog):
         self.folder = folder.resolve()
         self.keys, self.server = load(folder)
         self.access = "suggest" if self.keys.writable else "read"
-        self.setWindowTitle(_("Connect an AI tool"))
+        self.setWindowTitle(_("Connect an AI tool via MCP"))
         self.setMinimumWidth(620)
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(self.note(_("Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.")))
@@ -1507,7 +1507,7 @@ class Window(QtWidgets.QMainWindow):
         m.addAction(_("Tags…"), self.edit_tags)
         if len(self.selected()) == 1:
             m.addAction(_("Make a copy…"), self.copy_project)
-            m.addAction(_("Connect an AI tool…"), self.connect_tool)
+            m.addAction(_("Connect an AI tool via MCP…"), self.connect_tool)
         m.addSeparator()
         m.addAction(_("Leave…"), self.leave)
         m.exec(self.list.viewport().mapToGlobal(pos))
