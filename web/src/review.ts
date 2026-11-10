@@ -5,7 +5,7 @@ import * as Y from 'yjs'
 import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import type { Replica } from './replica'
-import { h } from './dom'
+import { dialog, h } from './dom'
 import { t, locale } from './i18n'
 
 export type Kind = 'comment' | 'suggestion'
@@ -172,10 +172,40 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     const sel = host.selection()
     if (!sel) return alert(t('Open a text file and select some text first.'))
     if (kind === 'comment' && sel.from === sel.to) return alert(t('Select the text you want to comment on.'))
-    const text = prompt(kind === 'comment' ? t('Comment:') : t('Replace “{{text}}” with:', { text: sel.text.slice(0, 80) + (sel.text.length > 80 ? '…' : '') }), kind === 'suggestion' ? sel.text : '')
-    if (text === null || (kind === 'comment' && !text.trim())) return
-    const id = addItem(r, kind, sel.file, sel.from, sel.to, text, host.userName())
-    if (id) focus(id)
+    writeDialog(kind, sel)
+  }
+
+  /** The text being commented on can move or go while this is open, as others keep editing. */
+  function writeDialog(kind: Kind, sel: { file: string; from: number; to: number; text: string }) {
+    const yt = r.files.get(sel.file)
+    if (!yt) return
+    const start = Y.createRelativePositionFromTypeIndex(yt, sel.from), end = Y.createRelativePositionFromTypeIndex(yt, sel.to, -1)
+    const lines = sel.text.split('\n').length
+    const area = h('textarea', { class: 'review-write', rows: kind === 'comment' ? 5 : Math.min(Math.max(lines + 1, 3), 12), placeholder: kind === 'comment' ? t('Write your comment…') : null, 'aria-label': kind === 'comment' ? t('Add a comment') : t('Replace the selected text with:') }) as HTMLTextAreaElement
+    area.value = kind === 'suggestion' ? sel.text : ''
+    const save = () => {
+      const text = area.value
+      if (kind === 'comment' && !text.trim()) { area.focus(); return }
+      const a = Y.createAbsolutePositionFromRelativePosition(start, r.doc), b = Y.createAbsolutePositionFromRelativePosition(end, r.doc)
+      if (!a || !b || a.type !== yt || b.type !== yt || (sel.to > sel.from && b.index <= a.index)) { alert(t('The text you selected has since been removed.')); dlg.close(); return }
+      dlg.close()
+      const id = addItem(r, kind, sel.file, a.index, b.index, text, host.userName())
+      if (id) focus(id)
+    }
+    area.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save() } })
+    const quote = sel.text.length > 400 ? `${sel.text.slice(0, 400)}…` : sel.text
+    const dlg = dialog('settings',
+      h('h3', {}, kind === 'comment' ? t('Add a comment') : t('Suggest a change')),
+      quote && kind === 'comment' ? h('blockquote', { class: 'review-quote' }, quote) : null,
+      kind === 'suggestion' ? h('p', { class: 'small' }, t('Replace the selected text with:')) : null,
+      area,
+      h('div', { class: 'row end' },
+        h('span', { class: 'muted small spacer' }, t('⌘Enter or Ctrl+Enter to save')),
+        h('button', { onclick: () => dlg.close() }, t('Cancel')),
+        h('button', { class: 'primary', onclick: save }, kind === 'comment' ? t('Add comment') : t('Add suggestion'))),
+    )
+    area.focus()
+    if (kind === 'suggestion') area.select()
   }
 
   function focus(id: string) {

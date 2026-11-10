@@ -12,8 +12,6 @@ const de: Catalog = {
   '✎ Suggest': '✎ Vorschlagen',
   'Open a text file and select some text first.': 'Öffnen Sie zuerst eine Textdatei und wählen Sie Text aus.',
   'Select the text you want to comment on.': 'Wählen Sie den Text aus, den Sie kommentieren möchten.',
-  'Comment:': 'Kommentar:',
-  'Replace “{{text}}” with:': '„{{text}}“ ersetzen durch:',
   'Reply…': 'Antworten …',
   'Reply': 'Antworten',
   'Show in the editor': 'Im Editor anzeigen',
@@ -31,6 +29,14 @@ const de: Catalog = {
   'Delete this for everyone?': 'Für alle löschen?',
   'No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.': 'Keine offenen Kommentare oder Vorschläge. Wählen Sie Text im Editor aus und dann 💬 Kommentieren oder ✎ Vorschlagen.',
   'No open comments or suggestions.': 'Keine offenen Kommentare oder Vorschläge.',
+  'Add a comment': 'Kommentar hinzufügen',
+  'Suggest a change': 'Änderung vorschlagen',
+  'Write your comment…': 'Kommentar schreiben …',
+  'Replace the selected text with:': 'Ausgewählten Text ersetzen durch:',
+  'Add comment': 'Kommentar hinzufügen',
+  'Add suggestion': 'Vorschlag hinzufügen',
+  '⌘Enter or Ctrl+Enter to save': '⌘Eingabe oder Strg+Eingabe zum Speichern',
+  'The text you selected has since been removed.': 'Der ausgewählte Text wurde inzwischen entfernt.',
 }
 
 export default de

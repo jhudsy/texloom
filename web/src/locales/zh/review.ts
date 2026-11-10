@@ -12,8 +12,6 @@ const zh: Catalog = {
   '✎ Suggest': '✎ 建议',
   'Open a text file and select some text first.': '请先打开文本文件并选择一些文本。',
   'Select the text you want to comment on.': '请选择要评论的文本。',
-  'Comment:': '评论：',
-  'Replace “{{text}}” with:': '将“{{text}}”替换为：',
   'Reply…': '回复…',
   'Reply': '回复',
   'Show in the editor': '在编辑器中显示',
@@ -31,6 +29,14 @@ const zh: Catalog = {
   'Delete this for everyone?': '为所有人删除此内容？',
   'No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.': '没有未解决的评论或建议。在编辑器中选择文本，然后点击 💬 评论或 ✎ 建议。',
   'No open comments or suggestions.': '没有未解决的评论或建议。',
+  'Add a comment': '添加评论',
+  'Suggest a change': '建议更改',
+  'Write your comment…': '写下您的评论…',
+  'Replace the selected text with:': '将所选文本替换为：',
+  'Add comment': '添加评论',
+  'Add suggestion': '添加建议',
+  '⌘Enter or Ctrl+Enter to save': '按 ⌘Enter 或 Ctrl+Enter 保存',
+  'The text you selected has since been removed.': '所选文本已被删除。',
 }
 
 export default zh
