@@ -105,6 +105,10 @@ const pt: Catalog = {
   'The server keeps no copy of this project: if nobody else has one, it will be gone for good.': 'O servidor não guarda cópia deste projeto: se ninguém mais tiver uma, ele será perdido para sempre.',
   'Remove from this browser': 'Remover deste navegador',
   'Done': 'Concluído',
+  "Suggested changes in the editor:": "Alterações sugeridas no editor:",
+  "Not marked (see the Review tab)": "Sem marcação (veja a aba Revisão)",
+  "Underlined": "Sublinhadas",
+  "In full (removed text struck through)": "Completas (texto removido riscado)",
 }
 
 export default pt

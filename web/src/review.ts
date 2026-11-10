@@ -9,7 +9,7 @@ import { h } from './dom'
 import { t, locale } from './i18n'
 import { applyChange } from './suggestcore'
 import { flushSuggestions } from './suggestmode'
-import { wordDiff, type DiffOp } from './worddiff'
+import { refine, wordDiff, type DiffOp } from './worddiff'
 
 export type Kind = 'comment' | 'suggestion'
 export interface Item {
@@ -93,6 +93,41 @@ export function accept(r: Replica, id: string): string | null {
 }
 
 // ---- editor decorations ----------------------------------------------------------
+/** How suggestions show in the editor (Settings): 'none', the default, leaves the text as it is
+ *  and the changes in the Review tab; 'simple' underlines them, with the details on hover; 'all'
+ *  shows removed text struck through and new text inline. Each browser's own choice. */
+export type Markup = 'none' | 'simple' | 'all'
+export const editorMarkup = (() => {
+  const KEY = 'texloom.markup'
+  let mode: Markup = 'none'
+  try { const v = localStorage.getItem(KEY); if (v === 'simple' || v === 'all') mode = v } catch {}
+  const watchers = new Set<() => void>()
+  return {
+    mode: () => mode,
+    set(v: Markup) {
+      mode = v
+      try { if (v === 'none') localStorage.removeItem(KEY); else localStorage.setItem(KEY, v) } catch {}
+      watchers.forEach((f) => f())
+    },
+    watch(f: () => void) { watchers.add(f); return () => { watchers.delete(f) } },
+  }
+})()
+
+/** A suggestion's change in a sentence, for hovering: “old” → “new”. `by` is null for your own. */
+export function changeTitle(by: string | null, quote: string, text: string): string {
+  const o = { name: by ?? '', text: (quote || text).slice(0, 300), old: quote.slice(0, 300), new: text.slice(0, 300) }
+  if (by === null) return !quote ? t('You suggest adding “{{text}}”', o) : !text ? t('You suggest removing “{{text}}”', o) : t('You suggest “{{old}}” → “{{new}}”', o)
+  return !quote ? t('{{name}} suggests adding “{{text}}”', o) : !text ? t('{{name}} suggests removing “{{text}}”', o) : t('{{name}} suggests “{{old}}” → “{{new}}”', o)
+}
+
+/** In the simple view: a thin mark where text would be added or removed. */
+export class ChangeMark extends WidgetType {
+  constructor(readonly kind: 'add' | 'remove', readonly title: string, readonly id: string | null) { super() }
+  eq(o: ChangeMark) { return o.kind === this.kind && o.title === this.title && o.id === this.id }
+  toDOM() { return h('span', { class: `cm-change-mark ${this.kind}`, title: this.title, ...(this.id ? { 'data-review': this.id } : {}) }) }
+  ignoreEvent() { return false }
+}
+
 class InsertWidget extends WidgetType {
   constructor(readonly text: string, readonly id: string, readonly by: string) { super() }
   eq(o: InsertWidget) { return o.text === this.text && o.id === this.id && o.by === this.by }
@@ -134,11 +169,18 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
         if (to > from) ranges.push(Decoration.mark({ class: 'cm-comment', attributes: { 'data-review': i.id, title: `${i.by}: ${i.text.slice(0, 200)}` } }).range(from, to))
         continue
       }
+      if (editorMarkup.mode() === 'none') continue // only in the Review tab
+      if (editorMarkup.mode() === 'simple') { // the text as it is, underlined where a change is suggested
+        const title = changeTitle(i.by, i.quote, i.text)
+        if (to > from) ranges.push(Decoration.mark({ class: 'cm-suggest-simple', attributes: { 'data-review': i.id, title } }).range(from, to))
+        else ranges.push(Decoration.widget({ widget: new ChangeMark('add', title, i.id), side: 1 }).range(to))
+        continue
+      }
       const del = (a: number, b: number) => { if (b > a) ranges.push(Decoration.mark({ class: 'cm-suggest-del', attributes: { 'data-review': i.id, title: t('{{name}} suggests removing this', { name: i.by }) } }).range(a, b)) }
       const ins = (x: number, text: string) => ranges.push(Decoration.widget({ widget: new InsertWidget(text, i.id, i.by), side: 1 }).range(x))
-      if (shared.slice(rg.from, rg.to) === i.quote) { // as a word diff: only the words that change
+      if (shared.slice(rg.from, rg.to) === i.quote) { // as a diff: only the words (or letters) that change
         let p = rg.from
-        for (const op of wordDiff(i.quote, i.text)) {
+        for (const op of refine(wordDiff(i.quote, i.text))) {
           if (op.op === 'eq') p += op.text.length
           else if (op.op === 'del') { del(at(p), at(p + op.text.length)); p += op.text.length }
           else ins(at(p), op.text)
@@ -161,10 +203,11 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
     const schedule = () => { clearTimeout(timer); timer = setTimeout(() => compute(view), 120) }
     r.review.observeDeep(schedule)
     pendingWatchers.add(schedule)
+    const unwatch = editorMarkup.watch(schedule)
     schedule()
     return {
       update(u: ViewUpdate) { if (u.docChanged) schedule() },
-      destroy() { clearTimeout(timer); r.review.unobserveDeep(schedule); pendingWatchers.delete(schedule) },
+      destroy() { clearTimeout(timer); r.review.unobserveDeep(schedule); pendingWatchers.delete(schedule); unwatch() },
     }
   })
   return [

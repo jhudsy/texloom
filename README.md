@@ -180,10 +180,11 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **Right panel:** **PDF**, **Assistant**, **Review** (comments and suggestions: reply,
   resolve, accept, reject) and **History** (versions, compare, restore, "who wrote this").
 - **Suggest mode:** **✎ Suggest mode** in the Review tab (⌘⌥⇧E / Ctrl+Alt+Shift+E) makes what
-  you type into suggestions instead of changes, like tracked changes: words you remove are struck
-  through in red and words you add are green. Each changed stretch becomes a suggestion in the Review
-  tab, shown word by word, for someone to accept or reject; until then the file, the PDF and
-  everyone else's copy stay as they were. Undo takes a suggestion back. Search and replace, and
+  you type into suggestions instead of changes, like tracked changes. You edit as usual; each changed
+  stretch becomes a suggestion in the Review tab, shown word by word (removed words struck through in
+  red, new ones green), for someone to accept or reject. Until then the file, the PDF and everyone
+  else's copy stay as they were. ⚙ Settings → *Suggested changes in the editor* also shows them in the
+  editor, underlined or in full; by default the editor shows just the text. Undo takes a suggestion back. Search and replace, and
   adding a package for a symbol, suggest too while it's on. It's remembered per project in that
   browser, and a bar across the editor says when it's on. Suggestions are blue in the Review tab and
   comments amber. While suggesting you don't see collaborators' cursors, and suggestions you typed
@@ -611,8 +612,8 @@ The **Assistant** tab next to the PDF is a chat that works on the project like a
 collaborator:
 - it can list, read and search files, read the comments and suggestions in the Review tab and reply to or resolve them, make targeted edits, create or delete files,
   compile, and read the compile log;
-- with **Ask before applying edits** (the default), each change appears as a diff to
-  apply or reject; deleting a file always asks, even with this turned off;
+- with **Ask before applying edits** (the default), each change appears word by word, like a
+  suggestion, to apply or reject; deleting a file always asks, even with this turned off;
 - every request's edits can be undone in one click, and they reach collaborators like
   anyone else's.
 

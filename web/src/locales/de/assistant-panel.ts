@@ -7,7 +7,6 @@ const de: Catalog = {
   'xhigh': 'sehr hoch',
   'max': 'maximal',
   '… {{n}} unchanged lines': ['… {{n}} unveränderte Zeile', '… {{n}} unveränderte Zeilen'],
-  '… {{n}} more lines': ['… {{n}} weitere Zeile', '… {{n}} weitere Zeilen'],
   'Provider': 'Anbieter',
   'model': 'Modell',
   'Model': 'Modell',
@@ -68,6 +67,8 @@ const de: Catalog = {
   '💬 Reading comments': '💬 Kommentare werden gelesen',
   '💬 Replying to a comment': '💬 Auf Kommentar antworten',
   '✓ Resolving a comment': '✓ Kommentar wird erledigt',
+  "… and more": "… und mehr",
+  "From line {{n}}": "Ab Zeile {{n}}",
 }
 
 export default de

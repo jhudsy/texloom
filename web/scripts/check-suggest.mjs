@@ -170,6 +170,24 @@ for (let run = 0; run < 300; run++) {
   remote(() => yt.insert(yt.toString().indexOf('big'), 'very ')) // between them, outside both
   check(`edits outside suggestions show: ${core.compose(shared, hunks)}`, core.compose(shared, hunks) === 'the color of the very big red van')
 }
+// someone typing right against a word the suggestion took in
+{
+  const doc = new Y.Doc({ gc: false })
+  const yt = new Y.Text()
+  doc.getMap('files').set('main.tex', yt)
+  yt.insert(0, 'This is good.')
+  let shared = yt.toString(), hunks = []
+  const type = (f, t, s) => { hunks = core.edit(shared, hunks, core.compose(shared, hunks), f, t, s).hunks; core.anchor(yt, hunks) }
+  const remote = (fn) => { fn(); shared = yt.toString(); hunks = core.refresh(doc, yt, hunks).hunks; core.anchor(yt, hunks) }
+  type(7, 7, ' very') // "is" → "is very"
+  remote(() => yt.insert(7, "n't")) // carries the word on
+  check(`a word carried on is part of the suggestion: ${core.compose(shared, hunks)}`, core.compose(shared, hunks) === "This isn't very good.")
+  remote(() => yt.insert(yt.toString().indexOf("isn't") + 5, ' really')) // starts with a space: beside it
+  check(`text beside a suggestion stays outside it: ${core.compose(shared, hunks)}`, core.compose(shared, hunks) === "This isn't very really good." && hunks[0].text === "isn't very")
+  remote(() => yt.insert(0, 'So ')) // and before it, nothing changes
+  check(`text before stays outside: ${core.compose(shared, hunks)}`, core.compose(shared, hunks) === "So This isn't very really good.")
+}
+
 // stored suggestions pushed together are joined on loading, and the extra one goes
 {
   const doc = new Y.Doc({ gc: false })

@@ -42,6 +42,12 @@ const de: Catalog = {
   "✎ Suggest mode": "✎ Vorschlagsmodus",
   "✎ Suggestion": "✎ Vorschlag",
   "No open comments or suggestions. Select text in the editor, then 💬 Comment or Suggest a change; or turn on ✎ Suggest mode and type.": "Keine offenen Kommentare oder Vorschläge. Markieren Sie Text im Editor und wählen Sie 💬 Kommentieren oder Änderung vorschlagen – oder schalten Sie den ✎ Vorschlagsmodus ein und tippen Sie.",
+  "You suggest adding “{{text}}”": "Sie schlagen vor, „{{text}}“ hinzuzufügen",
+  "You suggest removing “{{text}}”": "Sie schlagen vor, „{{text}}“ zu entfernen",
+  "You suggest “{{old}}” → “{{new}}”": "Sie schlagen vor: „{{old}}“ → „{{new}}“",
+  "{{name}} suggests adding “{{text}}”": "{{name}} schlägt vor, „{{text}}“ hinzuzufügen",
+  "{{name}} suggests removing “{{text}}”": "{{name}} schlägt vor, „{{text}}“ zu entfernen",
+  "{{name}} suggests “{{old}}” → “{{new}}”": "{{name}} schlägt vor: „{{old}}“ → „{{new}}“",
 }
 
 export default de

@@ -138,6 +138,10 @@ const fr: Catalog = {
     'Le serveur ne garde aucune copie de ce projet : si personne d’autre n’en a, il sera définitivement perdu.',
   'Remove from this browser': 'Supprimer de ce navigateur',
   'Done': 'Terminé',
+  "Suggested changes in the editor:": "Modifications suggérées dans l’éditeur :",
+  "Not marked (see the Review tab)": "Non marquées (voir l’onglet Relecture)",
+  "Underlined": "Soulignées",
+  "In full (removed text struck through)": "En entier (texte supprimé barré)",
 }
 
 export default fr

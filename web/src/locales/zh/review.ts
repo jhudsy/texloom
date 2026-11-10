@@ -42,6 +42,12 @@ const zh: Catalog = {
   "✎ Suggest mode": "✎ 建议模式",
   "✎ Suggestion": "✎ 建议",
   "No open comments or suggestions. Select text in the editor, then 💬 Comment or Suggest a change; or turn on ✎ Suggest mode and type.": "没有未处理的评论或建议。在编辑器中选择文本，然后点击 💬 评论 或 建议更改；或者打开 ✎ 建议模式 后直接输入。",
+  "You suggest adding “{{text}}”": "你建议添加“{{text}}”",
+  "You suggest removing “{{text}}”": "你建议删除“{{text}}”",
+  "You suggest “{{old}}” → “{{new}}”": "你建议“{{old}}”→“{{new}}”",
+  "{{name}} suggests adding “{{text}}”": "{{name}} 建议添加“{{text}}”",
+  "{{name}} suggests removing “{{text}}”": "{{name}} 建议删除“{{text}}”",
+  "{{name}} suggests “{{old}}” → “{{new}}”": "{{name}} 建议“{{old}}”→“{{new}}”",
 }
 
 export default zh

@@ -42,6 +42,12 @@ const es: Catalog = {
   "✎ Suggest mode": "✎ Modo sugerencia",
   "✎ Suggestion": "✎ Sugerencia",
   "No open comments or suggestions. Select text in the editor, then 💬 Comment or Suggest a change; or turn on ✎ Suggest mode and type.": "No hay comentarios ni sugerencias abiertos. Selecciona texto en el editor y elige 💬 Comentar o Sugerir un cambio; o activa el ✎ Modo sugerencia y escribe.",
+  "You suggest adding “{{text}}”": "Sugieres añadir «{{text}}»",
+  "You suggest removing “{{text}}”": "Sugieres eliminar «{{text}}»",
+  "You suggest “{{old}}” → “{{new}}”": "Sugieres «{{old}}» → «{{new}}»",
+  "{{name}} suggests adding “{{text}}”": "{{name}} sugiere añadir «{{text}}»",
+  "{{name}} suggests removing “{{text}}”": "{{name}} sugiere eliminar «{{text}}»",
+  "{{name}} suggests “{{old}}” → “{{new}}”": "{{name}} sugiere «{{old}}» → «{{new}}»",
 }
 
 export default es

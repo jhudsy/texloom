@@ -7,7 +7,6 @@ const es: Catalog = {
   'xhigh': 'muy alto',
   'max': 'máximo',
   '… {{n}} unchanged lines': ['… {{n}} línea sin cambios', '… {{n}} líneas sin cambios'],
-  '… {{n}} more lines': ['… {{n}} línea más', '… {{n}} líneas más'],
   'Provider': 'Proveedor',
   'model': 'modelo',
   'Model': 'Modelo',
@@ -68,6 +67,8 @@ const es: Catalog = {
   '💬 Reading comments': '💬 Leyendo comentarios',
   '💬 Replying to a comment': '💬 Respondiendo a un comentario',
   '✓ Resolving a comment': '✓ Resolviendo un comentario',
+  "… and more": "… y más",
+  "From line {{n}}": "Desde la línea {{n}}",
 }
 
 export default es

@@ -105,6 +105,10 @@ const zh: Catalog = {
   'The server keeps no copy of this project: if nobody else has one, it will be gone for good.': '服务器不保留此项目的副本：如果其他人也没有，它将永久丢失。',
   'Remove from this browser': '从此浏览器中移除',
   'Done': '完成',
+  "Suggested changes in the editor:": "编辑器中的建议修改：",
+  "Not marked (see the Review tab)": "不标记（在“审阅”标签页中查看）",
+  "Underlined": "加下划线",
+  "In full (removed text struck through)": "完整显示（被删除的文字加删除线）",
 }
 
 export default zh

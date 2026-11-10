@@ -7,7 +7,6 @@ const zh: Catalog = {
   'xhigh': '超高',
   'max': '最高',
   '… {{n}} unchanged lines': { other: '… {{n}} 行未更改' },
-  '… {{n}} more lines': { other: '… 还有 {{n}} 行' },
   'Provider': '服务商',
   'model': '模型',
   'Model': '模型',
@@ -68,6 +67,8 @@ const zh: Catalog = {
   '💬 Reading comments': '💬 正在读取评论',
   '💬 Replying to a comment': '💬 正在回复评论',
   '✓ Resolving a comment': '✓ 正在解决评论',
+  "… and more": "……以及更多",
+  "From line {{n}}": "从第 {{n}} 行起",
 }
 
 export default zh

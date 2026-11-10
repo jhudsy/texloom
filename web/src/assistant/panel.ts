@@ -9,6 +9,7 @@ import { createSession, explainError, type LlmSession } from './llm'
 import { ASSISTANT, runTool, toolsFor, type Change, type ToolCtx } from './tools'
 import { locale, t, tn } from '../i18n'
 import { flushSuggestions } from '../suggestmode'
+import { refine, wordDiff } from '../worddiff'
 
 const MAX_STEPS = 40 // tool round-trips per request
 const MAX_SAVED_STATE = 4 * 1024 * 1024 // past this, a conversation is kept to read but can't be continued
@@ -47,26 +48,37 @@ function md(s: string): string {
     .replace(/\n/g, '<br>')).join('')
 }
 
-/** Compact line diff: common prefix/suffix trimmed, with a few lines of context. */
+/** A proposed change shown like a suggestion: the lines around it as they are, and the changed
+ *  part word by word (removed text struck through, new text highlighted). */
 function diffView(before: string | null, after: string | null): HTMLElement {
-  const a = before?.split('\n') ?? [], b = after?.split('\n') ?? []
+  const MAX = 6000 // characters of a new or deleted file to show
+  if (before === null || after === null) { // a whole file added or removed
+    const text = (after ?? before ?? '').slice(0, MAX)
+    return h('div', { class: 'diff wdiff' }, h(after === null ? 'del' : 'ins', {}, text),
+      (after ?? before ?? '').length > MAX ? h('div', { class: 'dl skip' }, t('… and more')) : null)
+  }
+  const a = before.split('\n'), b = after.split('\n')
   let p = 0
   while (p < a.length && p < b.length && a[p] === b[p]) p++
   let s = 0
   while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++
-  const C = 3
-  const rows: HTMLElement[] = []
-  const line = (cls: string, n: string, text: string) => rows.push(h('div', { class: `dl ${cls}` }, h('span', { class: 'ln' }, n), text || ' '))
-  if (p > C) rows.push(h('div', { class: 'dl skip' }, tn(p - C, '… {{n}} unchanged line', '… {{n}} unchanged lines')))
-  for (let i = Math.max(0, p - C); i < p; i++) line('ctx', String(i + 1), a[i])
-  for (let i = p; i < a.length - s; i++) line('del', String(i + 1), a[i])
-  for (let i = p; i < b.length - s; i++) line('add', String(i + 1), b[i])
-  const shift = b.length - a.length // trailing context is numbered as in the new text
-  for (let i = a.length - s; i < Math.min(a.length, a.length - s + C); i++) line('ctx', String(i + shift + 1), a[i])
-  if (s > C) rows.push(h('div', { class: 'dl skip' }, tn(s - C, '… {{n}} unchanged line', '… {{n}} unchanged lines')))
-  const shown = rows.slice(0, 400)
-  if (rows.length > 400) shown.push(h('div', { class: 'dl skip' }, tn(rows.length - 400, '… {{n}} more line', '… {{n}} more lines')))
-  return h('div', { class: 'diff' }, ...shown)
+  const C = 2
+  const out = h('div', { class: 'diff wdiff' })
+  const skip = (n: number) => out.append(h('div', { class: 'dl skip' }, tn(n, '… {{n}} unchanged line', '… {{n}} unchanged lines')))
+  const from = Math.max(0, p - C), to = Math.min(a.length, a.length - s + C) // lines shown, in `before`
+  if (from > 0) skip(from)
+  out.append(h('div', { class: 'dl skip' }, t('From line {{n}}', { n: from + 1 })))
+  const body = h('div', { class: 'wtext' })
+  const was = a.slice(from, to).join('\n'), will = b.slice(from, b.length - s + (to - (a.length - s))).join('\n')
+  let shown = 0
+  for (const op of refine(wordDiff(was, will))) {
+    if (shown > 20000) { body.append(h('div', { class: 'dl skip' }, t('… and more'))); break }
+    shown += op.text.length
+    body.append(op.op === 'eq' ? op.text : h(op.op === 'del' ? 'del' : 'ins', {}, op.text))
+  }
+  out.append(body)
+  if (a.length - to > 0) skip(a.length - to)
+  return out
 }
 
 export function createAssistantPanel(host: PanelHost): HTMLElement {

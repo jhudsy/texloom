@@ -187,12 +187,16 @@ export function anchors(yt: Y.Text, a: number, b: number): { start: Uint8Array; 
   }
 }
 
-/** Give hunks that have none the anchors for where they are now. */
+/** Give hunks that have none the anchors for where they are now. Unlike stored anchors, an end
+ *  that is a word takes in text typed right against it, so that someone turning "is" into
+ *  "isn't" changes the word this suggestion holds (refresh() then decides what to keep). */
 export function anchor(yt: Y.Text, hunks: Hunk[]) {
+  const shared = yt.toString()
   for (const h of hunks) {
     if (h.s && h.e) continue
-    h.s = Y.createRelativePositionFromTypeIndex(yt, h.a, h.a < h.b ? 0 : -1)
-    h.e = Y.createRelativePositionFromTypeIndex(yt, h.b, -1)
+    const empty = h.a === h.b
+    h.s = Y.createRelativePositionFromTypeIndex(yt, h.a, empty || isWordChar(shared[h.a]) ? -1 : 0)
+    h.e = Y.createRelativePositionFromTypeIndex(yt, h.b, !empty && isWordChar(shared[h.b - 1]) ? 0 : -1)
   }
 }
 
@@ -201,12 +205,29 @@ export function anchor(yt: Y.Text, hunks: Hunk[]) {
  *  replaces where they don't touch the words it changes; otherwise it's marked as a conflict. */
 export function refresh(doc: Y.Doc, yt: Y.Text, hunks: readonly Hunk[]): { hunks: Hunk[]; gone: string[] } {
   const shared = yt.toString()
-  const moved: Hunk[] = []
+  const placed: { h: Hunk; a: number; b: number }[] = []
   for (const h of hunks) {
     const s = h.s && Y.createAbsolutePositionFromRelativePosition(h.s, doc)
     const e = h.e && Y.createAbsolutePositionFromRelativePosition(h.e, doc)
     if (!s || !e || s.type !== yt || e.type !== yt) continue
-    const a = Math.min(s.index, e.index), b = Math.max(s.index, e.index), base = shared.slice(a, b)
+    placed.push({ h, a: Math.min(s.index, e.index), b: Math.max(s.index, e.index) })
+  }
+  // text typed between two hunks can be taken in by both ends: the earlier one keeps it
+  placed.sort((x, y) => x.a - y.a || x.b - y.b)
+  for (let i = 1; i < placed.length; i++) {
+    const prev = placed[i - 1], cur = placed[i]
+    if (cur.a < prev.b) { cur.a = prev.b; cur.b = Math.max(cur.a, cur.b) }
+  }
+  const moved: Hunk[] = []
+  for (const { h, a: a0, b: b0 } of placed) {
+    let a = a0, b = b0, base = shared.slice(a, b)
+    // text typed right against a word at either end belongs to the suggestion if it carries on
+    // the word ("is" → "isn't"); if it starts with a space or punctuation, it's beside it
+    if (h.base && base !== h.base) {
+      if (base.startsWith(h.base) && !isWordChar(base[h.base.length])) b = a + h.base.length
+      else if (base.endsWith(h.base) && !isWordChar(base[base.length - h.base.length - 1])) a = b - h.base.length
+      base = shared.slice(a, b)
+    }
     if (a === h.a && b === h.b && base === h.base) { moved.push(h); continue }
     if (h.base === undefined || base === h.base) { moved.push({ ...h, a, b, base }); continue }
     const text = rebase(h.base, base, h.text)

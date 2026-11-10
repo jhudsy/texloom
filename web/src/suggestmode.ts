@@ -11,10 +11,10 @@ import { Annotation, Transaction, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, showPanel, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { h } from './dom'
 import { t } from './i18n'
-import { addItem, allItems, rangeOf } from './review'
+import { addItem, allItems, ChangeMark, changeTitle, editorMarkup, rangeOf } from './review'
 import type { Replica } from './replica'
 import { anchor, compose, edit, loadHunks, normalize, refresh, saveHunks, settle, toShared, toView, type Hunk } from './suggestcore'
-import { wordDiff } from './worddiff'
+import { refine, wordDiff } from './worddiff'
 
 /** Marks changes to the review map that this tab's suggesting made (not news to it). */
 const ORIGIN = { suggestMode: true }
@@ -203,17 +203,24 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
     queueMicrotask(show)
   }
 
+  /** Your suggestions in the view, as Settings says: by default not marked at all (they're in the
+   *  Review tab); underlined, with a thin mark where something was removed (hover for the change);
+   *  or removed text struck through and new text highlighted. */
   function decorations(): DecorationSet {
+    const markup = editorMarkup.mode()
+    if (markup === 'none') return Decoration.none
     const out = []
+    const all = markup === 'all'
     let d = 0
     for (const hk of hunks) {
       let p = hk.a + d
       d += hk.text.length - (hk.b - hk.a)
-      const attrs = hk.id ? { 'data-review': hk.id } : undefined
-      for (const op of wordDiff(shared.slice(hk.a, hk.b), hk.text)) {
+      const base = shared.slice(hk.a, hk.b), title = changeTitle(null, base, hk.text)
+      const attrs = { ...(hk.id ? { 'data-review': hk.id } : {}), title }
+      for (const op of refine(wordDiff(base, hk.text))) {
         if (op.op === 'eq') p += op.text.length
-        else if (op.op === 'ins') { out.push(Decoration.mark({ class: 'cm-suggest-new', attributes: attrs }).range(p, p + op.text.length)); p += op.text.length }
-        else out.push(Decoration.widget({ widget: new Struck(op.text, hk.id), side: -1 }).range(p))
+        else if (op.op === 'ins') { out.push(Decoration.mark({ class: all ? 'cm-suggest-new' : 'cm-suggest-simple', attributes: attrs }).range(p, p + op.text.length)); p += op.text.length }
+        else out.push(Decoration.widget({ widget: all ? new Struck(op.text, hk.id) : new ChangeMark('remove', title, hk.id), side: -1 }).range(p))
       }
     }
     return Decoration.set(out, true)
@@ -229,11 +236,13 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
     destroy() { cm = null }
   }, { decorations: (v) => v.decorations })
 
+  const keepFocus = (e: Event) => e.preventDefault() // keep typing where you were
+  const unwatchMarkup = editorMarkup.watch(() => put({}))
   const banner = showPanel.of(() => ({
     top: true,
     dom: h('div', { class: 'cm-suggest-banner', role: 'status' },
       h('span', {}, h('b', {}, t('Suggesting')), ' · ', t('Your edits become suggestions that others accept or reject. Compiling uses the file without them.')),
-      h('button', { class: 'small', onmousedown: (e: Event) => e.preventDefault() /* keep typing where you were */, onclick: stop }, t('Stop suggesting'))),
+      h('button', { class: 'small', onmousedown: keepFocus, onclick: stop }, t('Stop suggesting'))),
   }))
 
   const session: SuggestSession = {
@@ -247,6 +256,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
     destroy() {
       flush()
       sessions.delete(session)
+      unwatchMarkup()
       clearTimeout(timer)
       r.doc.off('afterTransaction', onTransaction)
       document.removeEventListener('visibilitychange', onHide)

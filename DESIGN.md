@@ -366,7 +366,14 @@ accept and reject, the assistant, the MCP tools, older clients) needs nothing ne
   else to text a hunk replaces is carried into the hunk (`rebase`) when it only touches words the
   hunk keeps; when it touches the words being changed, the hunk keeps its text and is marked
   `conflict`, so accepting it asks first. A hunk someone accepted, rejected or deleted leaves the
-  view, except anything typed into it since it was last saved, which becomes a new suggestion. A pure insertion anchors both ends to the character
+  view, except anything typed into it since it was last saved, which becomes a new suggestion.
+  In memory, an end of a hunk that is a word also takes in text typed right against it, so
+  "is → is very" becomes "isn't → isn't very" when someone types "n't"; text that starts with a
+  space or punctuation is put back outside. (Stored anchors don't do this, so others' views keep
+  such text beside the suggestion.)
+- **In the editor**, suggestions are by default not marked at all (they're in the Review tab);
+  Settings can underline them or show them in full, where a word replaced by a similar one shows
+  only the letters that differ (`refine` in `worddiff.ts`). A pure insertion anchors both ends to the character
   before it, so text others type at that spot comes after; other hunks hold their first and last
   replaced characters, so text typed at either edge falls outside.
 - **Positions** outside the editor (comments on a selection, search results, compile errors, the

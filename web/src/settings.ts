@@ -5,6 +5,7 @@ import { engineCached, clearEngineCache } from './compile'
 import { h, dialog } from './dom'
 import { detectMain } from './projectfiles'
 import { t, LANGUAGES, langPref, setLangPref, type Lang } from './i18n'
+import { editorMarkup, type Markup } from './review'
 
 export type CompileWhere = 'browser' | 'local' | 'none'
 export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean; spell: boolean; mathPreview: boolean; checks: boolean }
@@ -188,6 +189,10 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     h('label', { class: 'check' },
       h('input', { type: 'checkbox', 'aria-label': t('Point out common mistakes'), checked: d.checks, onchange: (e: any) => { d.checks = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
       t('Point out common LaTeX mistakes (unclosed environments, stray braces, \\label before \\caption, quotes, ties, …)')),
+    h('label', { class: 'row' }, t('Suggested changes in the editor:'),
+      h('select', { 'aria-label': t('Suggested changes in the editor:'), onchange: (e: any) => editorMarkup.set(e.target.value as Markup) },
+        ...([['none', t('Not marked (see the Review tab)')], ['simple', t('Underlined')], ['all', t('In full (removed text struck through)')]] as [Markup, string][])
+          .map(([v, label]) => h('option', { value: v, selected: editorMarkup.mode() === v }, label)))),
     h('div', { class: 'row' },
       h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, t('Creation code…')),
       h('span', { class: 'muted small' }, t('Needed only to store new projects on servers that ask for one.'))),

@@ -410,6 +410,11 @@ dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: cen
 /* suggest mode: the words you add are real text in your view; the words you remove are shown struck */
 .cm-suggest-new { color: var(--ins); background: color-mix(in srgb, var(--ins) 14%, transparent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--ins) 60%, transparent); }
 .cm-suggest-gone { user-select: none; }
+/* the simple view: text as it reads, with a dotted underline and thin marks where changes are */
+.cm-suggest-simple { text-decoration: underline dotted var(--suggest); text-decoration-thickness: 2px; text-underline-offset: 3px; cursor: pointer; }
+.cm-change-mark { display: inline-block; width: 0; height: 1.1em; vertical-align: text-bottom; margin: 0 1px; border-left: 2px solid var(--suggest); cursor: pointer; position: relative; }
+.cm-change-mark.remove { border-left-color: var(--del); }
+.cm-change-mark::after { content: ''; position: absolute; inset: -2px -5px; } /* easier to hover and click */
 .cm-suggest-banner { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font: 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
   background: color-mix(in srgb, var(--suggest) 16%, var(--bg)); border-bottom: 2px solid var(--suggest); color: var(--fg); }
 .cm-suggest-banner span { flex: 1; min-width: 0; }
@@ -517,3 +522,8 @@ aside .tab.symtab { flex-shrink: 0; }
 .md-preview .md-noimage { color: var(--muted); font-size: .9em; }
 
 .recovery-warning { margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+/* the assistant's proposed changes, shown like suggestions */
+.diff.wdiff .wtext { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; padding: 4px 6px; }
+.diff.wdiff del { color: var(--del); background: color-mix(in srgb, var(--del) 12%, transparent); text-decoration-color: var(--del); border-radius: 2px; }
+.diff.wdiff ins { color: var(--ins); background: color-mix(in srgb, var(--ins) 14%, transparent); text-decoration-color: color-mix(in srgb, var(--ins) 60%, transparent); border-radius: 2px; }
+.diff.wdiff > del, .diff.wdiff > ins { display: block; white-space: pre-wrap; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; padding: 4px 6px; }

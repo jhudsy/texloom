@@ -42,6 +42,12 @@ const pt: Catalog = {
   "✎ Suggest mode": "✎ Modo sugestão",
   "✎ Suggestion": "✎ Sugestão",
   "No open comments or suggestions. Select text in the editor, then 💬 Comment or Suggest a change; or turn on ✎ Suggest mode and type.": "Nenhum comentário ou sugestão em aberto. Selecione texto no editor e use 💬 Comentar ou Sugerir uma alteração; ou ative o ✎ Modo sugestão e digite.",
+  "You suggest adding “{{text}}”": "Você sugere adicionar “{{text}}”",
+  "You suggest removing “{{text}}”": "Você sugere remover “{{text}}”",
+  "You suggest “{{old}}” → “{{new}}”": "Você sugere “{{old}}” → “{{new}}”",
+  "{{name}} suggests adding “{{text}}”": "{{name}} sugere adicionar “{{text}}”",
+  "{{name}} suggests removing “{{text}}”": "{{name}} sugere remover “{{text}}”",
+  "{{name}} suggests “{{old}}” → “{{new}}”": "{{name}} sugere “{{old}}” → “{{new}}”",
 }
 
 export default pt

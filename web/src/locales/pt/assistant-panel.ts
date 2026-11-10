@@ -7,7 +7,6 @@ const pt: Catalog = {
   'xhigh': 'muito alto',
   'max': 'máximo',
   '… {{n}} unchanged lines': ['… {{n}} linha sem alteração', '… {{n}} linhas sem alteração'],
-  '… {{n}} more lines': ['… mais {{n}} linha', '… mais {{n}} linhas'],
   'Provider': 'Provedor',
   'model': 'modelo',
   'Model': 'Modelo',
@@ -68,6 +67,8 @@ const pt: Catalog = {
   '💬 Reading comments': '💬 Lendo comentários',
   '💬 Replying to a comment': '💬 Respondendo a um comentário',
   '✓ Resolving a comment': '✓ Resolvendo um comentário',
+  "… and more": "… e mais",
+  "From line {{n}}": "A partir da linha {{n}}",
 }
 
 export default pt

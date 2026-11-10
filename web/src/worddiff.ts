@@ -113,3 +113,26 @@ export function wordDiff(before: string, after: string): DiffOp[] {
 
 /** Whitespace without a line break, or one punctuation mark: too little to stand between two changes. */
 const isGlue = (s: string) => (/^[^\S\n]+$/.test(s) || (s.length === 1 && !isWordChar(s) && !/\s/.test(s)))
+
+/** For showing: a word replaced by a similar one ("references" → "referens") as the letters that
+ *  differ ("referen", -"ce", +"s"), which reads more easily in the text than two whole words. */
+export function refine(ops: DiffOp[]): DiffOp[] {
+  const out: DiffOp[] = []
+  for (let i = 0; i < ops.length; i++) {
+    const d = ops[i], n = ops[i + 1]
+    const oneWord = (s: string) => /^[\p{L}\p{M}\p{N}_]+$/u.test(s)
+    if (d.op !== 'del' || n?.op !== 'ins' || !oneWord(d.text) || !oneWord(n.text)) { out.push(d); continue }
+    const a = [...d.text], b = [...n.text] // by character, not UTF-16 unit
+    let p = 0
+    while (p < a.length && p < b.length && a[p] === b[p]) p++
+    let q = 0
+    while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++
+    if (p + q < 2 || p + q < Math.min(a.length, b.length) / 2) { out.push(d); continue } // not alike: whole words
+    if (p) out.push({ op: 'eq', text: a.slice(0, p).join('') })
+    if (a.length - q > p) out.push({ op: 'del', text: a.slice(p, a.length - q).join('') })
+    if (b.length - q > p) out.push({ op: 'ins', text: b.slice(p, b.length - q).join('') })
+    if (q) out.push({ op: 'eq', text: a.slice(a.length - q).join('') })
+    i++ // the insertion is done
+  }
+  return out
+}

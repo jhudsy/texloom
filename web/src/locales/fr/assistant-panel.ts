@@ -8,7 +8,6 @@ const fr: Catalog = {
   'max': 'maximal',
   // diff view
   '… {{n}} unchanged lines': ['… {{n}} ligne inchangée', '… {{n}} lignes inchangées'],
-  '… {{n}} more lines': ['… {{n}} ligne de plus', '… {{n}} lignes de plus'],
   // panel
   'Provider': 'Fournisseur',
   'model': 'modèle',
@@ -74,5 +73,7 @@ const fr: Catalog = {
   '💬 Reading comments': '💬 Lecture des commentaires',
   '💬 Replying to a comment': '💬 Réponse à un commentaire',
   '✓ Resolving a comment': '✓ Résolution d’un commentaire',
+  "… and more": "… et plus",
+  "From line {{n}}": "À partir de la ligne {{n}}",
 }
 export default fr
