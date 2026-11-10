@@ -90,7 +90,6 @@ export class Replica {
   readonly clients = this.doc.getMap<string>('clients') // Yjs client id -> display name (for "who wrote this")
   readonly review = this.doc.getMap<Y.Map<any>>('review') // comments and suggested changes (review.ts)
   /** Called after every change made on this device (not ones received from others). */
-  readonly localChange: (() => void)[] = []
   readonly meta = this.doc.getMap<any>('meta')
   readonly out = this.doc.getMap<any>('out')
   readonly awareness = new awarenessProtocol.Awareness(this.doc)
@@ -143,7 +142,6 @@ export class Replica {
     this.doc.on('update', (update: Uint8Array, origin: unknown) => {
       if (origin === REMOTE || origin === this.persistence) return
       if (!this.keys.writable) return
-      for (const fn of this.localChange) fn()
       const id = crypto.randomUUID()
       this.pending++
       this.onStatus()

@@ -10,11 +10,15 @@ import { docAt, nameVersion, observeNames, saveVersion, versionLabel, type Versi
 
 const AUTO_IDLE = 2 * 60_000 // auto-save after this long without local edits
 
-/** Save an automatic version after a pause in local editing, and when leaving the page. */
+/** Save an automatic version after a pause in local editing, and when leaving the page. Only
+ *  this person's changes to files and folders count: saving a version changes the document too. */
 export function autoSave(r: Replica, by: () => string) {
   if (!r.keys.writable) return
   let dirty = false, last = 0
-  r.localChange.push(() => { dirty = true; last = Date.now() })
+  const changed = (tx: Y.Transaction) => { if (tx.local) { dirty = true; last = Date.now() } }
+  r.files.observeDeep((_events, tx) => changed(tx))
+  r.bin.observe((_event, tx) => changed(tx))
+  r.dirs.observe((_event, tx) => changed(tx))
   const flush = () => { if (dirty) { dirty = false; saveVersion(r, by(), undefined, true) } }
   setInterval(() => { if (dirty && Date.now() - last > AUTO_IDLE) flush() }, 30_000)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush() })
