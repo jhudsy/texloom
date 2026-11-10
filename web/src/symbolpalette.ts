@@ -8,6 +8,7 @@ import { isDocument, isTexFile, mainFile } from './projectfiles'
 import type { Replica } from './replica'
 import { SYMBOLS, type Symbol } from './symbols'
 import { stripComments } from './texscan'
+import { changeOrSuggest, isSuggesting, suggested } from './suggestmode'
 
 const LABELS: Record<string, () => string> = {
   greek: () => t('Greek'), relations: () => t('Relations'), operators: () => t('Operators'), large: () => t('Large operators'), arrows: () => t('Arrows'),
@@ -31,7 +32,8 @@ const declared = (r: Replica): Set<string> => {
 }
 const isDeclared = (have: Set<string>, pkg: string) => have.has(pkg) || [...have].some((n) => PROVIDED_BY[pkg]?.test(n))
 
-/** Add \usepackage to a document's preamble: after the last one there, else after \documentclass. */
+/** Add \usepackage to a document's preamble: after the last one there, else after \documentclass.
+ *  While suggesting, it's a suggestion. */
 function addPackage(r: Replica, file: string, pkg: string): boolean {
   const yt = r.files.get(file)
   if (!yt) return false
@@ -42,7 +44,8 @@ function addPackage(r: Replica, file: string, pkg: string): boolean {
   const lastPackage = lines.at(-1)
   if (!lastPackage) return false
   const at = lastPackage.index + lastPackage[0].length
-  yt.insert(at, `${at > 0 && !lastPackage[0].endsWith('\n') ? '\n' : ''}\\usepackage{${pkg}}\n`)
+  if (suggested(r, file, `\\usepackage{${pkg}}`)) return true // already suggested
+  changeOrSuggest(r, file, at, at, `${at > 0 && !lastPackage[0].endsWith('\n') ? '\n' : ''}\\usepackage{${pkg}}\n`)
   return true
 }
 
@@ -88,7 +91,9 @@ export function createSymbolPalette({ r, view, file, inserted }: PaletteHost): {
     status.textContent = ''
     if (sym.pkg && !isDeclared(declared(r), sym.pkg)) {
       const line = `\\usepackage{${sym.pkg}}`, main = target()
-      status.textContent = main && addPackage(r, main, sym.pkg) ? t('Added {{line}} to {{main}}.', { line, main }) : t('This symbol needs {{line}} in your preamble.', { line })
+      status.textContent = main && addPackage(r, main, sym.pkg)
+        ? (isSuggesting() ? t('Suggested adding {{line}} to {{main}}.', { line, main }) : t('Added {{line}} to {{main}}.', { line, main }))
+        : t('This symbol needs {{line}} in your preamble.', { line })
     }
     const list = [sym.latex, ...readRecent().filter((x) => x !== sym.latex)].slice(0, MAX_RECENT)
     try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch {}

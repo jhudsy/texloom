@@ -1,12 +1,15 @@
 :root {
   --bg: #fbfbfa; --panel: #f2f1ee; --line: #dddbd5; --fg: #1d1d1b; --muted: #75736c;
   --accent: #2f5d50; --accent-fg: #fff; --ok: #2e7d32; --warn: #b26a00; --err: #b3261e;
+  /* review: comments are amber, suggestions blue, with red for removed and green for added words */
+  --comment: #d99a00; --suggest: #3b6fd8; --del: #c0392b; --ins: #1e7e34;
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #1b1c1e; --panel: #232427; --line: #36383c; --fg: #e8e6e1; --muted: #9a978f;
-    --accent: #6fb39d; --accent-fg: #10221c; }
+    --accent: #6fb39d; --accent-fg: #10221c;
+    --comment: #e6b450; --suggest: #7aa2f7; --del: #ff7b72; --ins: #56d364; }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
@@ -401,13 +404,25 @@ dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: cen
 @keyframes pdfmark { 0%, 70% { opacity: 1 } 100% { opacity: 0 } }
 
 /* comments and suggested changes */
-.cm-comment { background: rgba(255, 200, 0, .28); border-bottom: 2px solid rgba(230, 160, 0, .8); cursor: pointer; }
-.cm-suggest-del { text-decoration: line-through; text-decoration-color: #c0392b; background: rgba(192, 57, 43, .12); cursor: pointer; }
-.cm-suggest-ins { color: #1e7e34; background: rgba(40, 167, 69, .15); border-radius: 2px; padding: 0 2px; cursor: pointer; text-decoration: underline; }
+.cm-comment { background: color-mix(in srgb, var(--comment) 26%, transparent); border-bottom: 2px solid var(--comment); cursor: pointer; }
+.cm-suggest-del { text-decoration: line-through; text-decoration-color: var(--del); color: color-mix(in srgb, var(--del) 75%, var(--fg)); background: color-mix(in srgb, var(--del) 12%, transparent); cursor: pointer; }
+.cm-suggest-ins { color: var(--ins); background: color-mix(in srgb, var(--ins) 15%, transparent); border-radius: 2px; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--ins) 60%, transparent); }
+/* suggest mode: the words you add are real text in your view; the words you remove are shown struck */
+.cm-suggest-new { color: var(--ins); background: color-mix(in srgb, var(--ins) 14%, transparent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--ins) 60%, transparent); }
+.cm-suggest-gone { user-select: none; }
+.cm-suggest-banner { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font: 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: color-mix(in srgb, var(--suggest) 16%, var(--bg)); border-bottom: 2px solid var(--suggest); color: var(--fg); }
+.cm-suggest-banner span { flex: 1; min-width: 0; }
+.cm-suggest-banner b { color: var(--suggest); }
+.cm-panels-top:has(.cm-suggest-banner) { border-bottom: none; }
+.review .suggest-mode.on { background: var(--suggest); border-color: var(--suggest); color: #fff; }
 .review { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .review-list { overflow: auto; flex: 1; padding: 6px; }
-.rcard { border: 1px solid var(--line); border-left: 3px solid #e6a000; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
-.rcard.suggestion { border-left-color: #28a745; }
+.rcard { border: 1px solid var(--line); border-left: 4px solid var(--comment); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px;
+  background: color-mix(in srgb, var(--comment) 6%, var(--bg)); }
+.rcard.suggestion { border-left-color: var(--suggest); background: color-mix(in srgb, var(--suggest) 7%, var(--bg)); }
+.rkind { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--comment); }
+.rcard.suggestion .rkind { color: var(--suggest); }
 .rcard.resolved { opacity: .6; }
 .rcompose { padding: 8px; border-bottom: 1px solid var(--line); background: var(--panel); flex-shrink: 0; max-height: 60%; overflow: auto; }
 .rcompose[hidden] { display: none; }
@@ -422,10 +437,10 @@ textarea.review-write { display: block; width: 100%; box-sizing: border-box; mar
 .rloc { font-family: ui-monospace, monospace; font-size: 12px; }
 .rquote { border-left: 2px solid var(--line); padding-left: 6px; margin: 4px 0; color: var(--muted); white-space: pre-wrap; max-height: 4.5em; overflow: hidden; }
 .rtext, .rreply { white-space: pre-wrap; margin: 4px 0; }
-.rsuggest { white-space: pre-wrap; overflow-wrap: anywhere; }
 .rreply { padding-left: 10px; border-left: 2px solid var(--line); }
-.rsuggest { margin: 4px 0; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
-.rsuggest del { color: #c0392b; } .rsuggest ins { color: #1e7e34; }
+.rsuggest { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.rsuggest del { color: var(--del); background: color-mix(in srgb, var(--del) 12%, transparent); text-decoration-color: var(--del); border-radius: 2px; }
+.rsuggest ins { color: var(--ins); background: color-mix(in srgb, var(--ins) 14%, transparent); text-decoration-color: color-mix(in srgb, var(--ins) 60%, transparent); border-radius: 2px; }
 .ractions { display: flex; gap: 4px; margin-top: 4px; align-items: center; }
 .ractions input { flex: 1; min-width: 0; }
 .review .ai-bar { flex-wrap: wrap; }

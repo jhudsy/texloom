@@ -25,7 +25,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from pycrdt import Array, Assoc, Map, Text
+from pycrdt import Array, Assoc, Map, StickyIndex, Text
 
 from . import __version__
 from .crypto import Keys, b64e
@@ -59,6 +59,15 @@ def u16(s: str, i: int) -> int:
     """Python string index -> UTF-16 offset (what Yjs and sticky indices use)."""
     return len(s[:i].encode("utf-16-le")) // 2
 
+
+
+def suggestion_text(quote: str, text: str) -> str:
+    """A suggested change in words (the same as the web app's assistant)."""
+    if not quote:
+        return f"insert “{text}”"
+    if not text:
+        return f"delete “{quote}”"
+    return f"replace “{quote}” with “{text}”"
 
 class Project:
     def __init__(self, replica: Replica, name: str):
@@ -112,6 +121,14 @@ class Project:
         if before and i > 0:
             return yt.sticky_index(u16(s, i), Assoc.BEFORE)
         return yt.sticky_index(u16(s, i), Assoc.AFTER)
+
+    def _anchored(self, path: str, s: str, start) -> int | None:
+        """Where a comment or suggestion starts now (a Python index into `s`), from its stored anchor."""
+        try:
+            k = StickyIndex.decode(bytes(start), self.r.files[path]).get_index()
+        except Exception:  # noqa: BLE001 - an old or damaged anchor: fall back to the quote
+            return None
+        return len(s.encode("utf-16-le")[: 2 * k].decode("utf-16-le", errors="ignore")) if k >= 0 else None
 
     # --- helpers -------------------------------------------------------------------
     def text(self, path: str) -> str:
@@ -258,10 +275,12 @@ class Project:
                 continue
             path, quote = str(m.get("file", "")), str(m.get("quote", ""))
             s = str(self.r.files[path]) if path in self.r.files else ""
-            where = f"{path}:{self.line_of(s, s.index(quote))}" if quote and quote in s else f"{path} (text changed)"
+            at = self._anchored(path, s, m.get("start"))
+            where = (f"{path}:{self.line_of(s, at)}" if at is not None else
+                     f"{path}:{self.line_of(s, s.index(quote))}" if quote and quote in s else f"{path} (text changed)")
             kind = m.get("kind")
             status = ("accepted" if m.get("outcome") == "accepted" else "rejected" if m.get("outcome") == "rejected" else "resolved") if m.get("resolved") else "open"
-            body = f"replace “{quote}” with “{m.get('text')}”" if kind == "suggestion" else f"on “{quote[:200]}”: {m.get('text')}"
+            body = suggestion_text(quote, str(m.get("text", ""))) if kind == "suggestion" else f"on “{quote[:200]}”: {m.get('text')}"
             replies = m.get("replies")
             rep = [f"    ↳ {x.get('by')}: {x.get('text')}" for x in (replies.to_py() if isinstance(replies, Array) else []) if isinstance(x, dict)]
             rows.append("\n".join([f"[{iid}] {kind} by {m.get('by')} at {where} ({status}): {body}", *rep]))

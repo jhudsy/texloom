@@ -18,6 +18,7 @@ const zh: Catalog = {
   'No matches.': '无匹配项。',
   'Replace this one': '替换此项',
   'Replace {{n}} matches in {{files}}? (Undo with History if needed.)': { other: '替换 {{files}} 中的 {{n}} 处匹配？（如有需要，可通过历史记录撤销。）' },
+  "Suggest replacing {{n}} matches in {{files}}? Each becomes a suggestion in the Review tab.": {"other": "建议替换 {{files}} 中的 {{n}} 处匹配？每一处都会成为“审阅”标签页中的一条建议。"},
 }
 
 export default zh

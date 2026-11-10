@@ -5,6 +5,7 @@ import { h } from './dom'
 import { mainFile } from './projectfiles'
 import { t, tn, locale } from './i18n'
 import { texCountDialog } from './texcount'
+import { changeOrSuggest, isSuggesting } from './suggestmode'
 import { COMMENT, envClose, envOpen, INLINE_MATH, MATH_OPEN, mathClose, spans } from './texscan'
 
 export type Reveal = (file: string, from: number, to: number) => void
@@ -223,20 +224,22 @@ export function createSearchPanel(r: Replica, writable: boolean, reveal: Reveal)
   function replaceOne(x: Hit) {
     const yt = r.files.get(x.file)
     if (!yt || yt.toString().slice(x.from, x.to) !== x.match) return run()
-    r.doc.transact(() => { yt.delete(x.from, x.to - x.from); yt.insert(x.from, replacement(x.match)) })
+    changeOrSuggest(r, x.file, x.from, x.to, replacement(x.match)) // while suggesting, a suggestion
     run()
   }
 
   function replaceAll() {
     if (!hits.length) return
     const nFiles = new Set(hits.map((x) => x.file)).size
-    if (!confirm(tn(hits.length, 'Replace {{n}} match in {{files}}? (Undo with History if needed.)', 'Replace {{n}} matches in {{files}}? (Undo with History if needed.)',
-      { files: tn(nFiles, '{{n}} file', '{{n}} files') }))) return
+    const files = tn(nFiles, '{{n}} file', '{{n}} files')
+    if (!confirm(isSuggesting()
+      ? tn(hits.length, 'Suggest replacing {{n}} match in {{files}}? Each becomes a suggestion in the Review tab.', 'Suggest replacing {{n}} matches in {{files}}? Each becomes a suggestion in the Review tab.', { files })
+      : tn(hits.length, 'Replace {{n}} match in {{files}}? (Undo with History if needed.)', 'Replace {{n}} matches in {{files}}? (Undo with History if needed.)', { files }))) return
     r.doc.transact(() => {
       for (const x of [...hits].sort((a, b) => a.file.localeCompare(b.file) || b.from - a.from)) {
         const yt = r.files.get(x.file)
         if (!yt || yt.toString().slice(x.from, x.to) !== x.match) continue
-        yt.delete(x.from, x.to - x.from); yt.insert(x.from, replacement(x.match))
+        changeOrSuggest(r, x.file, x.from, x.to, replacement(x.match))
       }
     })
     run()

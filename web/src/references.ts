@@ -8,6 +8,7 @@ import { dialog, h } from './dom'
 import { cleanPath, mainFile } from './projectfiles'
 import { stripComments } from './texscan'
 import { t } from './i18n'
+import { changeOrSuggest, isSuggesting } from './suggestmode'
 
 /** The DOI for a pasted DOI, doi.org/arXiv URL or arXiv id, or null. */
 export function parseId(input: string): string | null {
@@ -157,16 +158,17 @@ export function addBibliography(r: Replica, plan: BibPlan, file: string): boolea
   if (end < 0 || begin < 0) return false
   const atLine = (i: number) => (i > 0 && t[i - 1] !== '\n' ? '\n' : '')
   const line = bibliographyLine(plan, file)
-  r.doc.transact(() => {
+  const main = plan.main!
+  r.doc.transact(() => { // while suggesting, these are suggestions
     if (plan.biblatex) { // later position first, so the earlier one stays valid
-      if (!/\\printbibliography/.test(clean)) yt.insert(end, atLine(end) + '\\printbibliography\n\n')
-      yt.insert(begin, atLine(begin) + line + '\n')
+      if (!/\\printbibliography/.test(clean)) changeOrSuggest(r, main, end, end, atLine(end) + '\\printbibliography\n\n')
+      changeOrSuggest(r, main, begin, begin, atLine(begin) + line + '\n')
     } else {
       let all = ''
       for (const [p, f] of r.files) if (p.endsWith('.tex')) all += stripComments(f.toString())
       const natbib = /\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bnatbib\b/.test(all)
       const style = /\\bibliographystyle\s*\{/.test(all) ? '' : `\\bibliographystyle{${natbib ? 'plainnat' : 'plain'}}\n`
-      yt.insert(end, atLine(end) + style + line + '\n\n')
+      changeOrSuggest(r, main, end, end, atLine(end) + style + line + '\n\n')
     }
   })
   return true
@@ -202,9 +204,9 @@ export async function addReference(r: Replica, index: ProjectIndex, input: strin
   const entry = formatEntry(e.type, key, e.fields)
   r.doc.transact(() => {
     let yt = r.files.get(file!)
-    if (!yt) { yt = new Y.Text(); r.files.set(file!, yt) }
+    if (!yt) { yt = new Y.Text(); r.files.set(file!, yt) } // a new file is made even while suggesting; its entry is suggested
     const t = yt.toString()
-    yt.insert(yt.length, (t && !t.endsWith('\n\n') ? (t.endsWith('\n') ? '\n' : '\n\n') : '') + entry)
+    changeOrSuggest(r, file!, t.length, t.length, (t && !t.endsWith('\n\n') ? (t.endsWith('\n') ? '\n' : '\n\n') : '') + entry)
   })
   return { key, file: file!, existed: false, entry }
 }
@@ -263,10 +265,11 @@ export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: st
       const file = chosen()
       const a = await addReference(r, index, input.value, file)
       onKey(a.key)
-      msg.textContent = a.existed ? t('Already in {{file}} as “{{key}}”; cited it.', { file: a.file, key: a.key }) : t('Added to {{file}} as “{{key}}”.', { file: a.file, key: a.key })
+      msg.textContent = a.existed ? t('Already in {{file}} as “{{key}}”; cited it.', { file: a.file, key: a.key })
+        : isSuggesting() ? t('Suggested adding it to {{file}} as “{{key}}”.', { file: a.file, key: a.key }) : t('Added to {{file}} as “{{key}}”.', { file: a.file, key: a.key })
       if (a.entry) { pre.textContent = a.entry; pre.hidden = false }
       if (!plan.declared) {
-        if (addLine?.checked && addBibliography(r, plan, a.file)) msg.textContent += ' ' + t('Added {{line}} to {{main}}.', { line: bibliographyLine(plan, a.file), main: plan.main })
+        if (addLine?.checked && addBibliography(r, plan, a.file)) msg.textContent += ' ' + (isSuggesting() ? t('Suggested adding {{line}} to {{main}}.', { line: bibliographyLine(plan, a.file), main: plan.main }) : t('Added {{line}} to {{main}}.', { line: bibliographyLine(plan, a.file), main: plan.main }))
         else msg.textContent += ' ' + t('Add {{line}} to your document to print it.', { line: bibliographyLine(plan, a.file) })
       }
       input.value = ''

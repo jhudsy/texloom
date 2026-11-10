@@ -18,6 +18,7 @@ const pt: Catalog = {
   'No matches.': 'Nenhuma ocorrência.',
   'Replace this one': 'Substituir esta',
   'Replace {{n}} matches in {{files}}? (Undo with History if needed.)': ['Substituir {{n}} ocorrência em {{files}}? (Desfaça pelo Histórico se precisar.)', 'Substituir {{n}} ocorrências em {{files}}? (Desfaça pelo Histórico se precisar.)'],
+  "Suggest replacing {{n}} matches in {{files}}? Each becomes a suggestion in the Review tab.": ["Sugerir substituir {{n}} ocorrência em {{files}}? Cada uma vira uma sugestão na aba Revisão.", "Sugerir substituir {{n}} ocorrências em {{files}}? Cada uma vira uma sugestão na aba Revisão."],
 }
 
 export default pt

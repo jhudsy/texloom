@@ -49,7 +49,7 @@ No accounts: a project is shared by sending a link.
 | `versions`: Y.Array | saved versions: `{at, by, label?, auto?, link}` (older ones: `snap`, a whole encoded `Y.snapshot`) |
 | `versionChain`: Y.Array | what versions are built from: `{id, base, snap}`, see History |
 | `clients`: Y.Map  | Yjs client id → display name (for "who wrote this")             |
-| `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, resolved, outcome?, replies: Y.Array}`; `start`/`end` are encoded Yjs relative positions, so they follow edits |
+| `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, resolved, outcome?, replies: Y.Array, typed?, conflict?}`; `start`/`end` are encoded Yjs relative positions, so they follow edits; `typed` and `conflict` come from suggest mode (see below) |
 | `members`: Y.Map  | personal edit links the owner issued: public key → `{name, at, by, g, revoked?}`, `g` = the owner's grant. Any editor can write this map, so the share dialog only trusts entries whose grant verifies, the owner's own record of issued links (localStorage) and keys seen signing edits; enforcement is by signatures |
 
 Text merges character by character (CRDT). Binary files are last-writer-wins
@@ -343,6 +343,41 @@ A chat panel (`web/src/assistant/`) that acts on the project like another collab
   a `<context>` block: project, main file, open file and current selection.
 - **Keys** live in `localStorage` only; they never enter the Yjs document or pass
   through the texloom server.
+
+## Suggest mode
+
+Typing that becomes suggestions instead of changes (`web/src/suggestmode.ts`, `suggestcore.ts`).
+A suggestion changes nothing until accepted, so while suggesting the editor isn't bound to the
+shared `Y.Text` at all. It shows this tab's view: the shared text with the tab's own open typed
+suggestions applied. Each of those is a hunk, a range `[a, b)` of the shared text and its
+replacement, stored as an ordinary `review` entry (`quote` = the shared text there, `text` = the
+replacement) with `typed` set to an id of this page load, so every other reader (the Review tab,
+accept and reject, the assistant, the MCP tools, older clients) needs nothing new.
+
+- **Typing:** each change in the editor, in view positions, merges with the hunks it touches into
+  one hunk; it's trimmed to what actually differs from the shared text and grown to whole words (an
+  insertion takes the word beside it), so a suggestion reads "is → is very". A hunk that matches
+  the shared text again goes, which is how undo withdraws a suggestion. Hunks never touch. Changes
+  are saved 0.8 s after typing stops, when the tab is hidden, and before anything reads or settles
+  suggestions (accepting one, the assistant).
+- **Others' edits:** hunks keep Yjs relative positions in memory. After any transaction from
+  elsewhere that touches the file or the review map, hunks move with their anchors and the editor
+  gets the difference, word by word, so the cursor and undo history stay put. A change by someone
+  else to text a hunk replaces is carried into the hunk (`rebase`) when it only touches words the
+  hunk keeps; when it touches the words being changed, the hunk keeps its text and is marked
+  `conflict`, so accepting it asks first. A hunk someone accepted, rejected or deleted leaves the
+  view, except anything typed into it since it was last saved, which becomes a new suggestion. A pure insertion anchors both ends to the character
+  before it, so text others type at that spot comes after; other hunks hold their first and last
+  replaced characters, so text typed at either edge falls outside.
+- **Positions** outside the editor (comments on a selection, search results, compile errors, the
+  assistant's context) are in the shared file; the editor maps them to and from its view.
+- **Display:** every suggestion is drawn as a word diff (`worddiff.ts`: Myers over word tokens,
+  with spaces or a single punctuation mark between two changes joined into one), in the editor
+  and in the Review card. Accepting applies only the differing words, so text in common keeps its
+  authors and others' edits next to it survive.
+- `npm run check-suggest` drives the bookkeeping with thousands of random edits from the user
+  and from a collaborator, checking that the view always equals the shared text with the hunks
+  applied, that saving and loading round-trips, and that accepting everything gives what was typed.
 
 ## History
 

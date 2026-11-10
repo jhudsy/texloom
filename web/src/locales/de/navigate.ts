@@ -18,6 +18,7 @@ const de: Catalog = {
   'No matches.': 'Keine Treffer.',
   'Replace this one': 'Diesen ersetzen',
   'Replace {{n}} matches in {{files}}? (Undo with History if needed.)': ['{{n}} Treffer in {{files}} ersetzen? (Bei Bedarf über den Verlauf rückgängig machen.)', '{{n}} Treffer in {{files}} ersetzen? (Bei Bedarf über den Verlauf rückgängig machen.)'],
+  "Suggest replacing {{n}} matches in {{files}}? Each becomes a suggestion in the Review tab.": ["{{n}} Treffer in {{files}} zum Ersetzen vorschlagen? Jeder wird zu einem Vorschlag im Tab „Überprüfung“.", "{{n}} Treffer in {{files}} zum Ersetzen vorschlagen? Jeder wird zu einem Vorschlag im Tab „Überprüfung“."],
 }
 
 export default de

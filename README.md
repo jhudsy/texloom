@@ -158,6 +158,7 @@ the original's history, comments or collaborators, and it counts towards your st
 
 | **⌘⇧F** / **Ctrl+Shift+F** | search (and replace) across all files |
 | **⌘⌥M** / **Ctrl+Alt+M**, **⌘⌥E** / **Ctrl+Alt+E** | comment on the selection / suggest a change to it |
+| **⌘⌥⇧E** / **Ctrl+Alt+Shift+E** | suggest mode on or off |
 | **⌘⌥→** / **Ctrl+Alt+→** | show the current line in the PDF |
 | **⌘⌥←** / **Ctrl+Alt+←** | go to the source of the spot last clicked in the PDF (or the middle of the view); double-clicking or right-clicking the PDF does the same |
 | paste or drop an image | adds it to `figs/` and inserts `\includegraphics` (a whole `figure` on an empty line) |
@@ -178,6 +179,16 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   word counts; the total excludes maths and commands).
 - **Right panel:** **PDF**, **Assistant**, **Review** (comments and suggestions: reply,
   resolve, accept, reject) and **History** (versions, compare, restore, "who wrote this").
+- **Suggest mode:** **✎ Suggest mode** in the Review tab (⌘⌥⇧E / Ctrl+Alt+Shift+E) makes what
+  you type into suggestions instead of changes, like tracked changes: words you remove are struck
+  through in red and words you add are green. Each changed stretch becomes a suggestion in the Review
+  tab, shown word by word, for someone to accept or reject; until then the file, the PDF and
+  everyone else's copy stay as they were. Undo takes a suggestion back. Search and replace, and
+  adding a package for a symbol, suggest too while it's on. It's remembered per project in that
+  browser, and a bar across the editor says when it's on. Suggestions are blue in the Review tab and
+  comments amber. While suggesting you don't see collaborators' cursors, and suggestions you typed
+  in an earlier visit show like anyone else's (accept or reject them from the Review tab). If someone
+  changes the very words you're replacing, your suggestion stays and accepting it asks first.
 - **Problems:** after compiling, errors and warnings are listed under the PDF with their
   file and line; click one to go there. Biber and BibTeX errors (a missing `.bib`, say) are
   listed too. **Raw log** shows the whole log. **Compile from scratch** deletes LaTeX's
@@ -703,7 +714,8 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | `web/src/settings.ts`, `storagenotice.ts`, `projects.ts`, `layout.ts` | setup and settings, storage warnings, start-page list, panes |
 | `web/src/assistant/` | assistant: provider adapters (`llm.ts`), tools (`tools.ts`), chat panel (`panel.ts`) |
 | `web/src/history.ts`, `diff.ts` | versions, compare, restore, line authors |
-| `web/src/review.ts` | comments and suggested changes |
+| `web/src/review.ts`, `worddiff.ts` | comments and suggested changes, shown word by word |
+| `web/src/suggestmode.ts`, `suggestcore.ts` | suggest mode: typing that becomes suggestions |
 | `web/src/navigate.ts`, `spell.ts`, `mathpreview.ts`, `checks.ts` | search and replace, outline, word count; spell check; equation preview; common mistakes |
 | `web/src/clashes.ts` | keeps both files when two people create the same name while apart |
 | `web/src/latexlog.ts`, `synctex.ts` | log parsing into problems; SyncTeX |
@@ -723,6 +735,7 @@ against the same data, `scripts/listsync-vectors.json`:
 python scripts/check_listsync.py
 cd web && npm run check-listsync
 npm run check-versions  # saved versions: every one opens exactly, and storing them stays small
+npm run check-suggest   # suggest mode: random typing and collaborators' edits keep the view and suggestions in step
 ```
 
 To see what a relay can take, `uv run python scripts/loadtest.py all` starts its own throwaway server
@@ -755,7 +768,6 @@ To add a language (`it`, say):
 Early prototype. Not yet built:
 - direct browser-to-browser WebRTC (changes always pass through a relay)
 - a desktop app bundling the helper (for now: `uv tool install`, or folder sync in Chrome/Edge)
-- tracked changes made by typing in "suggest mode" (suggestions are made from a selection)
 
 ## License
 

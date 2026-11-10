@@ -26,6 +26,7 @@ const zh: Catalog = {
   'Added {{line}} to {{main}}.': '已将 {{line}} 添加到 {{main}}。',
   'Add {{line}} to your document to print it.': '将 {{line}} 添加到文档中即可打印。',
   'Couldn’t reach doi.org (offline?).': '无法连接 doi.org（是否离线？）。',
+  "Suggested adding it to {{file}} as “{{key}}”.": "已建议将其以“{{key}}”添加到 {{file}}。",
 }
 
 export default zh

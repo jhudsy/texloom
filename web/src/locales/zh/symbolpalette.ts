@@ -21,6 +21,7 @@ const zh: Catalog = {
   '{{cmd}} (needs {{line}})': '{{cmd}}（需要 {{line}}）',
   'No symbols found.': '未找到符号。',
   'Insert a symbol at the cursor (⌘⌥S / Ctrl+Alt+S)': '在光标处插入符号（⌘⌥S / Ctrl+Alt+S）',
+  "Suggested adding {{line}} to {{main}}.": "已建议将 {{line}} 添加到 {{main}}。",
 }
 
 export default zh

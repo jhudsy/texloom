@@ -371,7 +371,7 @@ async function openProject(keys: Keys) {
     onCompile: () => output.compile(),
     onSync: () => syncToPdf(),
     problems: (file) => output.problems().filter((p) => p.file === file),
-    review: (file) => reviewExtension(r, file, (id) => { openReview(); review()?.focus(id) }),
+    review: (file, map) => reviewExtension(r, file, (id) => { openReview(); review()?.focus(id) }, map),
     menu: {
       writable,
       review: addReview,
@@ -388,7 +388,27 @@ async function openProject(keys: Keys) {
     checks: () => device.checks,
     onReview: addReview,
     onSymbols: () => showSymbols(),
+    onToggleSuggest: () => suggestMode.set(!suggestMode.on()),
+    userName: () => me.name,
   })
+  // Suggest mode: typing makes suggestions. Remembered per project in this browser.
+  const suggestMode = (() => {
+    const KEY = `texloom.suggesting.${keys.project}`
+    let on = false
+    try { on = writable && localStorage.getItem(KEY) === '1' } catch {}
+    const watchers: (() => void)[] = []
+    return {
+      on: () => on,
+      set(v: boolean) {
+        on = v && writable
+        try { if (on) localStorage.setItem(KEY, '1'); else localStorage.removeItem(KEY) } catch {}
+        editor.setSuggesting(on)
+        watchers.forEach((f) => f())
+      },
+      watch: (f: () => void) => { watchers.push(f) },
+    }
+  })()
+  editor.setSuggesting(suggestMode.on())
   const tree = createFileTree(r, writable, (p) => {
     editor.open(p)
     r.awareness.setLocalStateField('file', p) // so collaborators can jump to where you are
@@ -433,7 +453,8 @@ async function openProject(keys: Keys) {
     layout.reveal('right')
     showInPanel(false)
     showTab('pdf')
-    if (!output.showInPdf(c.file, v.state.doc.lineAt(v.state.selection.main.head).number)) alert(t('Compile first: the PDF has no SyncTeX data yet.'))
+    const line = c.suggesting ? c.toLine : v.state.doc.lineAt(v.state.selection.main.head).number // the file's line, not the suggesting view's
+    if (!output.showInPdf(c.file, line)) alert(t('Compile first: the PDF has no SyncTeX data yet.'))
   }
   output.syncRequest = syncToPdf
   function syncToSource() {
@@ -489,7 +510,7 @@ async function openProject(keys: Keys) {
       onContextChange: editor.onContextChange,
     }),
     review: () => (reviewPanel = createReviewPanel({
-      replica: r, writable, userName: () => me.name, selection: () => editor.selection(),
+      replica: r, writable, userName: () => me.name, selection: () => editor.selection(), suggesting: suggestMode,
       reveal: revealAt,
     })).el,
     history: () => createHistoryPanel({

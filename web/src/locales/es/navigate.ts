@@ -18,6 +18,7 @@ const es: Catalog = {
   'No matches.': 'Sin coincidencias.',
   'Replace this one': 'Sustituir esta',
   'Replace {{n}} matches in {{files}}? (Undo with History if needed.)': ['¿Sustituir {{n}} coincidencia en {{files}}? (Puedes deshacerlo con el Historial).', '¿Sustituir {{n}} coincidencias en {{files}}? (Puedes deshacerlo con el Historial).'],
+  "Suggest replacing {{n}} matches in {{files}}? Each becomes a suggestion in the Review tab.": ["¿Sugerir sustituir {{n}} coincidencia en {{files}}? Cada una se convierte en una sugerencia en la pestaña Revisión.", "¿Sugerir sustituir {{n}} coincidencias en {{files}}? Cada una se convierte en una sugerencia en la pestaña Revisión."],
 }
 
 export default es

@@ -26,6 +26,7 @@ const de: Catalog = {
   'Added {{line}} to {{main}}.': '{{line}} zu {{main}} hinzugefügt.',
   'Add {{line}} to your document to print it.': 'Fügen Sie {{line}} zu Ihrem Dokument hinzu, um sie zu drucken.',
   'Couldn’t reach doi.org (offline?).': 'doi.org ist nicht erreichbar (offline?).',
+  "Suggested adding it to {{file}} as “{{key}}”.": "Vorgeschlagen, es als „{{key}}“ zu {{file}} hinzuzufügen.",
 }
 
 export default de

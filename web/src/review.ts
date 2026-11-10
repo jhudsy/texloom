@@ -7,11 +7,15 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
 import type { Replica } from './replica'
 import { h } from './dom'
 import { t, locale } from './i18n'
+import { applyChange } from './suggestcore'
+import { flushSuggestions } from './suggestmode'
+import { wordDiff, type DiffOp } from './worddiff'
 
 export type Kind = 'comment' | 'suggestion'
 export interface Item {
   id: string; kind: Kind; file: string; quote: string; text: string; by: string; at: number
   resolved: boolean; outcome?: 'accepted' | 'rejected'; replies: { by: string; at: number; text: string }[]
+  conflict?: boolean // someone changed the text it replaces while it was being typed (suggest mode)
 }
 
 // ---- data ---------------------------------------------------------------------
@@ -38,7 +42,7 @@ export function itemOf(r: Replica, id: string): Item | null {
   return {
     id, kind: m.get('kind') === 'suggestion' ? 'suggestion' : 'comment', file: String(m.get('file') ?? ''),
     quote: String(m.get('quote') ?? ''), text: String(m.get('text') ?? ''), by: String(m.get('by') ?? '?').slice(0, 64),
-    at: Number(m.get('at')) || 0, resolved: !!m.get('resolved'), outcome: m.get('outcome'),
+    at: Number(m.get('at')) || 0, resolved: !!m.get('resolved'), outcome: m.get('outcome'), conflict: !!m.get('conflict'),
     replies: replies instanceof Y.Array ? replies.toArray().filter((x: any) => x && typeof x.text === 'string') : [],
   }
 }
@@ -78,10 +82,10 @@ export function accept(r: Replica, id: string): string | null {
   const yt = it && r.files.get(it.file)
   if (!it || !yt || !rg) return t('The text this suggestion refers to no longer exists.')
   const current = yt.toString().slice(rg.from, rg.to)
-  if (current !== it.quote && !confirm(t('The text has changed since this was suggested.\n\nNow: “{{now}}”\nSuggested replacement: “{{suggested}}”\n\nApply anyway?', { now: current.slice(0, 200), suggested: it.text.slice(0, 200) }))) return 'cancelled'
+  if ((current !== it.quote || it.conflict) && !confirm(t('The text has changed since this was suggested.\n\nNow: “{{now}}”\nSuggested replacement: “{{suggested}}”\n\nApply anyway?', { now: current.slice(0, 200), suggested: it.text.slice(0, 200) }))) return 'cancelled'
   r.doc.transact(() => {
-    yt.delete(rg.from, rg.to - rg.from)
-    if (it.text) yt.insert(rg.from, it.text)
+    if (current === it.quote) applyChange(yt, rg.from, it.quote, it.text) // only the words that differ
+    else { yt.delete(rg.from, rg.to - rg.from); if (it.text) yt.insert(rg.from, it.text) }
     const m = r.review.get(id)!
     m.set('resolved', true); m.set('outcome', 'accepted')
   })
@@ -90,9 +94,9 @@ export function accept(r: Replica, id: string): string | null {
 
 // ---- editor decorations ----------------------------------------------------------
 class InsertWidget extends WidgetType {
-  constructor(readonly text: string, readonly id: string) { super() }
-  eq(o: InsertWidget) { return o.text === this.text && o.id === this.id }
-  toDOM() { return h('span', { class: 'cm-suggest-ins', 'data-review': this.id, title: t('Suggested replacement') }, this.text || '⌫') }
+  constructor(readonly text: string, readonly id: string, readonly by: string) { super() }
+  eq(o: InsertWidget) { return o.text === this.text && o.id === this.id && o.by === this.by }
+  toDOM() { return h('span', { class: 'cm-suggest-ins', 'data-review': this.id, title: t('{{name}} suggests adding this', { name: this.by }) }, this.text || '⌫') }
 }
 
 const setDecos = StateEffect.define<DecorationSet>()
@@ -111,26 +115,44 @@ function setPending(r: Replica, p: { file: string; start: Y.RelativePosition; en
   pendingWatchers.forEach((f) => f())
 }
 
-export function reviewExtension(r: Replica, file: string, onPick: (id: string) => void): Extension {
+/** While suggesting, the editor shows its own view of the file: where shared positions are in
+ *  it, and which suggestions it draws itself. */
+export interface ReviewMap { toView(x: number): number; skip(id: string): boolean }
+
+export function reviewExtension(r: Replica, file: string, onPick: (id: string) => void, map?: ReviewMap): Extension {
   const compute = (view: EditorView) => {
     const len = view.state.doc.length
+    const at = (x: number) => Math.min(map ? map.toView(x) : x, len)
+    const shared = r.files.get(file)?.toString() ?? ''
     const ranges = []
     for (const i of allItems(r)) {
-      if (i.file !== file || i.resolved) continue
+      if (i.file !== file || i.resolved || map?.skip(i.id)) continue
       const rg = rangeOf(r, i.id)
       if (!rg) continue
-      const from = Math.min(rg.from, len), to = Math.min(rg.to, len)
+      const from = at(rg.from), to = at(rg.to)
       if (i.kind === 'comment') {
         if (to > from) ranges.push(Decoration.mark({ class: 'cm-comment', attributes: { 'data-review': i.id, title: `${i.by}: ${i.text.slice(0, 200)}` } }).range(from, to))
-      } else {
-        if (to > from) ranges.push(Decoration.mark({ class: 'cm-suggest-del', attributes: { 'data-review': i.id, title: t('{{name}} suggests a change', { name: i.by }) } }).range(from, to))
-        ranges.push(Decoration.widget({ widget: new InsertWidget(i.text, i.id), side: 1 }).range(to))
+        continue
+      }
+      const del = (a: number, b: number) => { if (b > a) ranges.push(Decoration.mark({ class: 'cm-suggest-del', attributes: { 'data-review': i.id, title: t('{{name}} suggests removing this', { name: i.by }) } }).range(a, b)) }
+      const ins = (x: number, text: string) => ranges.push(Decoration.widget({ widget: new InsertWidget(text, i.id, i.by), side: 1 }).range(x))
+      if (shared.slice(rg.from, rg.to) === i.quote) { // as a word diff: only the words that change
+        let p = rg.from
+        for (const op of wordDiff(i.quote, i.text)) {
+          if (op.op === 'eq') p += op.text.length
+          else if (op.op === 'del') { del(at(p), at(p + op.text.length)); p += op.text.length }
+          else ins(at(p), op.text)
+        }
+        if (i.quote === i.text) ins(to, '') // nothing would change: still something to click
+      } else { // the text has changed since: the whole of it, and the whole replacement
+        del(from, to)
+        ins(to, i.text)
       }
     }
     const p = pending.get(r)
     if (p?.file === file) {
       const a = Y.createAbsolutePositionFromRelativePosition(p.start, r.doc), b = Y.createAbsolutePositionFromRelativePosition(p.end, r.doc)
-      if (a && b && b.index > a.index) ranges.push(Decoration.mark({ class: 'cm-review-pending' }).range(Math.min(a.index, len), Math.min(b.index, len)))
+      if (a && b && at(b.index) > at(a.index)) ranges.push(Decoration.mark({ class: 'cm-review-pending' }).range(at(a.index), at(b.index)))
     }
     view.dispatch({ effects: setDecos.of(Decoration.set(ranges, true)) })
   }
@@ -158,9 +180,34 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
 }
 
 // ---- panel ------------------------------------------------------------------------
+const CONTEXT = 60 // characters of unchanged text kept on each side of a change, in a card
+
+/** A suggestion as a word diff: removed words struck through, new ones underlined, with long
+ *  unchanged stretches shortened. */
+function suggestionDiff(quote: string, text: string): HTMLElement {
+  const ops: DiffOp[] = wordDiff(quote, text)
+  const out = h('div', { class: 'rsuggest' })
+  if (!ops.some((o) => o.op !== 'eq')) { out.append(h('span', { class: 'muted' }, t('(no change)'))); return out }
+  ops.forEach((o, i) => {
+    if (o.op === 'del') out.append(h('del', { title: t('Removed') }, o.text))
+    else if (o.op === 'ins') out.append(h('ins', { title: t('Added') }, o.text))
+    else {
+      const first = i === 0, last = i === ops.length - 1
+      const keep = (first || last ? 1 : 2) * CONTEXT
+      if (o.text.length <= keep + 1) out.append(o.text)
+      else if (first) out.append('…', o.text.slice(-CONTEXT))
+      else if (last) out.append(o.text.slice(0, CONTEXT), '…')
+      else out.append(o.text.slice(0, CONTEXT), ' … ', o.text.slice(-CONTEXT))
+    }
+  })
+  return out
+}
+
 export interface ReviewHost {
   replica: Replica
   writable: boolean
+  /** Suggest mode: typing in the editor makes suggestions. */
+  suggesting: { on(): boolean; set(on: boolean): void; watch(f: () => void): void }
   userName: () => string
   selection: () => { file: string; from: number; to: number; text: string } | null
   reveal: (file: string, from: number, to: number) => void
@@ -177,10 +224,21 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   let draft: { area: HTMLTextAreaElement; initial: string } | null = null
   const replies = new Map<string, string>() // half-written replies: the list is redrawn whenever anyone comments
   const resolvedChk = h('input', { type: 'checkbox', 'aria-label': t('Show resolved'), onchange: (e: any) => { showResolved = e.target.checked; render() } })
+  const modeBtn = h('button', { class: 'suggest-mode', title: t('Suggest mode: what you type in the editor becomes suggestions for others to accept or reject (⌘⌥⇧E / Ctrl+Alt+Shift+E)'),
+    onclick: () => host.suggesting.set(!host.suggesting.on()) })
+  const showMode = () => {
+    const on = host.suggesting.on()
+    modeBtn.textContent = on ? t('✎ Suggest mode: on') : t('✎ Suggest mode')
+    modeBtn.classList.toggle('on', on)
+    modeBtn.setAttribute('aria-pressed', String(on))
+  }
+  host.suggesting.watch(showMode)
+  showMode()
   const el = h('div', { class: 'review' },
     h('div', { class: 'ai-bar' },
       host.writable ? h('button', { title: t('Comment on the selected text (⌘⌥M / Ctrl+Alt+M)'), onclick: () => add('comment') }, t('💬 Comment')) : null,
-      host.writable ? h('button', { title: t('Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)'), onclick: () => add('suggestion') }, t('✎ Suggest')) : null,
+      host.writable ? h('button', { title: t('Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)'), onclick: () => add('suggestion') }, t('Suggest a change')) : null,
+      host.writable ? modeBtn : null,
       h('span', { class: 'spacer' }),
       h('label', { class: 'check small' }, resolvedChk, t('Show resolved'))),
     composer,
@@ -267,19 +325,19 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     })
     return h('div', { class: `rcard ${it.kind} ${it.resolved ? 'resolved' : ''} ${it.id === focused ? 'focused' : ''}`, 'data-id': it.id },
       h('div', { class: 'rhead', onclick: go, title: rg ? t('Show in the editor') : t('The text it referred to was deleted') },
-        h('span', { class: 'rkind' }, it.kind === 'comment' ? '💬' : '✎'),
+        h('span', { class: 'rkind' }, it.kind === 'comment' ? t('💬 Comment') : t('✎ Suggestion')),
         h('span', { class: 'rloc' }, it.file), h('span', { class: 'muted small' }, ` · ${it.by} · ${when(it.at)}`)),
       it.kind === 'comment'
         ? h('div', {}, h('div', { class: 'rquote' }, it.quote.slice(0, 300)), h('div', { class: 'rtext' }, it.text))
-        : h('div', { class: 'rsuggest' }, h('del', {}, it.quote.slice(0, 500) || t('(insert here)')), ' → ', h('ins', {}, it.text.slice(0, 500) || t('(delete)'))),
+        : suggestionDiff(it.quote, it.text),
       it.resolved ? h('div', { class: 'muted small' }, it.outcome ? (it.outcome === 'accepted' ? t('Suggestion accepted') : t('Suggestion rejected')) : t('Resolved')) : null,
       ...it.replies.map((rp) => h('div', { class: 'rreply' }, h('b', {}, String(rp.by).slice(0, 64)), ` ${rp.text}`, h('span', { class: 'muted small' }, ` · ${when(rp.at)}`))),
       host.writable ? h('div', { class: 'ractions' },
         it.resolved ? h('button', { onclick: () => setResolved(r, it.id, false) }, t('Reopen')) : replyIn,
-        !it.resolved && it.kind === 'suggestion' ? h('button', { class: 'primary', onclick: () => { const m = accept(r, it.id); if (m && m !== 'cancelled') alert(m) } }, t('Accept')) : null,
-        !it.resolved && it.kind === 'suggestion' ? h('button', { onclick: () => setResolved(r, it.id, true, 'rejected') }, t('Reject')) : null,
+        !it.resolved && it.kind === 'suggestion' ? h('button', { class: 'primary', onclick: () => { flushSuggestions(); const m = accept(r, it.id); if (m && m !== 'cancelled') alert(m) } }, t('Accept')) : null,
+        !it.resolved && it.kind === 'suggestion' ? h('button', { onclick: () => { flushSuggestions(); setResolved(r, it.id, true, 'rejected') } }, t('Reject')) : null,
         !it.resolved && it.kind === 'comment' ? h('button', { onclick: () => setResolved(r, it.id, true) }, t('Resolve')) : null,
-        h('button', { class: 'icon', title: t('Delete'), 'aria-label': t('Delete'), onclick: () => { if (confirm(t('Delete this for everyone?'))) r.review.delete(it.id) } }, '✕')) : null)
+        h('button', { class: 'icon', title: t('Delete'), 'aria-label': t('Delete'), onclick: () => { if (confirm(t('Delete this for everyone?'))) { flushSuggestions(); r.review.delete(it.id) } } }, '✕')) : null)
   }
 
   function render() {
@@ -288,7 +346,7 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     const caret = typing?.selectionStart ?? 0, typingIn = typing?.getAttribute('data-reply')
     list.replaceChildren(...(items.length ? items.map(card)
       : [h('p', { class: 'muted small', style: 'padding: 8px 10px' }, host.writable
-        ? t('No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.')
+        ? t('No open comments or suggestions. Select text in the editor, then 💬 Comment or Suggest a change; or turn on ✎ Suggest mode and type.')
         : t('No open comments or suggestions.'))]))
     if (typingIn) { // carry on where they were
       const again = list.querySelector<HTMLTextAreaElement>(`[data-reply="${CSS.escape(typingIn)}"]`)

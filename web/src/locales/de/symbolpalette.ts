@@ -21,6 +21,7 @@ const de: Catalog = {
   '{{cmd}} (needs {{line}})': '{{cmd}} (benötigt {{line}})',
   'No symbols found.': 'Keine Symbole gefunden.',
   'Insert a symbol at the cursor (⌘⌥S / Ctrl+Alt+S)': 'Symbol am Cursor einfügen (⌘⌥S / Strg+Alt+S)',
+  "Suggested adding {{line}} to {{main}}.": "Vorgeschlagen, {{line}} zu {{main}} hinzuzufügen.",
 }
 
 export default de

@@ -22,6 +22,8 @@ import { lineAuthors } from './history'
 import type { Problem } from './latexlog'
 import { keymap } from '@codemirror/view'
 import { Prec, type Extension } from '@codemirror/state'
+import { setSuggestingFlag, suggestSession, type SuggestSession } from './suggestmode'
+import type { ReviewMap } from './review'
 
 export interface EditorPane {
   el: HTMLElement
@@ -33,11 +35,17 @@ export interface EditorPane {
   current(): string | null
   relint(): void
   gotoOffset(pos: number): void
-  context(): { file: string; selection: string; fromLine: number; toLine: number } | null
+  /** What the user is looking at. Lines are the file's; while suggesting, `selection` is the text as
+   *  shown (with the user's suggestions) and `fileSelection` what the file itself has there. */
+  context(): { file: string; selection: string; fromLine: number; toLine: number; suggesting: boolean; fileSelection?: string } | null
   onContextChange(f: () => void): void
   selection(): { file: string; from: number; to: number; text: string } | null
   reveal(from: number, to: number): void
   refreshSpell(): void
+  /** Suggest mode: typing makes suggestions instead of changing the file. */
+  setSuggesting(on: boolean): void
+  /** Save what's been typed while suggesting. */
+  flush(): void
 }
 
 // A line briefly highlighted after jumping to it (from the PDF, say).
@@ -55,9 +63,11 @@ export interface EditorHooks {
   onCompile: () => void
   onSync: () => void // show the current line in the PDF
   problems: (file: string) => Problem[] // last compile's problems for a file
-  review: (file: string) => Extension // comment/suggestion highlights
+  review: (file: string, map?: ReviewMap) => Extension // comment/suggestion highlights
   onReview: (kind: 'comment' | 'suggestion') => void // ⌘⌥M / ⌘⌥E
   onSymbols: () => void // ⌘⌥S
+  onToggleSuggest: () => void // ⌘⌥⇧E
+  userName: () => string
   menu: EditorMenuHost // right-click on selected text and LaTeX commands
   addReference: AddReference // from \cite{ completion
   spell: () => { on: boolean; lang: string }
@@ -77,6 +87,8 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
   let mathExtension: Extension | undefined
   const spellExt = () => { const sp = hooks.spell(); return spellcheck(sp.on, sp.lang, isTexFile(current)) }
   let authorsOn = false
+  let suggesting = false
+  let session: SuggestSession | null = null // while suggesting in a text file
 
   // how many words are selected, in the corner of the editor while anything is
   const selectionCount = h('div', { class: 'selcount', role: 'status', hidden: true })
@@ -147,31 +159,45 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     if (path === current && (view || !path)) return
     current = path
     view?.destroy(); view = null
+    session?.destroy(); session = null
     el.replaceChildren(selectionCount)
     selectionCount.hidden = true
     bound = undefined
     if (!path) return
     const yt = bound = r.files.get(path)
     if (yt) {
+      // Suggesting, the editor shows its own view of the file (suggestmode.ts) instead of
+      // editing the shared text, so collaborators' cursors aren't shown meanwhile.
+      const s = session = suggesting && writable ? suggestSession(r, path, yt, hooks.userName, hooks.onToggleSuggest) : null
       view = new EditorView({
         parent: el,
         state: EditorState.create({
-          doc: yt.toString(),
+          doc: s ? s.initial : yt.toString(),
           extensions: [
             basicSetup,
             StreamLanguage.define(stex),
             EditorView.lineWrapping,
             dark ? oneDark : [],
-            yCollab(yt, r.awareness, { undoManager: new Y.UndoManager(yt) }),
-            latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => (current ? hooks.problems(current) : []), addReference: writable ? hooks.addReference : undefined, checks: () => hooks.checks() && isTexFile(current) }),
+            s ? s.extension : yCollab(yt, r.awareness, { undoManager: new Y.UndoManager(yt) }),
+            latexSupport(index, { onCompile: hooks.onCompile, onSync: hooks.onSync, problems: () => sharedToViewLines(current ? hooks.problems(current) : []), addReference: writable ? hooks.addReference : undefined, checks: () => hooks.checks() && isTexFile(current) }),
             imageDropExtension(r, writable),
             spellSlot.of(spellExt()),
             editorMenu(hooks.menu),
             mathSlot.of(mathExt()),
-            authorsSlot.of(authorsOn ? authorsExtension(yt) : []),
-            hooks.review(path),
+            authorsSlot.of(authorsOn && !s ? authorsExtension(yt) : []),
+            hooks.review(path, s ? { toView: s.toView, skip: s.mine } : undefined),
             flashField,
             EditorView.updateListener.of((u) => { if (u.selectionSet || u.docChanged) { showSelectionCount(u.view); contextChanged() } }),
+            // ⌘⌥⇧E / Ctrl+Alt+Shift+E: suggest mode. By the physical key, before ⌘⌥E (suggest a change),
+            // since keyboards report Shift with letters and Alt differently on each system
+            Prec.highest(EditorView.domEventHandlers({
+              keydown: (e) => {
+                if (!(writable && e.code === 'KeyE' && e.shiftKey && e.altKey && (e.metaKey || e.ctrlKey))) return false
+                e.preventDefault()
+                hooks.onToggleSuggest()
+                return true
+              },
+            })),
             Prec.high(keymap.of([
               { key: 'Mod-Alt-m', run: () => { hooks.onReview('comment'); return true } },
               { key: 'Mod-Alt-e', run: () => { hooks.onReview('suggestion'); return true } },
@@ -195,25 +221,61 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     }).catch((e) => box.append(h('p', { class: 'err' }, String(e))))
   }
 
+  // While suggesting, the editor's positions are in its own view of the file: everything outside
+  // the editor (comments, search, the assistant, compile errors) uses the shared file's.
+  const lineIn = (text: string, pos: number) => { let n = 1; for (let i = text.indexOf('\n'); i >= 0 && i < pos; i = text.indexOf('\n', i + 1)) n++; return n }
+  /** Compile problems are on the file's lines: while suggesting, find them in the view. */
+  function sharedToViewLines(problems: Problem[]): Problem[] {
+    if (!session || !view) return problems
+    const shared = session.shared(), doc = view.state.doc
+    const starts = [0]
+    for (let i = shared.indexOf('\n'); i >= 0; i = shared.indexOf('\n', i + 1)) starts.push(i + 1)
+    return problems.map((p) => p.line == null ? p : { ...p, line: doc.lineAt(Math.min(doc.length, session!.toView(starts[Math.min(p.line, starts.length) - 1]))).number })
+  }
+
+  /** The selection in the shared file. */
+  function sharedSelection(): { from: number; to: number; text: string } | null {
+    if (!view) return null
+    const sel = view.state.selection.main
+    if (!session) return { from: sel.from, to: sel.to, text: view.state.doc.sliceString(sel.from, sel.to) }
+    const from = session.toShared(sel.from, -1), to = sel.empty ? from : Math.max(from, session.toShared(sel.to, 1))
+    return { from, to, text: session.shared().slice(from, to) }
+  }
+
   function context() {
     if (!current) return null
-    if (!view) return { file: current, selection: '', fromLine: 0, toLine: 0 }
-    const sel = view.state.selection.main
-    const doc = view.state.doc
-    return { file: current, selection: doc.sliceString(sel.from, sel.to), fromLine: doc.lineAt(sel.from).number, toLine: doc.lineAt(sel.to).number }
+    const sel = sharedSelection()
+    if (!sel) return { file: current, selection: '', fromLine: 0, toLine: 0, suggesting: false }
+    if (!session) {
+      const doc = view!.state.doc
+      return { file: current, selection: sel.text, fromLine: doc.lineAt(sel.from).number, toLine: doc.lineAt(sel.to).number, suggesting: false }
+    }
+    const shared = session.shared(), main = view!.state.selection.main
+    const shown = view!.state.doc.sliceString(main.from, main.to)
+    return { file: current, selection: shown, fromLine: lineIn(shared, sel.from), toLine: lineIn(shared, sel.to), suggesting: true, ...(shown !== sel.text ? { fileSelection: sel.text } : {}) }
   }
 
   function showAuthors(on: boolean) {
     authorsOn = on
     const yt = current ? r.files.get(current) : null
-    if (view && yt) view.dispatch({ effects: authorsSlot.reconfigure(on ? authorsExtension(yt) : []) })
+    if (view && yt) view.dispatch({ effects: authorsSlot.reconfigure(on && !session ? authorsExtension(yt) : []) })
   }
 
   function goto(line: number, col = 0, flash = false) {
     if (!view) return
     const doc = view.state.doc
-    const l = doc.line(Math.max(1, Math.min(doc.lines, line)))
-    const pos = Math.min(l.to, l.from + col)
+    let pos: number
+    if (session) { // a line of the shared file
+      const shared = session.shared()
+      let start = 0
+      for (let n = 1; n < line; n++) { const i = shared.indexOf('\n', start); if (i < 0) break; start = i + 1 }
+      const end = shared.indexOf('\n', start)
+      pos = session.toView(Math.min(end < 0 ? shared.length : end, start + col))
+    } else {
+      const l = doc.line(Math.max(1, Math.min(doc.lines, line)))
+      pos = Math.min(l.to, l.from + col)
+    }
+    const l = doc.lineAt(Math.min(pos, doc.length))
     view.dispatch({ selection: { anchor: pos }, effects: [EditorView.scrollIntoView(pos, { y: 'center' }), ...(flash ? [setFlash.of(l.from)] : [])] })
     view.focus()
     if (flash) { const v = view; setTimeout(() => { if (view === v) v.dispatch({ effects: setFlash.of(-1) }) }, 1600) }
@@ -221,26 +283,42 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
 
   function gotoOffset(pos: number) {
     if (!view) return
-    const p = Math.max(0, Math.min(view.state.doc.length, pos))
+    const p = Math.max(0, Math.min(view.state.doc.length, session ? session.toView(pos) : pos))
     view.dispatch({ selection: { anchor: p }, effects: EditorView.scrollIntoView(p, { y: 'center' }) })
     view.focus()
   }
 
   function selection() {
-    if (!current || !view) return null
-    const sel = view.state.selection.main
-    return { file: current, from: sel.from, to: sel.to, text: view.state.doc.sliceString(sel.from, sel.to) }
+    const sel = current ? sharedSelection() : null
+    return sel && current ? { file: current, ...sel } : null
   }
 
   function reveal(from: number, to: number) {
     if (!view) return
+    if (session) { from = session.toView(from); to = session.toView(to) }
     const n = view.state.doc.length
     const a = Math.max(0, Math.min(from, n)), b = Math.max(a, Math.min(to, n))
     view.dispatch({ selection: { anchor: a, head: b }, effects: EditorView.scrollIntoView(a, { y: 'center' }) })
     view.focus()
   }
 
+  function setSuggesting(on: boolean) {
+    on &&= writable
+    setSuggestingFlag(on, hooks.userName)
+    if (on === suggesting) return
+    suggesting = on
+    const path = current, sel = sharedSelection(), focused = view?.hasFocus
+    current = null
+    show(path) // with or without its own view of the file
+    if (view && sel) { // keep the cursor where it was in the file
+      const a = session ? session.toView(sel.from) : sel.from, b = session ? session.toView(sel.to) : sel.to
+      const n = view.state.doc.length
+      view.dispatch({ selection: { anchor: Math.min(a, n), head: Math.min(b, n) }, scrollIntoView: true })
+      if (focused) view.focus()
+    }
+  }
+
   const refreshSpell = () => { if (view) view.dispatch({ effects: [spellSlot.reconfigure(spellExt()), mathSlot.reconfigure(mathExt())] }) }
 
-  return { el, open, onContextChange: (f: () => void) => { contextWatchers.push(f) }, context, selection, reveal, refreshSpell, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { view?.dispatch({ effects: recheck.of(null) }) } }
+  return { el, open, onContextChange: (f: () => void) => { contextWatchers.push(f) }, context, selection, reveal, refreshSpell, showAuthors, goto, gotoOffset, setSuggesting, flush: () => session?.flush(), view: () => view, current: () => current, relint: () => { view?.dispatch({ effects: recheck.of(null) }) } }
 }

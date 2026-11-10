@@ -23,5 +23,6 @@ const fr: Catalog = {
     'Remplacer {{n}} résultat dans {{files}} ? (Vous pourrez annuler depuis l’Historique si besoin.)',
     'Remplacer {{n}} résultats dans {{files}} ? (Vous pourrez annuler depuis l’Historique si besoin.)',
   ],
+  "Suggest replacing {{n}} matches in {{files}}? Each becomes a suggestion in the Review tab.": ["Suggérer de remplacer {{n}} occurrence dans {{files}} ? Chacune devient une suggestion dans l’onglet Relecture.", "Suggérer de remplacer {{n}} occurrences dans {{files}} ? Chacune devient une suggestion dans l’onglet Relecture."],
 }
 export default fr

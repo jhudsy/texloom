@@ -8,6 +8,7 @@ import { aiPrefs, listModels, PRESETS, type ProviderConfig } from './providers'
 import { createSession, explainError, type LlmSession } from './llm'
 import { ASSISTANT, runTool, toolsFor, type Change, type ToolCtx } from './tools'
 import { locale, t, tn } from '../i18n'
+import { flushSuggestions } from '../suggestmode'
 
 const MAX_STEPS = 40 // tool round-trips per request
 const MAX_SAVED_STATE = 4 * 1024 * 1024 // past this, a conversation is kept to read but can't be continued
@@ -28,7 +29,7 @@ How to work:
 export interface PanelHost {
   replica: Replica
   writable: boolean
-  editorContext: () => { file: string | null; selection: string; fromLine: number; toLine: number } | null
+  editorContext: () => { file: string | null; selection: string; fromLine: number; toLine: number; suggesting?: boolean; fileSelection?: string } | null
   compile: () => Promise<{ ok: boolean; log: string } | null>
   lastLog: () => string
   userName: () => string
@@ -260,10 +261,13 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     if (!cfg.model) return configDialog(t('Choose a model first.'))
     if (cfg.kind === 'anthropic' && !cfg.apiKey) return configDialog(t('Add your Anthropic API key first.'))
     input.value = ''
+    flushSuggestions() // so what was just typed while suggesting is in the Review tab for it to read
     const c = host.editorContext()
     const ctxLines = [`Project: ${r.meta.get('name') || 'untitled'}; main file: ${r.meta.get('main') || 'auto'}; user: ${host.userName()}`]
     if (c?.file) ctxLines.push(`Open file: ${c.file}`)
+    if (c?.suggesting) ctxLines.push('The user is in suggest mode: what they type becomes suggestions in the Review tab instead of changing the file. Propose changes with suggest_edit unless they ask you to edit directly.')
     if (c?.selection) ctxLines.push(`Selected text (lines ${c.fromLine}-${c.toLine}):\n${c.selection.slice(0, 8000)}`)
+    if (c?.fileSelection !== undefined) ctxLines.push(`That selection includes the user's own suggestions. In the file itself it reads:\n${c.fileSelection.slice(0, 8000)}`)
     const message = `<context>\n${ctxLines.join('\n')}\n</context>\n\n${text}`
 
     chat ??= { meta: { id: crypto.randomUUID(), project: r.keys.project, title: text.replace(/\s+/g, ' ').slice(0, 80), provider: providerId, model: cfg.model, at: Date.now() }, entries: [] }
