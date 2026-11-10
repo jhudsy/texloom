@@ -190,9 +190,9 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   editor, underlined or in full; by default the editor shows just the text. Undo takes a suggestion back. Search and replace, and
   adding a package for a symbol, suggest too while it's on. It's remembered per project in that
   browser, and a bar across the editor says when it's on. Suggestions are blue in the Review tab and
-  comments amber. While suggesting you don't see collaborators' cursors, and suggestions you typed
-  in an earlier visit show like anyone else's (accept or reject them from the Review tab). If someone
-  changes the very words you're replacing, your suggestion stays and accepting it asks first.
+  comments amber. You can go back to suggestions you typed on an earlier visit, in the same browser, and keep
+  editing them (one tab at a time per file). If someone changes the very words you're replacing,
+  your suggestion stays and accepting it asks first.
 - **Problems:** after compiling, errors and warnings are listed under the PDF with their
   file and line; click one to go there. Biber and BibTeX errors (a missing `.bib`, say) are
   listed too. **Raw log** shows the whole log. **Compile from scratch** deletes LaTeX's

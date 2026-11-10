@@ -9,6 +9,7 @@
 import * as Y from 'yjs'
 import { Annotation, Transaction, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, showPanel, type DecorationSet, type ViewUpdate } from '@codemirror/view'
+import { yRemoteSelectionsTheme } from 'y-codemirror.next'
 import { h } from './dom'
 import { t } from './i18n'
 import { addItem, allItems, ChangeMark, changeTitle, editorMarkup, rangeOf } from './review'
@@ -20,9 +21,32 @@ import { refine, wordDiff } from './worddiff'
 const ORIGIN = { suggestMode: true }
 /** Marks editor changes that come from the shared document rather than from typing. */
 const fromShared = Annotation.define<boolean>()
-/** Whose typed suggestions these are: this page, so that two tabs never edit the same ones.
- *  Typed suggestions from an earlier visit show like anyone else's. */
-const ME = crypto.randomUUID()
+/** Whose typed suggestions these are. This browser's, so that they can be edited again on a later
+ *  visit; but while one tab suggests in a file it holds a lock on that file (LOCK), and another
+ *  tab of the same browser uses its own page's id there, so two tabs never edit the same ones. */
+const PAGE = crypto.randomUUID()
+const BROWSER = (() => {
+  try {
+    const id = localStorage.getItem('texloom.suggester') || crypto.randomUUID()
+    localStorage.setItem('texloom.suggester', id)
+    return id
+  } catch { return PAGE }
+})()
+const LOCK_FRESH = 15_000 // ms: a lock not renewed for this long was left by a tab that's gone
+
+/** Take this browser's suggestions in `file` for this tab, if no other tab has them. Returns the
+ *  id to use, and how to let go. */
+function claim(project: string, file: string): { me: string; release(): void } {
+  const key = `texloom.suggestlock.${project}.${file}`
+  const mine = () => JSON.stringify({ tab: PAGE, at: Date.now() })
+  try {
+    const held = JSON.parse(localStorage.getItem(key) || 'null') as { tab: string; at: number } | null
+    if (held && held.tab !== PAGE && Date.now() - held.at < LOCK_FRESH) return { me: PAGE, release() {} }
+    localStorage.setItem(key, mine())
+    const renew = setInterval(() => { try { localStorage.setItem(key, mine()) } catch {} }, LOCK_FRESH / 3)
+    return { me: BROWSER, release() { clearInterval(renew); try { if (JSON.parse(localStorage.getItem(key) || 'null')?.tab === PAGE) localStorage.removeItem(key) } catch {} } }
+  } catch { return { me: PAGE, release() {} } }
+}
 const SAVE_AFTER = 800 // ms after typing stops
 
 let on = false
@@ -69,6 +93,17 @@ export interface SuggestSession {
   destroy(): void
 }
 
+/** A collaborator's cursor, drawn as the usual editor binding draws it. */
+class Caret extends WidgetType {
+  constructor(readonly color: string, readonly name: string) { super() }
+  eq(o: Caret) { return o.color === this.color && o.name === this.name }
+  toDOM() {
+    return h('span', { class: 'cm-ySelectionCaret', style: `background-color: ${this.color}; border-color: ${this.color}` },
+      '\u2060', h('div', { class: 'cm-ySelectionCaretDot' }), '\u2060', h('div', { class: 'cm-ySelectionInfo' }, this.name), '\u2060')
+  }
+  ignoreEvent() { return true }
+}
+
 class Struck extends WidgetType {
   constructor(readonly text: string, readonly id: string | null) { super() }
   eq(o: Struck) { return o.text === this.text && o.id === this.id }
@@ -77,6 +112,8 @@ class Struck extends WidgetType {
 }
 
 export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => string, stop: () => void): SuggestSession {
+  const lock = claim(r.keys.project, file)
+  const ME = lock.me
   let shared = yt.toString()
   let hunks: Hunk[] = []
   let gone = new Set<string>()
@@ -181,7 +218,8 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
   r.doc.on('afterTransaction', onTransaction)
   const onHide = () => { if (document.visibilityState === 'hidden') flush() }
   document.addEventListener('visibilitychange', onHide)
-  addEventListener('pagehide', flush)
+  const onLeave = () => { flush(); lock.release() } // a reload must find the file free again
+  addEventListener('pagehide', onLeave)
 
   /** Turn edits in the editor into changes to the suggestions. */
   function typed(tr: Transaction) {
@@ -237,6 +275,50 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
     destroy() { cm = null }
   }, { decorations: (v) => v.decorations })
 
+  /** Collaborators' cursors and selections, found in this view of the file; and this person's, put
+   *  where others look for it (on the shared text, as the usual editor binding does). */
+  const cursors = ViewPlugin.fromClass(class {
+    decorations: DecorationSet = Decoration.none
+    private sent = ''
+    private listener = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }) => {
+      if ([...added, ...updated, ...removed].some((id) => id !== r.awareness.clientID)) put({})
+    }
+    constructor(view: EditorView) { r.awareness.on('change', this.listener); this.decorations = this.draw(view) }
+    update(u: ViewUpdate) {
+      if (u.selectionSet || u.focusChanged || u.docChanged) this.publish(u.view)
+      this.decorations = this.draw(u.view)
+    }
+    destroy() { r.awareness.off('change', this.listener) }
+    private publish(view: EditorView) {
+      const sel = view.hasFocus ? view.state.selection.main : null
+      const at = (v: number) => Y.createRelativePositionFromTypeIndex(yt, toShared(hunks, v, -1))
+      const cursor = sel ? { anchor: at(sel.anchor), head: at(sel.head) } : null
+      const key = JSON.stringify(cursor)
+      if (key === this.sent) return
+      this.sent = key
+      queueMicrotask(() => r.awareness.setLocalStateField('cursor', cursor)) // not in the middle of an editor update
+    }
+    private draw(view: EditorView): DecorationSet {
+      const out = [], len = view.state.doc.length
+      for (const [id, st] of r.awareness.getStates()) {
+        if (id === r.awareness.clientID || !st?.cursor) continue
+        const where = (j: unknown) => {
+          try {
+            const a = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(j), r.doc)
+            return a && a.type === yt ? Math.min(len, toView(hunks, a.index)) : null
+          } catch { return null }
+        }
+        const a = where(st.cursor.anchor), b = where(st.cursor.head)
+        if (a === null || b === null) continue
+        const user = st.user ?? {}
+        const color = typeof user.color === 'string' ? user.color : '#888', light = typeof user.colorLight === 'string' ? user.colorLight : `${color}33`
+        if (a !== b) out.push(Decoration.mark({ class: 'cm-ySelection', attributes: { style: `background-color: ${light}` } }).range(Math.min(a, b), Math.max(a, b)))
+        out.push(Decoration.widget({ widget: new Caret(color, String(user.name ?? '').slice(0, 64)), side: b > a ? -1 : 1 }).range(b))
+      }
+      return Decoration.set(out, true)
+    }
+  }, { decorations: (v) => v.decorations })
+
   const keepFocus = (e: Event) => e.preventDefault() // keep typing where you were
   const unwatchMarkup = editorMarkup.watch(() => put({}))
   const banner = showPanel.of(() => ({
@@ -248,7 +330,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
 
   const session: SuggestSession = {
     initial: compose(shared, hunks),
-    extension: [plugin, banner],
+    extension: [plugin, cursors, yRemoteSelectionsTheme, banner],
     toView: (x) => toView(hunks, x),
     toShared: (v, bias = -1) => toShared(hunks, v, bias),
     shared: () => shared,
@@ -256,12 +338,13 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
     flush,
     destroy() {
       flush()
+      lock.release()
       sessions.delete(session)
       unwatchMarkup()
       clearTimeout(timer)
       r.doc.off('afterTransaction', onTransaction)
       document.removeEventListener('visibilitychange', onHide)
-      removeEventListener('pagehide', flush)
+      removeEventListener('pagehide', onLeave)
     },
   }
   sessions.add(session)
