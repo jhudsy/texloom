@@ -72,5 +72,6 @@ const fr: Catalog = {
   'Delete the conversation “{{name}}”': 'Supprimer la conversation « {{name}} »',
   'Saved only in this browser, for this project. They can quote your documents.': 'Enregistrées uniquement dans ce navigateur, pour ce projet. Elles peuvent citer vos documents.',
   'This conversation can be read here, but the assistant can’t pick it up again. If you send a message, it starts without the earlier history.': 'Cette conversation peut être lue ici, mais l’assistant ne peut pas la reprendre. Si vous envoyez un message, il repartira sans l’historique.',
+  '💬 Reading comments': '💬 Lecture des commentaires',
 }
 export default fr

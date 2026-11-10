@@ -66,6 +66,7 @@ const zh: Catalog = {
   'Delete the conversation “{{name}}”': '删除对话“{{name}}”',
   'Saved only in this browser, for this project. They can quote your documents.': '仅保存在此浏览器中，并按项目分开。其中可能引用您的文档。',
   'This conversation can be read here, but the assistant can’t pick it up again. If you send a message, it starts without the earlier history.': '此对话可以在这里阅读，但助手无法继续。如果您发送消息，它将不带之前的记录重新开始。',
+  '💬 Reading comments': '💬 正在读取评论',
 }
 
 export default zh
