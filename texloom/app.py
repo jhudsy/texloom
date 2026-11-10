@@ -871,6 +871,96 @@ class ProjectListDialog(QtWidgets.QDialog):
             self.refresh_list()
 
 
+class ConnectToolDialog(QtWidgets.QDialog):
+    """How to connect an MCP tool that's already on this computer, such as Claude Code: it runs
+    under the person's own account with that tool. The same guide as web/src/assistant/connect.ts."""
+
+    INSTALL = "uv tool install git+https://github.com/jhudsy/texloom"
+
+    def __init__(self, folder: Path, parent=None) -> None:
+        super().__init__(parent)
+        self.folder = folder.resolve()
+        self.keys, self.server = load(folder)
+        self.access = "suggest" if self.keys.writable else "read"
+        self.setWindowTitle(_("Connect an AI tool"))
+        self.setMinimumWidth(620)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(self.note(_("Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.")))
+        lay.addWidget(self.heading(_("Install the TeXLoom command-line helper once")))
+        self.install = self.block(lay, 1, lambda: self.INSTALL)
+        how = self.note(f'<a href="https://docs.astral.sh/uv/getting-started/installation/">{_("How to install uv")}</a>')
+        how.setOpenExternalLinks(True)
+        lay.addWidget(how)
+        if self.keys.writable:
+            lay.addWidget(self.heading(_("Choose what the tool may do")))
+            for access, label in (("suggest", _("Suggest changes for people to accept")), ("edit", _("Edit files directly")), ("read", _("Read the project only"))):
+                radio = QtWidgets.QRadioButton(label)
+                radio.setProperty("access", access)
+                radio.setChecked(access == self.access)
+                radio.toggled.connect(functools.partial(self.choose, access))
+                lay.addWidget(radio)
+        lay.addWidget(self.heading(_("Add it to your tool")))
+        lay.addWidget(self.note(_("Claude Code: run this in a terminal")))
+        self.claude = self.block(lay, 3, lambda: "claude mcp add texloom -- texloom " + " ".join(self.quoted(a) for a in self.args("Claude Code")))
+        lay.addWidget(self.note(_("Other tools: add this to their MCP settings")))
+        self.other = self.block(lay, 9, lambda: json.dumps({"mcpServers": {"texloom": {"command": "texloom", "args": self.args("AI agent")}}}, indent=2, ensure_ascii=False))
+        lay.addWidget(self.note(_("If your tool can’t find the texloom command, give its full path instead.")))
+        lay.addWidget(self.note(_("Suggesting and editing use this folder’s path. Reading uses a read-only link, which your tool saves in its settings, so anyone who can read those settings can read the project.")))
+        lay.addWidget(self.note(_("The tool reads text other people wrote in this project, which could include instructions aimed at it. On shared projects, suggesting is the safer choice.")))
+        row = QtWidgets.QHBoxLayout()
+        row.addStretch(1)
+        close = QtWidgets.QPushButton(_("Close"))
+        close.clicked.connect(self.accept)
+        row.addWidget(close)
+        lay.addLayout(row)
+        self.show_commands()
+
+    @staticmethod
+    def note(text: str) -> QtWidgets.QLabel:
+        label = QtWidgets.QLabel(text)
+        label.setWordWrap(True)
+        return label
+
+    def heading(self, text: str) -> QtWidgets.QLabel:
+        label = self.note(text)
+        font = label.font()
+        font.setBold(True)
+        label.setFont(font)
+        return label
+
+    def block(self, lay: QtWidgets.QBoxLayout, lines: int, text) -> tuple:
+        box = QtWidgets.QPlainTextEdit(readOnly=True)
+        box.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
+        box.setWordWrapMode(QtGui.QTextOption.WrapAnywhere)
+        box.setFixedHeight(box.fontMetrics().lineSpacing() * lines + 14)
+        copy = QtWidgets.QPushButton(_("Copy"))
+        copy.setAutoDefault(False)
+        copy.clicked.connect(lambda: (QtWidgets.QApplication.clipboard().setText(text()), copy.setText(_("Copied"))))
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(box, 1)
+        row.addWidget(copy, 0, Qt.AlignTop)
+        lay.addLayout(row)
+        return box, copy, text
+
+    def args(self, name: str) -> list[str]:
+        target = self.keys.link(self.server, False) if self.access == "read" else str(self.folder)
+        return ["mcp", *(["--suggest-only"] if self.access == "suggest" else []), "--name", name, target]
+
+    @staticmethod
+    def quoted(arg: str) -> str:
+        return arg if re.fullmatch(r"[\w.-]+", arg) else f'"{arg}"'  # double quotes work in every common shell
+
+    def choose(self, access: str, on: bool) -> None:
+        if on:
+            self.access = access
+            self.show_commands()
+
+    def show_commands(self) -> None:
+        for box, copy, text in (self.install, self.claude, self.other):
+            box.setPlainText(text())
+            copy.setText(_("Copy"))
+
+
 class CopyFolderDialog(QtWidgets.QDialog):
     """Start a new project from a folder's current files."""
 
@@ -1417,6 +1507,7 @@ class Window(QtWidgets.QMainWindow):
         m.addAction(_("Tags…"), self.edit_tags)
         if len(self.selected()) == 1:
             m.addAction(_("Make a copy…"), self.copy_project)
+            m.addAction(_("Connect an AI tool…"), self.connect_tool)
         m.addSeparator()
         m.addAction(_("Leave…"), self.leave)
         m.exec(self.list.viewport().mapToGlobal(pos))
@@ -1440,6 +1531,9 @@ class Window(QtWidgets.QMainWindow):
         self.show_filter()
         self.refresh()
         QtCore.QTimer.singleShot(2000, self.keep_list_updated)
+
+    def connect_tool(self) -> None:
+        ConnectToolDialog(self.selected()[0], self).exec()
 
     def copy_project(self) -> None:
         d = self.current()

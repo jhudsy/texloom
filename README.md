@@ -398,6 +398,7 @@ browser stops if it finds the app or `texloom run` keeping the same folder.
   by tag. Tags show in colour, which **Manage tags…** lets you change. Select several (Shift or ⌘/Ctrl-click) to change their **Tags…** or **Leave…** them
   together, and right-click for the same actions. Tags are the same ones as in the web app, through
   your project list. **Make a copy…** starts a new project, in a new folder, from a folder's files.
+  **Connect an AI tool…** on the right-click menu shows how to connect a tool you already use through [MCP](#agents-mcp).
 - **Share a folder…** turns an existing folder into a new project; **Add existing folder…**
   brings back one set up earlier (e.g. left, or cloned on the command line).
 - Each folder shows whether it is up to date, offline or sending changes, with its recent
