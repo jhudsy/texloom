@@ -695,6 +695,7 @@ class Conn:
         self.hellos: list[float] = []
         self.recheck = 0.0  # private servers: when to check the project's code again
         self.held = 0  # bytes received and not yet finished with (see Metered)
+        self.aware = False  # has sent awareness, so others must hear when it goes
         self.window_start = time.monotonic()
         self.msgs = 0
         self.bytes = 0
@@ -1009,6 +1010,8 @@ class Relay:
             if not room:
                 self.rooms.pop(project, None)
             log.info("leave %s…", project[:8])
+            if conn.aware:  # this also covers a crash or a lost connection, where a client can't say goodbye
+                await self.broadcast(project, {"t": "left", "from": conn.id})
         return ws
 
     async def handle(self, project: str, ws, conn: Conn, t: str, msg: dict) -> None:
@@ -1079,7 +1082,8 @@ class Relay:
             self.store.snapshot(project, upto, data, sig)
             log.info("compacted %s… up to %d", project[:8], upto)
         elif t == "aw":
-            await self.broadcast(project, {"t": "aw", "d": field(msg, "d", str)}, ws)
+            conn.aware = True
+            await self.broadcast(project, {"t": "aw", "d": field(msg, "d", str), "from": conn.id}, ws)
         elif t == "p2p":
             # Opaque peer-to-peer payload (state-vector sync, blob transfer). Never stored.
             out = {"t": "p2p", "d": field(msg, "d", str), "from": conn.id}

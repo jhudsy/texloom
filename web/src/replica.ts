@@ -94,6 +94,9 @@ export class Replica {
   readonly meta = this.doc.getMap<any>('meta')
   readonly out = this.doc.getMap<any>('out')
   readonly awareness = new awarenessProtocol.Awareness(this.doc)
+  private presenceConn = new Map<number, number | undefined>() // which server connection each person's presence came through
+  private presenceSender: number | undefined
+  private presenceQueue: Promise<void> = Promise.resolve()
   status: Status = 'offline'
   pending = 0 // local updates not yet acknowledged
   peers = 0 // other connections to this project right now
@@ -152,7 +155,11 @@ export class Replica {
       for (const id of [...added, ...updated]) cleanPresence(this.awareness.getStates().get(id))
     })
     this.awareness.on('update', ({ added, updated, removed }: any, origin: unknown) => {
-      if (origin === REMOTE) return
+      for (const id of removed) this.presenceConn.delete(id)
+      if (origin === REMOTE) {
+        for (const id of [...added, ...updated]) this.presenceConn.set(id, this.presenceSender)
+        return
+      }
       const changed = added.concat(updated, removed)
       this.sendAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed))
     })
@@ -245,7 +252,7 @@ export class Replica {
         await this.uploadPending()
         await this.flushOutbox()
         await this.p2p({ k: 'sv1', sv: b64e(Y.encodeStateVector(this.doc)) })
-        this.sendAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID]))
+        this.awareness.setLocalState(this.awareness.getLocalState()) // a newer clock, so it counts as news to everyone; sent by the listener above
         if (m.count >= COMPACT_AFTER) await this.compact()
         setTimeout(() => this.pruneOutputs().catch(() => {}), 5000)
         this.manualDone?.(); this.manualDone = null
@@ -263,13 +270,12 @@ export class Replica {
         this.onStatus()
         break
       }
-      case 'aw': {
-        const upd = await this.keys.decrypt(b64d(m.d)).catch(() => null)
-        if (upd) try { awarenessProtocol.applyAwarenessUpdate(this.awareness, upd, REMOTE) } catch { break }
-        this.peers = Math.max(this.peers, this.awareness.getStates().size - 1)
-        this.onStatus()
+      case 'aw': // one at a time: a "left" must not overtake the last update before it, still being decrypted
+        this.presenceQueue = this.presenceQueue.then(() => this.applyPresence(m)).catch((e) => console.error(e))
         break
-      }
+      case 'left':
+        this.presenceQueue = this.presenceQueue.then(() => this.forgetConnection(m.from)).catch((e) => console.error(e))
+        break
       case 'p2p':
         await this.onP2p(m)
         break
@@ -354,6 +360,24 @@ export class Replica {
     if (d.length > MAX_SNAPSHOT) return // too big for the server to take: the log stays as it is
     const upto = this.since
     this.ws.send(JSON.stringify({ t: 'snap', upto, d: b64e(d), s: b64e(this.keys.sign(`snap:${upto}:`, d)) }))
+  }
+
+  private async applyPresence(m: { d: string; from?: number }) {
+    const upd = await this.keys.decrypt(b64d(m.d)).catch(() => null)
+    if (upd) {
+      this.presenceSender = m.from
+      try { awarenessProtocol.applyAwarenessUpdate(this.awareness, upd, REMOTE) } catch { return }
+    }
+    this.peers = Math.max(this.peers, this.awareness.getStates().size - 1)
+    this.onStatus()
+  }
+
+  /** Someone's connection closed: stop showing them now rather than when their presence times out. */
+  private forgetConnection(conn: number) {
+    const gone = [...this.presenceConn].filter(([id, c]) => c === conn && id !== this.doc.clientID).map(([id]) => id)
+    if (!gone.length) return
+    awarenessProtocol.removeAwarenessStates(this.awareness, gone, REMOTE)
+    for (const id of gone) this.awareness.meta.delete(id) // removal raises their clock: if the page reconnects, it must still be heard
   }
 
   private async sendAwareness(update: Uint8Array) {

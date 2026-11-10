@@ -113,7 +113,8 @@ without compiling.
 | `{t:"log", entries:[{q,d,s}], head, floor, mode, you, peers, store, rv}` | catch-up reply to `hello` (a snapshot, if any, comes first); `you` = this connection's peer id; `floor` = entries up to here were evicted; `rv` = revocations |
 | `{t:"up", q, d, s}` | someone else's update |
 | `{t:"ack", q}` | your update was stored at sequence `q` |
-| `{t:"aw", d}` | someone's awareness |
+| `{t:"aw", d, from}` | someone's awareness |
+| `{t:"left", from}` | that connection closed: stop showing the awareness it sent |
 | `{t:"p2p", d, s?, from}` | a peer's payload |
 | `{t:"mode", m}` | storage mode changed |
 | `{t:"rv", p, s}` | a personal key was revoked |
