@@ -6,6 +6,7 @@ import { zipSync, type Zippable } from 'fflate'
 import type { Replica } from './replica'
 import { setText } from './diff'
 import { t, tn } from './i18n'
+import { flushSuggestions } from './suggestmode'
 
 export const IMAGE_RE = /\.(png|jpe?g|gif|svg|webp|pdf|eps|ps|bmp|tiff?)$/i
 
@@ -119,10 +120,16 @@ export function confirmAdding(r: Replica, paths: string[], bytes: number, replac
 
 /** Move/rename a file or a folder (with everything in it). */
 export function movePath(r: Replica, from: string, to: string) {
+  flushSuggestions() // what's being typed in suggest mode is saved against the file as it is
   r.doc.transact(() => {
     const moveFile = (a: string, b: string) => {
       const t = r.files.get(a)
-      if (t) { r.files.set(b, new Y.Text(t.toString())); r.files.delete(a) }
+      if (t) {
+        const moved = new Y.Text(t.toString())
+        r.files.set(b, moved)
+        moveReview(r, a, t, b, moved) // before the old text goes, while its positions still resolve
+        r.files.delete(a)
+      }
       const blob = r.bin.get(a)
       if (blob) { r.bin.set(b, blob); r.bin.delete(a) }
       if (r.meta.get('main') === a) r.meta.set('main', b)
@@ -134,6 +141,23 @@ export function movePath(r: Replica, from: string, to: string) {
     }
     r.dirs.set(to, true)
   })
+}
+
+/** A moved file's text is a new copy, so comments and suggestions on it would lose their place:
+ *  anchor each at the same spot in the copy, which holds the same text, and give it the new path.
+ *  Ones whose text was already gone just get the new path. */
+function moveReview(r: Replica, from: string, old: Y.Text, to: string, moved: Y.Text) {
+  for (const m of r.review.values()) {
+    if (!(m instanceof Y.Map) || m.get('file') !== from) continue
+    for (const key of ['start', 'end']) {
+      try {
+        const rel = Y.decodeRelativePosition(m.get(key))
+        const at = Y.createAbsolutePositionFromRelativePosition(rel, r.doc)
+        if (at && at.type === old) m.set(key, Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(moved, at.index, rel.assoc)))
+      } catch { /* an anchor that can't be read stays as it was */ }
+    }
+    m.set('file', to)
+  }
 }
 
 /** Delete a file, or a folder and everything in it. Returns how many files were removed. */

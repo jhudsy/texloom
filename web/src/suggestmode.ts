@@ -104,6 +104,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
     clearTimeout(timer)
     if (!dirty) return
     dirty = false
+    if (r.files.get(file) !== yt) return // the file was moved, replaced or deleted: its anchors would be wrong
     const kept = hunks.filter((h) => !h.id || r.review.has(h.id)) // (reconcile drops deleted ones first)
     const lost = kept.length !== hunks.length
     hunks = saveHunks(r.doc, r.review, yt, kept, gone, { file, by: by(), me: ME, origin: ORIGIN })

@@ -49,7 +49,7 @@ No accounts: a project is shared by sending a link.
 | `versions`: Y.Array | saved versions: `{at, by, label?, auto?, link}` (older ones: `snap`, a whole encoded `Y.snapshot`) |
 | `versionChain`: Y.Array | what versions are built from: `{id, base, snap}`, see History |
 | `clients`: Y.Map  | Yjs client id → display name (for "who wrote this")             |
-| `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, resolved, outcome?, replies: Y.Array, typed?, conflict?}`; `start`/`end` are encoded Yjs relative positions, so they follow edits; `typed` and `conflict` come from suggest mode (see below) |
+| `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, resolved, outcome?, replies: Y.Array, typed?, conflict?}`; `start`/`end` are encoded Yjs relative positions, so they follow edits; `typed` and `conflict` come from suggest mode (see below). Moving a file makes a new `Y.Text`, so `movePath` re-anchors its items at the same places in the copy and updates `file` |
 | `members`: Y.Map  | personal edit links the owner issued: public key → `{name, at, by, g, revoked?}`, `g` = the owner's grant. Any editor can write this map, so the share dialog only trusts entries whose grant verifies, the owner's own record of issued links (localStorage) and keys seen signing edits; enforcement is by signatures |
 
 Text merges character by character (CRDT). Binary files are last-writer-wins
@@ -492,6 +492,8 @@ symlinks) into a new folder and shares that as a new project with the same setti
   Planned: an owner-signed "deleted" marker the server keeps, refusing all further traffic
   for the project; collaborators' apps then show "The owner deleted this project", keep a
   read-only copy and offer a .zip. Their files on disk stay (they are theirs).
+- Renaming a file on disk, in a folder kept in sync, reaches the project as one file deleted and
+  another added, so comments and suggestions on it lose their place (renaming in the app keeps them).
 - Two peers who both *create* (or upload) the same path while apart: Yjs keeps one value
   per map key and deletes the other everywhere. `web/src/clashes.ts` finds the loser (a
   deleted value for the key that no later write saw: no item has it as `origin`) and
