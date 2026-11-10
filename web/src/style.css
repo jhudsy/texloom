@@ -231,6 +231,8 @@ dialog.dlg h4 { margin: 18px 0 6px; font-size: 13px; text-transform: uppercase; 
 .check { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
 .grid { display: grid; grid-template-columns: max-content 1fr; gap: 8px 12px; align-items: center; }
 select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.connect-access { display: flex; flex-direction: column; gap: 4px; }
+.ai-note .connect-tool { margin-top: 6px; }
 .cmds pre { background: var(--panel); padding: 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
 .row.end { justify-content: flex-end; margin-top: 18px; }
 details { margin-top: 12px; }

@@ -613,6 +613,10 @@ Providers (pick one in the tab; settings via ⚙):
   (`lms server start --cors`). Ollama accepts `localhost` pages by default; from another
   site, set `OLLAMA_ORIGINS`. Use a model with tool calling (for example a Qwen 3.x model).
 
+**Connect your own AI tool…** in the tab shows how to connect a tool you already use through
+[MCP](#agents-mcp) instead, such as Claude Code. It runs under your own account with that tool, so it
+needs no API key here.
+
 API keys and provider settings are stored only in your browser. They are not part of
 the project and never pass through the TeXLoom server: requests go straight from your
 browser to the provider.

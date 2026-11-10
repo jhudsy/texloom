@@ -487,6 +487,7 @@ async function openProject(keys: Keys) {
     ai: () => createAssistantPanel({
       replica: r, writable, editorContext: editor.context,
       compile: () => output.compile(false), lastLog: output.lastLog, userName: () => me.name,
+      link: (write) => keys.link(server, write && writable),
     }),
     review: () => (reviewPanel = createReviewPanel({
       replica: r, writable, userName: () => me.name, selection: () => editor.selection(),

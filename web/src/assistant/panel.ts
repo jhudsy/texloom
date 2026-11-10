@@ -1,4 +1,5 @@
 // The in-editor assistant: a chat panel that acts on the project like a collaborator.
+import { connectToolDialog } from './connect'
 import * as Y from 'yjs'
 import type { Replica } from '../replica'
 import { dialog, h } from '../dom'
@@ -29,6 +30,7 @@ export interface PanelHost {
   compile: () => Promise<{ ok: boolean; log: string } | null>
   lastLog: () => string
   userName: () => string
+  link: (write: boolean) => string // the project's edit or read-only link
 }
 
 // --- tiny, safe markdown (escape first, then a few constructs) ----------------
@@ -115,13 +117,15 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     log.scrollTop = log.scrollHeight
   }
 
+  const connectButton = () => h('button', { class: 'small connect-tool', onclick: () => connectToolDialog(host.writable, host.link) }, t('Connect your own AI tool…'))
+
   function intro() {
     log.replaceChildren(h('div', { class: 'ai-note' }, [
       t('Assistant using {{provider}}.', { provider: cfg.label + (cfg.model ? ` · ${cfg.model}` : '') }),
       host.writable ? t('It can read, search and edit files and compile this project.') : t('It can read, search and compile this project.'),
       t('Edits appear for collaborators like anyone else’s.'),
       cfg.kind === 'anthropic' || cfg.apiKey || !/^https:/.test(cfg.baseUrl) ? '' : t('Set an API key in ⚙.'),
-    ].filter(Boolean).join(' ')))
+    ].filter(Boolean).join(' '), h('div', {}, connectButton())))
   }
   intro()
 
@@ -315,6 +319,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
         ...(c.kind === 'anthropic' ? [h('span', {}, t('Effort')), effort] : []),
       ),
       status,
+      h('p', {}, connectButton()),
       h('p', { class: 'muted small' }, t('Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to the endpoint above.')),
       h('div', { class: 'row end' },
         h('button', { onclick: () => dlg.close() }, t('Cancel')),
