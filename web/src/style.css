@@ -59,6 +59,7 @@ header button { white-space: nowrap; flex-shrink: 0; }
 main { flex: 1; display: grid; min-height: 0; }
 aside { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
 aside .tools { display: flex; gap: 6px; padding: 8px; flex-wrap: wrap; }
+aside .tools button { flex: 1; justify-content: center; white-space: nowrap; }
 .filetree { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .filetree .where { padding: 0 10px 4px; min-height: 0; }
 .files li.dir .path { font-weight: 500; }
@@ -138,6 +139,15 @@ body.resizing-v canvas, body.resizing-v .cm-editor { pointer-events: none; }
 .pdfbar .spacer { flex: 1; }
 .pdfbar { gap: 6px; flex-wrap: wrap; }
 .pdfbar button.on { border-color: var(--accent); }
+/* the PDF's controls wrap onto the next line together, never one by one */
+.pdftools { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+
+/* icons (icons.ts) */
+.ico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
+.ico-chevron { width: 12px; height: 12px; vertical-align: -1px; margin-left: -2px; opacity: .8; }
+button.withicon { display: inline-flex; align-items: center; gap: 5px; }
+button.iconbtn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 28px; padding-left: 5px; padding-right: 5px; }
+header button:has(> .ico) { display: inline-flex; align-items: center; gap: 5px; }
 .err { color: var(--err); }
 
 dialog.share { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); width: min(640px, 92vw); }
@@ -242,7 +252,8 @@ details { margin-top: 12px; }
 /* right-hand tabs */
 .right .tabs, aside .tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; padding: 4px 6px 0; border-bottom: 1px solid var(--line); background: var(--panel); }
 .right .tab, aside .tab { border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; background: transparent; color: var(--muted); padding: 4px 10px; white-space: nowrap; flex-shrink: 0; }
-.right .tab.active, aside .tab.active { background: var(--bg); color: var(--fg); border-color: var(--line); margin-bottom: -1px; }
+.right .tab.active, aside .tab.active { background: var(--bg); color: var(--fg); border-color: var(--line); margin-bottom: -1px; box-shadow: inset 0 2px 0 var(--accent); }
+.right .tab:not(.active):hover, aside .tab:not(.active):hover { color: var(--fg); }
 .right .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .right .pane[hidden] { display: none; }
 
@@ -298,9 +309,9 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 .recent .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; white-space: nowrap; }
 .recent .tag.ro { color: var(--warn); }
 .recent .details { font-size: 12px; overflow-wrap: anywhere; }
-.recent .icon { border: none; background: transparent; color: var(--muted); padding: 0 4px; }
-.recent .icon:hover { color: var(--fg); }
-.recent .forget:hover { color: var(--err); }
+.recent .icon { border: 1px solid transparent; background: transparent; color: var(--muted); padding: 0; width: 26px; height: 26px; display: inline-grid; place-items: center; flex: none; }
+.recent .icon:hover, .recent .icon:focus-visible { color: var(--fg); background: var(--panel); border-color: var(--line); }
+.recent .forget:hover, .recent .forget:focus-visible { color: var(--err); }
 .recent .to-app { white-space: nowrap; }
 @media (max-width: 560px) { /* room for the name, then the buttons */
   .recent .top { flex-wrap: wrap; }
@@ -423,7 +434,7 @@ textarea.review-write { display: block; width: 100%; box-sizing: border-box; mar
 /* left-hand tabs: search and outline */
 aside .tabs { background: var(--bg); gap: 0; padding-inline: 4px; }
 aside .tab.active { background: var(--panel); }
-aside .tab { padding: 4px 3px; font-size: 13px; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+aside .tab { padding: 4px 6px; font-size: 13px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 aside .tab.symtab { flex-shrink: 0; }
 .lpane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .lpane[hidden] { display: none; }

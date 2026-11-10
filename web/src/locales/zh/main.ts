@@ -47,10 +47,7 @@ const zh: Catalog = {
   'Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.': '“{{name}}”（{{code}}）的私有备注名。\n仅你在此浏览器中可见。留空则使用共享名称。',
   'this project': '此项目',
   'Remove from this browser': '从此浏览器中移除',
-  'Import files from a .zip (e.g. Overleaf) or an arXiv paper': '从 .zip（例如 Overleaf）或 arXiv 论文导入文件',
   'Import': '导入',
-  'Add a bibliography entry from a DOI or arXiv id': '通过 DOI 或 arXiv 编号添加参考文献条目',
-  '+ Reference': '+ 参考文献',
   'Compile first: the PDF has no SyncTeX data yet.': '请先编译：PDF 还没有 SyncTeX 数据。',
   'PDF': 'PDF',
   'Assistant': '助手',
@@ -153,6 +150,9 @@ const zh: Catalog = {
   'Projects per page': '每页项目数',
   '{{n}} per page': '每页 {{n}} 个',
   'All on one page': '全部显示在一页',
+  "Reference from a DOI or arXiv id…": "从 DOI 或 arXiv 编号添加参考文献…",
+  "Import a .zip (e.g. Overleaf) or arXiv paper…": "导入 .zip（例如来自 Overleaf）或 arXiv 论文…",
+  "Download the source (.zip)": "下载源文件（.zip）",
 }
 
 export default zh

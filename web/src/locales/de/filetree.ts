@@ -1,10 +1,6 @@
 import type { Catalog } from '../../i18n'
 
 const de: Catalog = {
-  'New file in the selected folder': 'Neue Datei im ausgewählten Ordner',
-  '+ File': '+ Datei',
-  'New folder in the selected folder': 'Neuer Ordner im ausgewählten Ordner',
-  '+ Folder': '+ Ordner',
   'Upload files into the selected folder': 'Dateien in den ausgewählten Ordner hochladen',
   'Upload': 'Hochladen',
   'Drag to move · drop files or folders from your computer onto a folder to upload · ★ = main file': 'Ziehen zum Verschieben · Dateien oder Ordner vom Computer auf einen Ordner ziehen zum Hochladen · ★ = Hauptdatei',
@@ -34,6 +30,10 @@ const de: Catalog = {
   '{{n}} files already exist and will be replaced: {{files}}. The old versions stay in History.': ['{{n}} Datei ist bereits vorhanden und wird ersetzt: {{files}}. Die alte Version bleibt im Verlauf.', '{{n}} Dateien sind bereits vorhanden und werden ersetzt: {{files}}. Die alten Versionen bleiben im Verlauf.'],
   'This adds {{mb}} MB in {{n}} files. It counts towards your storage, and collaborators will have to download it.': ['Dadurch kommen {{mb}} MB in {{n}} Datei hinzu. Das zählt zu Ihrem Speicherplatz, und Mitwirkende müssen sie herunterladen.', 'Dadurch kommen {{mb}} MB in {{n}} Dateien hinzu. Das zählt zu Ihrem Speicherplatz, und Mitwirkende müssen sie herunterladen.'],
   'Continue?': 'Fortfahren?',
+  "New": "Neu",
+  "New file…": "Neue Datei…",
+  "New folder…": "Neuer Ordner…",
+  "New file or folder in the selected folder, and more": "Neue Datei oder neuer Ordner im ausgewählten Ordner und mehr",
 }
 
 export default de

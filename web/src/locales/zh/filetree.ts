@@ -1,10 +1,6 @@
 import type { Catalog } from '../../i18n'
 
 const zh: Catalog = {
-  'New file in the selected folder': '在所选文件夹中新建文件',
-  '+ File': '+ 文件',
-  'New folder in the selected folder': '在所选文件夹中新建文件夹',
-  '+ Folder': '+ 文件夹',
   'Upload files into the selected folder': '将文件上传到所选文件夹',
   'Upload': '上传',
   'Drag to move · drop files or folders from your computer onto a folder to upload · ★ = main file': '拖动可移动 · 将电脑上的文件或文件夹拖到文件夹即可上传 · ★ = 主文件',
@@ -34,6 +30,10 @@ const zh: Catalog = {
   '{{n}} files already exist and will be replaced: {{files}}. The old versions stay in History.': { other: '{{n}} 个文件已存在，将被替换：{{files}}。旧版本保留在历史记录中。' },
   'This adds {{mb}} MB in {{n}} files. It counts towards your storage, and collaborators will have to download it.': { other: '这将添加 {{n}} 个文件，共 {{mb}} MB。这会计入你的存储空间，协作者也需要下载这些文件。' },
   'Continue?': '是否继续？',
+  "New": "新建",
+  "New file…": "新建文件…",
+  "New folder…": "新建文件夹…",
+  "New file or folder in the selected folder, and more": "在所选文件夹中新建文件或文件夹，以及更多",
 }
 
 export default zh

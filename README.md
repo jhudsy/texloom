@@ -141,7 +141,7 @@ remove them together, or use the box at the top to tick everything found. Tags a
 alone: they aren't stored in the project, so collaborators never see them. With a synced list they
 follow you to your other devices, encrypted; otherwise they stay in that browser.
 
-**Make a copy** (⧉ next to a project, or in the editor's header) starts a new project of your own
+**Make a copy** (the copy icon next to a project, or in the editor's header) starts a new project of your own
 from the current files and settings, which suits templates. The copy has its own links and none of
 the original's history, comments or collaborators, and it counts towards your storage.
 
@@ -186,19 +186,19 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   `.texloom/build`).
 - **New projects** start from a template (article, paper with bibliography, Beamer, thesis
   with chapters, letter) or an import: a `.zip` (Overleaf: Menu → Download → Source; a
-  GitHub "Download ZIP"; any zipped folder) or an arXiv paper's LaTeX source. **Import** in
+  GitHub "Download ZIP"; any zipped folder) or an arXiv paper's LaTeX source. **New → Import…** in
   the file list does the same for an existing project. From git: clone it and run
   `texloom new` in the folder.
-- **+ Reference** adds a bibliography entry from a DOI or arXiv id (via doi.org) with a
+- **New → Reference…** in the file list adds a bibliography entry from a DOI or arXiv id (via doi.org) with a
   readable key such as `vaswani2017attention`, and cites it at the cursor.
 - **Offline:** after the first visit the app (and, after one compile, the TeX engine) works
   offline; browsers offer to install it as an app.
-- **Files:** the tree has folders. New files and folders go into the selected folder,
+- **Files:** the tree has folders. **New** (file, folder, reference, import) and **Upload** work in the selected folder,
   you can drag to move, and dropping files or whole folders from your computer onto a folder uploads them
   there (you're asked first if files would be replaced, or if it's a very large amount).
 - **Panes:** drag the dividers between the file list, the editor and the PDF/assistant
   panel; ☰ and ▥ hide the side panes.
-- **PDF in its own window:** **New window** above the PDF opens it in a separate window, for example
+- **PDF in its own window:** the window button above the PDF opens it in a separate window, for example
   on another screen. It updates when you compile, double-clicking it jumps to the source, and it
   stays in step if you reload the editor.
 - **Word counts:** the Outline tab counts the document and each section; selecting text shows its count
@@ -216,10 +216,10 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **PDF zoom:** − and + above the PDF change its size, and the percentage goes back to normal
   size; ⌘ or Ctrl + scroll, or pinching on a trackpad, does the same. The zoom is remembered.
 - **Pages and printing:** the box above the PDF shows the current page; type a number and press
-  Enter to go there. **Print** opens your browser's print dialog, with pages drawn at 300 dpi. For
+  Enter to go there. the printer button opens your browser's print dialog, with pages drawn at 300 dpi. For
   a print that keeps the PDF's own text, download it and print that.
 - **Compile log:** **Log** shows it under the PDF; drag its top edge to resize.
-- **Downloads:** **⤓ PDF** and **⤓ Source** (a `.zip`).
+- **Downloads:** the download button above the PDF, and **Source** (a `.zip`) in the header.
 
 **Phones and tablets.** In small windows the editor and the PDF take turns on screen, the file list
 opens over them from ☰, and the other commands are under ⋯. On touch screens a bar above the keyboard

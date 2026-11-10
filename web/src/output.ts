@@ -3,6 +3,7 @@
 import type { Replica } from './replica'
 import type { Device } from './settings'
 import { h, saveFile, verticalResizer } from './dom'
+import { icon } from './icons'
 import { PdfView } from './pdfview'
 import { pdfWindowLink } from './pdfwindow'
 import { compileInBrowser, defaultEngine, browserCompileAvailable, type Progress, CompileStopped, stopBrowserCompile } from './compile'
@@ -65,7 +66,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     try { localStorage.setItem(LOG_KEY, open ? '1' : '') } catch {}
   }
   const logBtn = h('button', { title: t('Show/hide the compile log'), onclick: () => setLogOpen(!!logBox.hidden) }, t('Log'))
-  const dlBtn = h('button', { title: t('Download the PDF'), disabled: true, onclick: () => lastPdf && saveFile(`${pdfName ?? fileBase(r)}.pdf`, lastPdf, 'application/pdf') }, '⤓ PDF')
+  const dlBtn = h('button', { class: 'iconbtn', title: t('Download the PDF'), 'aria-label': t('Download the PDF'), disabled: true, onclick: () => lastPdf && saveFile(`${pdfName ?? fileBase(r)}.pdf`, lastPdf, 'application/pdf') }, icon('download'))
   const compileBtn = h('button', { class: 'primary', title: t('Compile (⌘S / Ctrl+S)'), onclick: (e: Event) => {
     if (stopRunning) { e.stopImmediatePropagation(); stopRunning() } else compile() // stopping shouldn't change what's on show
   } }, t('Compile')) as HTMLButtonElement
@@ -78,9 +79,9 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     compileBtn.classList.toggle('primary', !stop)
     compileBtn.classList.toggle('danger', !!stop)
   }
-  const windowBtn = h('button', { class: 'to-window wide-only', title: t('Open the PDF in a separate window, for example on another screen. It updates when you compile.'), onclick: () => {
+  const windowBtn = h('button', { class: 'to-window wide-only iconbtn', title: t('Open the PDF in a separate window, for example on another screen. It updates when you compile.'), 'aria-label': t('New window'), onclick: () => {
     if (!pdfWindow.open()) info.textContent = t('Your browser blocked the new window: allow pop-ups for this site and try again.')
-  } }, `↗ ${t('New window')}`)
+  } }, icon('window'))
   compileBtn.addEventListener('pointerenter', () => { // says which file, when it isn't the main one
     if (stopRunning || device().compile === 'local') return
     const file = target()
@@ -89,7 +90,8 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const summary = h('button', { class: 'psummary', title: t('Show problems'), hidden: true, onclick: () => { setLogOpen(true); showLogView(false) } })
 
   const pane = h('div', { class: 'pane output' },
-    h('div', { class: 'pdfbar' }, info, summary, h('span', { class: 'spacer' }), pdfView.controls, windowBtn, dlBtn, logBtn),
+    h('div', { class: 'pdfbar' }, info, summary, h('span', { class: 'spacer' }),
+      h('span', { class: 'pdftools' }, pdfView.controls, windowBtn, dlBtn, logBtn)),
     progress, pdfView.el, logBox)
   verticalResizer(logSplit, logBox, 'texloom.logHeight', 60, 180)
   setLogOpen(localStorage.getItem(LOG_KEY) === '1')

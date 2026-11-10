@@ -4,6 +4,7 @@ import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { t } from './i18n'
 import { h } from './dom'
+import { icon } from './icons'
 import { openContextMenu, type MenuItem } from './contextmenu'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
@@ -97,7 +98,7 @@ export class PdfView {
       },
     })
     this.pageTotal = h('span', { class: 'muted' })
-    this.printBtn = h('button', { title: t('Print the PDF'), onclick: () => { this.print().catch((e) => { this.printDone(); alert(t('Couldn’t prepare the PDF for printing: {{error}}', { error: e })) }) } }, t('Print'))
+    this.printBtn = h('button', { class: 'iconbtn', title: t('Print the PDF'), 'aria-label': t('Print'), onclick: () => { this.print().catch((e) => { this.printDone(); alert(t('Couldn’t prepare the PDF for printing: {{error}}', { error: e })) }) } }, icon('print'))
     this.controls = h('span', { class: 'pdfcontrols', hidden: true },
       h('span', { class: 'pdfpage' }, this.pageBox, this.pageTotal),
       h('span', { class: 'pdfzoom', role: 'group', 'aria-label': t('PDF zoom') }, this.zoomOut, this.zoomReset, this.zoomIn),
@@ -126,8 +127,8 @@ export class PdfView {
   private async print() {
     if (!this.last || this.printBtn.disabled) return
     this.printBtn.disabled = true
-    const label = this.printBtn.textContent
-    this.printDone = () => { this.printBtn.disabled = false; this.printBtn.textContent = label }
+    const label = [...this.printBtn.childNodes]
+    this.printDone = () => { this.printBtn.disabled = false; this.printBtn.replaceChildren(...label) }
     const task = openPdf(this.last)
     const sheets = h('div', { class: 'print-sheets' })
     const urls: string[] = []
@@ -135,7 +136,7 @@ export class PdfView {
     try {
       const doc = await task.promise
       for (let i = 1; i <= doc.numPages; i++) {
-        this.printBtn.textContent = t('Preparing… ({{done}} of {{total}})', { done: i, total: doc.numPages })
+        this.printBtn.replaceChildren(icon('print'), ' ', t('Preparing… ({{done}} of {{total}})', { done: i, total: doc.numPages }))
         const page = await doc.getPage(i)
         const base = page.getViewport({ scale: 1 })
         if (i === 1) size = `${base.width}pt ${base.height}pt`

@@ -4,6 +4,7 @@ import { isPreviewable } from './preview'
 import * as Y from 'yjs'
 import type { Replica } from './replica'
 import { h, saveFile, askText } from './dom'
+import { icon } from './icons'
 import { t, tn } from './i18n'
 import { allFiles, allFolders, cleanPath, confirmAdding, deletePath, exists, IMAGE_RE, isDocument, mainFile, movePath, newFolder, putFile } from './projectfiles'
 import { isJunk } from './templates'
@@ -14,6 +15,8 @@ export interface FileTree {
   current(): string | null
   /** Open the main file, and keep a file open from now on. */
   start(): void
+  /** Add an item to the New menu (after New file and New folder). */
+  addNew(label: string, run: () => void): void
 }
 
 const base = (p: string) => p.slice(p.lastIndexOf('/') + 1)
@@ -37,11 +40,19 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
   const list = h('ul', { class: 'files', role: 'tree' })
   const uploadIn = h('input', { type: 'file', multiple: true, hidden: true, onchange: (e: any) => { upload([...e.target.files].map((file) => ({ file, rel: file.name })), [], folder); e.target.value = '' } })
   const where = h('div', { class: 'where muted small' })
+  // New file, New folder and the items the editor adds (a reference, an import)
+  const newItems: MenuItem[] = [
+    [t('New file…'), () => newFile(folder)],
+    [t('New folder…'), () => makeFolder(folder)],
+  ]
+  const newBtn = h('button', { class: 'withicon', 'aria-haspopup': 'menu', title: t('New file or folder in the selected folder, and more'), onclick: () => {
+    const box = newBtn.getBoundingClientRect()
+    newBtn.setAttribute('aria-expanded', 'true')
+    openContextMenu(box.left, box.bottom + 2, newItems, () => newBtn.setAttribute('aria-expanded', 'false'))
+  } }, icon('plus'), t('New'), icon('chevron'))
   const el = h('div', { class: 'filetree' },
-    writable ? h('div', { class: 'tools' },
-      h('button', { title: t('New file in the selected folder'), onclick: () => newFile(folder) }, t('+ File')),
-      h('button', { title: t('New folder in the selected folder'), onclick: () => makeFolder(folder) }, t('+ Folder')),
-      h('button', { title: t('Upload files into the selected folder'), onclick: () => uploadIn.click() }, t('Upload')),
+    writable ? h('div', { class: 'tools' }, newBtn,
+      h('button', { class: 'withicon', title: t('Upload files into the selected folder'), onclick: () => uploadIn.click() }, icon('upload'), t('Upload')),
       uploadIn) : null,
     where,
     list,
@@ -260,5 +271,5 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
 
   r.files.observe(render); r.bin.observe(render); r.dirs.observe(render); r.meta.observe(render)
   render()
-  return { el, open: openFile, current: () => current, start: () => { started = true; render() } }
+  return { el, open: openFile, current: () => current, start: () => { started = true; render() }, addNew: (label, run) => { newItems.push([label, run]) } }
 }

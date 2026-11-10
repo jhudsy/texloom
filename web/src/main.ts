@@ -9,6 +9,7 @@ import { createAssistantPanel } from './assistant/panel'
 import { setupLayout } from './layout'
 import { askCode, chooseNewProject, riskBanner, SAFARI_NOTE } from './storagenotice'
 import { $, h, saveFile, askText } from './dom'
+import { icon } from './icons'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
@@ -299,18 +300,18 @@ function projectList(): HTMLElement {
           if (v === null) return
           projects.update(r.project, { nick: v.trim() })
           refreshProjects()
-        } }, '✎'),
+        } }, icon('pencil')),
         h('button', { class: 'icon', title: t('Make a copy'), 'aria-label': t('Make a copy of {{name}}…', { name: label }), onclick: () => {
           try {
             const keys = Keys.fromFragment('#' + r.fragment)
             if (keys) copyDialog({ name: label, by: prefs.name, server, keys })
           } catch (e) { alert(e) }
-        } }, '⧉'),
+        } }, icon('copy')),
         h('button', { class: 'icon forget', title: t('Remove…'), 'aria-label': t('Remove {{name}}…', { name: label }), onclick: async () => {
           const folder = await savedFolder(r.project).catch(() => undefined)
           removeDialog({ name: label, code: projectCode(r.project), owner: canOwn(r), onServer: hasServerCopy(r), folder: folder?.name ?? null },
             async (fromServer) => { await removeProject(r, fromServer); refreshProjects() })
-        } }, '✕')),
+        } }, icon('close'))),
       h('div', { class: 'details muted' }, details.join(' · ')),
       h('div', { class: 'tags' },
         ...tagsOf(r.project).map((tag) => h('button', { class: `utag tc-${tag.colour}${finding.tags.has(tag.id) ? ' on' : ''}`, title: t('Show only projects tagged “{{name}}”', { name: tag.name }), onclick: () => toggleFilter(tag.id) }, tag.name)),
@@ -402,15 +403,12 @@ async function openProject(keys: Keys) {
     },
   })
 
-  // "Import" (zip / arXiv) and "+ Reference" (DOI / arXiv): in the file tools
-  if (writable) tree.el.querySelector('.tools')?.append(h('button', { title: t('Import files from a .zip (e.g. Overleaf) or an arXiv paper'), onclick: () => importDialog(r) }, t('Import')))
-  if (writable) tree.el.querySelector('.tools')?.append(h('button', {
-    title: t('Add a bibliography entry from a DOI or arXiv id'),
-    onclick: () => referenceDialog(r, index, (key) => {
-      const v = editor.view(), f = editor.current()
-      if (v && f?.endsWith('.tex')) v.dispatch(v.state.replaceSelection(`\\cite{${key}}`))
-    }),
-  }, t('+ Reference')))
+  // a reference (DOI / arXiv) and an import (zip / arXiv): in the file list's New menu
+  tree.addNew(t('Reference from a DOI or arXiv id…'), () => referenceDialog(r, index, (key) => {
+    const v = editor.view(), f = editor.current()
+    if (v && f?.endsWith('.tex')) v.dispatch(v.state.replaceSelection(`\\cite{${key}}`))
+  }))
+  tree.addNew(t('Import a .zip (e.g. Overleaf) or arXiv paper…'), () => importDialog(r))
 
   /** Jump to a collaborator: open their file at their cursor. */
   function jumpTo(clientId: number) {
@@ -622,9 +620,9 @@ async function openProject(keys: Keys) {
   const title = h('input', { class: 'title', readonly: !writable, 'aria-label': t('Project name'), onchange: (e: any) => r.meta.set('name', e.target.value) })
   const syncNow = async () => { syncBtn.setAttribute('disabled', ''); await r.syncNow(); syncBtn.removeAttribute('disabled') }
   const syncBtn = h('button', { class: 'wide-only', onclick: syncNow }, t('Sync now'))
-  const zipBtn = h('button', { class: 'wide-only', title: t('Download all files as a .zip'), onclick: () => downloadZip() }, `⤓ ${t('Source')}`)
+  const zipBtn = h('button', { class: 'wide-only', title: t('Download all files as a .zip'), onclick: () => downloadZip() }, icon('download'), t('Source'))
   const copyProject = () => copyDialog({ name: title.value, by: prefs.name, server, replica: r })
-  const copyBtn = h('button', { class: 'wide-only', title: t('Start a new project from this one’s files'), 'aria-label': t('Make a copy'), onclick: copyProject }, '⧉ ', h('span', { class: 'lbl' }, t('Make a copy')))
+  const copyBtn = h('button', { class: 'wide-only', title: t('Start a new project from this one’s files'), 'aria-label': t('Make a copy'), onclick: copyProject }, icon('copy'), h('span', { class: 'lbl' }, t('Make a copy')))
   const tagsLabel = () => { const n = tags.of(keys.project).length; return n ? t('Tags ({{n}})', { n }) : t('Tags') }
   const showTags = () => {
     tagsBtn.textContent = tagsLabel()
@@ -640,8 +638,8 @@ async function openProject(keys: Keys) {
   // Each is a button in wide windows and an item under ⋯ in small ones.
   const headerActions: { btn: HTMLElement; label: () => string; run: () => void }[] = [
     { btn: syncBtn, label: () => t('Sync now'), run: syncNow },
-    { btn: zipBtn, label: () => `⤓ ${t('Source')}`, run: () => downloadZip() },
-    { btn: copyBtn, label: () => `⧉ ${t('Make a copy')}`, run: copyProject },
+    { btn: zipBtn, label: () => t('Download the source (.zip)'), run: () => downloadZip() },
+    { btn: copyBtn, label: () => t('Make a copy'), run: copyProject },
     { btn: tagsBtn, label: tagsLabel, run: editTags },
     { btn: folderBtn, label: () => folderBtn.textContent ?? '', run: () => folderMenu() },
     { btn: shareBtn, label: () => t('Share'), run: shareProject },

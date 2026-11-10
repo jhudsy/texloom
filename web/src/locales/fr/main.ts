@@ -47,10 +47,7 @@ const fr: Catalog = {
   'Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.': 'Libellé privé pour « {{name}} » ({{code}}).\nVous seul le voyez, dans ce navigateur. Laissez vide pour utiliser le nom partagé.',
   'this project': 'ce projet',
   'Remove from this browser': 'Supprimer de ce navigateur',
-  'Import files from a .zip (e.g. Overleaf) or an arXiv paper': 'Importer des fichiers depuis un .zip (par ex. Overleaf) ou un article arXiv',
   'Import': 'Importer',
-  'Add a bibliography entry from a DOI or arXiv id': 'Ajouter une entrée de bibliographie à partir d’un DOI ou d’un identifiant arXiv',
-  '+ Reference': '+ Référence',
   'Compile first: the PDF has no SyncTeX data yet.': 'Compilez d’abord : le PDF n’a pas encore de données SyncTeX.',
   'PDF': 'PDF',
   'Assistant': 'Assistant',
@@ -153,5 +150,8 @@ const fr: Catalog = {
   'Projects per page': 'Projets par page',
   '{{n}} per page': '{{n}} par page',
   'All on one page': 'Tous sur une page',
+  "Reference from a DOI or arXiv id…": "Référence à partir d’un DOI ou d’un identifiant arXiv…",
+  "Import a .zip (e.g. Overleaf) or arXiv paper…": "Importer un .zip (par ex. Overleaf) ou un article arXiv…",
+  "Download the source (.zip)": "Télécharger les sources (.zip)",
 }
 export default fr
