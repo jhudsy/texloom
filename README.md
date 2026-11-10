@@ -598,7 +598,7 @@ decide when to ask you first. `write_file` and `edit_file` are marked destructiv
 
 The **Assistant** tab next to the PDF is a chat that works on the project like a
 collaborator:
-- it can list, read and search files, read the comments and suggestions in the Review tab, make targeted edits, create or delete files,
+- it can list, read and search files, read the comments and suggestions in the Review tab and reply to or resolve them, make targeted edits, create or delete files,
   compile, and read the compile log;
 - with **Ask before applying edits** (the default), each change appears as a diff to
   apply or reject; deleting a file always asks, even with this turned off;

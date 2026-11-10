@@ -375,6 +375,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       case 'add_comment': return t('💬 Commenting on {{path}}', v).trimEnd()
       case 'delete_file': return t('🗑 Deleting {{path}}', v).trimEnd()
       case 'list_comments': return t('💬 Reading comments')
+      case 'reply_comment': return t('💬 Replying to a comment')
+      case 'resolve_comment': return t('✓ Resolving a comment')
       case 'compile': return t('⚙ Compiling')
       case 'get_compile_log': return t('📄 Reading compile log')
       default: return name

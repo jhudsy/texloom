@@ -67,6 +67,8 @@ const pt: Catalog = {
   'Saved only in this browser, for this project. They can quote your documents.': 'Salvas apenas neste navegador, para este projeto. Elas podem citar seus documentos.',
   'This conversation can be read here, but the assistant can’t pick it up again. If you send a message, it starts without the earlier history.': 'Esta conversa pode ser lida aqui, mas o assistente não consegue retomá-la. Se você enviar uma mensagem, ele começará sem o histórico anterior.',
   '💬 Reading comments': '💬 Lendo comentários',
+  '💬 Replying to a comment': '💬 Respondendo a um comentário',
+  '✓ Resolving a comment': '✓ Resolvendo um comentário',
 }
 
 export default pt
