@@ -614,6 +614,9 @@ Providers (pick one in the tab; settings via ⚙):
   (`lms server start --cors`). Ollama accepts `localhost` pages by default; from another
   site, set `OLLAMA_ORIGINS`. Use a model with tool calling (for example a Qwen 3.x model).
 
+Conversations are saved in your browser, per project: 🕘 lists them to read, continue (on the provider and
+model they used) or delete, and they're removed if you remove the project from this browser.
+
 **Connect your own AI tool…** in the tab shows how to connect a tool you already use through
 [MCP](#agents-mcp) instead, such as Claude Code. It runs under your own account with that tool, so it
 needs no API key here.

@@ -59,6 +59,13 @@ const pt: Catalog = {
   'Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to the endpoint above.': 'Armazenada apenas neste navegador. As chaves nunca são adicionadas ao projeto nem enviadas ao servidor do TeXLoom; as solicitações vão diretamente deste navegador para o endpoint acima.',
   'Cancel': 'Cancelar',
   'Save': 'Salvar',
+  'Past conversations': 'Conversas anteriores',
+  'No past conversations yet.': 'Ainda não há conversas anteriores.',
+  'Delete all conversations': 'Excluir todas as conversas',
+  'Delete all past conversations for this project? This can’t be undone.': 'Excluir todas as conversas anteriores deste projeto? Isso não pode ser desfeito.',
+  'Delete the conversation “{{name}}”': 'Excluir a conversa “{{name}}”',
+  'Saved only in this browser, for this project. They can quote your documents.': 'Salvas apenas neste navegador, para este projeto. Elas podem citar seus documentos.',
+  'This conversation can be read here, but the assistant can’t pick it up again. If you send a message, it starts without the earlier history.': 'Esta conversa pode ser lida aqui, mas o assistente não consegue retomá-la. Se você enviar uma mensagem, ele começará sem o histórico anterior.',
 }
 
 export default pt

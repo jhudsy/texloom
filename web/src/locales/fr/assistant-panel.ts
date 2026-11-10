@@ -65,5 +65,12 @@ const fr: Catalog = {
     'Enregistré uniquement dans ce navigateur. Les clés ne sont jamais ajoutées au projet ni envoyées au serveur texloom ; les requêtes partent directement de ce navigateur vers le point de terminaison ci-dessus.',
   'Cancel': 'Annuler',
   'Save': 'Enregistrer',
+  'Past conversations': 'Conversations passées',
+  'No past conversations yet.': 'Aucune conversation passée pour l’instant.',
+  'Delete all conversations': 'Supprimer toutes les conversations',
+  'Delete all past conversations for this project? This can’t be undone.': 'Supprimer toutes les conversations passées de ce projet ? Cette action est irréversible.',
+  'Delete the conversation “{{name}}”': 'Supprimer la conversation « {{name}} »',
+  'Saved only in this browser, for this project. They can quote your documents.': 'Enregistrées uniquement dans ce navigateur, pour ce projet. Elles peuvent citer vos documents.',
+  'This conversation can be read here, but the assistant can’t pick it up again. If you send a message, it starts without the earlier history.': 'Cette conversation peut être lue ici, mais l’assistant ne peut pas la reprendre. Si vous envoyez un message, il repartira sans l’historique.',
 }
 export default fr

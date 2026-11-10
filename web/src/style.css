@@ -264,6 +264,11 @@ details { margin-top: 12px; }
 .ai-note, .ai-warn, .ai-err { font-size: 12px; padding: 6px 8px; border-radius: 6px; background: var(--panel); color: var(--muted); }
 .ai-warn { color: var(--warn); }
 .ai-err { color: var(--err); }
+.chatlist { display: flex; flex-direction: column; gap: 4px; }
+.chatrow { display: flex; align-items: center; gap: 6px; }
+.chatopen { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.chattitle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chatrow .icon { flex-shrink: 0; border: none; background: transparent; color: var(--muted); }
 .ai-review { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .ai-review .title { padding: 6px 8px; font-weight: 600; font-size: 12px; background: var(--panel); }
 .ai-review .row.end { padding: 6px 8px; margin: 0; }

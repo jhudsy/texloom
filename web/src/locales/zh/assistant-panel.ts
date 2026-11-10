@@ -59,6 +59,13 @@ const zh: Catalog = {
   'Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to the endpoint above.': '仅保存在此浏览器中。密钥不会添加到项目，也不会发送到 TeXLoom 服务器；请求由此浏览器直接发送到上述接口地址。',
   'Cancel': '取消',
   'Save': '保存',
+  'Past conversations': '历史对话',
+  'No past conversations yet.': '还没有历史对话。',
+  'Delete all conversations': '删除所有对话',
+  'Delete all past conversations for this project? This can’t be undone.': '要删除此项目的所有历史对话吗？此操作无法撤销。',
+  'Delete the conversation “{{name}}”': '删除对话“{{name}}”',
+  'Saved only in this browser, for this project. They can quote your documents.': '仅保存在此浏览器中，并按项目分开。其中可能引用您的文档。',
+  'This conversation can be read here, but the assistant can’t pick it up again. If you send a message, it starts without the earlier history.': '此对话可以在这里阅读，但助手无法继续。如果您发送消息，它将不带之前的记录重新开始。',
 }
 
 export default zh

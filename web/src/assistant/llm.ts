@@ -18,10 +18,13 @@ export interface LlmSession {
   addUser(text: string): void
   addToolResults(results: { id: string; content: string; isError: boolean }[]): void
   turn(ev: TurnEvents, signal: AbortSignal): Promise<TurnResult>
+  /** The conversation so far, to hand back to createSession later. */
+  save(): unknown
 }
 
-export function createSession(cfg: ProviderConfig, tools: ToolDef[], system: string): LlmSession {
-  return cfg.kind === 'anthropic' ? new AnthropicSession(cfg, tools, system) : new OpenAISession(cfg, tools, system)
+export function createSession(cfg: ProviderConfig, tools: ToolDef[], system: string, saved?: unknown): LlmSession {
+  const history = Array.isArray(saved) ? saved : []
+  return cfg.kind === 'anthropic' ? new AnthropicSession(cfg, tools, system, history) : new OpenAISession(cfg, tools, system, history)
 }
 
 /** Human-readable explanation for network/API failures. */
@@ -44,10 +47,9 @@ const ADAPTIVE_ONLY = /^claude-(fable|opus-5|opus-4-[678]|sonnet-5|haiku-5|sonne
 
 class AnthropicSession implements LlmSession {
   private client: Anthropic
-  private messages: Anthropic.Beta.BetaMessageParam[] = []
   private tools: Anthropic.Beta.BetaTool[]
 
-  constructor(private cfg: ProviderConfig, tools: ToolDef[], private system: string) {
+  constructor(private cfg: ProviderConfig, tools: ToolDef[], private system: string, private messages: Anthropic.Beta.BetaMessageParam[]) {
     this.client = new Anthropic({
       apiKey: cfg.apiKey,
       baseURL: cfg.baseUrl,
@@ -62,6 +64,7 @@ class AnthropicSession implements LlmSession {
   }
 
   addUser(text: string) { this.messages.push({ role: 'user', content: text }) }
+  save() { return this.messages }
 
   addToolResults(results: { id: string; content: string; isError: boolean }[]) {
     // All results for one assistant turn go back in a single user message.
@@ -148,12 +151,13 @@ class OpenAISession implements LlmSession {
   private messages: OaiMessage[]
   private tools: unknown[]
 
-  constructor(private cfg: ProviderConfig, tools: ToolDef[], system: string) {
-    this.messages = [{ role: 'system', content: system }]
+  constructor(private cfg: ProviderConfig, tools: ToolDef[], system: string, history: OaiMessage[]) {
+    this.messages = [{ role: 'system', content: system }, ...history]
     this.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: jsonSchema(t) } }))
   }
 
   addUser(text: string) { this.messages.push({ role: 'user', content: text }) }
+  save() { return this.messages.slice(1) } // today's system prompt is used when it's picked up again
   addToolResults(results: { id: string; content: string; isError: boolean }[]) {
     for (const r of results) this.messages.push({ role: 'tool', tool_call_id: r.id, content: r.isError ? `ERROR: ${r.content}` : r.content })
   }

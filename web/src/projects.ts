@@ -1,5 +1,6 @@
 // The list of projects opened in this browser (start page). Kept in localStorage; the server
 // can't read projects, so it can't list them for you (listsync.ts can keep an encrypted copy).
+import { chats } from './assistant/chats'
 import { forgetLocalCopy } from './replica'
 import { b64d } from './crypto'
 import { rememberFolder } from './foldersync'
@@ -127,6 +128,7 @@ export const projects = {
     writeGone({ ...readGone(), [project]: Date.now() })
     write(read().filter((x) => x.project !== project))
     tags.forgetProject(project)
+    await chats.forgetProject(project).catch(() => {})
     // every per-project setting (texloom.<what>.<project>) and the linked folder
     try { for (const k of Object.keys(localStorage)) if (k.startsWith('texloom.') && k.endsWith(`.${project}`)) localStorage.removeItem(k) } catch {}
     await rememberFolder(project, null).catch(() => {})

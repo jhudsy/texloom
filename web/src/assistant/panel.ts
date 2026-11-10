@@ -1,14 +1,16 @@
 // The in-editor assistant: a chat panel that acts on the project like a collaborator.
 import { connectToolDialog } from './connect'
+import { chats, type ChatMeta, type Entry } from './chats'
 import * as Y from 'yjs'
 import type { Replica } from '../replica'
 import { dialog, h } from '../dom'
 import { aiPrefs, listModels, PRESETS, type ProviderConfig } from './providers'
 import { createSession, explainError, type LlmSession } from './llm'
 import { ASSISTANT, runTool, toolsFor, type Change, type ToolCtx } from './tools'
-import { t, tn } from '../i18n'
+import { locale, t, tn } from '../i18n'
 
 const MAX_STEPS = 40 // tool round-trips per request
+const MAX_SAVED_STATE = 4 * 1024 * 1024 // past this, a conversation is kept to read but can't be continued
 const EFFORTS: [value: string, label: string][] = [['low', t('low')], ['medium', t('medium')], ['high', t('high')], ['xhigh', t('xhigh')], ['max', t('max')]]
 
 const SYSTEM = `You are a LaTeX writing assistant built into texloom, a collaborative LaTeX editor. You work directly on the user's project through tools; other people may be editing the same files at the same time, so their text can change between your reads and edits.
@@ -70,6 +72,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   let providerId = aiPrefs.activeId
   let cfg: ProviderConfig = aiPrefs.get(providerId)
   let session: LlmSession | null = null
+  let chat: { meta: ChatMeta; entries: Entry[] } | null = null // the conversation being saved
   let abort: AbortController | null = null
   const undo = new Y.UndoManager([r.files, r.bin, r.meta], { trackedOrigins: new Set([ASSISTANT]), captureTimeout: 1e9 })
   let lastUndoBtn: HTMLButtonElement | null = null
@@ -84,6 +87,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   const sendBtn = h('button', { class: 'primary', onclick: () => (abort ? stop() : send()) }, t('Send')) as HTMLButtonElement
   const reviewChk = h('input', { type: 'checkbox', 'aria-label': t('Ask before applying edits'), checked: aiPrefs.reviewEdits, onchange: (e: any) => (aiPrefs.reviewEdits = e.target.checked) }) as HTMLInputElement
   const ctxChip = h('span', { class: 'ctx muted' })
+  const historyBtn = h('button', { title: t('Past conversations'), 'aria-label': t('Past conversations'), onclick: () => historyDialog() }, '🕘') as HTMLButtonElement
 
   const refreshModels = () => {
     modelIn.value = cfg.model
@@ -98,6 +102,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
 
   const panel = h('div', { class: 'assistant' },
     h('div', { class: 'ai-bar' }, providerSel, modelIn, modelList,
+      historyBtn,
       h('button', { title: t('Assistant settings'), onclick: () => configDialog() }, '⚙'),
       h('button', { title: t('Start a new conversation'), onclick: () => newChat(true) }, t('New'))),
     log,
@@ -112,9 +117,84 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     ctxChip.textContent = !c?.file ? '' : c.selection ? t('Context: {{file}}, lines {{from}}–{{to}} selected', { file: c.file, from: c.fromLine, to: c.toLine }) : t('Context: {{file}}', { file: c.file })
   }
 
-  function hint(text: string, cls = 'note') {
+  function hint(text: string, cls = 'note', remember = true) {
     log.append(h('div', { class: `ai-${cls}` }, text))
     log.scrollTop = log.scrollHeight
+    if (remember) chat?.entries.push({ k: 'note', cls, text })
+  }
+
+  // ---- past conversations ----
+  /** Only a finished turn leaves a history the provider will accept, so `finished` is what allows continuing later. */
+  function persist(finished: boolean) {
+    if (!chat) return
+    let state: unknown = null
+    if (finished && session) {
+      const json = JSON.stringify(session.save())
+      if (json.length <= MAX_SAVED_STATE) state = JSON.parse(json)
+    }
+    chat.meta = { ...chat.meta, provider: providerId, model: cfg.model, at: Date.now() }
+    chats.save(chat.meta, { id: chat.meta.id, entries: [...chat.entries], state }).catch((e) => console.error(e))
+  }
+
+  function entryEl(e: Entry): HTMLElement {
+    switch (e.k) {
+      case 'user': return h('div', { class: 'ai-user' }, e.text)
+      case 'text': return Object.assign(h('div', { class: 'ai-text' }), { innerHTML: md(e.text) })
+      case 'think': return h('details', { class: 'ai-think' }, h('summary', {}, t('Thinking')), h('pre', {}, e.text))
+      case 'tool': return h('div', { class: `ai-tool ${e.ok ? 'ok' : 'err'}` }, e.text, e.err ? h('span', { class: 'muted' }, ` — ${e.err}`) : '')
+      case 'change': return h('div', { class: `ai-tool ${e.ok ? 'ok' : 'err'}` }, `${e.ok ? '✓' : '✗'} ${e.text}`)
+      case 'note': return h('div', { class: `ai-${e.cls}` }, e.text)
+    }
+  }
+
+  async function openChat(meta: ChatMeta) {
+    const body = await chats.body(meta.id)
+    if (!body || abort) return
+    if (meta.provider in PRESETS && (meta.provider !== providerId || meta.model !== cfg.model)) { // back to what it was using
+      providerId = meta.provider
+      aiPrefs.activeId = providerId
+      providerSel.value = providerId
+      cfg = aiPrefs.get(providerId)
+      if (meta.model !== cfg.model) { cfg.model = meta.model; aiPrefs.save(providerId, { model: cfg.model }) }
+      refreshModels()
+    }
+    lastUndoBtn = null
+    chat = { meta, entries: body.entries }
+    session = body.state && meta.provider in PRESETS ? createSession(cfg, toolsFor(host.writable), SYSTEM, body.state) : null
+    log.replaceChildren(...body.entries.map(entryEl))
+    if (!session) hint(t('This conversation can be read here, but the assistant can’t pick it up again. If you send a message, it starts without the earlier history.'), 'note', false)
+    log.scrollTop = log.scrollHeight
+  }
+
+  function historyDialog() {
+    const project = r.keys.project
+    const items = h('ul', { class: 'taglist chatlist' })
+    const forget = async (id: string) => { await chats.remove(id); if (chat?.meta.id === id) newChat(true) }
+    const clearAll = h('button', {
+      onclick: async () => {
+        if (!confirm(t('Delete all past conversations for this project? This can’t be undone.'))) return
+        await chats.forgetProject(project)
+        newChat(true)
+        render()
+      },
+    }, t('Delete all conversations'))
+    async function render() {
+      const all = await chats.list(project).catch(() => [] as ChatMeta[])
+      clearAll.hidden = !all.length
+      if (!all.length) { items.replaceChildren(h('li', { class: 'muted small' }, t('No past conversations yet.'))); return }
+      items.replaceChildren(...all.map((m) => h('li', { class: 'chatrow' },
+        h('button', { class: 'chatopen', onclick: () => { dlg.close(); openChat(m) } },
+          h('span', { class: 'chattitle' }, m.title),
+          h('span', { class: 'muted small' }, `${new Date(m.at).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })} · ${PRESETS[m.provider]?.label ?? m.provider}${m.model ? ` · ${m.model}` : ''}`)),
+        h('button', { class: 'icon', title: t('Delete the conversation “{{name}}”', { name: m.title }), 'aria-label': t('Delete the conversation “{{name}}”', { name: m.title }), onclick: async () => { await forget(m.id); render() } }, '✕'))))
+    }
+    const dlg = dialog('settings',
+      h('h3', {}, t('Past conversations')),
+      h('p', { class: 'muted small' }, t('Saved only in this browser, for this project. They can quote your documents.')),
+      items,
+      h('div', { class: 'row end' }, clearAll, h('button', { class: 'primary', autofocus: true, onclick: () => dlg.close() }, t('Close'))),
+    )
+    render()
   }
 
   const connectButton = () => h('button', { class: 'small connect-tool', onclick: () => connectToolDialog(host.writable, host.link) }, t('Connect your own AI tool…'))
@@ -140,6 +220,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   function newChat(clear = false) {
     if (abort) stop()
     session = null
+    chat = null
     if (clear) intro()
     else hint(t('Model changed: starting a new conversation.'))
   }
@@ -153,6 +234,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     if (!aiPrefs.reviewEdits && c.after !== null) return Promise.resolve(true) // deleting a file always asks
     return new Promise((resolve) => {
       const done = (ok: boolean) => {
+        chat?.entries.push({ k: 'change', text: c.summary, ok })
         card.classList.add(ok ? 'accepted' : 'rejected')
         btns.replaceChildren(h('span', { class: 'muted' }, ok ? t('Applied') : t('Rejected')))
         abort?.signal.removeEventListener('abort', onAbort)
@@ -182,6 +264,9 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     if (c?.selection) ctxLines.push(`Selected text (lines ${c.fromLine}-${c.toLine}):\n${c.selection.slice(0, 8000)}`)
     const message = `<context>\n${ctxLines.join('\n')}\n</context>\n\n${text}`
 
+    chat ??= { meta: { id: crypto.randomUUID(), project: r.keys.project, title: text.replace(/\s+/g, ' ').slice(0, 80), provider: providerId, model: cfg.model, at: Date.now() }, entries: [] }
+    chat.entries.push({ k: 'user', text })
+    persist(false)
     log.append(h('div', { class: 'ai-user' }, text))
     const turnEl = h('div', { class: 'ai-turn' })
     log.append(turnEl)
@@ -192,6 +277,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     session.addUser(message)
     abort = new AbortController()
     sendBtn.textContent = t('Stop')
+    historyBtn.disabled = true
     undo.stopCapturing() // this request's edits become one undo step
     const stackBefore = undo.undoStack.length
     lastUndoBtn?.remove(); lastUndoBtn = null
@@ -226,6 +312,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
           },
         }, abort.signal)
         if (textEl) (textEl as HTMLElement).innerHTML = md(textBuf)
+        if (thinkEl) chat?.entries.push({ k: 'think', text: (thinkEl as HTMLElement).textContent ?? '' })
+        if (textBuf) chat?.entries.push({ k: 'text', text: textBuf })
         ;(toolEl as HTMLElement | null)?.remove()
         if (res.note) hint(res.note, 'warn')
         if (res.stop !== 'tool_use') break
@@ -242,10 +330,13 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
               : await runTool(tools, call.name, call.input, ctx)
           chip.className = `ai-tool ${out.isError ? 'err' : 'ok'}`
           chip.title = out.content.slice(0, 2000)
-          if (out.isError) chip.append(h('span', { class: 'muted' }, ` — ${out.content.split('\n')[0].slice(0, 120)}`))
+          const problem = out.isError ? out.content.split('\n')[0].slice(0, 120) : undefined
+          if (problem) chip.append(h('span', { class: 'muted' }, ` — ${problem}`))
+          chat?.entries.push({ k: 'tool', text: label, ok: !out.isError, err: problem })
           results.push({ id: call.id, ...out })
         }
         session.addToolResults(results)
+        persist(false)
         if (abort.signal.aborted) break
         if (step === MAX_STEPS - 1) hint(t('Stopped after {{n}} steps.', { n: MAX_STEPS }), 'warn')
       }
@@ -261,6 +352,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       }
       abort = null
       sendBtn.textContent = t('Send')
+      historyBtn.disabled = false
+      persist(true)
       if (undo.undoStack.length > stackBefore) {
         const btn = h('button', { class: 'small', onclick: () => { undo.undo(); btn.replaceWith(h('span', { class: 'muted small' }, t('Changes undone'))) } }, t('Undo these changes')) as HTMLButtonElement
         turnEl.append(h('div', { class: 'row end' }, btn))
