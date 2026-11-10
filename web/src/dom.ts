@@ -26,6 +26,22 @@ export function dialog(cls: string, ...kids: Kid[]): HTMLDialogElement {
   return dlg
 }
 
+/** A styled prompt(): resolves to what was typed, or null if cancelled. */
+export function askText(label: string, value = '', maxLength?: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    let answer: string | null = null
+    const input = h('input', { value, 'aria-label': label, class: 'ask-input', ...(maxLength ? { maxlength: maxLength } : {}) }) as HTMLInputElement
+    const ok = () => { answer = input.value; dlg.close() }
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); ok() } })
+    const dlg = dialog('settings',
+      h('p', { class: 'ask-label' }, label), input,
+      h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Cancel')), h('button', { class: 'primary', onclick: ok }, t('OK'))))
+    dlg.addEventListener('close', () => resolve(answer))
+    input.focus()
+    input.setSelectionRange(value.length, value.length)
+  })
+}
+
 /** Offer bytes to the user as a file download. */
 export function saveFile(name: string, data: Uint8Array | string, type = 'application/octet-stream') {
   const url = URL.createObjectURL(new Blob([data as BlobPart], { type }))

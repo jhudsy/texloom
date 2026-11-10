@@ -37,6 +37,7 @@ const es: Catalog = {
   'Add suggestion': 'Añadir sugerencia',
   '⌘Enter or Ctrl+Enter to save': '⌘Intro o Ctrl+Intro para guardar',
   'The text you selected has since been removed.': 'El texto seleccionado se ha eliminado entretanto.',
+  'Enter to send, Shift+Enter for a new line': 'Intro para enviar, Mayús+Intro para nueva línea',
 }
 
 export default es

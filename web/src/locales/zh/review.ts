@@ -37,6 +37,7 @@ const zh: Catalog = {
   'Add suggestion': '添加建议',
   '⌘Enter or Ctrl+Enter to save': '按 ⌘Enter 或 Ctrl+Enter 保存',
   'The text you selected has since been removed.': '所选文本已被删除。',
+  'Enter to send, Shift+Enter for a new line': 'Enter 发送，Shift+Enter 换行',
 }
 
 export default zh

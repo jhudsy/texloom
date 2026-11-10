@@ -2,7 +2,7 @@
 // comparing with now, restoring files, and who wrote which line.
 import * as Y from 'yjs'
 import type { Replica } from './replica'
-import { h } from './dom'
+import { h, askText } from './dom'
 import { diffLines, diffStats, type Op } from './diff'
 import { putText } from './projectfiles'
 import { t, tn, locale } from './i18n'
@@ -86,8 +86,8 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
 
   const panel = h('div', { class: 'history' },
     h('div', { class: 'ai-bar' },
-      host.writable ? h('button', { class: 'primary', onclick: () => {
-        const label = prompt(t('Name this version (e.g. “Submitted to journal”):'))?.trim()
+      host.writable ? h('button', { class: 'primary', onclick: async () => {
+        const label = (await askText(t('Name this version (e.g. “Submitted to journal”):'), '', 120))?.trim()
         if (label) saveVersion(r, host.userName(), label.slice(0, 120))
       } }, t('Save version…')) : null,
       filterSel,
@@ -143,9 +143,9 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
       h('ul', { class: 'vfiles' }, ...rows))
   }
 
-  function rename(v: Version) {
+  async function rename(v: Version) {
     const was = versionLabel(r, v)
-    const label = prompt(was ? t('Rename this version (leave empty to remove the name):') : t('Name this version (e.g. “Submitted to journal”):'), was ?? '')
+    const label = await askText(was ? t('Rename this version (leave empty to remove the name):') : t('Name this version (e.g. “Submitted to journal”):'), was ?? '', 120)
     if (label === null || label.trim() === (was ?? '')) return
     nameVersion(r, v, label)
     if (selected === v) showVersion(v)

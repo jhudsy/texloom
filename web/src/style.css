@@ -220,6 +220,8 @@ html.narrow dialog.dlg { padding: 14px 16px; max-height: 92dvh; }
 /* dialogs */
 dialog.dlg { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); width: min(620px, 94vw); max-height: 90vh; overflow: auto; padding: 18px 22px; }
 dialog.dlg h3 { margin: 0 0 4px; }
+.ask-label { margin: 0 0 8px; white-space: pre-line; }
+dialog.dlg input.ask-input { display: block; width: 100%; box-sizing: border-box; margin-bottom: 12px; }
 dialog.dlg h5 { margin: 12px 0 6px; font-size: 12px; color: var(--muted); }
 dialog.dlg h4 { margin: 18px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .radios { display: flex; flex-direction: column; gap: 6px; }
@@ -396,7 +398,13 @@ dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: cen
 .rcard { border: 1px solid var(--line); border-left: 3px solid #e6a000; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
 .rcard.suggestion { border-left-color: #28a745; }
 .rcard.resolved { opacity: .6; }
-textarea.review-write { display: block; width: 100%; box-sizing: border-box; margin: 8px 0 10px; padding: 8px; font: inherit; resize: vertical; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.rcompose { padding: 8px; border-bottom: 1px solid var(--line); background: var(--panel); flex-shrink: 0; max-height: 60%; overflow: auto; }
+.rcompose[hidden] { display: none; }
+.rcompose .review-quote { cursor: pointer; margin-bottom: 6px; }
+.rcompose .row { margin: 0; }
+.cm-review-pending { background: color-mix(in srgb, var(--accent) 35%, transparent); border-bottom: 2px solid var(--accent); }
+textarea.rreply-in { flex: 1; min-width: 0; resize: none; overflow: hidden; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+textarea.review-write { display: block; width: 100%; box-sizing: border-box; margin: 6px 0 8px; padding: 8px; font: inherit; resize: vertical; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .review-quote { margin: 8px 0 0; padding: 4px 10px; border-left: 3px solid var(--line); color: var(--muted); font-size: 13px; max-height: 8em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rcard.focused { box-shadow: 0 0 0 2px var(--accent); }
 .rhead { cursor: pointer; display: flex; gap: 4px; align-items: baseline; flex-wrap: wrap; }

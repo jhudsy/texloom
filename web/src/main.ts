@@ -8,7 +8,7 @@ import { prefs, setupDialog, settingsDialog, languagePicker, type Device } from 
 import { createAssistantPanel } from './assistant/panel'
 import { setupLayout } from './layout'
 import { askCode, chooseNewProject, riskBanner, SAFARI_NOTE } from './storagenotice'
-import { $, h, saveFile } from './dom'
+import { $, h, saveFile, askText } from './dom'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
@@ -294,8 +294,8 @@ function projectList(): HTMLElement {
         !hasServerCopy(r) ? h('span', { class: 'tag warn', title: t('The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.') }, t('not on server')) : null,
         h('span', { class: 'spacer' }),
         h('button', { class: 'to-app small', title: t('Keep this project in a folder on this computer, using the TeXLoom app'), 'aria-label': t('Sync {{name}} to a folder…', { name: label }), onclick: () => openInApp(`${server}/#${r.fragment}`) }, t('Sync to a folder…')),
-        h('button', { class: 'icon', title: t('Private label (only you see it)'), 'aria-label': t('Label {{name}}', { name: label }), onclick: () => {
-          const v = prompt(t('Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.', { name: r.name || t('this project'), code: projectCode(r.project) }), r.nick ?? '')
+        h('button', { class: 'icon', title: t('Private label (only you see it)'), 'aria-label': t('Label {{name}}', { name: label }), onclick: async () => {
+          const v = await askText(t('Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.', { name: r.name || t('this project'), code: projectCode(r.project) }), r.nick ?? '')
           if (v === null) return
           projects.update(r.project, { nick: v.trim() })
           refreshProjects()

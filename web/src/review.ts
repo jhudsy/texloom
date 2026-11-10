@@ -5,7 +5,7 @@ import * as Y from 'yjs'
 import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import type { Replica } from './replica'
-import { dialog, h } from './dom'
+import { h } from './dom'
 import { t, locale } from './i18n'
 
 export type Kind = 'comment' | 'suggestion'
@@ -103,6 +103,14 @@ const decoField = StateField.define<DecorationSet>({
 })
 
 /** Highlights for open comments and suggestions in `file`; clicking one calls onPick(id). */
+/** The text a comment or suggestion is being written about. */
+const pending = new WeakMap<Replica, { file: string; start: Y.RelativePosition; end: Y.RelativePosition }>()
+const pendingWatchers = new Set<() => void>()
+function setPending(r: Replica, p: { file: string; start: Y.RelativePosition; end: Y.RelativePosition } | null) {
+  if (p) pending.set(r, p); else pending.delete(r)
+  pendingWatchers.forEach((f) => f())
+}
+
 export function reviewExtension(r: Replica, file: string, onPick: (id: string) => void): Extension {
   const compute = (view: EditorView) => {
     const len = view.state.doc.length
@@ -119,16 +127,22 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
         ranges.push(Decoration.widget({ widget: new InsertWidget(i.text, i.id), side: 1 }).range(to))
       }
     }
+    const p = pending.get(r)
+    if (p?.file === file) {
+      const a = Y.createAbsolutePositionFromRelativePosition(p.start, r.doc), b = Y.createAbsolutePositionFromRelativePosition(p.end, r.doc)
+      if (a && b && b.index > a.index) ranges.push(Decoration.mark({ class: 'cm-review-pending' }).range(Math.min(a.index, len), Math.min(b.index, len)))
+    }
     view.dispatch({ effects: setDecos.of(Decoration.set(ranges, true)) })
   }
   const plugin = ViewPlugin.define((view) => {
     let timer: ReturnType<typeof setTimeout> | undefined
     const schedule = () => { clearTimeout(timer); timer = setTimeout(() => compute(view), 120) }
     r.review.observeDeep(schedule)
+    pendingWatchers.add(schedule)
     schedule()
     return {
       update(u: ViewUpdate) { if (u.docChanged) schedule() },
-      destroy() { clearTimeout(timer); r.review.unobserveDeep(schedule) },
+      destroy() { clearTimeout(timer); r.review.unobserveDeep(schedule); pendingWatchers.delete(schedule) },
     }
   })
   return [
@@ -159,6 +173,9 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   let showResolved = false
   let focused: string | null = null
   const list = h('div', { class: 'review-list' })
+  const composer = h('div', { class: 'rcompose', hidden: true })
+  let draft: { area: HTMLTextAreaElement; initial: string } | null = null
+  const replies = new Map<string, string>() // half-written replies: the list is redrawn whenever anyone comments
   const resolvedChk = h('input', { type: 'checkbox', 'aria-label': t('Show resolved'), onchange: (e: any) => { showResolved = e.target.checked; render() } })
   const el = h('div', { class: 'review' },
     h('div', { class: 'ai-bar' },
@@ -166,44 +183,60 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
       host.writable ? h('button', { title: t('Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)'), onclick: () => add('suggestion') }, t('✎ Suggest')) : null,
       h('span', { class: 'spacer' }),
       h('label', { class: 'check small' }, resolvedChk, t('Show resolved'))),
+    composer,
     list)
 
   function add(kind: Kind) {
     const sel = host.selection()
     if (!sel) return alert(t('Open a text file and select some text first.'))
     if (kind === 'comment' && sel.from === sel.to) return alert(t('Select the text you want to comment on.'))
-    writeDialog(kind, sel)
+    write(kind, sel)
   }
 
-  /** The text being commented on can move or go while this is open, as others keep editing. */
-  function writeDialog(kind: Kind, sel: { file: string; from: number; to: number; text: string }) {
+  /** Written here rather than in a dialog, so that the editor stays visible and usable. The text
+   *  it's about stays highlighted, and can move or go as people keep editing. */
+  function write(kind: Kind, sel: { file: string; from: number; to: number; text: string }) {
+    const edited = draft && draft.area.value.trim() && draft.area.value !== draft.initial
+    if (edited) { draft!.area.focus(); return } // don't lose what's been written
     const yt = r.files.get(sel.file)
     if (!yt) return
     const start = Y.createRelativePositionFromTypeIndex(yt, sel.from), end = Y.createRelativePositionFromTypeIndex(yt, sel.to, -1)
     const lines = sel.text.split('\n').length
-    const area = h('textarea', { class: 'review-write', rows: kind === 'comment' ? 5 : Math.min(Math.max(lines + 1, 3), 12), placeholder: kind === 'comment' ? t('Write your comment…') : null, 'aria-label': kind === 'comment' ? t('Add a comment') : t('Replace the selected text with:') }) as HTMLTextAreaElement
-    area.value = kind === 'suggestion' ? sel.text : ''
+    const initial = kind === 'suggestion' ? sel.text : ''
+    const area = h('textarea', { class: 'review-write', rows: kind === 'comment' ? 4 : Math.min(Math.max(lines + 1, 3), 10), placeholder: kind === 'comment' ? t('Write your comment…') : null, 'aria-label': kind === 'comment' ? t('Add a comment') : t('Replace the selected text with:') }) as HTMLTextAreaElement
+    area.value = initial
+    const close = () => { draft = null; composer.hidden = true; composer.replaceChildren(); setPending(r, null) }
     const save = () => {
       const text = area.value
       if (kind === 'comment' && !text.trim()) { area.focus(); return }
       const a = Y.createAbsolutePositionFromRelativePosition(start, r.doc), b = Y.createAbsolutePositionFromRelativePosition(end, r.doc)
-      if (!a || !b || a.type !== yt || b.type !== yt || (sel.to > sel.from && b.index <= a.index)) { alert(t('The text you selected has since been removed.')); dlg.close(); return }
-      dlg.close()
+      close()
+      if (!a || !b || a.type !== yt || b.type !== yt || (sel.to > sel.from && b.index <= a.index)) { alert(t('The text you selected has since been removed.')); return }
       const id = addItem(r, kind, sel.file, a.index, b.index, text, host.userName())
       if (id) focus(id)
     }
-    area.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save() } })
+    area.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save() }
+      else if (e.key === 'Escape' && (!area.value.trim() || area.value === initial)) close()
+    })
+    const show = () => {
+      const a = Y.createAbsolutePositionFromRelativePosition(start, r.doc), b = Y.createAbsolutePositionFromRelativePosition(end, r.doc)
+      if (a && b && a.type === yt) host.reveal(sel.file, a.index, b.index)
+    }
     const quote = sel.text.length > 400 ? `${sel.text.slice(0, 400)}…` : sel.text
-    const dlg = dialog('settings',
-      h('h3', {}, kind === 'comment' ? t('Add a comment') : t('Suggest a change')),
-      quote && kind === 'comment' ? h('blockquote', { class: 'review-quote' }, quote) : null,
-      kind === 'suggestion' ? h('p', { class: 'small' }, t('Replace the selected text with:')) : null,
+    composer.replaceChildren(...[
+      h('b', {}, kind === 'comment' ? t('Add a comment') : t('Suggest a change')),
+      quote ? h('blockquote', { class: 'review-quote', title: t('Show in the editor'), onclick: show }, quote) : null,
+      kind === 'suggestion' ? h('div', { class: 'small' }, t('Replace the selected text with:')) : null,
       area,
       h('div', { class: 'row end' },
         h('span', { class: 'muted small spacer' }, t('⌘Enter or Ctrl+Enter to save')),
-        h('button', { onclick: () => dlg.close() }, t('Cancel')),
+        h('button', { onclick: close }, t('Cancel')),
         h('button', { class: 'primary', onclick: save }, kind === 'comment' ? t('Add comment') : t('Add suggestion'))),
-    )
+    ].filter((x): x is HTMLElement => !!x))
+    composer.hidden = false
+    draft = { area, initial }
+    setPending(r, { file: sel.file, start, end })
     area.focus()
     if (kind === 'suggestion') area.select()
   }
@@ -219,8 +252,19 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   function card(it: Item): HTMLElement {
     const rg = rangeOf(r, it.id)
     const go = () => { if (rg) host.reveal(it.file, rg.from, rg.to) }
-    const replyIn = h('input', { placeholder: t('Reply…'), 'aria-label': t('Reply') })
-    replyIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && replyIn.value.trim()) { reply(r, it.id, replyIn.value, host.userName()); replyIn.value = '' } })
+    const grow = () => { replyIn.style.height = 'auto'; replyIn.style.height = `${replyIn.scrollHeight + 2}px` }
+    const replyIn = h('textarea', { class: 'rreply-in', rows: 1, placeholder: t('Reply…'), 'aria-label': t('Reply'), title: t('Enter to send, Shift+Enter for a new line'), 'data-reply': it.id,
+      oninput: () => { replies.set(it.id, replyIn.value); grow() } }) as HTMLTextAreaElement
+    replyIn.value = replies.get(it.id) ?? ''
+    if (replyIn.value) requestAnimationFrame(grow)
+    replyIn.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
+      e.preventDefault()
+      if (!replyIn.value.trim()) return
+      replies.delete(it.id)
+      reply(r, it.id, replyIn.value, host.userName())
+      replyIn.value = ''
+    })
     return h('div', { class: `rcard ${it.kind} ${it.resolved ? 'resolved' : ''} ${it.id === focused ? 'focused' : ''}`, 'data-id': it.id },
       h('div', { class: 'rhead', onclick: go, title: rg ? t('Show in the editor') : t('The text it referred to was deleted') },
         h('span', { class: 'rkind' }, it.kind === 'comment' ? '💬' : '✎'),
@@ -240,10 +284,17 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
 
   function render() {
     const items = allItems(r).filter((i) => showResolved || !i.resolved).sort((a, b) => a.file.localeCompare(b.file) || (rangeOf(r, a.id)?.from ?? 0) - (rangeOf(r, b.id)?.from ?? 0))
+    const typing = document.activeElement instanceof HTMLTextAreaElement && list.contains(document.activeElement) ? document.activeElement : null
+    const caret = typing?.selectionStart ?? 0, typingIn = typing?.getAttribute('data-reply')
     list.replaceChildren(...(items.length ? items.map(card)
       : [h('p', { class: 'muted small', style: 'padding: 8px 10px' }, host.writable
         ? t('No open comments or suggestions. Select text in the editor, then 💬 Comment or ✎ Suggest.')
         : t('No open comments or suggestions.'))]))
+    if (typingIn) { // carry on where they were
+      const again = list.querySelector<HTMLTextAreaElement>(`[data-reply="${CSS.escape(typingIn)}"]`)
+      again?.focus()
+      again?.setSelectionRange(caret, caret)
+    }
   }
 
   r.review.observeDeep(() => render())

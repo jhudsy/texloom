@@ -3,7 +3,7 @@ import { menuItems, openContextMenu, type MenuItem } from './contextmenu'
 import { isPreviewable } from './preview'
 import * as Y from 'yjs'
 import type { Replica } from './replica'
-import { h, saveFile } from './dom'
+import { h, saveFile, askText } from './dom'
 import { t, tn } from './i18n'
 import { allFiles, allFolders, cleanPath, confirmAdding, deletePath, exists, IMAGE_RE, isDocument, mainFile, movePath, newFolder, putFile } from './projectfiles'
 import { isJunk } from './templates'
@@ -195,16 +195,16 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
   }
 
   // ---- operations -----------------------------------------------------------
-  function ask(label: string, def: string): string | null {
-    const v = prompt(label, def)
+  async function ask(label: string, def: string): Promise<string | null> {
+    const v = await askText(label, def)
     if (v === null) return null
     const p = cleanPath(v)
     if (!p) { alert(t('That isn’t a valid path. Use letters, numbers, - _ . and / between folders.')); return null }
     return p
   }
 
-  function newFile(dir: string) {
-    const p = ask(t('New file name (you can include folders, e.g. sections/intro.tex)'), join(dir, ''))
+  async function newFile(dir: string) {
+    const p = await ask(t('New file name (you can include folders, e.g. sections/intro.tex)'), join(dir, ''))
     if (!p) return
     if (exists(r, p)) return alert(t('{{path}} already exists.', { path: p }))
     r.files.set(p, new Y.Text(''))
@@ -212,8 +212,8 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     openFile(p)
   }
 
-  function makeFolder(dir: string) {
-    const p = ask(t('New folder name'), join(dir, ''))
+  async function makeFolder(dir: string) {
+    const p = await ask(t('New folder name'), join(dir, ''))
     if (!p) return
     if (exists(r, p)) return alert(t('{{path}} already exists.', { path: p }))
     newFolder(r, p)
@@ -221,8 +221,8 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
     render()
   }
 
-  function rename(path: string, isDir: boolean) {
-    const q = ask(isDir ? t('Rename or move folder to') : t('Rename or move file to'), path)
+  async function rename(path: string, isDir: boolean) {
+    const q = await ask(isDir ? t('Rename or move folder to') : t('Rename or move file to'), path)
     if (!q || q === path) return
     if (isDir && q.startsWith(path + '/')) return alert(t('A folder can’t be moved into itself.'))
     if (exists(r, q)) return alert(t('{{path}} already exists.', { path: q }))
