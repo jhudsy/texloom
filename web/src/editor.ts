@@ -64,9 +64,9 @@ export interface EditorHooks {
   onSync: () => void // show the current line in the PDF
   problems: (file: string) => Problem[] // last compile's problems for a file
   review: (file: string, map?: ReviewMap) => Extension // comment/suggestion highlights
-  onReview: (kind: 'comment' | 'suggestion') => void // ⌘⌥M / ⌘⌥E
+  onReview: (kind: 'comment' | 'suggestion') => void // ⌘⌥M; right-click
   onSymbols: () => void // ⌘⌥S
-  onToggleSuggest: () => void // ⌘⌥⇧E
+  onToggleSuggest: () => void // ⌘⌥E
   userName: () => string
   menu: EditorMenuHost // right-click on selected text and LaTeX commands
   addReference: AddReference // from \cite{ completion
@@ -188,11 +188,12 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             hooks.review(path, s ? { toView: s.toView, skip: s.mine } : undefined),
             flashField,
             EditorView.updateListener.of((u) => { if (u.selectionSet || u.docChanged) { showSelectionCount(u.view); contextChanged() } }),
-            // ⌘⌥⇧E / Ctrl+Alt+Shift+E: suggest mode. By the physical key, before ⌘⌥E (suggest a change),
-            // since keyboards report Shift with letters and Alt differently on each system
+            // ⌘⌥E / Ctrl+Alt+E: suggest mode on or off. By the physical key, since keyboards report
+            // Alt with letters differently on each system (on a Mac, ⌥E is a dead key)
             Prec.highest(EditorView.domEventHandlers({
               keydown: (e) => {
-                if (!(writable && e.code === 'KeyE' && e.shiftKey && e.altKey && (e.metaKey || e.ctrlKey))) return false
+                if (!(writable && e.code === 'KeyE' && e.altKey && (e.metaKey || e.ctrlKey))) return false
+                if (e.getModifierState?.('AltGraph')) return false // AltGr+E types € on many keyboards
                 e.preventDefault()
                 hooks.onToggleSuggest()
                 return true
@@ -200,7 +201,6 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             })),
             Prec.high(keymap.of([
               { key: 'Mod-Alt-m', run: () => { hooks.onReview('comment'); return true } },
-              { key: 'Mod-Alt-e', run: () => { hooks.onReview('suggestion'); return true } },
               { key: 'Mod-Alt-s', run: () => { if (writable) hooks.onSymbols(); return writable }, preventDefault: true },
             ])),
             EditorState.readOnly.of(!writable),

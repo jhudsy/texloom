@@ -444,7 +444,13 @@ async function openProject(keys: Keys) {
       } catch {}
     }
   }
-  function addReview(kind: 'comment' | 'suggestion') { if (writable) { openReview(); review()?.add(kind) } }
+  /** Comment on the selection, or suggest changes to it: suggest mode, keeping the selection to type over. */
+  function addReview(kind: 'comment' | 'suggestion') {
+    if (!writable) return
+    if (kind === 'comment') { openReview(); review()?.addComment(); return }
+    if (!suggestMode.on()) suggestMode.set(true)
+    editor.view()?.focus()
+  }
   function revealSearch(text?: string) { layout.reveal('left'); showLeft('search'); search.focus(text) }
   function showSymbols() { layout.reveal('left'); showLeft('symbols') }
   function syncToPdf() {

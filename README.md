@@ -157,8 +157,8 @@ the original's history, comments or collaborators, and it counts towards your st
 | inside `\includegraphics{`, `\cite{`, `\ref{`, `\input{`, `\usepackage{` | suggests the project's images, bibliography keys (with titles), labels, files and common packages |
 
 | **⌘⇧F** / **Ctrl+Shift+F** | search (and replace) across all files |
-| **⌘⌥M** / **Ctrl+Alt+M**, **⌘⌥E** / **Ctrl+Alt+E** | comment on the selection / suggest a change to it |
-| **⌘⌥⇧E** / **Ctrl+Alt+Shift+E** | suggest mode on or off |
+| **⌘⌥M** / **Ctrl+Alt+M** | comment on the selection |
+| **⌘⌥E** / **Ctrl+Alt+E** | suggest mode on or off |
 | **⌘⌥→** / **Ctrl+Alt+→** | show the current line in the PDF |
 | **⌘⌥←** / **Ctrl+Alt+←** | go to the source of the spot last clicked in the PDF (or the middle of the view); double-clicking or right-clicking the PDF does the same |
 | paste or drop an image | adds it to `figs/` and inserts `\includegraphics` (a whole `figure` on an empty line) |
@@ -179,7 +179,7 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   word counts; the total excludes maths and commands).
 - **Right panel:** **PDF**, **Assistant**, **Review** (comments and suggestions: reply,
   resolve, accept, reject) and **History** (versions, compare, restore, "who wrote this").
-- **Suggest mode:** **✎ Suggest mode** in the Review tab (⌘⌥⇧E / Ctrl+Alt+Shift+E) makes what
+- **Suggest mode:** **✎ Suggest mode** in the Review tab (⌘⌥E / Ctrl+Alt+E, or right-click → *Suggest changes*) makes what
   you type into suggestions instead of changes, like tracked changes. You edit as usual; each changed
   stretch becomes a suggestion in the Review tab, shown word by word (removed words struck through in
   red, new ones green), for someone to accept or reject. Until then the file, the PDF and everyone
@@ -237,7 +237,7 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 opens over them from ☰, and the other commands are under ⋯. On touch screens a bar above the keyboard
 has the characters LaTeX needs.
 
-**Right-click.** On selected text: show it in the PDF, comment, suggest a change, search the project
+**Right-click.** On selected text: show it in the PDF, comment, suggest changes (suggest mode), search the project
 or ask the assistant. On a LaTeX command: go to a `\ref`'s label or a `\cite`'s bibliography entry,
 find the uses of a `\label`, open an `\input` or `\includegraphics` file, or show that line in the
 PDF. Anywhere else you get the browser's own menu with its spelling suggestions, and Shift +

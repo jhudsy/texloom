@@ -256,7 +256,7 @@ export interface ReviewHost {
   reveal: (file: string, from: number, to: number) => void
 }
 
-export interface ReviewPanel { el: HTMLElement; add(kind: Kind): void; focus(id: string): void }
+export interface ReviewPanel { el: HTMLElement; addComment(): void; focus(id: string): void }
 
 export function createReviewPanel(host: ReviewHost): ReviewPanel {
   const r = host.replica
@@ -264,10 +264,10 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   let focused: string | null = null
   const list = h('div', { class: 'review-list' })
   const composer = h('div', { class: 'rcompose', hidden: true })
-  let draft: { area: HTMLTextAreaElement; initial: string } | null = null
+  let draft: { area: HTMLTextAreaElement } | null = null
   const replies = new Map<string, string>() // half-written replies: the list is redrawn whenever anyone comments
   const resolvedChk = h('input', { type: 'checkbox', 'aria-label': t('Show resolved'), onchange: (e: any) => { showResolved = e.target.checked; render() } })
-  const modeBtn = h('button', { class: 'suggest-mode', title: t('Suggest mode: what you type in the editor becomes suggestions for others to accept or reject (⌘⌥⇧E / Ctrl+Alt+Shift+E)'),
+  const modeBtn = h('button', { class: 'suggest-mode', title: t('Suggest mode: what you type in the editor becomes suggestions for others to accept or reject (⌘⌥E / Ctrl+Alt+E)'),
     onclick: () => host.suggesting.set(!host.suggesting.on()) })
   const showMode = () => {
     const on = host.suggesting.on()
@@ -279,67 +279,60 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   showMode()
   const el = h('div', { class: 'review' },
     h('div', { class: 'ai-bar' },
-      host.writable ? h('button', { title: t('Comment on the selected text (⌘⌥M / Ctrl+Alt+M)'), onclick: () => add('comment') }, t('💬 Comment')) : null,
-      host.writable ? h('button', { title: t('Suggest a replacement for the selected text (⌘⌥E / Ctrl+Alt+E)'), onclick: () => add('suggestion') }, t('Suggest a change')) : null,
+      host.writable ? h('button', { title: t('Comment on the selected text (⌘⌥M / Ctrl+Alt+M)'), onclick: () => addComment() }, t('💬 Comment')) : null,
       host.writable ? modeBtn : null,
       h('span', { class: 'spacer' }),
       h('label', { class: 'check small' }, resolvedChk, t('Show resolved'))),
     composer,
     list)
 
-  function add(kind: Kind) {
+  function addComment() {
     const sel = host.selection()
     if (!sel) return alert(t('Open a text file and select some text first.'))
-    if (kind === 'comment' && sel.from === sel.to) return alert(t('Select the text you want to comment on.'))
-    write(kind, sel)
+    if (sel.from === sel.to) return alert(t('Select the text you want to comment on.'))
+    write(sel)
   }
 
-  /** Written here rather than in a dialog, so that the editor stays visible and usable. The text
-   *  it's about stays highlighted, and can move or go as people keep editing. */
-  function write(kind: Kind, sel: { file: string; from: number; to: number; text: string }) {
-    const edited = draft && draft.area.value.trim() && draft.area.value !== draft.initial
-    if (edited) { draft!.area.focus(); return } // don't lose what's been written
+  /** A comment is written here rather than in a dialog, so that the editor stays visible and usable.
+   *  The text it's about stays highlighted, and can move or go as people keep editing. (Changes are
+   *  suggested by typing, in suggest mode.) */
+  function write(sel: { file: string; from: number; to: number; text: string }) {
+    if (draft && draft.area.value.trim()) { draft.area.focus(); return } // don't lose what's been written
     const yt = r.files.get(sel.file)
     if (!yt) return
     const start = Y.createRelativePositionFromTypeIndex(yt, sel.from), end = Y.createRelativePositionFromTypeIndex(yt, sel.to, -1)
-    const lines = sel.text.split('\n').length
-    const initial = kind === 'suggestion' ? sel.text : ''
-    const area = h('textarea', { class: 'review-write', rows: kind === 'comment' ? 4 : Math.min(Math.max(lines + 1, 3), 10), placeholder: kind === 'comment' ? t('Write your comment…') : null, 'aria-label': kind === 'comment' ? t('Add a comment') : t('Replace the selected text with:') }) as HTMLTextAreaElement
-    area.value = initial
+    const area = h('textarea', { class: 'review-write', rows: 4, placeholder: t('Write your comment…'), 'aria-label': t('Add a comment') }) as HTMLTextAreaElement
     const close = () => { draft = null; composer.hidden = true; composer.replaceChildren(); setPending(r, null) }
     const save = () => {
       const text = area.value
-      if (kind === 'comment' && !text.trim()) { area.focus(); return }
+      if (!text.trim()) { area.focus(); return }
       const a = Y.createAbsolutePositionFromRelativePosition(start, r.doc), b = Y.createAbsolutePositionFromRelativePosition(end, r.doc)
       close()
-      if (!a || !b || a.type !== yt || b.type !== yt || (sel.to > sel.from && b.index <= a.index)) { alert(t('The text you selected has since been removed.')); return }
-      const id = addItem(r, kind, sel.file, a.index, b.index, text, host.userName())
+      if (!a || !b || a.type !== yt || b.type !== yt || b.index <= a.index) { alert(t('The text you selected has since been removed.')); return }
+      const id = addItem(r, 'comment', sel.file, a.index, b.index, text, host.userName())
       if (id) focus(id)
     }
     area.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save() }
-      else if (e.key === 'Escape' && (!area.value.trim() || area.value === initial)) close()
+      else if (e.key === 'Escape' && !area.value.trim()) close()
     })
     const show = () => {
       const a = Y.createAbsolutePositionFromRelativePosition(start, r.doc), b = Y.createAbsolutePositionFromRelativePosition(end, r.doc)
       if (a && b && a.type === yt) host.reveal(sel.file, a.index, b.index)
     }
     const quote = sel.text.length > 400 ? `${sel.text.slice(0, 400)}…` : sel.text
-    composer.replaceChildren(...[
-      h('b', {}, kind === 'comment' ? t('Add a comment') : t('Suggest a change')),
-      quote ? h('blockquote', { class: 'review-quote', title: t('Show in the editor'), onclick: show }, quote) : null,
-      kind === 'suggestion' ? h('div', { class: 'small' }, t('Replace the selected text with:')) : null,
+    composer.replaceChildren(
+      h('b', {}, t('Add a comment')),
+      h('blockquote', { class: 'review-quote', title: t('Show in the editor'), onclick: show }, quote),
       area,
       h('div', { class: 'row end' },
         h('span', { class: 'muted small spacer' }, t('⌘Enter or Ctrl+Enter to save')),
         h('button', { onclick: close }, t('Cancel')),
-        h('button', { class: 'primary', onclick: save }, kind === 'comment' ? t('Add comment') : t('Add suggestion'))),
-    ].filter((x): x is HTMLElement => !!x))
+        h('button', { class: 'primary', onclick: save }, t('Add comment'))))
     composer.hidden = false
-    draft = { area, initial }
+    draft = { area }
     setPending(r, { file: sel.file, start, end })
     area.focus()
-    if (kind === 'suggestion') area.select()
   }
 
   function focus(id: string) {
@@ -389,7 +382,7 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     const caret = typing?.selectionStart ?? 0, typingIn = typing?.getAttribute('data-reply')
     list.replaceChildren(...(items.length ? items.map(card)
       : [h('p', { class: 'muted small', style: 'padding: 8px 10px' }, host.writable
-        ? t('No open comments or suggestions. Select text in the editor, then 💬 Comment or Suggest a change; or turn on ✎ Suggest mode and type.')
+        ? t('No open comments or suggestions. Select text in the editor and choose 💬 Comment, or turn on ✎ Suggest mode and type.')
         : t('No open comments or suggestions.'))]))
     if (typingIn) { // carry on where they were
       const again = list.querySelector<HTMLTextAreaElement>(`[data-reply="${CSS.escape(typingIn)}"]`)
@@ -400,5 +393,5 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
 
   r.review.observeDeep(() => render())
   render()
-  return { el, add, focus }
+  return { el, addComment, focus }
 }

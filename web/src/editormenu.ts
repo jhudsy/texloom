@@ -71,7 +71,7 @@ function selectionItems(host: EditorMenuHost, text: string, canShow: boolean): M
   return menuItems(
     canShow && [t('Show in PDF'), host.showInPdf],
     host.writable && [t('Add a comment…'), () => host.review('comment')],
-    host.writable && [t('Suggest a change…'), () => host.review('suggestion')],
+    host.writable && [t('Suggest changes (suggest mode)'), () => host.review('suggestion')],
     !text.includes('\n') && [t('Search the project'), () => host.search(text)],
     host.writable && isTexFile(host.file()) && [t('Insert a symbol…'), host.symbols],
     [t('Ask the assistant'), host.ask],
