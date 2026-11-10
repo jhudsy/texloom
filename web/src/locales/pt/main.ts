@@ -153,6 +153,9 @@ const pt: Catalog = {
   "Reference from a DOI or arXiv id…": "Referência a partir de um DOI ou identificador do arXiv…",
   "Import a .zip (e.g. Overleaf) or arXiv paper…": "Importar um .zip (por exemplo, do Overleaf) ou um artigo do arXiv…",
   "Download the source (.zip)": "Baixar o código-fonte (.zip)",
+  "The owner deleted this project for everyone. This browser keeps a read-only copy.": "O proprietário excluiu este projeto para todos. Este navegador guarda uma cópia somente leitura.",
+  "deleted by the owner": "excluído pelo proprietário",
+  "The owner deleted this project for everyone on {{date}}. This copy in your browser is read-only and is the only one left here: download it to keep it.": "O proprietário excluiu este projeto para todos em {{date}}. A cópia no seu navegador é somente leitura e é a única que resta aqui: baixe-a para guardá-la.",
 }
 
 export default pt

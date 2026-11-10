@@ -105,6 +105,10 @@ export class Replica {
   /** Why the server isn't storing changes. It refuses with quota-full when a code has expired, which older clients understand. */
   /** A private server turned this project away: why. Everything here keeps working on this device. */
   denied: 'needs-code' | 'code-expired' | null = null
+  /** When the owner deleted the project for everyone (ms), or null. This copy then stays as it
+   *  is, read-only: nothing connects, and nothing is sent. */
+  deletedAt: number | null = null
+  onDeleted: () => void = () => {}
   get storeProblem(): StoreProblem { return this.refusal === 'quota-full' && this.storeInfo?.codeExpired ? 'code-expired' : this.refusal }
   onStatus: () => void = () => {}
   onCompileAck: (info: { by: string }) => void = () => {}
@@ -137,11 +141,12 @@ export class Replica {
     // revocations learned earlier, before anything arrives from peers
     this.learnRevoked((await idbGet<{ p: string; s: string }[]>(this.db, 'kv', 'revoked')) ?? [], false)
     this.pending = (await idbKeys(this.db, 'outbox')).length
+    this.deletedAt = (await idbGet<number>(this.db, 'kv', 'deleted')) ?? null
     navigator.storage?.persist?.()
 
     this.doc.on('update', (update: Uint8Array, origin: unknown) => {
       if (origin === REMOTE || origin === this.persistence) return
-      if (!this.keys.writable) return
+      if (!this.keys.writable || this.deletedAt) return
       const id = crypto.randomUUID()
       this.pending++
       this.onStatus()
@@ -203,7 +208,7 @@ export class Replica {
   }
 
   private connect() {
-    if (this.closed) return
+    if (this.closed || this.deletedAt) return
     const url = this.server.replace(/^http/, 'ws') + `/ws/${this.keys.project}`
     this.status = 'connecting'; this.onStatus()
     const ws = new WebSocket(url)
@@ -220,7 +225,7 @@ export class Replica {
       this.inflight.clear()
       this.peers = 0
       this.status = this.syncMode === 'manual' ? 'paused' : 'offline'; this.onStatus()
-      if (this.closed || this.syncMode !== 'live') return
+      if (this.closed || this.deletedAt || this.syncMode !== 'live') return
       // A refusal won't change in seconds; renewing a code or entering one calls reconnect().
       this.retry = setTimeout(() => this.connect(), this.denied ? 5 * 60_000 : (this.backoff = Math.min(this.backoff * 2, 30000)))
     }
@@ -280,6 +285,14 @@ export class Replica {
       case 'rv':
         this.learnRevoked([m])
         break
+      case 'deleted': { // the owner deleted the project for everyone
+        this.deletedAt = Number(m.at) || Date.now()
+        await idbPut(this.db, 'kv', 'deleted', this.deletedAt)
+        this.deleteAck?.(null)
+        this.onDeleted()
+        this.onStatus()
+        break
+      }
       case 'mode':
         this.serverMode = m.m
         if (m.m === 'relay') { this.refusal = null; this.modeAck?.(null) } // not storing is the point
@@ -297,6 +310,7 @@ export class Replica {
           this.onStatus()
         } else {
           if (m.code === 'mode-rejected') this.modeAck?.(t('the server refused the change'))
+          if (m.code === 'delete-rejected') this.deleteAck?.(t('the server refused to delete it'))
           if (m.code === 'mode-busy') this.modeAck?.(t('the server is busy: try again later'))
           console.warn('server:', m.m)
         }
@@ -515,6 +529,30 @@ export class Replica {
       this.modeAck = (error) => { clearTimeout(timer); this.modeAck = null; error ? reject(new Error(error)) : resolve() }
     })
     await this.setStorage('relay')
+    await done
+  }
+
+  private deleteAck: ((error: string | null) => void) | null = null
+
+  /** Owner: delete the project for everyone. The server erases its copy and from then on refuses
+   *  the project to anyone, so collaborators' apps keep their copy read-only. Resolves once the
+   *  server confirms (connecting first if needed), or rejects with its reason. */
+  async deleteForEveryone(timeoutMs = 20000): Promise<void> {
+    if (!this.keys.owner) throw new Error(t('only the owner can delete the project for everyone'))
+    if (this.deletedAt) return
+    if (!this.ws) this.connect()
+    const until = Date.now() + timeoutMs
+    while (!(this.ws && this.ws.readyState === WebSocket.OPEN)) {
+      if (this.deletedAt) return
+      if (Date.now() > until) throw new Error(t('the server can’t be reached'))
+      await sleep(200)
+    }
+    const done = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { this.deleteAck = null; reject(new Error(t('the server didn’t confirm'))) }, Math.max(1000, until - Date.now()))
+      this.deleteAck = (error) => { clearTimeout(timer); this.deleteAck = null; error ? reject(new Error(error)) : resolve() }
+    })
+    const ts = Math.floor(Date.now() / 1000)
+    this.ws.send(JSON.stringify({ t: 'delete', ts, s: b64e(this.keys.sign(`delete:${ts}`, new Uint8Array())) }))
     await done
   }
 

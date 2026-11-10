@@ -10,6 +10,8 @@ const es: Catalog = {
   'not a file id': 'no es un identificador de archivo',
   'file content not available yet ({{id}}): no online peer has it': 'el contenido del archivo aún no está disponible ({{id}}): nadie conectado lo tiene',
   'Someone': 'Alguien',
+  "the server refused to delete it": "el servidor se negó a eliminarlo",
+  "only the owner can delete the project for everyone": "solo el propietario puede eliminar el proyecto para todos",
 }
 
 export default es

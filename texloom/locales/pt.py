@@ -243,4 +243,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'TeXCount couldn’t count this folder: {err}': 'O TeXCount não conseguiu contar esta pasta: {err}',
     'Word count of “{name}”': 'Contagem de palavras de “{name}”',
     'No .tex file with \\documentclass found.': 'Nenhum arquivo .tex com \\documentclass encontrado.',
+    "Deleted by the owner": "Excluído pelo proprietário",
+    "The owner deleted this project for everyone. The files in this folder stay, but nothing syncs any more: use Leave… to take it off the list.": "O proprietário excluiu este projeto para todos. Os arquivos desta pasta ficam, mas nada mais é sincronizado: use Sair… para tirá-lo da lista.",
 }

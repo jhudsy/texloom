@@ -107,6 +107,7 @@ without compiling.
 | `{t:"p2p", d, s?, to?}` | encrypted peer-to-peer payload (below); relayed to one peer or all, never stored |
 | `{t:"mode", m, ts, s}` | set storage mode `"server"` or `"relay"`; `s` signs `"mode:<m>:<ts>"`, valid for 10 min; `relay` (which deletes the server copy) only from the owner |
 | `{t:"revoke", p, s}` | owner only: revoke personal key `p`; `s` signs `"revoke:" ‖ p` |
+| `{t:"delete", ts, s}` | owner only: delete the project for everyone; `s` signs `"delete:<ts>"`, valid for 10 min. The server erases what it stores, keeps a tombstone (the `deleted` table, which purges never touch) and from then on answers the project's connections with `deleted` and its file requests with 410 |
 
 | server → client | meaning |
 |---|---|
@@ -118,6 +119,7 @@ without compiling.
 | `{t:"p2p", d, s?, from}` | a peer's payload |
 | `{t:"mode", m}` | storage mode changed |
 | `{t:"rv", p, s}` | a personal key was revoked |
+| `{t:"deleted", at}` | the owner deleted the project for everyone (at, ms); the connection then closes. Clients keep their copy read-only and stop connecting (web: `deleted` in the replica's kv store; helper: `state.json`) |
 
 Ciphertext = `iv(12 bytes) ‖ AES-256-GCM(plaintext)`.
 
@@ -487,11 +489,8 @@ symlinks) into a new folder and shares that as a new project with the same setti
 
 ## Known limitations / open questions
 
-- Deleting a project for everyone: today the owner can remove the server's copy (relay mode),
-  but collaborators can keep syncing peer to peer, and a writer could switch storage back on.
-  Planned: an owner-signed "deleted" marker the server keeps, refusing all further traffic
-  for the project; collaborators' apps then show "The owner deleted this project", keep a
-  read-only copy and offer a .zip. Their files on disk stay (they are theirs).
+- Deleting a project for everyone stops it on its server only. Anyone with a copy can still read
+  it, and could share it as a new project; it can't take back what people already have.
 - Renaming a file on disk, in a folder kept in sync, reaches the project as one file deleted and
   another added, so comments and suggestions on it lose their place (renaming in the app keeps them).
 - Two peers who both *create* (or upload) the same path while apart: Yjs keeps one value

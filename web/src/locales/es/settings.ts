@@ -2,7 +2,6 @@ import type { Catalog } from '../../i18n'
 
 const es: Catalog = {
   'Remove…': 'Quitar…',
-  'Remove this project from this browser, or (the owner) from the server too. Collaborators keep their copies, and folders on your computer keep their files.': 'Quita este proyecto de este navegador o (el propietario) también del servidor. Los colaboradores conservan sus copias y las carpetas de tu ordenador conservan sus archivos.',
   'Language': 'Idioma',
   'Interface language': 'Idioma de la interfaz',
   'Automatic (the browser’s language)': 'Automático (el idioma del navegador)',
@@ -109,6 +108,7 @@ const es: Catalog = {
   "Not marked (see the Review tab)": "Sin marcar (ver la pestaña Revisión)",
   "Underlined": "Subrayados",
   "In full (removed text struck through)": "Completos (texto eliminado tachado)",
+  "Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.": "Quitar este proyecto de este navegador; o, como propietario, también del servidor, o eliminarlo para todos. Las carpetas de tu ordenador conservan sus archivos.",
 }
 
 export default es

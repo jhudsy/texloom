@@ -10,6 +10,8 @@ const pt: Catalog = {
   'not a file id': 'não é um identificador de arquivo',
   'file content not available yet ({{id}}): no online peer has it': 'conteúdo do arquivo ainda não disponível ({{id}}): nenhum colaborador on-line o tem',
   'Someone': 'Alguém',
+  "the server refused to delete it": "o servidor recusou a exclusão",
+  "only the owner can delete the project for everyone": "só o proprietário pode excluir o projeto para todos",
 }
 
 export default pt

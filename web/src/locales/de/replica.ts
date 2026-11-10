@@ -10,6 +10,8 @@ const de: Catalog = {
   'not a file id': 'keine Datei-ID',
   'file content not available yet ({{id}}): no online peer has it': 'Dateiinhalt noch nicht verfügbar ({{id}}): Niemand online hat ihn',
   'Someone': 'Jemand',
+  "the server refused to delete it": "der Server hat das Löschen abgelehnt",
+  "only the owner can delete the project for everyone": "nur der Eigentümer kann das Projekt für alle löschen",
 }
 
 export default de

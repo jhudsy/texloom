@@ -285,7 +285,7 @@ class FolderSync:
 
     def ingest_dirs(self) -> bool:
         """Folders made or deleted on disk -> the project's folder list."""
-        if not self.r.keys.writable:
+        if not self.r.can_write:
             return False
         disk = self.disk_dirs()
         added = {d for d in disk if d not in self.known_dirs and d not in self.r.dirs}
@@ -337,7 +337,7 @@ class FolderSync:
 
     async def ingest(self, paths: set[str]) -> None:
         """Push local disk changes for `paths` into the CRDT."""
-        if not self.r.keys.writable:
+        if not self.r.can_write:
             return
         changed = False
         for rel in sorted(paths):
@@ -551,7 +551,7 @@ class FolderSync:
     async def on_compile_request(self, frm: int | None, clean: bool = False) -> None:
         """A browser asked for a compile (its device setting: 'compile with my own TeX');
         `clean`: from scratch, without the previous run's .aux, .bbl and other files."""
-        if not self.compile or not self.r.keys.writable:
+        if not self.compile or not self.r.can_write:
             return
         # Anyone with the link can ask (requests aren't signed): at most one compile every few seconds.
         now = time.monotonic()
@@ -609,7 +609,7 @@ class FolderSync:
         out_pdf = self.target(main[:-4] + ".pdf")
         if pdf.exists() and out_pdf is not None:
             shutil.copyfile(pdf, out_pdf)
-        if not self.r.keys.writable or not self.r.connected.is_set():
+        if not self.r.can_write or not self.r.connected.is_set():
             return
         try:
             pdf_id = await self.r.put_blob(pdf.read_bytes(), "output") if pdf.exists() else None
@@ -664,7 +664,7 @@ class FolderSync:
         def keep(_change, path: str) -> bool:
             return f"/{STATE}/" not in path and not path.endswith(f"/{STATE}") and "/.git/" not in path
 
-        if not self.r.keys.writable:
+        if not self.r.can_write:
             log.warning("read-only link: local edits in this folder will NOT be shared")
         async for changes in awatch(self.root, debounce=300, step=100, recursive=True,
                                     watch_filter=keep):

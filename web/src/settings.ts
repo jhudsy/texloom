@@ -205,7 +205,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       folderHelp(r, link)),
     h('h4', {}, t('Remove')),
     h('p', { class: 'muted small' },
-      t('Remove this project from this browser, or (the owner) from the server too. Collaborators keep their copies, and folders on your computer keep their files.')),
+      t('Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.')),
     h('div', { class: 'row' }, h('button', { class: 'danger', onclick: async () => {
       dlg.close()
       await onRemove()

@@ -113,7 +113,7 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
         await replica.synced.wait()
         cid = str(replica.doc.client_id)
         name = cfg.get("name") or f"folder copy on {platform.node().split('.')[0]}"
-        if keys.writable and replica.clients.get(cid) != name:  # for "who wrote this"
+        if replica.can_write and replica.clients.get(cid) != name:  # for "who wrote this"
             replica.local_change(lambda: replica.clients.__setitem__(cid, name))
         async with replica.lock:
             await fs.write_out()
@@ -206,6 +206,8 @@ async def peek(link: str, timeout: float = 15) -> dict:
             raise FolderProblem(f"couldn't reach {server}") from None
         finally:
             task.cancel()
+        if r.deleted_at is not None:
+            raise FolderProblem("the owner deleted this project for everyone")
         return {"name": str(r.meta.get("name") or ""), "writable": keys.writable, "server": server,
                 "files": len(r.files) + len(r.bin), "member": keys.member[2] if keys.member else None}
 

@@ -153,6 +153,9 @@ const zh: Catalog = {
   "Reference from a DOI or arXiv id…": "从 DOI 或 arXiv 编号添加参考文献…",
   "Import a .zip (e.g. Overleaf) or arXiv paper…": "导入 .zip（例如来自 Overleaf）或 arXiv 论文…",
   "Download the source (.zip)": "下载源文件（.zip）",
+  "The owner deleted this project for everyone. This browser keeps a read-only copy.": "所有者已为所有人删除此项目。此浏览器保留一份只读副本。",
+  "deleted by the owner": "已被所有者删除",
+  "The owner deleted this project for everyone on {{date}}. This copy in your browser is read-only and is the only one left here: download it to keep it.": "所有者已于 {{date}} 为所有人删除此项目。你浏览器中的这份副本是只读的，也是这里仅剩的一份：请下载以便保留。",
 }
 
 export default zh

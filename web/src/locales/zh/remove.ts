@@ -24,6 +24,12 @@ const zh: Catalog = {
   '{{n}} of these have no copy on the server: if nobody else has one, they will be gone for good.': { other: '其中 {{n}} 个在服务器上没有副本：如果其他人也没有，它们将永久丢失。' },
   'Remove {{n}} projects': { other: '移除 {{n}} 个项目' },
   'Also deletes the encrypted copies on the server of the {{n}} you own that are stored there. Others are only removed from this browser.': { other: '同时删除服务器上由你拥有的 {{n}} 个项目的加密副本。其他项目仅从此浏览器中移除。' },
+  "I understand this can’t be undone": "我明白此操作无法撤销",
+  "Deleting it for everyone…": "正在为所有人删除…",
+  "Nobody, you included, will be able to open it from a link again, or sync it. Collaborators’ browsers and apps keep a read-only copy they can download.": "包括你在内，任何人都无法再通过链接打开或同步它。协作者的浏览器和应用会保留一份可下载的只读副本。",
+  "Delete for everyone": "为所有人删除",
+  "For everyone": "对所有人",
+  "Deletes the server’s copy and stops the project for good: nobody can sync it or open it from a link again. Collaborators keep a read-only copy. Then removes it from this browser.": "删除服务器上的副本并永久停止该项目：任何人都无法再同步它或通过链接打开它。协作者保留只读副本。然后将其从此浏览器中移除。",
 }
 
 export default zh

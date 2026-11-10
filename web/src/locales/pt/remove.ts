@@ -24,6 +24,12 @@ const pt: Catalog = {
   '{{n}} of these have no copy on the server: if nobody else has one, they will be gone for good.': ['{{n}} deles não tem cópia no servidor: se ninguém mais tiver, ele será perdido para sempre.', '{{n}} deles não têm cópia no servidor: se ninguém mais tiver, eles serão perdidos para sempre.'],
   'Remove {{n}} projects': ['Remover {{n}} projeto', 'Remover {{n}} projetos'],
   'Also deletes the encrypted copies on the server of the {{n}} you own that are stored there. Others are only removed from this browser.': ['Também exclui a cópia criptografada no servidor do projeto seu armazenado lá. Os demais são apenas removidos deste navegador.', 'Também exclui as cópias criptografadas no servidor dos {{n}} projetos seus armazenados lá. Os demais são apenas removidos deste navegador.'],
+  "I understand this can’t be undone": "Entendo que isso não pode ser desfeito",
+  "Deleting it for everyone…": "Excluindo para todos…",
+  "Nobody, you included, will be able to open it from a link again, or sync it. Collaborators’ browsers and apps keep a read-only copy they can download.": "Ninguém, nem você, poderá abri-lo de novo por um link nem sincronizá-lo. Os navegadores e apps dos colaboradores guardam uma cópia somente leitura que pode ser baixada.",
+  "Delete for everyone": "Excluir para todos",
+  "For everyone": "Para todos",
+  "Deletes the server’s copy and stops the project for good: nobody can sync it or open it from a link again. Collaborators keep a read-only copy. Then removes it from this browser.": "Exclui a cópia do servidor e encerra o projeto de vez: ninguém poderá sincronizá-lo nem abri-lo por um link. Os colaboradores ficam com uma cópia somente leitura. Depois o remove deste navegador.",
 }
 
 export default pt

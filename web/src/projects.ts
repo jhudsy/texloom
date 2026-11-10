@@ -23,6 +23,7 @@ export interface Recent {
   files?: number
   storage?: 'server' | 'relay'
   atRisk?: boolean // no server copy as far as this browser knows
+  deleted?: number // when the owner deleted it for everyone (ms): this copy is read-only
 }
 
 const KEY = 'texloom.recent'

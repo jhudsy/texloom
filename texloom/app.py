@@ -145,6 +145,8 @@ def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
     r = st.replica
     if r is None:
         return _("Starting…"), GREY, ""
+    if r.deleted_at is not None:
+        return _("Deleted by the owner"), GREY, _("The owner deleted this project for everyone. The files in this folder stay, but nothing syncs any more: use Leave… to take it off the list.")
     if r.denied:
         return _("Not syncing"), RED, (_("This server is private, and this project's creation code has expired or been removed. Renewing it restores access.")
                                        if r.denied == "code-expired" else

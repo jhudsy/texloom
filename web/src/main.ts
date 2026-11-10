@@ -3,7 +3,7 @@ import * as Y from 'yjs'
 import { Keys } from './crypto'
 import { Replica } from './replica'
 import { projects, projectCode, latexTitle, whenOpened, type Recent } from './projects'
-import { bulkRemoveDialog, removeDialog } from './remove'
+import { bulkRemoveDialog, removeDialog, type RemoveScope } from './remove'
 import { prefs, setupDialog, settingsDialog, languagePicker, type Device } from './settings'
 import { createAssistantPanel } from './assistant/panel'
 import { setupLayout } from './layout'
@@ -190,13 +190,13 @@ function sortPicker(): HTMLElement {
   } }, ...Object.entries(SORTS).map(([id, s]) => h('option', { value: id, ...(id === sorting ? { selected: true } : {}) }, s.label())))
 }
 
-async function removeProject(r: Recent, fromServer: boolean) {
+async function removeProject(r: Recent, scope: RemoveScope) {
   let keys: Keys | null = null
   try { keys = Keys.fromFragment('#' + r.fragment) } catch {}
-  if (fromServer && keys) {
+  if (scope !== 'browser' && keys) {
     const rep = new Replica(keys, server, 'live')
     await rep.open()
-    try { await rep.removeFromServer() } finally { await rep.close() }
+    try { await (scope === 'everyone' ? rep.deleteForEveryone() : rep.removeFromServer()) } finally { await rep.close() }
   }
   await projects.forget(r.project)
   selected.delete(r.project)
@@ -218,7 +218,7 @@ function selectionBar(matching: Recent[], paged: boolean): HTMLElement {
     h('button', { class: 'small', onclick: () => { const n = selected.size; pickTags([...selected], tn(n, 'Tags for {{n}} project', 'Tags for {{n}} projects'), () => refreshProjects()) } }, t('Tags…')),
     h('button', { class: 'small', onclick: () => bulkRemoveDialog(
       chosen().map((r) => ({ id: r.project, name: projectLabel(r), code: projectCode(r.project), owner: canOwn(r), onServer: hasServerCopy(r) })),
-      async (item, fromServer) => { const r = projects.list().find((x) => x.project === item.id); if (r) await removeProject(r, fromServer) },
+      async (item, fromServer) => { const r = projects.list().find((x) => x.project === item.id); if (r) await removeProject(r, fromServer ? 'server' : 'browser') },
       () => refreshProjects()) }, t('Remove…')),
     h('button', { class: 'small', onclick: () => { selected.clear(); refreshProjects() } }, t('Clear selection')))
   showSelection = () => {
@@ -292,9 +292,10 @@ function projectList(): HTMLElement {
         h('a', { href: `#p=${r.project}`, class: 'pname' }, label),
         h('code', { class: 'pcode', title: t('Project code: derived from this project’s unique ID. Two projects with the same name always have different codes.') }, projectCode(r.project)),
         h('span', { class: `tag ${r.writable ? '' : 'ro'}` }, r.writable ? t('edit') : t('read-only')),
-        !hasServerCopy(r) ? h('span', { class: 'tag warn', title: t('The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.') }, t('not on server')) : null,
+        r.deleted ? h('span', { class: 'tag warn', title: t('The owner deleted this project for everyone. This browser keeps a read-only copy.') }, t('deleted by the owner'))
+          : !hasServerCopy(r) ? h('span', { class: 'tag warn', title: t('The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.') }, t('not on server')) : null,
         h('span', { class: 'spacer' }),
-        h('button', { class: 'to-app small', title: t('Keep this project in a folder on this computer, using the TeXLoom app'), 'aria-label': t('Sync {{name}} to a folder…', { name: label }), onclick: () => openInApp(`${server}/#${r.fragment}`) }, t('Sync to a folder…')),
+        r.deleted ? null : h('button', { class: 'to-app small', title: t('Keep this project in a folder on this computer, using the TeXLoom app'), 'aria-label': t('Sync {{name}} to a folder…', { name: label }), onclick: () => openInApp(`${server}/#${r.fragment}`) }, t('Sync to a folder…')),
         h('button', { class: 'icon', title: t('Private label (only you see it)'), 'aria-label': t('Label {{name}}', { name: label }), onclick: async () => {
           const v = await askText(t('Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.', { name: r.name || t('this project'), code: projectCode(r.project) }), r.nick ?? '')
           if (v === null) return
@@ -309,8 +310,8 @@ function projectList(): HTMLElement {
         } }, icon('copy')),
         h('button', { class: 'icon forget', title: t('Remove…'), 'aria-label': t('Remove {{name}}…', { name: label }), onclick: async () => {
           const folder = await savedFolder(r.project).catch(() => undefined)
-          removeDialog({ name: label, code: projectCode(r.project), owner: canOwn(r), onServer: hasServerCopy(r), folder: folder?.name ?? null },
-            async (fromServer) => { await removeProject(r, fromServer); refreshProjects() })
+          removeDialog({ name: label, code: projectCode(r.project), owner: canOwn(r) && !r.deleted, onServer: hasServerCopy(r) && !r.deleted, folder: folder?.name ?? null },
+            async (scope) => { await removeProject(r, scope); refreshProjects() })
         } }, icon('close'))),
       h('div', { class: 'details muted' }, details.join(' · ')),
       h('div', { class: 'tags' },
@@ -329,7 +330,7 @@ async function openProject(keys: Keys) {
   let device: Device = prefs.device(keys.project)
   const r = new Replica(keys, server, device.sync)
   await r.open()
-  const writable = keys.writable
+  const writable = keys.writable && !r.deletedAt // a project its owner deleted for everyone stays as it was
   let removing = false // set while deleting, so the page doesn't re-save it to "recent"
   if (!device.setup) {
     if (r.syncMode === 'live') await new Promise((res) => setTimeout(res, 800)) // fetch the name first
@@ -660,7 +661,7 @@ async function openProject(keys: Keys) {
   refreshProjects = showTags // tags changed on another device
   showTags()
   const shareProject = () => shareDialog(r, server, me.name)
-  const shareBtn = h('button', { class: 'wide-only', onclick: shareProject }, t('Share'))
+  const shareBtn = h('button', { class: 'wide-only', hidden: !!r.deletedAt, onclick: shareProject }, t('Share')) // a deleted project's links open nothing
   const settingsBtn = h('button', { class: 'wide-only', title: t('Settings'), onclick: () => openSettings() }, '⚙')
   // Each is a button in wide windows and an item under ⋯ in small ones.
   const headerActions: { btn: HTMLElement; label: () => string; run: () => void }[] = [
@@ -777,10 +778,13 @@ async function openProject(keys: Keys) {
   function openSettings() {
     settingsDialog(r, keys.link(server, writable), applyDevice, folderSyncSupported() && writable ? chooseFolder : null, async () => {
       removeDialog({ name: projects.list().find((p) => p.project === keys.project)?.nick || r.meta.get('name') || t('Untitled project'), code: projectCode(keys.project),
-        owner: keys.owner, onServer: r.storage !== 'relay', pending: r.pending, folder: folder?.name ?? null },
-        async (fromServer) => {
-          if (fromServer) await r.removeFromServer()
+        owner: keys.owner && !r.deletedAt, onServer: r.storage !== 'relay' && !r.deletedAt, pending: r.pending, folder: folder?.name ?? null },
+        async (scope) => {
           removing = true
+          try {
+            if (scope === 'everyone') await r.deleteForEveryone()
+            else if (scope === 'server') await r.removeFromServer()
+          } catch (e) { removing = false; throw e }
           await r.close()
           await projects.forget(keys.project)
           location.href = '/'
@@ -823,6 +827,11 @@ async function openProject(keys: Keys) {
       status.className = 'status warn'
       status.title = t('Changes reach collaborators who are online, and stay in this browser, but the server isn’t storing them. See the warning above.')
     }
+    if (r.deletedAt) { // nothing syncs any more: not "offline"
+      status.textContent = t('deleted by the owner')
+      status.className = 'status offline'
+      status.title = t('The owner deleted this project for everyone. This browser keeps a read-only copy.')
+    }
     risk.render()
     const atRisk = !!r.storeProblem || r.storage === 'relay'
     if (!removing && atRisk !== lastRisk) { lastRisk = atRisk; projects.update(keys.project, { atRisk }) }
@@ -853,6 +862,17 @@ async function openProject(keys: Keys) {
         h('button', { title: t('Hide'), 'aria-label': t('Hide this warning'), onclick: () => { clashes.length = 0; renderClashes() } }, '✕')))
   }
   programsNote.after(clashNote)
+  // the owner deleted the project for everyone: this copy is all there is, and read-only
+  if (r.deletedAt) {
+    projects.update(keys.project, { deleted: r.deletedAt })
+    const when = new Date(r.deletedAt).toLocaleDateString(locale, { dateStyle: 'medium' })
+    clashNote.after(h('div', { class: 'risk deleted', role: 'status' },
+      h('span', {}, h('b', {}, '⚠ '), t('The owner deleted this project for everyone on {{date}}. This copy in your browser is read-only and is the only one left here: download it to keep it.', { date: when })),
+      h('span', { class: 'actions' },
+        h('button', { onclick: () => downloadZip() }, t('Download the source (.zip)')),
+        h('button', { onclick: async () => { removing = true; await r.close(); await projects.forget(keys.project); location.href = '/' } }, t('Remove from this browser')))))
+  }
+  r.onDeleted = () => { if (!removing) location.reload() } // reopen read-only, with the notice
   watchClashes(r, (c) => { clashes.push(c); renderClashes() })
   r.meta.observe(renderMoved); renderMoved()
   r.onStatus = () => {

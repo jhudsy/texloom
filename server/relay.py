@@ -78,7 +78,7 @@ MAX_BLOB = 50 * MiB  # uploaded over HTTP
 # large ones at once must not exhaust the server's memory. p2p frames carry files only in
 # relay-only projects, up to P2P_BLOB (clients check).
 MAX_FRAME = 16 * MiB
-FRAME_LIMITS = {"hello": 4 * KiB, "aw": 64 * KiB, "mode": 4 * KiB, "up": MAX_UPDATE * 4 // 3 + KiB,
+FRAME_LIMITS = {"hello": 4 * KiB, "aw": 64 * KiB, "mode": 4 * KiB, "delete": 4 * KiB, "up": MAX_UPDATE * 4 // 3 + KiB,
                 "snap": MAX_SNAPSHOT * 4 // 3 + KiB, "p2p": MAX_FRAME, "revoke": 4 * KiB}
 RATE_WINDOW, RATE_MSGS, RATE_BYTES = 10.0, 600, 160 * MiB  # per connection
 HELLOS_PER_WINDOW = 5  # a log reply can be large: don't let one connection ask for it in a loop
@@ -393,6 +393,7 @@ class Store:
               project TEXT NOT NULL, h BLOB NOT NULL, seq INTEGER NOT NULL DEFAULT 0,
               PRIMARY KEY (project, h)) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS floor (project TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS deleted (project TEXT PRIMARY KEY, at REAL NOT NULL, sig BLOB NOT NULL);
             """
         )
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(projects)")}
@@ -430,6 +431,7 @@ class Store:
                 self.usage[project] += n or 0
         self.total = sum(self.usage.values())
         self.owners: dict[str, str] = dict(self.db.execute("SELECT project, owner FROM projects"))
+        self.deleted: set[str] = {p for (p,) in self.db.execute("SELECT project FROM deleted")}
         self.owner_bytes: dict[str, int] = defaultdict(int)  # checked on every stored edit: kept, not added up
         for project, n in self.usage.items():
             if project in self.owners:
@@ -645,6 +647,26 @@ class Store:
                 self.db.execute("DELETE FROM blob WHERE project=?", (project,))
                 self.db.execute("DELETE FROM gone WHERE project=?", (project,))
         self._recount(project)
+
+    # --- deleted for everyone ---------------------------------------------------------
+    def deleted_at(self, project: str) -> float | None:
+        """When the owner deleted this project for everyone (None if they haven't)."""
+        if project not in self.deleted:
+            return None
+        row = self.db.execute("SELECT at FROM deleted WHERE project=?", (project,)).fetchone()
+        return row[0] if row else None
+
+    def delete_project(self, project: str, sig: bytes) -> float:
+        """The owner deleted the project for everyone: forget what's stored and keep, for good, the
+        fact (the owner's signature proves it), so that no copy can bring it back here."""
+        at = time.time()
+        with self.db:
+            self.db.execute("INSERT OR IGNORE INTO deleted(project, at, sig) VALUES (?,?,?)", (project, at, sig))
+            for table in ("log", "blob", "gone", "head", "floor", "mode"):
+                self.db.execute(f"DELETE FROM {table} WHERE project=?", (project,))  # noqa: S608 - fixed names
+        self.deleted.add(project)
+        self._recount(project)
+        return self.deleted_at(project) or at
 
     def has_blob(self, project: str, bid: str) -> bool:
         return self.db.execute("SELECT 1 FROM blob WHERE project=? AND id=?", (project, bid)).fetchone() is not None
@@ -954,6 +976,12 @@ class Relay:
         self._next_id += 1
         if request.transport:
             request.transport.set_protocol(Metered(request.transport.get_protocol(), self, conn, request.transport))
+        gone = self.store.deleted_at(project)
+        if gone is not None:  # the owner deleted it for everyone: say so, and nothing more
+            self.conns.pop(ws, None)
+            await ws.send_json({"t": "deleted", "at": int(gone * 1000)})
+            await ws.close(code=1008, message=b"deleted")
+            return ws
         first = None
         if self.private:
             try:
@@ -1015,6 +1043,8 @@ class Relay:
         return ws
 
     async def handle(self, project: str, ws, conn: Conn, t: str, msg: dict) -> None:
+        if project in self.store.deleted:  # deleted while this connection was closing: nothing more
+            return
         relay_only = self.store.relay_only(project)
         if t == "hello":
             if not conn.allow_hello():
@@ -1116,6 +1146,17 @@ class Relay:
             self.store.set_mode(project, mode == "relay")
             log.info("project %s… storage mode -> %s", project[:8], mode)
             await self.broadcast(project, {"t": "mode", "m": mode})
+        elif t == "delete":  # the owner deletes the project for everyone
+            ts, sig = field(msg, "ts", int), b64d(field(msg, "s", str))
+            if abs(time.time() - ts) > MODE_SKEW or signer(project, f"delete:{ts}".encode(), sig) != "owner":
+                await ws.send_json({"t": "err", "code": "delete-rejected", "m": "rejected deletion"})
+                return
+            at = self.store.delete_project(project, sig)
+            log.info("project %s… deleted for everyone by its owner", project[:8])
+            room = list(self.rooms.get(project, ()))
+            await self.broadcast(project, {"t": "deleted", "at": int(at * 1000)})  # including the owner
+            for peer in room:
+                await peer.close(code=1008, message=b"deleted")
         elif t == "revoke":  # the owner withdraws a personal edit link
             pub, sig = canonical_pub(field(msg, "p", str)[:64]), b64d(field(msg, "s", str))
             if pub is None or signer(project, revoke_msg(pub), sig) != "owner":
@@ -1137,6 +1178,8 @@ class Relay:
             raise web.HTTPBadRequest()
         if (request.content_length or 0) > MAX_BLOB:
             raise web.HTTPRequestEntityTooLarge(max_size=MAX_BLOB, actual_size=request.content_length or 0)
+        if project in self.store.deleted:
+            return web.json_response({"code": "deleted"}, status=410)
         why = self.denied(project, request.headers.get("X-Create-Code"))  # before reading a large body
         if why:
             return web.json_response({"code": why}, status=403)
@@ -1165,6 +1208,8 @@ class Relay:
             data = spool.read()
         if not verify(project, f"blob:{bid}:".encode() + data, sig, self.store.revoked(project)):
             raise web.HTTPForbidden(text="bad signature")
+        if project in self.store.deleted:  # deleted while it was uploading
+            return web.json_response({"code": "deleted"}, status=410)
         if self.store.relay_only(project):
             raise web.HTTPConflict(text="project is relay-only: blobs are exchanged peer to peer")
         kind = "output" if request.headers.get("X-Kind") == "output" else "file"
@@ -1204,6 +1249,8 @@ class Relay:
         project, bid = request.match_info["project"], request.match_info["id"]
         if not PROJECT_RE.match(project) or not BLOB_RE.match(bid):
             raise web.HTTPBadRequest()
+        if project in self.store.deleted:
+            raise web.HTTPGone()
         if self.denied(project, None):
             raise web.HTTPForbidden()
         found = self.store.find_blob(project, bid)

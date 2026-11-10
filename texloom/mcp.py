@@ -154,7 +154,9 @@ class Project:
         return s.index(old)
 
     def edit(self, fn) -> None:
-        if not self.r.keys.writable:
+        if self.r.deleted_at is not None:
+            raise PermissionError("The owner deleted this project for everyone: it can be read but not changed.")
+        if not self.r.can_write:
             raise PermissionError("This is a read-only link: the agent can read and comment only with an edit link.")
         self.r.local_change(fn)
 
@@ -173,7 +175,7 @@ class Project:
             size = info.get("size", 0) if isinstance(info, dict) else 0
             rows.append(f"{p}  (binary, {size / 1024:.0f} KB)")
         dirs = sorted(d for d in self.r.dirs.keys())
-        head = f"Project “{self.r.meta.get('name') or 'Untitled'}” — {'edit' if self.r.keys.writable else 'read-only'} access"
+        head = f"Project “{self.r.meta.get('name') or 'Untitled'}” — {'edit' if self.r.can_write else 'read-only'} access"
         return "\n".join([head, *rows, *(f"{d}/  (empty folder)" for d in dirs if not any(p.startswith(d + '/') for p in [*self.r.files.keys(), *self.r.bin.keys()]))])
 
     def read_file(self, path: str, start_line: int | None = None, end_line: int | None = None) -> str:
@@ -237,7 +239,9 @@ class Project:
         return "\n".join(out) or "No matches."
 
     def _add_item(self, kind: str, path: str, start: int, end: int, text: str) -> str:
-        if not self.r.keys.writable:
+        if self.r.deleted_at is not None:
+            raise PermissionError("The owner deleted this project for everyone: it can be read but not changed.")
+        if not self.r.can_write:
             raise PermissionError("Comments and suggestions need an edit link.")
         yt = self.r.files[path]
         s = str(yt)
@@ -525,7 +529,7 @@ async def serve(keys: Keys, server: str, name: str, code: str | None, suggest_on
     async def register() -> None:
         await replica.synced.wait()
         cid = str(replica.doc.client_id)
-        if keys.writable and replica.clients.get(cid) != name:  # "who wrote this" shows the agent
+        if replica.can_write and replica.clients.get(cid) != name:  # "who wrote this" shows the agent
             replica.local_change(lambda: replica.clients.__setitem__(cid, name))
     reg = asyncio.create_task(register())
     try:

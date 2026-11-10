@@ -74,7 +74,10 @@ The start page lists the projects you've opened **in that browser**:
   server's and collaborators' copies stay; the link brings it back), or, for the owner,
   **from the server too** (the server deletes its encrypted copy and stops storing the
   project; collaborators keep their copies and can still work together while online at the
-  same time). Files in folders on your computer are never deleted.
+  same time), or **for everyone**: the server deletes its copy and refuses the project from
+  then on, so nobody can sync it or open it from a link again. Collaborators' browsers and apps
+  keep a read-only copy, with a notice and a download button. This can't be undone. Files in
+  folders on your computer are never deleted.
 
 The server can't read or recover links, so keep important links somewhere safe; a
 password manager works well.

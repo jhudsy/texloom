@@ -23,5 +23,11 @@ const fr: Catalog = {
   '{{n}} of these have no copy on the server: if nobody else has one, they will be gone for good.': ['{{n}} d’entre eux n’a pas de copie sur le serveur : si personne d’autre n’en a, il sera perdu définitivement.', '{{n}} d’entre eux n’ont pas de copie sur le serveur : si personne d’autre n’en a, ils seront perdus définitivement.'],
   'Remove {{n}} projects': ['Supprimer {{n}} projet', 'Supprimer {{n}} projets'],
   'Also deletes the encrypted copies on the server of the {{n}} you own that are stored there. Others are only removed from this browser.': ['Supprime aussi la copie chiffrée sur le serveur du projet dont vous êtes propriétaire et qui y est stocké. Les autres sont seulement supprimés de ce navigateur.', 'Supprime aussi les copies chiffrées sur le serveur des {{n}} projets dont vous êtes propriétaire et qui y sont stockés. Les autres sont seulement supprimés de ce navigateur.'],
+  "I understand this can’t be undone": "Je comprends que c’est irréversible",
+  "Deleting it for everyone…": "Suppression pour tout le monde…",
+  "Nobody, you included, will be able to open it from a link again, or sync it. Collaborators’ browsers and apps keep a read-only copy they can download.": "Personne, vous compris, ne pourra plus l’ouvrir depuis un lien ni le synchroniser. Les navigateurs et applications des collaborateurs en gardent une copie en lecture seule, téléchargeable.",
+  "Delete for everyone": "Supprimer pour tout le monde",
+  "For everyone": "Pour tout le monde",
+  "Deletes the server’s copy and stops the project for good: nobody can sync it or open it from a link again. Collaborators keep a read-only copy. Then removes it from this browser.": "Supprime la copie du serveur et arrête le projet définitivement : personne ne peut plus le synchroniser ni l’ouvrir depuis un lien. Les collaborateurs gardent une copie en lecture seule. Puis le retire de ce navigateur.",
 }
 export default fr

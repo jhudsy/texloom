@@ -2,7 +2,6 @@ import type { Catalog } from '../../i18n'
 
 const zh: Catalog = {
   'Remove…': '移除…',
-  'Remove this project from this browser, or (the owner) from the server too. Collaborators keep their copies, and folders on your computer keep their files.': '从此浏览器中移除此项目，或（所有者）同时从服务器移除。协作者保留各自的副本，你电脑上的文件夹也会保留其中的文件。',
   'Language': '语言',
   'Interface language': '界面语言',
   'Automatic (the browser’s language)': '自动（浏览器语言）',
@@ -109,6 +108,7 @@ const zh: Catalog = {
   "Not marked (see the Review tab)": "不标记（在“审阅”标签页中查看）",
   "Underlined": "加下划线",
   "In full (removed text struck through)": "完整显示（被删除的文字加删除线）",
+  "Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.": "从此浏览器中移除此项目；或者作为所有者，同时从服务器移除，或为所有人删除。你电脑上的文件夹会保留其中的文件。",
 }
 
 export default zh

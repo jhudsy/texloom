@@ -58,6 +58,7 @@ class Replica:
         self.code_expired = False  # the server says this project's creation code has expired
         self.store_refusal: str | None = None  # what the server last said; see store_problem
         self.denied: str | None = None  # a private server turned this project away: why
+        self.deleted_at: float | None = None  # the owner deleted the project for everyone (seconds): read-only from then on
         self.refused: str | None = None  # the server's reason for rejecting the last change sent
         self._blob_waiters: dict[str, list[asyncio.Future]] = {}
         self.before_remote: Callable[[], Awaitable[None]] | None = None
@@ -67,6 +68,11 @@ class Replica:
         self._caught_up = False  # this connection's log (and revocation list) has been applied
         self._revocations: list[dict] = []  # owner-signed, kept in state.json
         self.load()
+
+    @property
+    def can_write(self) -> bool:
+        """An edit link, for a project its owner hasn't deleted for everyone."""
+        return self.keys.writable and self.deleted_at is None
 
     @property
     def storage(self) -> str:
@@ -83,13 +89,15 @@ class Replica:
             self.since = s.get("since", 0)
             self.pending_mode = s.get("pending_mode")
             self.outbox = {k: b64d(v) for k, v in s.get("outbox", {}).items()}
+            self.deleted_at = s.get("deleted")
             self._revoked(s.get("revoked", []), save=False)  # before anything arrives from peers
 
     def save(self) -> None:
         (self.dir / "doc.bin.tmp").write_bytes(self.doc.get_update())
         (self.dir / "doc.bin.tmp").replace(self.dir / "doc.bin")
         state = {"since": self.since, "pending_mode": self.pending_mode,
-                 "outbox": {k: b64e(v) for k, v in self.outbox.items()}, "revoked": self._revocations}
+                 "outbox": {k: b64e(v) for k, v in self.outbox.items()}, "revoked": self._revocations,
+                 **({"deleted": self.deleted_at} if self.deleted_at is not None else {})}
         (self.dir / "state.json.tmp").write_text(json.dumps(state))
         (self.dir / "state.json.tmp").replace(self.dir / "state.json")
 
@@ -98,6 +106,8 @@ class Replica:
         """Run fn (which mutates the doc) and queue the resulting update for sending."""
         if not self.keys.writable:
             raise PermissionError("read-only link")
+        if self.deleted_at is not None:
+            raise PermissionError("the owner deleted this project for everyone")
         before = self.doc.get_state()
         with self.doc.transaction(origin="local"):
             fn()
@@ -407,7 +417,9 @@ class Replica:
         backoff = 1
         async with aiohttp.ClientSession() as http:
             self.http = http
-            while True:
+            if self.deleted_at is not None:
+                self.synced.set()
+            while self.deleted_at is None:  # a deleted project stays as it is: nothing to connect to
                 try:
                     async with http.ws_connect(ws_url, heartbeat=30, max_msg_size=64 * 1024 * 1024) as ws:
                         self.ws = ws
@@ -431,11 +443,22 @@ class Replica:
                 finally:
                     self.ws = None
                     self.connected.clear()
+                if self.deleted_at is not None:
+                    break
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30)
 
     async def _handle(self, m: dict) -> None:
         t = m.get("t")
+        if t == "deleted":  # the owner deleted the project for everyone
+            at = m.get("at")
+            self.deleted_at = at / 1000 if isinstance(at, (int, float)) else time.time()
+            self.save()
+            self.synced.set()  # nothing more will come: don't keep anyone waiting
+            log.warning("The owner deleted this project for everyone. This copy stays as it is; nothing syncs any more.")
+            if self.ws is not None:
+                await self.ws.close()
+            return
         if t == "log":
             self.denied = None
             self.code_expired = bool((m.get("store") or {}).get("codeExpired"))

@@ -243,4 +243,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'TeXCount couldn’t count this folder: {err}': 'TeXCount 无法统计此文件夹：{err}',
     'Word count of “{name}”': '“{name}”的字数统计',
     'No .tex file with \\documentclass found.': '未找到包含 \\documentclass 的 .tex 文件。',
+    "Deleted by the owner": "已被所有者删除",
+    "The owner deleted this project for everyone. The files in this folder stay, but nothing syncs any more: use Leave… to take it off the list.": "所有者已为所有人删除此项目。此文件夹中的文件会保留，但不再同步：使用 退出… 将其从列表中移除。",
 }

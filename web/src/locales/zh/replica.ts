@@ -10,6 +10,8 @@ const zh: Catalog = {
   'not a file id': '不是文件 ID',
   'file content not available yet ({{id}}): no online peer has it': '文件内容尚不可用（{{id}}）：没有在线的协作者拥有它',
   'Someone': '某人',
+  "the server refused to delete it": "服务器拒绝删除",
+  "only the owner can delete the project for everyone": "只有所有者可以为所有人删除该项目",
 }
 
 export default zh
