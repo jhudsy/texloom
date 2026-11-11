@@ -115,6 +115,35 @@ export function changeOrSuggest(r: Replica, file: string, from: number, to: numb
   if (!same) addItem(r, 'suggestion', file, from, to, text, suggester())
 }
 
+/** Many replacements at once (search and replace all): each file read once and the existing
+ *  suggestions listed once, not per match. An edit whose text no longer says `was` is skipped. */
+export function changeOrSuggestAll(r: Replica, edits: { file: string; from: number; to: number; was: string; text: string }[]) {
+  const key = (file: string, from: number, to: number, quote: string, text: string) => JSON.stringify([file, from, to, quote, text])
+  const suggesting = suggestMode.on()
+  const existing = new Set<string>()
+  if (suggesting) {
+    for (const i of allItems(r)) {
+      if (i.kind !== 'suggestion' || i.resolved) continue
+      const at = rangeOf(r, i.id)
+      if (at) existing.add(key(i.file, at.from, at.to, i.quote, i.text))
+    }
+  }
+  const byFile = new Map<string, typeof edits>()
+  for (const e of edits) byFile.set(e.file, [...(byFile.get(e.file) ?? []), e])
+  r.doc.transact(() => {
+    for (const [file, list] of byFile) {
+      const yt = r.files.get(file)
+      if (!yt) continue
+      const text = yt.toString()
+      for (const e of [...list].sort((a, b) => b.from - a.from)) { // from the end, so earlier places stay put
+        if (text.slice(e.from, e.to) !== e.was) continue
+        if (!suggesting) { if (e.to > e.from) yt.delete(e.from, e.to - e.from); if (e.text) yt.insert(e.from, e.text); continue }
+        if (!existing.has(key(file, e.from, e.to, e.was, e.text))) addItem(r, 'suggestion', file, e.from, e.to, e.text, suggester())
+      }
+    }
+  })
+}
+
 /** Open suggestions in `file` whose new text contains `text` (so as not to suggest it twice). */
 export const suggested = (r: Replica, file: string, text: string) =>
   suggestMode.on() && allItems(r).some((i) => i.kind === 'suggestion' && !i.resolved && i.file === file && i.text.includes(text))

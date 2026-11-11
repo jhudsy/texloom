@@ -3,7 +3,7 @@
 import type { EditorView } from '@codemirror/view'
 import { h } from './dom'
 import { t } from './i18n'
-import { blankNonProse } from './navigate'
+import { mathAt } from './mathpreview'
 import { isDocument, isTexFile, mainFile } from './projectfiles'
 import type { Replica } from './replica'
 import { SYMBOLS, type Symbol } from './symbols'
@@ -67,10 +67,10 @@ export function createSymbolPalette({ r, view, file, inserted }: PaletteHost): {
   /** The document a package belongs in: the open one, else the main file. */
   const target = () => (isDocument(r, file()) ? file() : mainFile(r))
 
-  /** The cursor is in maths if it would be blanked out as non-prose. */
+  /** Is the cursor inside maths ($…$, \\[…\\], an equation environment), not on its delimiters? */
   function inMath(v: EditorView, pos: number): boolean {
-    const doc = v.state.doc.toString()
-    return blankNonProse(`${doc.slice(0, pos)}Z${doc.slice(pos)}`)[pos] === ' '
+    const span = mathAt(v.state.doc.toString(), pos)
+    return !!span && pos > span.from && pos < span.to
   }
 
   function insert(sym: Symbol, isText: boolean) {

@@ -409,7 +409,10 @@ Simultaneous saves just fork the chain. Before writing a link, the saver rebuild
 compares with the real state; if they differ, or the chain is damaged, the link holds the
 whole snapshot (`base: null`). Removing a version only unlists it, since later links build
 on it. Older versions keep their own `snap` and clients that predate the chain ignore new
-ones. `npm run check-versions` in `web/` tests all this.
+ones. Every 64th link holds a whole snapshot anyway, so rebuilding a version never walks
+more than 64 links, and each tab remembers the snapshot at the tip of the chain, so saving
+a version rebuilds nothing it has already rebuilt. `npm run check-versions` in `web/` tests
+all this.
 
 ## Agents (MCP)
 
@@ -516,5 +519,12 @@ symlinks) into a new folder and shares that as a new project with the same setti
   holders with no copy can't open an evicted project until a writer returns.
 - Browser storage can be evicted: request persistent storage; the server copy and
   daemon copies are the backup.
+- Deleting a project's data on the server (delete for everyone, idle eviction, purging an
+  unused project) runs in one go on the relay's event loop, so for a very large project
+  other connections wait until it finishes. Fix: delete in batches, yielding between them,
+  or hand it to a worker thread.
+- The desktop app refreshes its project list every second, reading each project's tags
+  again and rebuilding every row. Fine for tens of projects; for many more, keep the tags
+  until their file changes and update only rows whose state changed.
 
 [texlyre-busytex]: https://github.com/TeXlyre/texlyre-busytex

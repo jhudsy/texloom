@@ -1284,9 +1284,15 @@ class Relay:
                         spool.write(piece)
             except TimeoutError:
                 raise web.HTTPRequestTimeout() from None
+            # one copy in memory: the signed message (prefix + file), with the file a view into it
+            prefix = f"blob:{bid}:".encode()
+            signed = bytearray(len(prefix) + size)
+            signed[: len(prefix)] = prefix
             spool.seek(0)
-            data = spool.read()
-        if not verify(project, f"blob:{bid}:".encode() + data, sig, self.store.revoked(project)):
+            if spool.readinto(memoryview(signed)[len(prefix):]) != size:
+                raise web.HTTPBadRequest(text="short upload")
+            data = memoryview(signed)[len(prefix):]
+        if not verify(project, signed, sig, self.store.revoked(project)):
             raise web.HTTPForbidden(text="bad signature")
         if project in self.store.deleted:  # deleted while it was uploading
             return web.json_response({"code": "deleted"}, status=410)

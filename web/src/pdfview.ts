@@ -1,5 +1,7 @@
-// Renders a PDF into a scrollable stack of canvases with PDF.js. Keeps the scroll
-// position across re-renders so recompiling doesn't jump you back to page 1.
+// Renders a PDF into a scrollable stack of pages with PDF.js. Every page has its place and size,
+// but only those on or near the screen are drawn (a 200-page thesis at full sharpness wouldn't fit
+// in memory), and the document stays open between redraws. Keeps the scroll position across
+// recompiles, so they don't jump you back to page 1.
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { t } from './i18n'
@@ -20,11 +22,18 @@ const savedZoom = () => {
     return z >= MIN_ZOOM && z <= MAX_ZOOM ? z : 1
   } catch { return 1 }
 }
-// Zoomed in, a whole document at full sharpness wouldn't fit in a browser's memory for canvases.
-const MAX_PAGE_PIXELS = 6e6, MIN_PAGE_PIXELS = 2e6, MAX_DOCUMENT_PIXELS = 2e8
+const MAX_PAGE_PIXELS = 6e6 // one page's canvas, however far zoomed in
+const NEAR = 1, FAR = 3 // screens above and below: pages this near are drawn; this far, their canvases are freed
+const GAP = 12 // px between pages, and around them (the .pdf padding and gap)
 // Printing draws its own copy of each page. The site's security rules allow no frames, which
-// handing the PDF to the browser's own viewer for printing would need.
-const PRINT_DPI = 300, MAX_PRINT_PIXELS = 16e6
+// handing the PDF to the browser's own viewer for printing would need. 200 dpi prints text well
+// and keeps a long document's pages within memory.
+const PRINT_DPI = 200, MAX_PRINT_PIXELS = 8e6
+
+/** A canvas with no pixels (a new one has 300 × 150), standing in for a page not drawn. */
+const emptyCanvas = () => { const c = document.createElement('canvas'); c.width = c.height = 0; return c }
+
+interface Page { wrap: HTMLDivElement; canvas: HTMLCanvasElement; points: number; ratio: number; drawn: number }
 
 export class PdfView {
   readonly el: HTMLDivElement
@@ -46,9 +55,13 @@ export class PdfView {
   private zoomIn: HTMLButtonElement
   private zoom = savedZoom()
   private zoomTimer: ReturnType<typeof setTimeout> | undefined
-  private pages: { wrap: HTMLDivElement; scale: number; canvas: HTMLCanvasElement; points: number }[] = []
+  private pages: Page[] = []
   private gen = 0
   private last: Uint8Array | null = null
+  private doc: pdfjs.PDFDocumentProxy | null = null
+  private task: pdfjs.PDFDocumentLoadingTask | null = null
+  private width = 0 // the pages' width now, in CSS pixels
+  private drawing = false
   private renderedWidth = 0
   constructor() {
     this.el = document.createElement('div')
@@ -57,9 +70,11 @@ export class PdfView {
     let timer: ReturnType<typeof setTimeout> | undefined
     new ResizeObserver(() => {
       const w = this.el.clientWidth
-      if (!this.last || !w || Math.abs(w - this.renderedWidth) < 24) return
+      if (!this.pages.length || !w || Math.abs(w - this.renderedWidth) < 24) return
+      this.renderedWidth = w
+      this.layout()
       clearTimeout(timer)
-      timer = setTimeout(() => { if (this.last) this.show(this.last).catch(() => {}) }, 250)
+      timer = setTimeout(() => this.update(), 250)
     }).observe(this.el)
     this.el.addEventListener('pointerdown', (e) => { if (e.button === 0) this.lastClick = this.pointAt(e) ?? this.lastClick })
     this.el.addEventListener('dblclick', (e) => {
@@ -76,7 +91,7 @@ export class PdfView {
     })
     this.el.addEventListener('scroll', () => {
       this.closeMenu()
-      this.pageFrame ||= requestAnimationFrame(() => { this.pageFrame = 0; this.showPage() })
+      this.pageFrame ||= requestAnimationFrame(() => { this.pageFrame = 0; this.showPage(); this.update() })
     }, { passive: true })
     // Ctrl or ⌘ + scroll; a trackpad pinch arrives as Ctrl + scroll
     this.el.addEventListener('wheel', (e) => {
@@ -129,7 +144,7 @@ export class PdfView {
     this.printBtn.disabled = true
     const label = [...this.printBtn.childNodes]
     this.printDone = () => { this.printBtn.disabled = false; this.printBtn.replaceChildren(...label) }
-    const task = openPdf(this.last)
+    const task = openPdf(this.last) // its own copy: the view's pages stay as they are
     const sheets = h('div', { class: 'print-sheets' })
     const urls: string[] = []
     let size = ''
@@ -156,7 +171,8 @@ export class PdfView {
     const style = h('style', {}, `@media print { @page { size: ${size}; margin: 0; } }`)
     document.head.append(style)
     document.body.append(sheets)
-    await Promise.all([...sheets.querySelectorAll('img')].map((img) => img.decode()))
+    // loaded, not all decoded at once: the browser decodes them as it prints
+    await Promise.all([...sheets.querySelectorAll('img')].map((img) => img.complete ? null : new Promise((res) => { img.onload = img.onerror = res })))
     document.body.classList.add('printing')
     window.addEventListener('afterprint', () => {
       document.body.classList.remove('printing')
@@ -192,15 +208,73 @@ export class PdfView {
     const down = (this.el.scrollTop + y) / Math.max(1, this.el.scrollHeight)
     this.showZoom()
     if (!this.pages.length) return
-    const width = this.pageWidth()
-    for (const p of this.pages) {
-      p.canvas.style.width = `${Math.floor(width)}px`
-      p.scale = width / p.points
-    }
+    this.layout()
     this.el.scrollLeft = across * this.el.scrollWidth - x
     this.el.scrollTop = down * this.el.scrollHeight - y
     clearTimeout(this.zoomTimer)
-    this.zoomTimer = setTimeout(() => { if (this.last) this.show(this.last).catch(() => {}) }, 300)
+    this.zoomTimer = setTimeout(() => this.update(), 300) // sharp again, once the zooming stops
+  }
+
+  /** Size every page for the current width (drawn ones stretch until they're drawn again). */
+  private layout() {
+    this.width = this.pageWidth()
+    for (const p of this.pages) {
+      p.wrap.style.width = `${Math.floor(this.width)}px`
+      p.wrap.style.height = `${Math.floor(this.width * p.ratio)}px`
+      p.canvas.style.width = `${Math.floor(this.width)}px`
+    }
+  }
+
+  private scaleOf(p: Page) { return this.width / p.points }
+
+  /** Draw the pages near the screen at the current size, nearest first, and free those far away. */
+  private update() {
+    if (!this.doc || !this.pages.length || this.drawing) return
+    const view = this.el.getBoundingClientRect(), h = Math.max(1, view.height)
+    let next: Page | null = null, best = Infinity
+    for (const p of this.pages) {
+      const r = p.wrap.getBoundingClientRect()
+      const away = r.bottom < view.top ? view.top - r.bottom : r.top > view.bottom ? r.top - view.bottom : 0
+      if (away > FAR * h) { if (p.drawn) this.free(p) }
+      else if (away <= NEAR * h && p.drawn !== this.width && away < best) { best = away; next = p }
+    }
+    if (!next) return
+    this.drawing = true
+    const gen = this.gen
+    this.draw(next).catch(() => {}).finally(() => {
+      this.drawing = false
+      if (gen === this.gen) this.update() // the next one
+    })
+  }
+
+  private free(p: Page) {
+    const blank = emptyCanvas()
+    blank.style.width = p.canvas.style.width
+    p.canvas.replaceWith(blank)
+    p.canvas.width = p.canvas.height = 0
+    p.canvas = blank
+    p.drawn = 0
+    p.wrap.classList.add('blank')
+  }
+
+  /** Draw one page at the current width, off screen, then put it in place. */
+  private async draw(p: Page, doc = this.doc) {
+    if (!doc) return
+    const width = this.width
+    const page = await doc.getPage(this.pages.indexOf(p) + 1 || 1)
+    const vp = page.getViewport({ scale: width / p.points })
+    const dpr = Math.min(window.devicePixelRatio || 1, Math.sqrt(MAX_PAGE_PIXELS / (vp.width * vp.height)))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.floor(vp.width * dpr)
+    canvas.height = Math.floor(vp.height * dpr)
+    canvas.style.width = `${Math.floor(width)}px`
+    await page.render({ canvas, viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined }).promise
+    if (!this.pages.includes(p)) { canvas.width = canvas.height = 0; return } // a newer document came meanwhile
+    p.canvas.replaceWith(canvas)
+    p.canvas.width = p.canvas.height = 0
+    p.canvas = canvas
+    p.drawn = width
+    p.wrap.classList.remove('blank')
   }
 
   /** The page and PDF-point position under a mouse event, if it's on a page. */
@@ -209,7 +283,7 @@ export class PdfView {
     const i = this.pages.findIndex((p) => p.wrap === wrap)
     if (i < 0) return null
     const rect = wrap!.getBoundingClientRect()
-    const s = this.pages[i].scale
+    const s = this.scaleOf(this.pages[i])
     return { page: i + 1, x: (e.clientX - rect.left) / s, y: (e.clientY - rect.top) / s }
   }
 
@@ -220,7 +294,7 @@ export class PdfView {
     const visible = (page: number, y: number) => {
       const p = this.pages[page - 1]
       if (!p) return false
-      const top = p.wrap.getBoundingClientRect().top + y * p.scale
+      const top = p.wrap.getBoundingClientRect().top + y * this.scaleOf(p)
       return top >= view.top && top <= view.bottom
     }
     if (this.lastClick && visible(this.lastClick.page, this.lastClick.y)) return this.lastClick
@@ -232,8 +306,9 @@ export class PdfView {
       if (d < dist) { dist = d; best = i }
     })
     const p = this.pages[best], r = p.wrap.getBoundingClientRect()
-    const y = Math.max(0, Math.min(r.height, mid - r.top)) / p.scale
-    return { page: best + 1, x: r.width / 2 / p.scale, y }
+    const s = this.scaleOf(p)
+    const y = Math.max(0, Math.min(r.height, mid - r.top)) / s
+    return { page: best + 1, x: r.width / 2 / s, y }
   }
 
   private openMenu(x: number, y: number, items: MenuItem[]) {
@@ -248,7 +323,8 @@ export class PdfView {
     if (!p) return
     const mark = document.createElement('div')
     mark.className = 'pdf-mark'
-    Object.assign(mark.style, { left: `${(x - 2) * p.scale}px`, top: `${(y - 2) * p.scale}px`, width: `${(w + 4) * p.scale}px`, height: `${(h + 4) * p.scale}px` })
+    const s = this.scaleOf(p)
+    Object.assign(mark.style, { left: `${(x - 2) * s}px`, top: `${(y - 2) * s}px`, width: `${(w + 4) * s}px`, height: `${(h + 4) * s}px` })
     p.wrap.append(mark)
     mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
     setTimeout(() => mark.remove(), 2500)
@@ -258,42 +334,47 @@ export class PdfView {
     this.last = data
     const gen = ++this.gen
     const task = openPdf(data)
-    const doc = await task.promise
-    try {
-      if (gen !== this.gen) return
+    let doc: pdfjs.PDFDocumentProxy
+    try { doc = await task.promise } catch (e) { void task.destroy(); throw e }
+    if (gen !== this.gen) { void task.destroy(); return }
+    // every page's size, which is cheap; drawing is what costs
+    const sizes: { points: number; ratio: number }[] = []
+    for (let i = 1; i <= doc.numPages; i++) {
+      const base = (await doc.getPage(i)).getViewport({ scale: 1 })
+      sizes.push({ points: base.width, ratio: base.height / base.width })
+    }
+    if (gen !== this.gen) { void task.destroy(); return }
     const scrollFrac = this.el.scrollTop / Math.max(1, this.el.scrollHeight)
     const scrollAcross = this.el.scrollLeft / Math.max(1, this.el.scrollWidth)
-    if (!this.el.clientWidth) return // hidden: render when it becomes visible
     this.renderedWidth = this.el.clientWidth
     const width = this.pageWidth()
-    const maxPixels = Math.min(MAX_PAGE_PIXELS, Math.max(MIN_PAGE_PIXELS, MAX_DOCUMENT_PIXELS / doc.numPages))
-    const pages = document.createDocumentFragment()
-    const info: typeof this.pages = []
-    for (let i = 1; i <= doc.numPages; i++) {
-      const page = await doc.getPage(i)
-      const base = page.getViewport({ scale: 1 })
-      const vp = page.getViewport({ scale: width / base.width })
-      const dpr = Math.min(window.devicePixelRatio || 1, Math.sqrt(maxPixels / (vp.width * vp.height)))
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.floor(vp.width * dpr)
-      canvas.height = Math.floor(vp.height * dpr)
-      canvas.style.width = `${Math.floor(vp.width)}px`
-      canvas.style.height = `${Math.floor(vp.height)}px`
-      await page.render({ canvas, viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined }).promise
-      if (gen !== this.gen) return
-      const wrap = document.createElement('div')
-      wrap.className = 'page'
-      wrap.append(canvas)
-      pages.append(wrap)
-      info.push({ wrap, scale: vp.width / base.width, canvas, points: base.width })
-    }
-    this.pages = info
-    this.el.replaceChildren(pages)
+    const pages: Page[] = sizes.map(({ points, ratio }) => {
+      const canvas = emptyCanvas()
+      const wrap = h('div', { class: 'page blank' }, canvas) as HTMLDivElement
+      return { wrap, canvas, points, ratio, drawn: 0 }
+    })
+    // draw what will be on screen before showing the new document, so nothing flashes blank
+    const old = { doc: this.doc, task: this.task, pages: this.pages }
+    this.doc = doc; this.task = task; this.pages = pages; this.width = width
+    let y = GAP
+    const tops = pages.map((p) => { const top = y; y += Math.floor(width * p.ratio) + GAP; return top })
+    const top = scrollFrac * (y + GAP), height = this.el.clientHeight || 800
+    this.drawing = true // scrolling meanwhile mustn't draw pages that aren't on screen yet
+    try {
+      for (const [i, p] of pages.entries()) {
+        if (tops[i] + width * p.ratio >= top - height / 2 && tops[i] <= top + height * 1.5) await this.draw(p, doc).catch(() => {})
+        if (gen !== this.gen) return
+      }
+    } finally { this.drawing = false }
+    this.el.replaceChildren(...pages.map((p) => p.wrap))
+    this.layout()
     this.el.scrollTop = scrollFrac * this.el.scrollHeight
     this.el.scrollLeft = scrollAcross * this.el.scrollWidth
+    for (const p of old.pages) p.canvas.width = p.canvas.height = 0
+    if (old.task) void old.task.destroy() // otherwise each document keeps a worker for the life of the tab
     this.controls.hidden = false
-    this.pageTotal.textContent = `/ ${info.length}`
+    this.pageTotal.textContent = `/ ${pages.length}`
     this.showPage()
-    } finally { void task.destroy() } // otherwise each document keeps a worker for the life of the tab
+    this.update()
   }
 }

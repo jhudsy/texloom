@@ -399,6 +399,7 @@ dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: cen
 .psummary { font-size: 12px; padding: 1px 8px; border-radius: 999px; color: var(--warn); }
 .psummary.has-errors { color: var(--err); border-color: color-mix(in srgb, var(--err) 50%, var(--line)); }
 .pdf .page { position: relative; flex: none; margin: 0 auto; } /* auto margins centre it, yet let a wide page scroll to its left edge */
+.pdf .page.blank { background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .4); } /* not drawn yet, or far off screen */
 .pdf-mark { position: absolute; background: color-mix(in srgb, #ffd400 45%, transparent); outline: 2px solid #e6b800; border-radius: 3px; pointer-events: none; animation: pdfmark 2.5s ease-out forwards; }
 @keyframes pdfmark { 0%, 70% { opacity: 1 } 100% { opacity: 0 } }
 

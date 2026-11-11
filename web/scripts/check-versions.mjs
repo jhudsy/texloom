@@ -51,7 +51,8 @@ const last = (r) => r.versions.get(r.versions.length - 1)
   want.forEach((s, v) => opens(r, v, s, 'history'))
   const links = r.versionChain.toArray()
   check('first link is whole', links[0].base === null)
-  check('later links build on the chain', links.slice(1).every((l) => l.base !== null))
+  // every 64th link holds the whole snapshot again, so rebuilding one stays bounded
+  check('later links build on the chain, but not too far back', links.every((l, i) => (i % 64 === 0) === (l.base === null)))
   // a late joiner gets everything in one update
   const late = replica(); Y.applyUpdate(late.doc, Y.encodeStateAsUpdate(r.doc))
   want.forEach((s, v) => opens(late, late.versions.toArray().find((x) => x.link === v.link), s, 'late joiner'))

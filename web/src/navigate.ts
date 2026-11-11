@@ -5,7 +5,7 @@ import { h } from './dom'
 import { mainFile } from './projectfiles'
 import { t, tn, locale } from './i18n'
 import { texCountDialog } from './texcount'
-import { changeOrSuggest, isSuggesting } from './suggestmode'
+import { changeOrSuggest, changeOrSuggestAll, isSuggesting } from './suggestmode'
 import { COMMENT, envClose, envOpen, INLINE_MATH, MATH_OPEN, mathClose, spans } from './texscan'
 
 export type Reveal = (file: string, from: number, to: number) => void
@@ -235,13 +235,7 @@ export function createSearchPanel(r: Replica, writable: boolean, reveal: Reveal)
     if (!confirm(isSuggesting()
       ? tn(hits.length, 'Suggest replacing {{n}} match in {{files}}? Each becomes a suggestion in the Review tab.', 'Suggest replacing {{n}} matches in {{files}}? Each becomes a suggestion in the Review tab.', { files })
       : tn(hits.length, 'Replace {{n}} match in {{files}}? (Undo with History if needed.)', 'Replace {{n}} matches in {{files}}? (Undo with History if needed.)', { files }))) return
-    r.doc.transact(() => {
-      for (const x of [...hits].sort((a, b) => a.file.localeCompare(b.file) || b.from - a.from)) {
-        const yt = r.files.get(x.file)
-        if (!yt || yt.toString().slice(x.from, x.to) !== x.match) continue
-        changeOrSuggest(r, x.file, x.from, x.to, replacement(x.match))
-      }
-    })
+    changeOrSuggestAll(r, hits.map((x) => ({ file: x.file, from: x.from, to: x.to, was: x.match, text: replacement(x.match) })))
     run()
   }
 

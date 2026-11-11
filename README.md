@@ -231,7 +231,7 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **PDF zoom:** − and + above the PDF change its size, and the percentage goes back to normal
   size; ⌘ or Ctrl + scroll, or pinching on a trackpad, does the same. The zoom is remembered.
 - **Pages and printing:** the box above the PDF shows the current page; type a number and press
-  Enter to go there. the printer button opens your browser's print dialog, with pages drawn at 300 dpi. For
+  Enter to go there. The printer button opens your browser's print dialog, with pages drawn at 200 dpi. For
   a print that keeps the PDF's own text, download it and print that.
 - **Compile log:** **Log** shows it under the PDF; drag its top edge to resize.
 - **Downloads:** the download button above the PDF, and **Source** (a `.zip`) in the header.

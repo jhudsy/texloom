@@ -13,6 +13,7 @@ type Saved = Pick<Replica, 'doc' | 'versions' | 'versionChain'>
 type Deletions = ReturnType<typeof Y.createDeleteSet>
 
 const MAX_AUTO = 300
+const FULL_EVERY = 64 // every so many links, one holds the whole snapshot, so rebuilding one stays bounded
 
 /** The deletions in `now` that aren't in `had`. Both sorted and merged, as Yjs makes them. */
 function newDeletions(now: Deletions, had: Deletions): Deletions {
@@ -49,7 +50,9 @@ function combine(parts: Y.Snapshot[]): Y.Snapshot {
 }
 
 /** The whole snapshot at a link: everything from there back to a link that needs no base. */
-function rebuild(links: Map<string, Link>, id: string): Y.Snapshot {
+function rebuild(links: Map<string, Link>, id: string): Y.Snapshot { return rebuildAt(links, id).snap }
+
+function rebuildAt(links: Map<string, Link>, id: string): { snap: Y.Snapshot; depth: number } {
   const parts: Y.Snapshot[] = [], seen = new Set<string>()
   for (let at: string | null = id; at !== null;) {
     const link = links.get(at)
@@ -58,8 +61,12 @@ function rebuild(links: Map<string, Link>, id: string): Y.Snapshot {
     parts.push(Y.decodeSnapshot(link.snap))
     at = link.base
   }
-  return combine(parts)
+  return { snap: combine(parts), depth: parts.length - 1 }
 }
+
+/** The newest link's whole snapshot, kept from the last save, so the next save needn't rebuild
+ *  the chain (which grows with every save). Only while that link is still the newest. */
+const tipCache = new WeakMap<Y.Array<Link>, { id: string; snap: Y.Snapshot; depth: number }>()
 
 /** A link for `now`. If the chain can't reproduce `now` exactly (damaged, or it knows of
  *  deletions this device hasn't seen yet), the link holds the whole snapshot instead. */
@@ -67,10 +74,17 @@ export function nextLink(chain: Y.Array<Link>, now: Y.Snapshot): Link {
   const id = crypto.randomUUID().slice(0, 13)
   try {
     const tip = chain.get(chain.length - 1)
-    const had = rebuild(indexOf(chain), tip.id)
-    const snap = Y.encodeSnapshot(Y.createSnapshot(newDeletions(now.ds, had.ds), newClocks(now.sv, had.sv)))
-    if (Y.equalSnapshots(combine([had, Y.decodeSnapshot(snap)]), now)) return { id, base: tip.id, snap }
+    const cached = tipCache.get(chain)
+    const { snap: had, depth } = cached?.id === tip.id ? cached : rebuildAt(indexOf(chain), tip.id)
+    if (depth + 1 < FULL_EVERY) {
+      const snap = Y.encodeSnapshot(Y.createSnapshot(newDeletions(now.ds, had.ds), newClocks(now.sv, had.sv)))
+      if (Y.equalSnapshots(combine([had, Y.decodeSnapshot(snap)]), now)) {
+        tipCache.set(chain, { id, snap: now, depth: depth + 1 })
+        return { id, base: tip.id, snap }
+      }
+    }
   } catch { /* an empty or damaged chain: start again from a whole snapshot */ }
+  tipCache.set(chain, { id, snap: now, depth: 0 })
   return { id, base: null, snap: Y.encodeSnapshot(now) }
 }
 
