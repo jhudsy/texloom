@@ -28,7 +28,6 @@ const pt: Catalog = {
   'In this browser': 'Neste navegador',
   'TeX Live 2026 in WebAssembly — {{note}}.': 'TeX Live 2026 em WebAssembly — {{note}}.',
   'With my own TeX installation': 'Com minha própria instalação do TeX',
-  'Sends compile requests to a texloom helper running with --compile.': 'Envia solicitações de compilação a um programa auxiliar texloom em execução com --compile.',
   'Don’t compile here': 'Não compilar aqui',
   'Just view the PDFs collaborators publish.': 'Apenas ver os PDFs publicados pelos colaboradores.',
   'Syncing': 'Sincronização',
@@ -81,7 +80,6 @@ const pt: Catalog = {
   'Changes stay here until you press Sync (e.g. to finish a thought, or save bandwidth).': 'As alterações ficam aqui até você clicar em Sincronizar (ex.: para terminar uma ideia ou economizar dados).',
   'Compile in this browser': 'Compilar neste navegador',
   'Compile with my own TeX': 'Compilar com meu próprio TeX',
-  'Needs `texloom run <folder> --compile` running.': 'Requer `texloom run <folder> --compile` em execução.',
   'Recompile automatically': 'Recompilar automaticamente',
   'Recompile automatically after I stop typing': 'Recompilar automaticamente quando eu parar de digitar',
   'Editing': 'Edição',
@@ -110,6 +108,7 @@ const pt: Catalog = {
   "In full (removed text struck through)": "Completas (texto removido riscado)",
   "Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.": "Remover este projeto deste navegador; ou, como proprietário, também do servidor, ou excluí-lo para todos. As pastas do seu computador mantêm os arquivos.",
   "The TeXLoom app on this computer keeps this project in sync with a folder. This browser keeps a copy of its own as well.": "O aplicativo TeXLoom deste computador mantém este projeto sincronizado com uma pasta. Este navegador também guarda uma cópia própria.",
+  "Your computer compiles it: the TeXLoom app, with “Compile with my own TeX” ticked for this project’s folder (or texloom run <folder> --compile). Its PDF appears here.": "Seu computador compila: o aplicativo TeXLoom, com “Compilar com meu próprio TeX” marcado para a pasta deste projeto (ou texloom run <folder> --compile). O PDF aparece aqui.",
 }
 
 export default pt

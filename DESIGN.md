@@ -107,7 +107,7 @@ without compiling.
 | `{t:"p2p", d, s?, to?}` | encrypted peer-to-peer payload (below); relayed to one peer or all, never stored |
 | `{t:"mode", m, ts, s}` | set storage mode `"server"` or `"relay"`; `s` signs `"mode:<m>:<ts>"`, valid for 10 min; `relay` (which deletes the server copy) only from the owner |
 | `{t:"revoke", p, s}` | owner only: revoke personal key `p`; `s` signs `"revoke:" ‖ p` |
-| `{t:"delete", ts, s}` | owner only: delete the project for everyone; `s` signs `"delete:<ts>"`, valid for 10 min. The server erases what it stores, keeps a tombstone (the `deleted` table, which purges never touch) and from then on answers the project's connections with `deleted` and its file requests with 410 |
+| `{t:"delete", ts, s}` | owner only: delete the project for everyone; `s` signs `"delete:<ts>"`, valid for 10 min. The server erases what it stores, keeps a tombstone (the `deleted` table, which purges never touch; its `projects` row goes) and from then on answers the project's connections with `deleted` and its file requests with 410 |
 
 | server → client | meaning |
 |---|---|
@@ -293,8 +293,19 @@ related-work section"`. Edits appear live in collaborators' browsers.
    bigger package answers 503 and is there for the next compile. Servers without
    `--texlive` keep the old behaviour: the recommended (200 MB) and extra (340 MB) bundles,
    fetched when a document needs them.
-2. **Native:** a daemon with `--compile` runs `latexmk`. Full TeX Live: shell-escape,
-   minted, etc.
+2. **Native:** a daemon with `--compile` (or the desktop app, per folder) runs `latexmk`.
+   Full TeX Live: shell-escape, minted, etc. It finds TeX the way a terminal would
+   (`use_tex_on_path`: /etc/paths.d on macOS, TeX Live's and MiKTeX's usual folders), since
+   programs started from the Finder, Dock, Start menu or at login don't get a terminal's PATH.
+   A compile starts once changes stop: 1.5 s after a change in the folder, 4 s after one from
+   elsewhere (those arrive keystroke by keystroke), at once for a browser's request (`creq`,
+   answered `cack`, or `cerr` with the reason when the compile can't run). A running compile
+   is never stopped; one more follows it if anything changed meanwhile. Compiles can't keep
+   setting each other off: the PDF written into the folder and the working files in
+   `.texloom/build` are never synced, a published PDF isn't a file change, and a file that
+   changes in the folder during or just after a compile counts as generated (sources such as
+   .tex and .bib never do): a chain of more than three compiles started that way stops, and
+   changes from elsewhere to generated files only don't start one.
 
 Either way the PDF goes into the `out` map, so other peers just view it.
 

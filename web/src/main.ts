@@ -46,6 +46,7 @@ import { suggestMode } from './suggestmode'
 // The desktop app opens its projects with ?from=app (it already keeps them in a folder); the
 // address is put back as it was, so a copied link doesn't carry it.
 const openedByApp = new URLSearchParams(location.search).get('from') === 'app'
+const appCompiles = openedByApp && new URLSearchParams(location.search).get('compile') === '1'
 if (openedByApp) history.replaceState(null, '', location.pathname + location.hash)
 /** The app opened this project here, so it keeps it in a folder on this computer (as far as this
  *  browser knows: the start page offers "In the TeXLoom app" instead of "Sync to a folder…"). */
@@ -126,7 +127,7 @@ function landing() {
   app.append(
     h('div', { class: 'masthead' },
       h('div', {}, h('h1', {}, brand()), h('p', { class: 'sub' }, t('Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.'))),
-      h('button', { class: 'icon gear', title: t('Settings'), 'aria-label': t('Settings'), onclick: startSettings }, '⚙')),
+      h('button', { class: 'icon gear', title: t('Settings'), 'aria-label': t('Settings'), onclick: startSettings }, icon('gear'))),
     h('div', { class: 'row startrow' },
       h('button', { class: 'primary', onclick: () => createProject() }, t('Create project')),
       linkIn,
@@ -391,7 +392,7 @@ async function openProject(keys: Keys) {
   let removing = false // set while deleting, so the page doesn't re-save it to "recent"
   if (!device.setup) {
     if (r.syncMode === 'live') await new Promise((res) => setTimeout(res, 800)) // fetch the name first
-    device = await setupDialog(r, keys.link(server, writable), openedByApp)
+    device = await setupDialog(r, keys.link(server, writable), openedByApp, appCompiles)
     r.setSyncMode(device.sync)
   }
   const me = { name: prefs.name || `anon-${r.doc.clientID % 1000}`, color: COLORS[r.doc.clientID % COLORS.length] }
@@ -703,7 +704,7 @@ async function openProject(keys: Keys) {
   showTags()
   const shareProject = () => shareDialog(r, server, me.name)
   const shareBtn = h('button', { class: 'wide-only', hidden: !!r.deletedAt, onclick: shareProject }, t('Share')) // a deleted project's links open nothing
-  const settingsBtn = h('button', { class: 'wide-only', title: t('Settings'), onclick: () => openSettings() }, '⚙')
+  const settingsBtn = h('button', { class: 'wide-only gearbtn', title: t('Settings'), 'aria-label': t('Settings'), onclick: () => openSettings() }, icon('gear'))
   // Each is a button in wide windows and an item under ⋯ in small ones.
   const headerActions: { btn: HTMLElement; label: () => string; run: () => void }[] = [
     { btn: syncBtn, label: () => t('Sync now'), run: syncNow },

@@ -30,7 +30,10 @@ input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-r
 /* landing */
 .landing { max-width: 940px; margin: 6vh auto; padding: 0 16px; }
 .landing .masthead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.landing .gear { font-size: 18px; width: 34px; height: 34px; padding: 0; border: 1px solid transparent; background: transparent; color: var(--muted); flex: none; }
+.landing .gear { width: 36px; height: 36px; padding: 0; border: 1px solid transparent; background: transparent; color: var(--muted); flex: none; display: inline-grid; place-items: center; }
+.landing .gear svg { width: 22px; height: 22px; }
+header .gearbtn { display: inline-grid; place-items: center; padding: 3px 6px; }
+header .gearbtn svg { width: 19px; height: 19px; }
 .landing .gear:hover, .landing .gear:focus-visible { color: var(--fg); background: var(--panel); border-color: var(--line); }
 .landing .startrow { margin-top: 20px; }
 .landing .listhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 32px; }

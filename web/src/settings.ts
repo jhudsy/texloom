@@ -64,8 +64,9 @@ const engineNote = async () => (await engineCached()) ? t('already downloaded on
 
 /** Shown the first time a link is opened in this browser. `byApp`: the desktop app opened it,
  *  and already keeps the project in a folder, so where the files live isn't a question. */
-export async function setupDialog(r: Replica, link: string, byApp = false): Promise<Device> {
+export async function setupDialog(r: Replica, link: string, byApp = false, appCompiles = false): Promise<Device> {
   const d = prefs.device(r.keys.project)
+  if (appCompiles) d.compile = 'local' // the app that opened it compiles this project's folder
   const note = await engineNote()
   const nameIn = h('input', { value: prefs.name, placeholder: t('Shown to collaborators') }) as HTMLInputElement
   const folderBox = h('div', { hidden: true }, folderHelp(r, link))
@@ -84,7 +85,7 @@ export async function setupDialog(r: Replica, link: string, byApp = false): Prom
       h('h4', {}, t('Compiling')),
       radios('compile', d.compile, [
         ['browser', t('In this browser'), t('TeX Live 2026 in WebAssembly — {{note}}.', { note })],
-        ['local', t('With my own TeX installation'), t('Sends compile requests to a texloom helper running with --compile.')],
+        ['local', t('With my own TeX installation'), t('Your computer compiles it: the TeXLoom app, with “Compile with my own TeX” ticked for this project’s folder (or texloom run <folder> --compile). Its PDF appears here.')],
         ['none', t('Don’t compile here'), t('Just view the PDFs collaborators publish.')],
       ], (v) => (d.compile = v)),
       h('h4', {}, t('Syncing')),
@@ -173,7 +174,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     h('h5', {}, t('Compiling')),
     radios('compile', d.compile, [
       ['browser', t('Compile in this browser'), `${note[0].toUpperCase()}${note.slice(1)}.`],
-      ['local', t('Compile with my own TeX'), t('Needs `texloom run <folder> --compile` running.')],
+      ['local', t('Compile with my own TeX'), t('Your computer compiles it: the TeXLoom app, with “Compile with my own TeX” ticked for this project’s folder (or texloom run <folder> --compile). Its PDF appears here.')],
       ['none', t('Don’t compile here')],
     ], (v) => { d.compile = v; prefs.saveDevice(r.keys.project, d); onDevice(d) }),
     h('label', { class: 'check' },

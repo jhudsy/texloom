@@ -196,7 +196,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       return compileLocally(fail, fromScratch)
     }
     if (!(await browserCompileAvailable())) {
-      return fail((t) => t('In-browser compilation is not installed on this server.\n\nChoose “Compile with my own TeX” in ⚙ Settings and run:\n  texloom run <folder> --compile'))
+      return fail((t) => t('In-browser compilation is not installed on this server.\n\nChoose “With my own TeX installation” in ⚙ Settings → Compiling, and tick “Compile with my own TeX” for this project’s folder in the TeXLoom app.'))
     }
     setRunning(stopBrowserCompile)
     showProgress({ phase: 'download', percent: 0 })
@@ -229,9 +229,11 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
 
   async function compileLocally(fail: Fail, fromScratch = false): Promise<CompileOut> {
     if (!(await r.requestCompile(fromScratch))) return fail((t) => t('Not connected, so no local helper can be reached.'))
-    showProgress({ phase: 'compile' }, t('Asking your texloom helper to compile…'))
+    showProgress({ phase: 'compile' }, t('Asking your computer to compile…'))
     let acked = false
+    let failed: { by: string; why: string } | null = null
     r.onCompileAck = (p) => { acked = true; showProgress({ phase: 'compile' }, t('Compiling with {{name}}…', { name: p.by })) }
+    r.onCompileError = (p) => { failed = p }
     const before = r.out.get('latest')?.at
     let stopped = false
     setRunning(() => { stopped = true }, t('Stop waiting'), t('Stop waiting for your texloom helper. It finishes any compile it has started.'))
@@ -240,14 +242,15 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
         await new Promise((res) => setTimeout(res, 250))
         if (stopped) return { ok: false, log: 'Stopped waiting for the texloom helper.' }
         if (r.out.get('latest')?.at !== before) break
-        if (i === 20 && !acked) return fail((t) => t('No texloom helper with --compile answered.\n\nOn a computer with TeX, run:\n  texloom run <folder> --compile'))
+        if (failed) { const f: { by: string; why: string } = failed; return fail((t) => t('{{name}} couldn’t compile: {{why}}', { name: f.by, why: f.why })) }
+        if (i === 20 && !acked) return fail((t) => t('No computer answered. In the TeXLoom app, tick “Compile with my own TeX” for this project’s folder (or run texloom run <folder> --compile), or compile in this browser instead (⚙ Settings → Compiling).'))
       }
     } finally {
       showProgress(null)
       setRunning(null)
     }
     const o = r.out.get('latest')
-    if (!o || o.at === before) return fail((t) => t('The local helper did not finish compiling within 60 s.'))
+    if (!o || o.at === before) return fail((t) => t('Your computer didn’t finish compiling within 60 seconds. It may still be working: the PDF appears here when it’s done.'))
     const log = o.log ? new TextDecoder().decode(await r.getBlob(o.log)) : ''
     return { ok: !!o.ok, log }
   }

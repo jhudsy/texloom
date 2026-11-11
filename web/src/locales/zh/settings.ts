@@ -28,7 +28,6 @@ const zh: Catalog = {
   'In this browser': '在此浏览器中',
   'TeX Live 2026 in WebAssembly — {{note}}.': 'WebAssembly 版 TeX Live 2026 — {{note}}。',
   'With my own TeX installation': '使用我自己安装的 TeX',
-  'Sends compile requests to a texloom helper running with --compile.': '将编译请求发送给以 --compile 运行的 texloom 辅助程序。',
   'Don’t compile here': '不在此处编译',
   'Just view the PDFs collaborators publish.': '仅查看协作者发布的 PDF。',
   'Syncing': '同步',
@@ -81,7 +80,6 @@ const zh: Catalog = {
   'Changes stay here until you press Sync (e.g. to finish a thought, or save bandwidth).': '更改保留在这里，直到你点击“同步”（例如为了写完一段内容或节省流量）。',
   'Compile in this browser': '在此浏览器中编译',
   'Compile with my own TeX': '使用我自己的 TeX 编译',
-  'Needs `texloom run <folder> --compile` running.': '需要运行 `texloom run <folder> --compile`。',
   'Recompile automatically': '自动重新编译',
   'Recompile automatically after I stop typing': '停止输入后自动重新编译',
   'Editing': '编辑',
@@ -110,6 +108,7 @@ const zh: Catalog = {
   "In full (removed text struck through)": "完整显示（被删除的文字加删除线）",
   "Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.": "从此浏览器中移除此项目；或者作为所有者，同时从服务器移除，或为所有人删除。你电脑上的文件夹会保留其中的文件。",
   "The TeXLoom app on this computer keeps this project in sync with a folder. This browser keeps a copy of its own as well.": "这台电脑上的 TeXLoom 应用会让此项目与一个文件夹保持同步。此浏览器也会保留一份自己的副本。",
+  "Your computer compiles it: the TeXLoom app, with “Compile with my own TeX” ticked for this project’s folder (or texloom run <folder> --compile). Its PDF appears here.": "由你的电脑编译：为此项目的文件夹勾选了“使用我自己的 TeX 编译”的 TeXLoom 应用（或 texloom run <folder> --compile）。生成的 PDF 会显示在这里。",
 }
 
 export default zh

@@ -124,6 +124,7 @@ class Admin:
 <span>Total cap</span><span>{_size(lim.max_bytes)}</span>
 <span>Per project</span><span>{_size(lim.project_max)} (unlimited codes exempt)</span>
 <span>Projects</span><span>{len(rows)} registered, {sum(1 for p in rows if st.usage.get(p[0]))} with stored data</span>
+<span>Deleted for everyone</span><span>{len(st.deleted)} (only the owner's signed deletion is kept, so that a copy can't bring one back)</span>
 <span>Connected now</span><span>{sum(online.values())} connection(s) in {len(online)} project(s)</span>
 <span>Idle eviction</span><span>{f"after {self.evict_days:g} days unopened" if self.evict_days else "off"}</span>
 <span>New projects</span><span>{"anyone" if r.codes.open_creation else "creation code needed"}</span>

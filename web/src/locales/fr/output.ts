@@ -30,18 +30,12 @@ const fr: Catalog = {
   'Compiling is turned off on this device (⚙ Settings → Compiling).': 'La compilation est désactivée sur cet appareil (⚙ Paramètres → Compilation).',
   'No .tex file with \\documentclass found.': 'Aucun fichier .tex contenant \\documentclass n’a été trouvé.',
   'A compile is already running; try again in a moment.': 'Une compilation est déjà en cours ; réessayez dans un instant.',
-  'In-browser compilation is not installed on this server.\n\nChoose “Compile with my own TeX” in ⚙ Settings and run:\n  texloom run <folder> --compile':
-    'La compilation dans le navigateur n’est pas installée sur ce serveur.\n\nChoisissez « Compiler avec mon propre TeX » dans ⚙ Paramètres et lancez :\n  texloom run <folder> --compile',
   'in browser': 'dans le navigateur',
   '{{secs}}s': '{{secs}} s',
   '{{name}} (browser)': '{{name}} (navigateur)',
   'Compile failed: {{error}}': 'Échec de la compilation : {{error}}',
   'Not connected, so no local helper can be reached.': 'Pas de connexion : impossible de joindre l’utilitaire texloom local.',
-  'Asking your texloom helper to compile…': 'Demande de compilation à votre utilitaire texloom…',
   'Compiling with {{name}}…': 'Compilation avec {{name}}…',
-  'No texloom helper with --compile answered.\n\nOn a computer with TeX, run:\n  texloom run <folder> --compile':
-    'Aucun utilitaire texloom lancé avec --compile n’a répondu.\n\nSur un ordinateur où TeX est installé, lancez :\n  texloom run <folder> --compile',
-  'The local helper did not finish compiling within 60 s.': 'L’utilitaire texloom local n’a pas terminé la compilation en 60 s.',
   'That line isn’t in the PDF (yet): compile first?': 'Cette ligne n’est pas (encore) dans le PDF : compilez d’abord ?',
   'Go to the source of the spot you last clicked in the PDF, or the middle of the view (⌘⌥← / Ctrl+Alt+←). Or double-click / right-click the PDF.':
     'Aller à la source de l’endroit cliqué en dernier dans le PDF, ou du milieu de la vue (⌘⌥← / Ctrl+Alt+←). Vous pouvez aussi double-cliquer ou faire un clic droit dans le PDF.',
@@ -53,5 +47,10 @@ const fr: Catalog = {
   'Stop waiting': 'Ne plus attendre',
   'Stop waiting for your texloom helper. It finishes any compile it has started.': 'Ne plus attendre votre assistant texloom. Il terminera toute compilation déjà commencée.',
   'Compile stopped.': 'Compilation arrêtée.',
+  "In-browser compilation is not installed on this server.\n\nChoose “With my own TeX installation” in ⚙ Settings → Compiling, and tick “Compile with my own TeX” for this project’s folder in the TeXLoom app.": "La compilation dans le navigateur n’est pas installée sur ce serveur.\n\nChoisissez « Avec mon installation TeX » dans ⚙ Réglages → Compilation, et cochez « Compiler avec mon propre TeX » pour le dossier de ce projet dans l’application TeXLoom.",
+  "Asking your computer to compile…": "Demande de compilation à votre ordinateur…",
+  "{{name}} couldn’t compile: {{why}}": "{{name}} n’a pas pu compiler : {{why}}",
+  "No computer answered. In the TeXLoom app, tick “Compile with my own TeX” for this project’s folder (or run texloom run <folder> --compile), or compile in this browser instead (⚙ Settings → Compiling).": "Aucun ordinateur n’a répondu. Dans l’application TeXLoom, cochez « Compiler avec mon propre TeX » pour le dossier de ce projet (ou lancez texloom run <folder> --compile), ou compilez plutôt dans ce navigateur (⚙ Réglages → Compilation).",
+  "Your computer didn’t finish compiling within 60 seconds. It may still be working: the PDF appears here when it’s done.": "Votre ordinateur n’a pas fini de compiler en 60 secondes. Il travaille peut-être encore : le PDF apparaîtra ici une fois terminé.",
 }
 export default fr

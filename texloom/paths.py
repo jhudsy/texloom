@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import unicodedata
+from pathlib import Path
 
 STATE = ".texloom"
 
@@ -70,6 +72,32 @@ def latexmk_command(engine: object, bib: object, main_name: str, *extra: str) ->
     shell = [] if any(a in ("-shell-escape", "-no-shell-escape", "-shell-restricted") for a in extra) else ["-no-shell-escape"]
     return ["latexmk", "-norc", flag, "-interaction=nonstopmode", "-file-line-error", *shell,
             *(["-bibtex-"] if bib == "none" else []), *extra, f"./{main_name}"]
+
+
+def use_tex_on_path() -> None:
+    """Let TeX's programs (latexmk, texcount…) be found when TeXLoom was started from the Finder,
+    the Dock, the Start menu or at login: such programs don't get the PATH a terminal has. Adds
+    macOS's system paths (/etc/paths and /etc/paths.d, where MacTeX registers itself) and TeX
+    Live's and MiKTeX's usual folders, after what PATH already holds."""
+    extra: list[str] = []
+    if sys.platform == "darwin":
+        for f in [Path("/etc/paths"), *sorted(Path("/etc/paths.d").glob("*"))]:
+            try:
+                extra += [line.strip() for line in f.read_text().splitlines() if line.strip()]
+            except OSError:
+                continue
+        extra += ["/Library/TeX/texbin", "/opt/homebrew/bin", "/usr/local/bin"]
+    elif os.name == "nt":
+        local, programs = os.environ.get("LOCALAPPDATA", ""), os.environ.get("ProgramFiles", r"C:\Program Files")
+        extra += [str(d) for d in sorted(Path("C:/texlive").glob("*/bin/*"), reverse=True)]  # newest release first
+        extra += [rf"{local}\Programs\MiKTeX\miktex\bin\x64", rf"{programs}\MiKTeX\miktex\bin\x64"]
+    else:
+        extra += [str(d) for d in sorted(Path("/usr/local/texlive").glob("*/bin/*"), reverse=True)]
+        extra += ["/usr/local/bin", "/usr/bin"]
+    have = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]
+    add = [d for d in dict.fromkeys(extra) if d not in have and os.path.isdir(d)]
+    if add:
+        os.environ["PATH"] = os.pathsep.join([*have, *add])
 
 
 def tex_env(**more: str) -> dict[str, str]:

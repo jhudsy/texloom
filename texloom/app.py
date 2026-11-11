@@ -37,7 +37,7 @@ from .cli import DEFAULT_CONFIG, clone_project, load, load_config, new_project, 
 from .crypto import Keys
 from .daemon import CURRENT, FOLDER, Daemon, FolderProblem, FolderTag
 from .folder import copy_project_files
-from .paths import main_file, tex_env
+from .paths import main_file, tex_env, use_tex_on_path
 from .i18n import _, app_pref, lang_pref, ngettext, set_app_pref, set_lang_pref
 from .locales import NAMES
 
@@ -49,6 +49,24 @@ MAC = sys.platform == "darwin"
 DEFAULT_SERVER = "https://app.texloom.org"
 HELP_URL = "https://github.com/jhudsy/texloom#readme"
 SOURCE_URL = "https://github.com/jhudsy/texloom"
+RELEASES_API = "https://api.github.com/repos/jhudsy/texloom/releases/latest"
+CHANGELOG_URL = "https://texloom.org/changelog.html"
+
+
+def version_tuple(v: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+
+
+def latest_release() -> tuple[str, str]:
+    """(version, download URL for this computer) of the newest release on GitHub. Network: call off the Qt thread."""
+    import urllib.request
+    from . import tls
+    req = urllib.request.Request(RELEASES_API, headers={"Accept": "application/vnd.github+json", "User-Agent": "TeXLoom"})
+    with urllib.request.urlopen(req, timeout=15, context=tls.context()) as r:
+        rel = json.load(r)
+    asset = ("TeXLoom-macos-arm64.zip" if MAC else "TeXLoom-windows-x64.zip" if sys.platform == "win32" else "TeXLoom-linux-x64.tar.gz")
+    url = next((a["browser_download_url"] for a in rel.get("assets", []) if a.get("name") == asset), rel.get("html_url") or SOURCE_URL)
+    return str(rel.get("tag_name", "")).lstrip("v"), url
 
 
 def theme_icon(name: str) -> QtGui.QIcon:
@@ -297,8 +315,10 @@ class ProjectRows(QtWidgets.QStyledItemDelegate):
 def browser_link(d: Path) -> str:
     """A folder's project link for opening in the browser, marked as opened by this app, so the web
     app doesn't ask where the files should live: they're in this folder already."""
-    page, _hash, keys = load_config(d)["link"].partition("#")
-    return f"{page}{'&' if '?' in page else '?'}from=app#{keys}"
+    cfg = load_config(d)
+    page, _hash, keys = cfg["link"].partition("#")
+    mark = "from=app" + ("&compile=1" if cfg.get("compile") else "")  # the web app then compiles here by default
+    return f"{page}{'&' if '?' in page else '?'}{mark}#{keys}"
 
 
 def open_path(p: Path | str) -> None:
@@ -1159,8 +1179,8 @@ async def copy_folder(engine: Engine, src: Path, dst: Path, name: str, code: str
 
 
 def find_texcount() -> str | None:
-    """TeXCount from this computer's TeX. Apps opened from the Finder don't get TeX on their PATH."""
-    return shutil.which("texcount") or shutil.which("texcount", path="/Library/TeX/texbin:/usr/texbin:/usr/local/bin:/opt/homebrew/bin")
+    """TeXCount from this computer's TeX (found through use_tex_on_path at start)."""
+    return shutil.which("texcount")
 
 
 def texcount_language(text: str) -> list[str]:
@@ -1461,6 +1481,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self.login.setChecked(autostart.status() != "off")
         self.login.toggled.connect(self.set_autostart)
         lay.addRow(_("Startup"), self.login)
+        self.updates = QtWidgets.QCheckBox(_("Check for new versions once a day"))
+        self.updates.setChecked(bool(app_pref("check_updates", True)))
+        self.updates.toggled.connect(lambda on: set_app_pref("check_updates", on))
+        lay.addRow(_("Updates"), self.updates)
         self.lang = QtWidgets.QComboBox()
         self.lang.addItem(_("Automatic (the system’s language)"), "auto")
         for code, name in NAMES.items():
@@ -1547,6 +1571,10 @@ class Window(QtWidgets.QMainWindow):
         self.list_timer.timeout.connect(self.keep_list_updated)
         self.list_timer.timeout.connect(lambda: self.sorting == "changed" and self.scan_dates())
         self.list_timer.start(60_000)
+        self.update_timer = QtCore.QTimer(self)
+        self.update_timer.timeout.connect(lambda: app_pref("check_updates", True) and self.check_updates())
+        self.update_timer.start(24 * 3600 * 1000)
+        QtCore.QTimer.singleShot(15_000, lambda: app_pref("check_updates", True) and self.check_updates())
         self.refresh()
 
     # -- actions, toolbar and menus
@@ -1586,6 +1614,10 @@ class Window(QtWidgets.QMainWindow):
         self.a_activity.toggled.connect(self.show_activity)
         self.a_help = a(_("TeXLoom help"), lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(HELP_URL)), keys=K.HelpContents)
         self.a_about = a(_("About TeXLoom"), self.about, role=QtGui.QAction.AboutRole)
+        self.a_updates = a(_("Check for updates…"), lambda: self.check_updates(asked=True), role=QtGui.QAction.ApplicationSpecificRole)
+        self.a_update = a(_("Update available"), self.offer_update, "SoftwareUpdateAvailable")
+        self.a_update.setVisible(False)
+        self.update_info: tuple[str, str] | None = None
         self.add_menu = QtWidgets.QMenu(self)
         for act in (self.a_new, self.a_join, self.a_add):
             self.add_menu.addAction(act)
@@ -1605,6 +1637,7 @@ class Window(QtWidgets.QMainWindow):
         tb.addAction(add)
         tb.widgetForAction(add).setPopupMode(QtWidgets.QToolButton.InstantPopup)
         tb.addAction(self.a_pause)
+        tb.addAction(self.a_update)  # only while a newer version is out
         spacer = QtWidgets.QWidget()
         spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         tb.addWidget(spacer)
@@ -1635,6 +1668,7 @@ class Window(QtWidgets.QMainWindow):
             m.addAction(self.action("TeXLoom", self.show_window))
         m = mb.addMenu(_("Help"))
         m.addAction(self.a_help)
+        m.addAction(self.a_updates)
         m.addAction(self.a_about)
 
     def fill_sort_menu(self, m: QtWidgets.QMenu) -> None:
@@ -2024,6 +2058,9 @@ class Window(QtWidgets.QMainWindow):
         self.c_compile = QtWidgets.QCheckBox(_("Compile with my own TeX (latexmk) when files change"))
         self.c_compile.clicked.connect(lambda on: self.set_option("compile", on))
         o.addWidget(self.c_compile)
+        self.no_tex = QtWidgets.QLabel(red(html.escape(_("latexmk wasn’t found on this computer, so it can’t compile here. Install TeX Live (MacTeX on a Mac, TeX Live or MiKTeX on Windows), then open TeXLoom again."))))
+        self.no_tex.setWordWrap(True)
+        o.addWidget(self.no_tex)
         self.compile_more = QtWidgets.QWidget()  # only while compiling is on
         c = QtWidgets.QVBoxLayout(self.compile_more)
         c.setContentsMargins(24, 0, 0, 0)
@@ -2162,6 +2199,7 @@ class Window(QtWidgets.QMainWindow):
         compiles = bool(cfg.get("compile"))
         self.c_compile.setChecked(compiles)
         self.compile_more.setVisible(compiles)
+        self.no_tex.setVisible(compiles and shutil.which("latexmk") is None)
         self.a_scratch.setEnabled(compiles)
         mode = cfg.get("shell_escape")
         self.p_mode.setCurrentIndex(2 if mode is True else 1 if mode == "restricted" else 0)
@@ -2303,6 +2341,57 @@ class Window(QtWidgets.QMainWindow):
         self.engine.call(dm.poke)
         self.refresh()
 
+    # -- new versions
+    def check_updates(self, asked: bool = False) -> None:
+        """Ask GitHub for the newest release (in the background). A newer one shows "Update
+        available" in the toolbar and tray; `asked` (Help ▸ Check for updates…) also says when
+        this is the newest, or that GitHub couldn't be reached."""
+        def work() -> None:
+            try:
+                found, err = latest_release(), None
+            except Exception as e:  # noqa: BLE001 - offline, rate-limited: try again tomorrow
+                found, err = None, e
+            bridge.invoke(lambda: self.updates_found(found, err, asked))
+        threading.Thread(target=work, daemon=True).start()
+
+    def updates_found(self, found: tuple[str, str] | None, err, asked: bool) -> None:
+        newer = bool(found and found[0] and version_tuple(found[0]) > version_tuple(__version__))
+        self.update_info = found if newer else None
+        self.a_update.setVisible(newer)
+        if newer:
+            self.a_update.setText(_("Update to {version}", version=found[0]))
+            if self.tray is not None and not asked:
+                self.tray.showMessage("TeXLoom", _("TeXLoom {version} is available.", version=found[0]), QtGui.QIcon(str(ICON)), 8000)
+        if asked:
+            if newer:
+                self.offer_update()
+            elif err is not None:
+                QtWidgets.QMessageBox.warning(self, _("Check for updates"), _("Couldn’t reach GitHub to check: {err}", err=err))
+            else:
+                QtWidgets.QMessageBox.information(self, _("Check for updates"), _("You have the newest version, {version}.", version=__version__))
+
+    def offer_update(self) -> None:
+        if not self.update_info:
+            return
+        version, url = self.update_info
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle(_("Update available"))
+        box.setText(_("TeXLoom {version} is available. You have {current}.", version=version, current=__version__))
+        frozen = getattr(sys, "frozen", False)
+        box.setInformativeText(
+            _("Download it, quit TeXLoom (from its menu), and put the new app in place of this one. Your folders and settings stay as they are.")
+            if frozen else _("Update it the way you installed it, for example: uv tool upgrade texloom"))
+        get = box.addButton(_("Download"), QtWidgets.QMessageBox.AcceptRole) if frozen else None
+        news = box.addButton(_("What’s new"), QtWidgets.QMessageBox.HelpRole)
+        box.setDefaultButton(box.addButton(_("Later"), QtWidgets.QMessageBox.RejectRole) if not frozen else get)
+        if frozen:
+            box.addButton(_("Later"), QtWidgets.QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is get:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+        elif box.clickedButton() is news:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(CHANGELOG_URL))
+
     def show_window(self) -> None:
         self.show()
         self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
@@ -2400,6 +2489,7 @@ class App(QtWidgets.QApplication):
 
 
 def main(argv: list[str] | None = None) -> None:
+    use_tex_on_path()  # opened from the Finder, Dock or Start menu: TeX isn't on PATH otherwise
     argv = list(sys.argv[1:] if argv is None else argv)
     hidden = "--hidden" in argv
     urls = [a for a in argv if a.startswith(f"{SCHEME}:")]
@@ -2471,6 +2561,7 @@ def main(argv: list[str] | None = None) -> None:
         menu.addSeparator()
         pause = menu.addAction(_("Pause syncing"), win.toggle_pause)
         menu.aboutToShow.connect(lambda: pause.setText(_("Resume syncing") if engine.daemon.paused else _("Pause syncing")))
+        menu.addAction(win.a_update)  # only while a newer version is out
         menu.addAction(_("Quit TeXLoom"), app.quit)
         tray.setContextMenu(menu)
         tray.setToolTip("TeXLoom")

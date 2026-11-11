@@ -409,6 +409,8 @@ class Store:
             CREATE INDEX IF NOT EXISTS log_h ON log(project, h);
             """
         )
+        with self.db:  # a deleted project keeps only its tombstone (registrations from before this rule go now)
+            self.db.execute("DELETE FROM projects WHERE project IN (SELECT project FROM deleted)")
         self.usage: dict[str, int] = defaultdict(int)
         for q in ("SELECT project, SUM(length(data) + length(sig)) FROM log GROUP BY project",
                   "SELECT project, SUM(length(data)) FROM blob GROUP BY project",
@@ -647,10 +649,14 @@ class Store:
         at = time.time()
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO deleted(project, at, sig, ts) VALUES (?,?,?,?)", (project, at, sig, ts))
-            for table in ("log", "blob", "gone", "head", "floor", "mode"):
+            # the tombstone above is all that's kept: its registration (owner, dates) goes too
+            for table in ("log", "blob", "gone", "head", "floor", "mode", "projects"):
                 self.db.execute(f"DELETE FROM {table} WHERE project=?", (project,))  # noqa: S608 - fixed names
         msg = self.deleted.setdefault(project, self._deleted_msg(at, ts, sig))  # a second deletion keeps the first
         self._recount(project)
+        self.owners.pop(project, None)  # its bytes came off its owner in _recount
+        self.usage.pop(project, None)
+        self.seen.pop(project, None)
         return msg
 
     def has_blob(self, project: str, bid: str) -> bool:

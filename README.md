@@ -439,7 +439,11 @@ has **Tags…**, **Make a copy…** (a new project, in a new folder, from this o
 - **Compiling:** compile with your own TeX when files change. Once that's on, **Running programs
   when compiling** is *Never* (default), *TeX Live's safe list*, or *Anything the document asks,
   once I allow it*, with **Review lines…** to see and allow them (as `texloom allow`), and
-  **Compile from scratch** first deletes LaTeX's working files.
+  **Compile from scratch** first deletes LaTeX's working files. The web app's **With my own TeX
+  installation** (⚙ Settings → Compiling) uses this: pressing Compile in the browser asks the app,
+  which runs latexmk (with BibTeX or Biber, makeindex and as many passes as the references need)
+  and the PDF and log appear in the browser. If latexmk can't be found, the project pane says so,
+  and so does a browser that asked. A project opened from the app uses it by default.
 - **Git:** keep the folder's git repository in step (commit, pull, push).
 - **Activity** unfolds the folder's recent log.
 - The search box finds folders by name or tag; the ⇅ button beside it (or the **View** menu)
@@ -448,7 +452,8 @@ has **Tags…**, **Make a copy…** (a new project, in a new folder, from this o
   Tags are the same ones as in the web app, through your project list.
 - **Settings** (TeXLoom ▸ Settings… or ⌘, on a Mac; the toolbar elsewhere): start at login, so
   folders keep syncing; the language, used from the next start (`TEXLOOM_LANG=fr` or `en`
-  overrides it); and the project list.
+  overrides it); the project list; and checking for a new version once a day (also **Help ▸
+  Check for updates…**), which shows **Update to …** in the toolbar and offers the download.
 - Closing the window keeps TeXLoom syncing in the menu bar or tray (on a Mac, click its Dock icon
   to bring the window back). On Linux desktops without a tray, closing asks whether to minimise
   instead, since quitting stops syncing.

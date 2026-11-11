@@ -114,6 +114,7 @@ export class Replica {
   get storeProblem(): StoreProblem { return this.refusal }
   onStatus: () => void = () => {}
   onCompileAck: (info: { by: string }) => void = () => {}
+  onCompileError: (info: { by: string; why: string }) => void = () => {}
 
   private db!: IDBDatabase
   private persistence!: IndexeddbPersistence
@@ -443,6 +444,9 @@ export class Replica {
       case 'cack': // a texloom helper accepted our compile request
         this.onCompileAck(p)
         break
+      case 'cerr': // it couldn't compile (no TeX on that computer, or the compile stopped)
+        if (typeof p.why === 'string') this.onCompileError({ by: String(p.by ?? ''), why: p.why.slice(0, 500) })
+        break
       case 'blob': {
         // only files we asked for (anyone with the link can send these)
         if (typeof p.id !== 'string' || !this.blobWaiters.has(p.id) || typeof p.b !== 'string') return
@@ -455,7 +459,7 @@ export class Replica {
     }
   }
 
-  /** Ask connected texloom helpers (running with --compile) to compile now; `fromScratch`
+  /** Ask connected computers that compile this project (the TeXLoom app, texloom run --compile) to compile now; `fromScratch`
    *  deletes their build folder (.aux, .bbl, …) first. */
   async requestCompile(fromScratch = false): Promise<boolean> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false

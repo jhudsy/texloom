@@ -31,16 +31,12 @@ const zh: Catalog = {
   'Compiling is turned off on this device (⚙ Settings → Compiling).': '此设备已关闭编译（⚙ 设置 → 编译）。',
   'No .tex file with \\documentclass found.': '未找到包含 \\documentclass 的 .tex 文件。',
   'A compile is already running; try again in a moment.': '已有编译正在进行；请稍后再试。',
-  'In-browser compilation is not installed on this server.\n\nChoose “Compile with my own TeX” in ⚙ Settings and run:\n  texloom run <folder> --compile': '此服务器未安装浏览器内编译。\n\n请在 ⚙ 设置中选择“使用我自己的 TeX 编译”，然后运行：\n  texloom run <folder> --compile',
   'in browser': '在浏览器中',
   '{{secs}}s': '{{secs}} 秒',
   '{{name}} (browser)': '{{name}}（浏览器）',
   'Compile failed: {{error}}': '编译失败：{{error}}',
   'Not connected, so no local helper can be reached.': '未连接，无法访问本地辅助程序。',
-  'Asking your texloom helper to compile…': '正在请求 texloom 辅助程序编译…',
   'Compiling with {{name}}…': '正在用 {{name}} 编译…',
-  'No texloom helper with --compile answered.\n\nOn a computer with TeX, run:\n  texloom run <folder> --compile': '没有带 --compile 的 texloom 辅助程序响应。\n\n请在装有 TeX 的电脑上运行：\n  texloom run <folder> --compile',
-  'The local helper did not finish compiling within 60 s.': '本地辅助程序未能在 60 秒内完成编译。',
   'That line isn’t in the PDF (yet): compile first?': '该行（暂时）不在 PDF 中：要先编译吗？',
   'Go to the source of the spot you last clicked in the PDF, or the middle of the view (⌘⌥← / Ctrl+Alt+←). Or double-click / right-click the PDF.': '转到 PDF 中上次点击位置的源代码，或视图中央位置（⌘⌥← / Ctrl+Alt+←）。也可以双击或右键点击 PDF。',
   'Go to source': '转到源代码',
@@ -51,6 +47,11 @@ const zh: Catalog = {
   'Stop waiting': '停止等待',
   'Stop waiting for your texloom helper. It finishes any compile it has started.': '停止等待 texloom 辅助程序。它会完成已开始的编译。',
   'Compile stopped.': '编译已停止。',
+  "In-browser compilation is not installed on this server.\n\nChoose “With my own TeX installation” in ⚙ Settings → Compiling, and tick “Compile with my own TeX” for this project’s folder in the TeXLoom app.": "此服务器未安装浏览器内编译。\n\n请在 ⚙ 设置 → 编译 中选择“使用我自己的 TeX 安装”，并在 TeXLoom 应用中为此项目的文件夹勾选“使用我自己的 TeX 编译”。",
+  "Asking your computer to compile…": "正在请求你的电脑编译…",
+  "{{name}} couldn’t compile: {{why}}": "{{name}} 无法编译：{{why}}",
+  "No computer answered. In the TeXLoom app, tick “Compile with my own TeX” for this project’s folder (or run texloom run <folder> --compile), or compile in this browser instead (⚙ Settings → Compiling).": "没有电脑响应。请在 TeXLoom 应用中为此项目的文件夹勾选“使用我自己的 TeX 编译”（或运行 texloom run <folder> --compile），或改为在此浏览器中编译（⚙ 设置 → 编译）。",
+  "Your computer didn’t finish compiling within 60 seconds. It may still be working: the PDF appears here when it’s done.": "你的电脑在 60 秒内没有完成编译。它可能仍在处理：完成后 PDF 会显示在这里。",
 }
 
 export default zh

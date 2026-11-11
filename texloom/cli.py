@@ -309,6 +309,8 @@ def projects_command(a) -> None:
 
 
 def main() -> None:
+    from .paths import use_tex_on_path
+    use_tex_on_path()  # started at login or by another program: TeX may not be on PATH
     ap = argparse.ArgumentParser(prog="texloom", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-v", "--verbose", action="store_true")

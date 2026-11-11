@@ -26,6 +26,7 @@ log = logging.getLogger("texloom")
 
 from .scan import SCANNED, added, allowed, scan
 from .paths import PROTECTED_DIRS, STATE, UNSAFE_NAMES, WIN_RESERVED, latexmk_command, main_file, safe_rel, tex_env  # noqa: F401
+SOURCES = (".tex", ".bib", ".sty", ".cls", ".bst", ".ltx", ".dtx", ".ins", ".bbx", ".cbx")  # never counted as compile output
 IGNORE_DIRS = {STATE, ".git", ".svn", "node_modules", "__pycache__", ".idea", ".vscode"}
 IGNORE_NAMES = {".DS_Store", "Thumbs.db"}
 IGNORE_SUFFIXES = (
@@ -226,6 +227,12 @@ class FolderSync:
         replica.on_compile_request = self.on_compile_request
         self._warned_shell: frozenset[str] = frozenset()
         self._last_request = 0.0
+        self._asked: set = set()  # browsers whose compile requests the next compile answers
+        self._compiled_at = 0.0  # when the last compile finished (monotonic)
+        self._chained = 0  # compiles in a row started by this folder's changes just after the last
+        self._generated: set[str] = set()  # files seen changing here just after a compile
+        self._compiling = False  # a compile is running (not just waiting)
+        self._again = False  # compile again once it finishes
         self._clean_build = False  # the next compile starts from scratch (requested from a browser)
         self._rewrite = False  # write the project's text to disk after this ingest
 
@@ -340,6 +347,7 @@ class FolderSync:
         if not self.r.can_write:
             return
         changed = False
+        ups: set[str] = set()  # files changed here and sent
         for rel in sorted(paths):
             if self.ignored(rel):
                 continue
@@ -411,9 +419,10 @@ class FolderSync:
             self._remember(rel, h)
             log.info("↑ %s", rel)
             changed = True
+            ups.add(rel)
         if changed:
             self.save_known()
-            self.schedule_compile()
+            self.schedule_compile(own_change=True, files=ups)
         if self._rewrite:
             self._rewrite = False
             await self.write_out()
@@ -426,11 +435,14 @@ class FolderSync:
         changed = False
         wanted: set[str] = set()
 
+        downs: set[str] = set()  # files that changed elsewhere and were written here
+
         def attempt(fn, rel):  # one bad entry (name clash, permissions) mustn't stop the rest
             nonlocal changed
             try:
                 if fn():
                     changed = True
+                    downs.add(rel)
             except OSError as e:
                 log.warning("could not write %s: %s", rel, e)
 
@@ -485,7 +497,7 @@ class FolderSync:
                 changed = True
         if changed:
             self.save_known()
-            self.schedule_compile()
+            self.schedule_compile(delay=4, files=downs)  # edits from elsewhere arrive keystroke by keystroke
 
     def _prune(self, d: Path) -> None:
         """Remove now-empty folders left behind by deletions (never the project root)."""
@@ -541,11 +553,45 @@ class FolderSync:
         self._clean_build = True
         self.schedule_compile(delay=0)
 
-    def schedule_compile(self, delay: float = 1.5) -> None:
+    def schedule_compile(self, delay: float = 1.5, own_change: bool = False, files: set[str] | None = None) -> None:
+        """Compile once changes have stopped for `delay` seconds (each change starts the wait
+        again). A compile that's running is never stopped: one more follows it instead.
+
+        Compiles mustn't set each other off. The PDF a compile writes here, and its working
+        files, are never synced, and a published PDF isn't a change. But a compile can also
+        write a file into the folder (a minted cache, a generated figure), differently each
+        time. So a file that changes here just after a compile counts as generated:
+        - `own_change` (files changed in this folder): after three compiles in a row each
+          started by such a change straight after the last, changes here stop starting
+          compiles for a while;
+        - changes from elsewhere to generated files only (another computer's compile wrote
+          them) don't start one, so two computers can't keep each other compiling.
+        A compile asked for (`files` None, delay 0) always runs."""
         if not self.compile:
             return
+        if own_change:
+            if self._compiling or time.monotonic() - self._compiled_at < 3:
+                self._generated |= {f for f in files or () if not f.lower().endswith(SOURCES)}
+                self._chained += 1
+                if self._chained > 3:
+                    if self._chained == 4:
+                        log.warning("files keep changing each time the project compiles, so changes here no longer "
+                                    "start a compile for now (a compile asked for, or an edit from elsewhere, still does)")
+                    return
+            else:
+                self._chained = 0
+        else:
+            self._chained = 0
+            if files and files <= self._generated:
+                return  # another computer's compile output, not an edit
+        self._start(delay)
+
+    def _start(self, delay: float) -> None:
+        if self._compiling:
+            self._again = True
+            return
         if self._compile_task and not self._compile_task.done():
-            self._compile_task.cancel()
+            self._compile_task.cancel()  # still waiting for changes to stop: wait again
         self._compile_task = asyncio.get_event_loop().create_task(self._compile(delay=delay))
 
     async def on_compile_request(self, frm: int | None, clean: bool = False) -> None:
@@ -558,6 +604,7 @@ class FolderSync:
         if now - self._last_request < 5:
             return
         self._last_request = now
+        self._asked.add(frm)
         await self.r.p2p({"k": "cack", "by": self.opts["label"]}, frm)
         if clean:
             self.compile_from_scratch()
@@ -566,6 +613,32 @@ class FolderSync:
 
     async def _compile(self, delay: float) -> None:
         await asyncio.sleep(delay)
+        asked, self._asked = self._asked, set()
+        self._compiling = True
+        try:
+            await self._run_compile()
+            self._compiled_at = time.monotonic()
+        except asyncio.CancelledError:
+            self._asked |= asked  # stopped (the folder is closing): nothing to answer with
+            raise
+        except FileNotFoundError as e:
+            await self._compile_failed(asked, "latexmk wasn't found on this computer, so it can't compile here. "
+                                       "Install TeX Live (MacTeX on a Mac, TeX Live or MiKTeX on Windows), which includes it.", e)
+        except Exception as e:  # noqa: BLE001 - say so, rather than leave whoever asked waiting
+            await self._compile_failed(asked, f"the compile stopped: {e}", e)
+
+        finally:
+            self._compiling = False
+            if self._again:  # changes or requests came in while it ran
+                self._again = False
+                self._start(1.5)
+
+    async def _compile_failed(self, asked: set, why: str, e: BaseException) -> None:
+        log.error("can't compile: %s (%s)", why, e)
+        for frm in asked:
+            await self.r.p2p({"k": "cerr", "by": self.opts["label"], "why": why}, frm)
+
+    async def _run_compile(self) -> None:
         main = self.main_file()
         if not main:
             return
