@@ -1,6 +1,6 @@
 [project]
 name = "texloom"
-version = "0.4.13"
+version = "0.4.14"
 description = "Local-first collaborative LaTeX: folder sync, MCP server for agents, and the relay server"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
