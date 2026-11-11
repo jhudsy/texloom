@@ -29,6 +29,8 @@ COMPACT_AFTER = 300  # log entries before a writer uploads a snapshot
 BLOB_RE = re.compile(r"^[0-9a-f]{32}$")  # blob ids are HMAC hex digests, never paths
 # Keep in sync with server/relay.py: frames are at most 16 MiB (base64 adds a third).
 MAX_SNAPSHOT = 12 * 1024 * 1024
+MAX_UPDATE = 8 * 1024 * 1024  # one change, after encryption
+UPDATE_BATCH = 6 * 1024 * 1024  # pending changes are merged up to this much per message
 P2P_BLOB = 11 * 1024 * 1024  # files sent peer to peer (relay-only projects)
 
 
@@ -126,6 +128,11 @@ class Replica:
         if self.ws is None or self.ws.closed:
             return  # stays in outbox; flushed on reconnect
         data = self.keys.encrypt(update)
+        if len(data) > MAX_UPDATE:  # the server would refuse it on every try
+            if "too-big" not in self._warned:
+                self._warned.add("too-big")
+                log.warning("NOT SENT: a change of %d MB is more than the server takes at once (8 MB)", len(data) >> 20)
+            return
         sig = self.keys.sign(b"upd:" + data)
         try:
             await self.ws.send_json({"t": "up", "id": uid, "d": b64e(data), "s": b64e(sig)})
@@ -135,12 +142,20 @@ class Replica:
     async def flush_outbox(self) -> None:
         if not self.outbox or not self.keys.writable:
             return
-        # Merge everything pending into one update to send.
-        merged = merge_updates(*self.outbox.values())
-        uid = secrets.token_hex(8)
-        self.outbox = {uid: merged}
+        # Merge what's pending into as few updates as fit the server's limit: one update for a
+        # whole new folder could be too big, and the server would refuse it every time.
+        batches: list[list[bytes]] = []
+        size = 0
+        for u in self.outbox.values():
+            if not batches or size + len(u) > UPDATE_BATCH:
+                batches.append([])
+                size = 0
+            batches[-1].append(u)
+            size += len(u)
+        self.outbox = {secrets.token_hex(8): merge_updates(*b) if len(b) > 1 else b[0] for b in batches}
         self.save()
-        await self._send_update(uid, merged)
+        for uid, u in list(self.outbox.items()):
+            await self._send_update(uid, u)
 
     # --- remote changes ------------------------------------------------------
     def _verify(self, prefix: bytes, data: bytes, sig: bytes, fresh: bool = False) -> bool:
