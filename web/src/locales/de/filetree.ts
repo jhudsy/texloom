@@ -34,6 +34,7 @@ const de: Catalog = {
   "New file…": "Neue Datei…",
   "New folder…": "Neuer Ordner…",
   "New file or folder in the selected folder, and more": "Neue Datei oder neuer Ordner im ausgewählten Ordner und mehr",
+  "Refresh from Zotero": "Aus Zotero aktualisieren",
 }
 
 export default de

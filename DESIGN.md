@@ -516,6 +516,24 @@ one to the projects it names.
   clients (`listcore.ts` and `tags.ts`; `listsync.py` and `tags.py`) are checked against the same
   test data. A folder on a server other than the list's keeps its tags on that computer only.
 
+## References and Zotero
+
+`web/src/references.ts` adds an entry from a DOI (or an arXiv id, as its DataCite DOI
+10.48550/arXiv.<id>) through doi.org's BibTeX, with a key like `vaswani2017attention`. Searching by
+title and authors asks Crossref (published work) and DataCite limited to arXiv, sorted by
+relevance (Crossref doesn't hold arXiv's DOIs), from the browser; both allow it, and only the
+words typed are sent.
+
+`web/src/zotero.ts` keeps a `.bib` file in step with a Zotero collection through api.zotero.org,
+also from the browser. Like any integration it has two levels. The **account** (an API key, the
+user id and name) is the person's: in `localStorage`, and in the project list's settings entry
+(`zotero`, beside `code`, the latest one set winning) so it follows them; never in a project. The
+**link** is the project's: `meta.zotero = {<file>: {lib, libName, coll, collName, format, by, at}}`,
+so collaborators see the file is generated and by whom; anyone whose own key reads that library can
+refresh it. A refresh exports the collection's top-level items as BibTeX or BibLaTeX (100 per
+request, using `Total-Results`) and applies the difference to the file (`applyText`), directly
+even in suggest mode, as the file is generated. Keys are Zotero's own.
+
 ## Copying a project
 
 `web/src/copyproject.ts` makes a new project (new keys, the copier as owner) from the current state

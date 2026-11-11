@@ -26,6 +26,8 @@ import { openPdfWindow, pdfWindowProject } from './pdfwindow'
 import { tags, type Tag } from './tags'
 import { manageTags, pickTags } from './tagdialogs'
 import { newProjectInApp, openInApp, sourceNote } from './openinapp'
+import { links as zoteroLinks, refresh as zoteroRefresh, zoteroAccount } from './zotero'
+import { zoteroAccountBox } from './zoteroui'
 import { createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
@@ -166,6 +168,8 @@ function startSettings() {
     h('h3', {}, t('Settings')),
     h('label', { class: 'field' }, t('Name'), nameIn),
     languagePicker(),
+    h('h4', {}, 'Zotero'),
+    zoteroAccountBox(),
     h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => { dlg.close(); refreshProjects() } }, t('Done'))))
 }
 
@@ -460,6 +464,8 @@ async function openProject(keys: Keys) {
   }, {
     preview: (p) => { preview.show(p); showInPanel(true); layout.reveal('right'); showTab('pdf') },
     compile: (p) => { showInPanel(false); layout.reveal('right'); showTab('pdf'); output.compile(true, false, p) },
+    zotero: (p) => (writable && zoteroLinks(r)[p] && zoteroAccount.get()
+      ? () => { zoteroRefresh(r, p, me.name).catch((e) => alert(e instanceof Error ? e.message : String(e))) } : null),
     insert: () => {
       const v = editor.view()
       if (!v || !isTexFile(editor.current())) return null
@@ -468,7 +474,7 @@ async function openProject(keys: Keys) {
   })
 
   // a reference (DOI / arXiv) and an import (zip / arXiv): in the file list's New menu
-  tree.addNew(t('Reference from a DOI or arXiv id…'), () => referenceDialog(r, index, (key) => {
+  tree.addNew(t('Reference…'), () => referenceDialog(r, index, (key) => {
     const v = editor.view(), f = editor.current()
     if (v && f?.endsWith('.tex')) v.dispatch(v.state.replaceSelection(`\\cite{${key}}`))
   }))

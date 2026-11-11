@@ -28,6 +28,8 @@ export interface FileTreeMenu {
   compile(path: string): void
   /** Put LaTeX at the editor's cursor; absent when no .tex file is open. */
   insert(): ((text: string) => void) | null
+  /** Fetch a file linked to a Zotero collection again; null when it isn't (or can't be here). */
+  zotero?(path: string): (() => void) | null
 }
 
 export function createFileTree(r: Replica, writable: boolean, onOpen: (path: string | null) => void, menu: FileTreeMenu): FileTree {
@@ -104,6 +106,7 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
       isDocument(r, path) && [t('Compile'), () => menu.compile(path)],
       insert && latex !== null && !/[{}\\%#]/.test(path) && [t('Insert {{latex}}', { latex }), () => insert(latex)],
       writable && !isBin && path.endsWith('.tex') && [t('Set as main file'), () => r.meta.set('main', path)],
+      !!menu.zotero?.(path) && [t('Refresh from Zotero'), () => menu.zotero?.(path)?.()],
       [t('Download'), () => { download(path).catch((e) => alert(String(e))) }],
       writable && [t('Rename or move'), () => rename(path, false)],
       writable && [t('Delete'), () => remove(path, false)],

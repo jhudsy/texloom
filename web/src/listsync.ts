@@ -12,6 +12,7 @@ import { b64d, b64e } from './crypto'
 import { canon, emptyList, emptySettings, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeSettings, mergeTags, passwordSecret, tidyTags, type ListDoc, type SettingsDoc, type TagDoc } from './listcore'
 import { projects } from './projects'
 import { creationCode } from './replica'
+import { zoteroAccount } from './zotero'
 import { tags } from './tags'
 
 /** The message is a code: needs-code, code-expired, list-full, list-retired, password-taken,
@@ -84,23 +85,39 @@ async function exchangeTags(secret: Uint8Array, list: ListDoc): Promise<boolean>
 // ---- settings: the creation code follows the list -----------------------------------------
 const settingsKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 'texloom list settings'))
 
-/** This browser's creation code, with when it was entered (one from before that was recorded
- *  counts as older than any that was). */
+/** Settings that follow the list: this browser's creation code and Zotero account, each with when
+ *  it was set (one from before that was recorded counts as older than any that was). */
+const SETTINGS: Record<string, { get(): string; at(): number; set(v: string, at: number): void }> = {
+  code: { get: () => creationCode.get(), at: () => creationCode.at(), set: (v, at) => creationCode.set(v, at) },
+  zotero: {
+    get: () => { const a = zoteroAccount.get(); return a ? JSON.stringify(a) : '' },
+    at: () => zoteroAccount.at(),
+    set: (v, at) => { try { zoteroAccount.set(v ? JSON.parse(v) : null, at) } catch {} },
+  },
+}
+
 function localSettings(): SettingsDoc {
-  const doc = emptySettings(), code = creationCode.get(), at = creationCode.at()
-  if (code || at) doc.s.code = { v: code, at: at || 1 }
+  const doc = emptySettings()
+  for (const [name, s] of Object.entries(SETTINGS)) {
+    const v = s.get(), at = s.at()
+    if (v || at) doc.s[name] = { v, at: at || 1 }
+  }
   return doc
 }
 
-/** Merge the creation code with the list's, so a code entered on one device works on the others
- *  (and in the TeXLoom app). True if this browser's code changed. */
+/** Merge these settings with the list's, so what's entered on one device works on the others
+ *  (and, for the creation code, in the TeXLoom app). True if any changed here. */
 async function exchangeSettings(secret: Uint8Array): Promise<boolean> {
   const local = localSettings()
   const doc = await update<SettingsDoc>(await settingsKey(secret), (had) => mergeSettings(had ?? emptySettings(), local), emptySettings())
-  const code = doc.s.code
-  if (!code || canon(code) === canon(local.s.code)) return false
-  creationCode.set(code.v, code.at)
-  return true
+  let changed = false
+  for (const [name, s] of Object.entries(SETTINGS)) {
+    const got = doc.s[name]
+    if (!got || canon(got) === canon(local.s[name])) continue
+    s.set(got.v, got.at)
+    changed = true
+  }
+  return changed
 }
 
 // ---- this browser --------------------------------------------------------------------------
@@ -133,7 +150,7 @@ export function saveSecret(secret: Uint8Array | null) {
 export const lastProblem = () => lastError
 /** Why tags aren't reaching the server, if they aren't; the list itself may be fine. */
 export const tagsProblem = () => tagsError
-const localState = () => canon({ list: projects.asList(), tags: tags.doc(), code: creationCode.get() })
+const localState = () => canon({ list: projects.asList(), tags: tags.doc(), settings: localSettings() })
 
 export function syncNow(): Promise<void> {
   if (!savedSecret()) return Promise.resolve()

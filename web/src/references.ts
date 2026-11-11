@@ -1,6 +1,7 @@
 // Add a bibliography entry from a DOI or arXiv id: fetched as BibTeX from doi.org
 // (arXiv papers have DOIs 10.48550/arXiv.<id>), given a readable key, and appended
-// to the project's .bib file.
+// to the project's .bib file. Or search by title and authors: Crossref for published work,
+// DataCite for arXiv preprints (whose DOIs Crossref doesn't hold), straight from the browser.
 import * as Y from 'yjs'
 import type { Replica } from './replica'
 import type { ProjectIndex } from './latex'
@@ -33,6 +34,49 @@ export async function fetchBibtex(doi: string): Promise<string> {
   if (!text.startsWith('@')) throw new Error(t('doi.org didn’t return BibTeX for this id.'))
   if (text.length > 50_000) throw new Error(t('The record is unexpectedly large.'))
   return text
+}
+
+/** A search result: enough to recognise the paper, and its DOI to fetch the entry. */
+export interface Found { doi: string; title: string; authors: string; year: string; venue: string }
+
+const names = (list: string[]) => (list.length > 3 ? `${list.slice(0, 3).join(', ')} et al.` : list.join(', '))
+
+async function crossref(q: string): Promise<Found[]> {
+  const u = new URL('https://api.crossref.org/works')
+  u.search = new URLSearchParams({ 'query.bibliographic': q, rows: '6', select: 'DOI,title,author,issued,container-title,type' }).toString()
+  const res = await fetch(u)
+  if (!res.ok) throw new Error(`Crossref ${res.status}`)
+  const items = (await res.json())?.message?.items ?? []
+  return items.filter((it: any) => it?.DOI && it.title?.[0]).map((it: any): Found => ({
+    doi: String(it.DOI), title: String(it.title[0]),
+    authors: names((it.author ?? []).map((a: any) => [a.given, a.family].filter(Boolean).join(' ') || a.name).filter(Boolean)),
+    year: String(it.issued?.['date-parts']?.[0]?.[0] ?? ''), venue: String(it['container-title']?.[0] ?? ''),
+  }))
+}
+
+async function arxiv(q: string): Promise<Found[]> {
+  const u = new URL('https://api.datacite.org/dois')
+  u.search = new URLSearchParams({ query: q, 'client-id': 'arxiv.content', sort: 'relevance', 'page[size]': '4', 'fields[dois]': 'doi,titles,creators,publicationYear' }).toString()
+  const res = await fetch(u)
+  if (!res.ok) throw new Error(`DataCite ${res.status}`)
+  const items = (await res.json())?.data ?? []
+  return items.filter((it: any) => it?.attributes?.doi && it.attributes.titles?.[0]?.title).map((it: any): Found => {
+    const a = it.attributes
+    return {
+      doi: String(a.doi), title: String(a.titles[0].title),
+      authors: names((a.creators ?? []).map((c: any) => (c.givenName && c.familyName ? `${c.givenName} ${c.familyName}` : c.name)).filter(Boolean)),
+      year: String(a.publicationYear ?? ''), venue: 'arXiv',
+    }
+  })
+}
+
+/** Papers matching words from their title and authors: published ones first, then arXiv preprints. */
+export async function searchWorks(q: string): Promise<Found[]> {
+  const [pub, pre] = await Promise.allSettled([crossref(q), arxiv(q)])
+  if (pub.status === 'rejected' && pre.status === 'rejected') throw pub.reason
+  const seen = new Set<string>()
+  return [...(pub.status === 'fulfilled' ? pub.value : []), ...(pre.status === 'fulfilled' ? pre.value : [])]
+    .filter((f) => { const k = f.doi.toLowerCase(); return !seen.has(k) && !!seen.add(k) })
 }
 
 /** Parse one BibTeX entry into type and fields (values keep their braces stripped of the outer pair). */
@@ -213,12 +257,14 @@ export async function addReference(r: Replica, index: ProjectIndex, input: strin
 
 /** A small dialog: paste a DOI/arXiv id, get a key back (inserted by the caller). */
 export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: string) => void, seed = '') {
-  const input = h('input', { placeholder: t('10.1145/361604.361612 or arXiv:1706.03762'), value: seed, 'aria-label': t('DOI or arXiv id'), style: 'width: 100%' })
-  const msg = h('p', { class: 'muted small' }, t('Paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.'))
+  const input = h('input', { placeholder: t('Title and authors, a DOI, or an arXiv id'), value: seed, 'aria-label': t('Title and authors, a DOI, or an arXiv id'), style: 'width: 100%' })
+  const HINT = () => t('Type words from the title and authors to search Crossref and arXiv, or paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.')
+  const msg = h('p', { class: 'muted small' }, HINT())
+  const results = h('ul', { class: 'refresults', hidden: true })
   const pre = h('pre', { class: 'bibpreview', hidden: true })
   const target = h('div', { class: 'reftarget' })
-  const go = h('button', { class: 'primary', onclick: () => run() }, t('Add reference'))
-  const dlg = dialog('refdlg', h('h3', {}, t('Add a reference')), input, target, msg, pre,
+  const go = h('button', { class: 'primary', onclick: () => run() }, t('Search or add'))
+  const dlg = dialog('refdlg', h('h3', {}, t('Add a reference')), input, target, msg, results, pre,
     h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Close')), go))
   const REMEMBER = `texloom.bibfile.${r.keys.project}`
   let plan = bibPlan(r, index)
@@ -259,11 +305,36 @@ export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: st
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run() } })
   render()
   input.focus()
+  const problem = (e: unknown, where: string) => String(e instanceof Error ? e.message : e)
+    .replace(/^(TypeError: )?(Failed to fetch|Load failed|NetworkError.*)$/, t('Couldn’t reach {{site}} (offline?).', { site: where }))
+
+  /** A DOI or arXiv id is added at once; anything else is searched for. */
   async function run() {
+    const q = input.value.trim()
+    if (!q) return
+    if (parseId(q)) return add(q)
+    if (q.length < 4) { msg.className = 'muted small'; msg.textContent = HINT(); return }
+    go.setAttribute('disabled', ''); msg.className = 'muted small'; msg.textContent = t('Searching…')
+    pre.hidden = true
+    try {
+      const found = await searchWorks(q)
+      results.replaceChildren(...found.map((f) => h('li', {},
+        h('button', { class: 'radio choice', onclick: () => { results.hidden = true; add(f.doi) } },
+          h('span', {}, h('b', {}, f.title),
+            h('small', { class: 'muted' }, [f.authors, [f.venue, f.year].filter(Boolean).join(' '), f.doi].filter(Boolean).join(' · ')))))))
+      results.hidden = !found.length
+      msg.textContent = found.length ? t('Choose the one to add:') : t('Nothing found. Try other words, or paste the DOI.')
+    } catch (e) {
+      msg.className = 'err small'
+      msg.textContent = problem(e, 'Crossref')
+    } finally { go.removeAttribute('disabled') }
+  }
+
+  async function add(value: string) {
     go.setAttribute('disabled', ''); msg.className = 'muted small'; msg.textContent = t('Fetching…')
     try {
       const file = chosen()
-      const a = await addReference(r, index, input.value, file)
+      const a = await addReference(r, index, value, file)
       onKey(a.key)
       msg.textContent = a.existed ? t('Already in {{file}} as “{{key}}”; cited it.', { file: a.file, key: a.key })
         : isSuggesting() ? t('Suggested adding it to {{file}} as “{{key}}”.', { file: a.file, key: a.key }) : t('Added to {{file}} as “{{key}}”.', { file: a.file, key: a.key })
@@ -276,7 +347,7 @@ export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: st
       render()
     } catch (e) {
       msg.className = 'err small'
-      msg.textContent = String(e instanceof Error ? e.message : e).replace(/^(TypeError: )?(Failed to fetch|Load failed|NetworkError.*)$/, t('Couldn’t reach doi.org (offline?).'))
+      msg.textContent = problem(e, 'doi.org')
     } finally { go.removeAttribute('disabled') }
   }
 }

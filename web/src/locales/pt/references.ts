@@ -7,10 +7,6 @@ const pt: Catalog = {
   'The record is unexpectedly large.': 'O registro é inesperadamente grande.',
   'That doesn’t look like a DOI (10.xxxx/…) or an arXiv id (e.g. 1706.03762).': 'Isso não parece um DOI (10.xxxx/…) nem um identificador do arXiv (ex.: 1706.03762).',
   'Couldn’t read the BibTeX that came back.': 'Não foi possível ler o BibTeX recebido.',
-  '10.1145/361604.361612 or arXiv:1706.03762': '10.1145/361604.361612 ou arXiv:1706.03762',
-  'DOI or arXiv id': 'DOI ou identificador do arXiv',
-  'Paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.': 'Cole um DOI, um link do doi.org ou do arXiv, ou um identificador do arXiv. A entrada é obtida do doi.org e adicionada ao seu arquivo .bib.',
-  'Add reference': 'Adicionar referência',
   'Add a reference': 'Adicionar uma referência',
   'Close': 'Fechar',
   '{{file}} (new file)': '{{file}} (novo arquivo)',
@@ -25,8 +21,14 @@ const pt: Catalog = {
   'Added to {{file}} as “{{key}}”.': 'Adicionado a {{file}} como “{{key}}”.',
   'Added {{line}} to {{main}}.': '{{line}} adicionado a {{main}}.',
   'Add {{line}} to your document to print it.': 'Adicione {{line}} ao seu documento para imprimi-la.',
-  'Couldn’t reach doi.org (offline?).': 'Não foi possível acessar doi.org (off-line?).',
   "Suggested adding it to {{file}} as “{{key}}”.": "Sugerido adicioná-lo a {{file}} como “{{key}}”.",
+  "Title and authors, a DOI, or an arXiv id": "Título e autores, um DOI ou um identificador do arXiv",
+  "Type words from the title and authors to search Crossref and arXiv, or paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.": "Digite palavras do título e dos autores para buscar no Crossref e no arXiv, ou cole um DOI, um link do doi.org ou do arXiv, ou um identificador do arXiv. A entrada é obtida do doi.org e adicionada ao seu arquivo .bib.",
+  "Search or add": "Buscar ou adicionar",
+  "Couldn’t reach {{site}} (offline?).": "Não foi possível acessar {{site}} (sem conexão?).",
+  "Searching…": "Buscando…",
+  "Choose the one to add:": "Escolha a que deseja adicionar:",
+  "Nothing found. Try other words, or paste the DOI.": "Nada encontrado. Tente outras palavras ou cole o DOI.",
 }
 
 export default pt

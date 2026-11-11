@@ -6,6 +6,7 @@ import { h, dialog } from './dom'
 import { detectMain } from './projectfiles'
 import { t, LANGUAGES, langPref, setLangPref, type Lang } from './i18n'
 import { editorMarkup, type Markup } from './review'
+import { zoteroSection } from './zoteroui'
 
 export type CompileWhere = 'browser' | 'local' | 'none'
 export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean; spell: boolean; mathPreview: boolean; checks: boolean }
@@ -206,6 +207,8 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
         h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => { dlg.close(); await chooseFolder() } }, t('Choose a folder…')))) : null,
       chooseFolder ? h('p', { class: 'muted small' }, t('Or, to keep it in sync without a browser (and compile with your own TeX):')) : null,
       folderHelp(r, link)),
+    h('h4', {}, 'Zotero'),
+    zoteroSection(r, () => prefs.name, w),
     h('h4', {}, t('Remove')),
     h('p', { class: 'muted small' },
       t('Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.')),

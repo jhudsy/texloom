@@ -6,11 +6,6 @@ const fr: Catalog = {
   'The record is unexpectedly large.': 'La notice est anormalement volumineuse.',
   'That doesn’t look like a DOI (10.xxxx/…) or an arXiv id (e.g. 1706.03762).': 'Cela ne ressemble ni à un DOI (10.xxxx/…) ni à un identifiant arXiv (p. ex. 1706.03762).',
   'Couldn’t read the BibTeX that came back.': 'Impossible de lire le BibTeX reçu.',
-  '10.1145/361604.361612 or arXiv:1706.03762': '10.1145/361604.361612 ou arXiv:1706.03762',
-  'DOI or arXiv id': 'DOI ou identifiant arXiv',
-  'Paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.':
-    'Collez un DOI, un lien doi.org ou arXiv, ou un identifiant arXiv. L’entrée est récupérée sur doi.org et ajoutée à votre fichier .bib.',
-  'Add reference': 'Ajouter la référence',
   'Add a reference': 'Ajouter une référence',
   'Close': 'Fermer',
   '{{file}} (new file)': '{{file}} (nouveau fichier)',
@@ -25,7 +20,13 @@ const fr: Catalog = {
   'Added to {{file}} as “{{key}}”.': 'Ajoutée à {{file}} sous la clé « {{key}} ».',
   'Added {{line}} to {{main}}.': '{{line}} ajouté à {{main}}.',
   'Add {{line}} to your document to print it.': 'Ajoutez {{line}} à votre document pour y faire apparaître la bibliographie.',
-  'Couldn’t reach doi.org (offline?).': 'Impossible de joindre doi.org (hors ligne ?).',
   "Suggested adding it to {{file}} as “{{key}}”.": "Ajout à {{file}} sous « {{key}} » suggéré.",
+  "Title and authors, a DOI, or an arXiv id": "Titre et auteurs, un DOI ou un identifiant arXiv",
+  "Type words from the title and authors to search Crossref and arXiv, or paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.": "Tapez des mots du titre et des auteurs pour chercher dans Crossref et arXiv, ou collez un DOI, un lien doi.org ou arXiv, ou un identifiant arXiv. L’entrée est récupérée sur doi.org et ajoutée à votre fichier .bib.",
+  "Search or add": "Chercher ou ajouter",
+  "Couldn’t reach {{site}} (offline?).": "Impossible de joindre {{site}} (hors ligne ?).",
+  "Searching…": "Recherche…",
+  "Choose the one to add:": "Choisissez celle à ajouter :",
+  "Nothing found. Try other words, or paste the DOI.": "Aucun résultat. Essayez d’autres mots, ou collez le DOI.",
 }
 export default fr

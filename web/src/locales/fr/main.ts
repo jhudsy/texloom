@@ -143,7 +143,6 @@ const fr: Catalog = {
   'Projects per page': 'Projets par page',
   '{{n}} per page': '{{n}} par page',
   'All on one page': 'Tous sur une page',
-  "Reference from a DOI or arXiv id…": "Référence à partir d’un DOI ou d’un identifiant arXiv…",
   "Import a .zip (e.g. Overleaf) or arXiv paper…": "Importer un .zip (par ex. Overleaf) ou un article arXiv…",
   "Download the source (.zip)": "Télécharger les sources (.zip)",
   "The owner deleted this project for everyone. This browser keeps a read-only copy.": "Le propriétaire a supprimé ce projet pour tout le monde. Ce navigateur en garde une copie en lecture seule.",
@@ -159,5 +158,6 @@ const fr: Catalog = {
   "In the TeXLoom app: the app on this computer keeps this project in a folder. Click to show it there.": "Dans l’application TeXLoom : l’application de cet ordinateur garde ce projet dans un dossier. Cliquez pour l’y afficher.",
   "Sync to a folder…: keep this project in a folder on this computer, using the TeXLoom app": "Synchroniser avec un dossier… : garder ce projet dans un dossier de cet ordinateur, avec l’application TeXLoom",
   "{{name}} is in the TeXLoom app": "{{name}} est dans l’application TeXLoom",
+  "Reference…": "Référence…",
 }
 export default fr

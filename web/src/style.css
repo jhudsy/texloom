@@ -507,7 +507,9 @@ aside .tab.symtab { flex-shrink: 0; }
 .outline li { display: flex; gap: 6px; padding: 3px 8px; cursor: pointer; align-items: baseline; }
 .outline .otitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .outline .lvl0 { font-weight: 600; }
-.refdlg { width: min(560px, 92vw); }
+.refdlg { width: min(620px, 92vw); }
+.refresults { list-style: none; padding: 0; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; max-height: 45vh; overflow: auto; }
+.refresults[hidden] { display: none; }
 .bibpreview { background: var(--panel); padding: 8px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; max-height: 40vh; overflow: auto; }
 .tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
 .tgrid.two { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
@@ -557,3 +559,8 @@ dialog.templates h4 { margin: 16px 0 8px; font-size: 13px; color: var(--muted); 
 
 /* "Free software (AGPL-3.0): source code · licences" at the foot of the start page and Settings */
 .source-note { margin-top: 1.5em; }
+
+/* Zotero links in project Settings */
+.zotero .zlink { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+.zotero .zlink .spacer, .zotero-account .spacer { flex: 1; }
+.zotero code { font-size: 12px; }

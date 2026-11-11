@@ -143,7 +143,6 @@ const zh: Catalog = {
   'Projects per page': '每页项目数',
   '{{n}} per page': '每页 {{n}} 个',
   'All on one page': '全部显示在一页',
-  "Reference from a DOI or arXiv id…": "从 DOI 或 arXiv 编号添加参考文献…",
   "Import a .zip (e.g. Overleaf) or arXiv paper…": "导入 .zip（例如来自 Overleaf）或 arXiv 论文…",
   "Download the source (.zip)": "下载源文件（.zip）",
   "The owner deleted this project for everyone. This browser keeps a read-only copy.": "所有者已为所有人删除此项目。此浏览器保留一份只读副本。",
@@ -159,6 +158,7 @@ const zh: Catalog = {
   "In the TeXLoom app: the app on this computer keeps this project in a folder. Click to show it there.": "在 TeXLoom 应用中：这台电脑上的应用把此项目保存在一个文件夹中。点击可在应用中查看。",
   "Sync to a folder…: keep this project in a folder on this computer, using the TeXLoom app": "同步到文件夹…：使用 TeXLoom 应用把此项目保存在这台电脑上的文件夹中",
   "{{name}} is in the TeXLoom app": "{{name}} 在 TeXLoom 应用中",
+  "Reference…": "参考文献…",
 }
 
 export default zh

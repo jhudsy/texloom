@@ -34,6 +34,7 @@ const zh: Catalog = {
   "New file…": "新建文件…",
   "New folder…": "新建文件夹…",
   "New file or folder in the selected folder, and more": "在所选文件夹中新建文件或文件夹，以及更多",
+  "Refresh from Zotero": "从 Zotero 刷新",
 }
 
 export default zh

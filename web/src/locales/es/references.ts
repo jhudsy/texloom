@@ -7,10 +7,6 @@ const es: Catalog = {
   'The record is unexpectedly large.': 'El registro es inesperadamente grande.',
   'That doesn’t look like a DOI (10.xxxx/…) or an arXiv id (e.g. 1706.03762).': 'Eso no parece un DOI (10.xxxx/…) ni un identificador de arXiv (p. ej., 1706.03762).',
   'Couldn’t read the BibTeX that came back.': 'No se pudo leer el BibTeX recibido.',
-  '10.1145/361604.361612 or arXiv:1706.03762': '10.1145/361604.361612 o arXiv:1706.03762',
-  'DOI or arXiv id': 'DOI o identificador de arXiv',
-  'Paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.': 'Pega un DOI, un enlace de doi.org o de arXiv, o un identificador de arXiv. La entrada se obtiene de doi.org y se añade a tu archivo .bib.',
-  'Add reference': 'Añadir referencia',
   'Add a reference': 'Añadir una referencia',
   'Close': 'Cerrar',
   '{{file}} (new file)': '{{file}} (archivo nuevo)',
@@ -25,8 +21,14 @@ const es: Catalog = {
   'Added to {{file}} as “{{key}}”.': 'Añadido a {{file}} como «{{key}}».',
   'Added {{line}} to {{main}}.': '{{line}} añadido a {{main}}.',
   'Add {{line}} to your document to print it.': 'Añade {{line}} a tu documento para imprimirla.',
-  'Couldn’t reach doi.org (offline?).': 'No se pudo conectar con doi.org (¿sin conexión?).',
   "Suggested adding it to {{file}} as “{{key}}”.": "Se ha sugerido añadirlo a {{file}} como «{{key}}».",
+  "Title and authors, a DOI, or an arXiv id": "Título y autores, un DOI o un identificador de arXiv",
+  "Type words from the title and authors to search Crossref and arXiv, or paste a DOI, a doi.org or arXiv link, or an arXiv id. The entry is fetched from doi.org and added to your .bib file.": "Escriba palabras del título y de los autores para buscar en Crossref y arXiv, o pegue un DOI, un enlace de doi.org o arXiv, o un identificador de arXiv. La entrada se obtiene de doi.org y se añade a su archivo .bib.",
+  "Search or add": "Buscar o añadir",
+  "Couldn’t reach {{site}} (offline?).": "No se pudo contactar con {{site}} (¿sin conexión?).",
+  "Searching…": "Buscando…",
+  "Choose the one to add:": "Elija la que quiere añadir:",
+  "Nothing found. Try other words, or paste the DOI.": "No se encontró nada. Pruebe con otras palabras o pegue el DOI.",
 }
 
 export default es

@@ -215,8 +215,27 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   filled in. **New → Import…** in
   the file list does the same for an existing project. From git: clone it and run
   `texloom new` in the folder.
-- **New → Reference…** in the file list adds a bibliography entry from a DOI or arXiv id (via doi.org) with a
-  readable key such as `vaswani2017attention`, and cites it at the cursor.
+- **New → Reference…** in the file list adds a bibliography entry with a readable key such as
+  `vaswani2017attention`, and cites it at the cursor. Type words from the title and authors to search
+  (Crossref for published work, DataCite for arXiv preprints) and pick the paper, or paste a DOI, a
+  doi.org or arXiv link, or an arXiv id. The entry comes from doi.org.
+- **Zotero:** project ⚙ Settings → **Zotero** keeps a `.bib` file in step with a Zotero collection (or
+  a whole library, yours or a group's). Connect once with a Zotero API key (made at
+  zotero.org/settings/keys, read access is enough): it stays in your browser, and with a project
+  list it travels with the list, encrypted, like the creation code; it never enters a project.
+  **Link a collection…** picks the collection, BibTeX or BibLaTeX and the file, and fetches it;
+  **Refresh** there (or right-click the file → **Refresh from Zotero**) fetches it again, changing
+  only what changed. The link is part of the project, so collaborators see that the file is
+  generated, by whom and when; anyone whose key can read the collection (say, a shared Zotero
+  group) can refresh it. Keys are Zotero's own (`smithtitle2020`). Edit entries in Zotero: a refresh
+  replaces hand edits to a linked file.
+- **Zotero with Better BibTeX, through a folder:** with the [TeXLoom app](#working-on-a-project-as-a-folder)
+  keeping the project in a folder, Zotero's [Better BibTeX](https://retorque.re/zotero-better-bibtex/)
+  plugin can do this without the web app: right-click a collection in Zotero → **Export
+  Collection…** → *Better BibTeX* (or *Better BibLaTeX*), tick **Keep updated**, and save the file
+  into the project's folder. Better BibTeX rewrites it whenever the collection changes, and the app
+  syncs it to everyone. Better BibTeX's citation keys are stable and configurable, which some
+  people prefer to Zotero's own.
 - **Offline:** after the first visit the app (and, after one compile, the TeX engine) works
   offline; browsers offer to install it as an app.
 - **Files:** the tree has folders. **New** (file, folder, reference, import) and **Upload** work in the selected folder,

@@ -34,6 +34,7 @@ const pt: Catalog = {
   "New file…": "Novo arquivo…",
   "New folder…": "Nova pasta…",
   "New file or folder in the selected folder, and more": "Novo arquivo ou pasta na pasta selecionada, e mais",
+  "Refresh from Zotero": "Atualizar do Zotero",
 }
 
 export default pt

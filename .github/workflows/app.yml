@@ -29,7 +29,15 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Qt's system libraries (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0
+        # Ubuntu's own archive after the runner's mirror (which has had outages), and a few tries
+        run: |
+          echo "http://archive.ubuntu.com/ubuntu/	priority:9" | sudo tee -a /etc/apt/apt-mirrors.txt
+          for i in 1 2 3; do
+            sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 \
+              libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 && exit 0
+            sleep 30
+          done
+          exit 1
       - run: uv sync --extra app
       - run: uv run python scripts/licences.py  # the licences of exactly what's bundled, for the About box
       - name: Check that the app starts
