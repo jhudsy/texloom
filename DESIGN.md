@@ -280,6 +280,12 @@ relay) as the fallback for symmetric NATs.
   than being overwritten.
 - CRDT → disk: write the merged file. If the file changed on disk since the last
   sync, ingest that change first.
+- Renames on disk: a rename reaches the sync as a deletion and an addition, perhaps in
+  different batches. A file gone from disk whose last synced content (by hash) is now in a
+  file the project doesn't have yet has moved there, and moves as renaming in the web app
+  does (`movePath`): the text is copied and comments and suggestions are anchored at the same
+  spots in the copy; the main-file setting follows. With several candidates, one with the
+  same file name is preferred (a renamed folder). The browser's folder sync does the same.
 - Ignores build products (`*.aux`, `*.log`, `*.synctex.gz`, the main PDF, …) and
   `.texloom/`, `.git/`.
 - `--compile`: run `latexmk` after changes (debounced) and publish PDF + log to `out`.
@@ -574,8 +580,6 @@ symlinks) into a new folder and shares that as a new project with the same setti
 
 - Deleting a project for everyone stops it on its server only. Anyone with a copy can still read
   it, and could share it as a new project; it can't take back what people already have.
-- Renaming a file on disk, in a folder kept in sync, reaches the project as one file deleted and
-  another added, so comments and suggestions on it lose their place (renaming in the app keeps them).
 - Two peers who both *create* (or upload) the same path while apart: Yjs keeps one value
   per map key and deletes the other everywhere. `web/src/clashes.ts` finds the loser (a
   deleted value for the key that no later write saw: no item has it as `origin`) and

@@ -2,7 +2,7 @@
 // other Chromium browsers: the File System Access API), with nothing to install.
 // Works while the tab is open; the texloom helper does the same without a browser.
 import type { Replica } from './replica'
-import { cleanPath, isText, mainFile, putBinary, putText } from './projectfiles'
+import { cleanPath, isText, mainFile, movePath, putBinary, putText } from './projectfiles'
 import { applyText, merge3 } from './diff'
 import { addedProgramLines, type ProgramLine } from './texscan'
 import { tn, t, locale } from './i18n'
@@ -185,6 +185,32 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     for (const d of diskDirs) if (r.dirs.has(d)) knownDirs.add(d)
     const main = mainFile(r)
     const ownPdf = main ? main.replace(/\.tex$/, '.pdf') : null // compiled on this computer: output, not source
+    // Renamed or moved in the folder: a file gone from it whose last synced content is now in a
+    // file the project doesn't have yet has moved there. It moves as renaming here does
+    // (movePath), so comments and suggestions on it follow. Same rule as _moves() in texloom/folder.py.
+    const gone = Object.keys(known).filter((p) => !disk.has(p))
+    if (gone.length) {
+      const sizes = new Set(gone.map((g) => known[g].z))
+      const name = (x: string) => x.slice(x.lastIndexOf('/') + 1)
+      for (const [p, fh] of disk) {
+        if (!gone.length) break
+        if (cleanPath(p) !== p || known[p] || r.files.has(p) || r.bin.has(p) || p === ownPdf) continue
+        const f = await fh.getFile()
+        if (!sizes.has(f.size)) continue
+        const data = new Uint8Array(await f.arrayBuffer())
+        const text = isText(p, data)
+        const h = text !== null ? await sha(data) : await r.keys.blobId(data)
+        const same = gone.filter((g) => known[g].h === h)
+        if (!same.length) continue
+        const from = same.find((g) => name(g) === name(p)) ?? same[0] // the same name first, as when a folder is renamed
+        gone.splice(gone.indexOf(from), 1)
+        movePath(r, from, p)
+        if (base.has(from)) { base.set(p, base.get(from)!); base.delete(from) }
+        delete known[from]
+        known[p] = { h, m: f.lastModified, z: f.size }; remember(p, h); n++
+        if (text !== null && r.files.get(p)?.toString() !== text) rewrite = true // collaborators changed it since
+      }
+    }
     for (const [p, fh] of disk) {
       const path = cleanPath(p)
       if (!path || path === ownPdf) continue

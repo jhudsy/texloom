@@ -17,7 +17,7 @@ import shutil
 import time
 from pathlib import Path
 
-from pycrdt import Text
+from pycrdt import Assoc, Map, StickyIndex, Text
 from watchfiles import awatch
 
 from .replica import BLOB_RE, Replica
@@ -197,6 +197,41 @@ def apply_text(ytext: Text, old: str, new: str) -> None:
             ytext.insert(b_start, repl)
 
 
+def move_file(r: Replica, review: Map, a: str, b: str) -> None:
+    """Move file `a` to `b` in the project, as renaming in the web app does (movePath in
+    web/src/projectfiles.ts): the text is copied to the new path, and the comments and
+    suggestions on it are anchored at the same spots in the copy. Call inside a change."""
+    yt = r.files.get(a)
+    if yt is not None:
+        s = str(yt)
+        r.files[b] = Text(s)
+        moved = r.files[b]
+        n16 = len(s.encode("utf-16-le")) // 2  # anchors count UTF-16 units
+        for m in review.values():
+            if not isinstance(m, Map) or m.get("file") != a:
+                continue
+            for key in ("start", "end"):
+                raw = m.get(key)
+                if not isinstance(raw, (bytes, bytearray)) or not raw:
+                    continue
+                try:
+                    old = StickyIndex.decode(bytes(raw), yt)
+                    k = old.get_index()
+                    if 0 <= k <= n16:
+                        m[key] = moved.sticky_index(k, Assoc(old.assoc)).encode()
+                except (KeyboardInterrupt, SystemExit):
+                    raise
+                except BaseException:  # noqa: BLE001 - a damaged anchor (pycrdt panics): it stays as it was
+                    pass
+            m["file"] = b
+        del r.files[a]
+    if a in r.bin:
+        r.bin[b] = dict(r.bin[a])
+        del r.bin[a]
+    if r.meta.get("main") == a:
+        r.meta["main"] = b
+
+
 class FolderSync:
     def __init__(self, root: Path, replica: Replica, compile_: bool = False,
                  compile_opts: dict | None = None):
@@ -337,6 +372,41 @@ class FolderSync:
         """The file holds a version this folder had earlier, not the latest: a replay."""
         return h in self.recent.get(rel, [])[:-1]
 
+    def _moves(self, paths: set[str]) -> dict[str, tuple[str, str]]:
+        """Files renamed or moved on disk: new path -> (old path, hash). A rename reaches us as a
+        deletion and an addition, maybe in different batches: a file gone from disk whose last
+        synced content is now in a file the project doesn't have yet has moved there."""
+        def usable(rel: str) -> bool:
+            return not self.ignored(rel) and safe_rel(rel) is not None
+        gone = [rel for rel in sorted(paths) if rel in self.known and usable(rel) and not (self.root / rel).is_file()]
+        if not gone:
+            return {}
+        sizes = {self.known[g].get("z") for g in gone}
+
+        def fresh(rel: str) -> bool:
+            if rel in self.known or rel in self.r.files or rel in self.r.bin or not usable(rel):
+                return False
+            try:
+                return (self.root / rel).stat().st_size in sizes
+            except OSError:
+                return False
+        new = [rel for rel in sorted(paths) if fresh(rel)]
+        if len(new) < len(gone):  # the other half of a rename may come in a later batch
+            new += [rel for rel in sorted(set(self.disk_files()) - set(paths)) if fresh(rel)]
+        out: dict[str, tuple[str, str]] = {}
+        for rel in new:
+            try:
+                data = (self.root / rel).read_bytes()
+            except OSError:
+                continue
+            h = sha(data) if is_text(rel, data) else self.r.keys.blob_id(data)
+            same = [g for g in gone if self.known[g].get("h") == h]
+            if same:  # the same name in another folder first, as when a folder is renamed
+                old = next((g for g in same if g.rsplit("/", 1)[-1] == rel.rsplit("/", 1)[-1]), same[0])
+                gone.remove(old)
+                out[rel] = (old, h)
+        return out
+
     # --- disk -> CRDT ----------------------------------------------------------
     async def ingest_all(self) -> None:
         await self.ingest(set(self.disk_files()) | set(self.known))
@@ -348,6 +418,26 @@ class FolderSync:
             return
         changed = False
         ups: set[str] = set()  # files changed here and sent
+        moves = self._moves(paths)
+        if moves:
+            review = self.r.doc.get("review", type=Map)
+
+            def move_all():
+                for new, (old, _h) in moves.items():
+                    move_file(self.r, review, old, new)
+            self.r.local_change(move_all)
+            for new, (old, h) in moves.items():
+                del self.known[old]
+                self._remember(new, h)
+                if old in self.base:
+                    self.base[new] = self.base.pop(old)
+                yt = self.r.files.get(new)
+                if yt is not None and sha(str(yt).encode()) != h:
+                    self._rewrite = True  # collaborators changed it since it was last synced
+                log.info("%s → %s", old, new)
+                ups.add(new)
+            changed = True
+            paths = paths - set(moves) - {old for old, _h in moves.values()}
         for rel in sorted(paths):
             if self.ignored(rel):
                 continue
