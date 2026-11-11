@@ -84,6 +84,10 @@ RATE_WINDOW, RATE_MSGS, RATE_BYTES = 10.0, 600, 160 * MiB  # per connection
 HELLOS_PER_WINDOW = 5  # a log reply can be large: don't let one connection ask for it in a loop
 MAX_CONNECTIONS = 2000
 PURGE_PAUSE = 0.01  # seconds between deleted projects: lets live editing through
+# Stored files of an evicted, relay-only or deleted project are erased a batch at a time, between
+# other work: SQLite reads every page of a row to free it, which for hundreds of MB on a cold disk
+# would hold up every connection for seconds.
+REAP_BATCH = 16 * MiB
 MODE_SKEW = 600  # seconds a signed mode-change command stays valid
 MAX_REVOKED = 1000  # revocations kept per project
 # Compacted edits are remembered by hash so a replay of one isn't stored again. Only the most
@@ -428,6 +432,17 @@ class Store:
         self.seen: dict[str, float] = {p: max(s, c) for p, s, c in self.db.execute("SELECT project, seen, created FROM projects")}
         self.dir = path.parent
         self.meta_tokens, self.meta_at = float(META_BURST), time.monotonic()
+        # Stored files waiting to be erased (see REAP_BATCH): rowid -> (project, id, size). They no
+        # longer count, can't be fetched, and an upload of the same content keeps the row instead.
+        self.doomed: dict[int, tuple[str, str, int]] = {}
+        self.doomed_bytes: dict[str, int] = defaultdict(int)
+        self._reaper: asyncio.Task | None = None
+        # files a stop left behind, of projects that keep none. (An evicted project's leftovers stay:
+        # its writers may have uploaded again since, and what is there is valid content.)
+        left = self.db.execute("SELECT DISTINCT project FROM blob WHERE project IN "
+                               "(SELECT project FROM deleted UNION SELECT project FROM mode WHERE relay=1)").fetchall()
+        for (project,) in left:
+            self._drop_files(project)
 
     # --- registration & accounting -------------------------------------------
     def owner(self, project: str) -> str | None:
@@ -494,12 +509,11 @@ class Store:
         freed = self.usage.get(project, 0)
         with self.db:
             self.db.execute("DELETE FROM log WHERE project=?", (project,))
-            self.db.execute("DELETE FROM blob WHERE project=?", (project,))
             self.db.execute("DELETE FROM gone WHERE project=?", (project,))
             self.db.execute("INSERT INTO floor(project, seq) VALUES (?,?) "
                             "ON CONFLICT(project) DO UPDATE SET seq=excluded.seq", (project, self.head(project)))
             self.db.execute("UPDATE projects SET evicted=? WHERE project=?", (time.time(), project))
-        self._recount(project)
+        self._drop_files(project)
         return freed
 
     def owner_usage(self, owner: str) -> int:
@@ -515,6 +529,7 @@ class Store:
         n += self.db.execute("SELECT COALESCE(SUM(length(data)), 0) FROM blob WHERE project=?",
                              (project,)).fetchone()[0]
         n += GONE_COST * self.db.execute("SELECT COUNT(*) FROM gone WHERE project=?", (project,)).fetchone()[0]
+        n -= self.doomed_bytes.get(project, 0)
         self._grew(project, n - self.usage[project])
 
     def free_disk(self) -> int:
@@ -633,9 +648,11 @@ class Store:
                             "ON CONFLICT(project) DO UPDATE SET relay=excluded.relay", (project, int(relay_only)))
             if relay_only:  # forget everything we stored for this project
                 self.db.execute("DELETE FROM log WHERE project=?", (project,))
-                self.db.execute("DELETE FROM blob WHERE project=?", (project,))
                 self.db.execute("DELETE FROM gone WHERE project=?", (project,))
-        self._recount(project)
+        if relay_only:
+            self._drop_files(project)
+        else:
+            self._recount(project)
 
     # --- deleted for everyone ---------------------------------------------------------
 
@@ -650,17 +667,64 @@ class Store:
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO deleted(project, at, sig, ts) VALUES (?,?,?,?)", (project, at, sig, ts))
             # the tombstone above is all that's kept: its registration (owner, dates) goes too
-            for table in ("log", "blob", "gone", "head", "floor", "mode", "projects"):
+            for table in ("log", "gone", "head", "floor", "mode", "projects"):
                 self.db.execute(f"DELETE FROM {table} WHERE project=?", (project,))  # noqa: S608 - fixed names
         msg = self.deleted.setdefault(project, self._deleted_msg(at, ts, sig))  # a second deletion keeps the first
-        self._recount(project)
+        self._drop_files(project)
         self.owners.pop(project, None)  # its bytes came off its owner in _recount
         self.usage.pop(project, None)
         self.seen.pop(project, None)
         return msg
 
+    def _drop_files(self, project: str) -> None:
+        """Erase a project's stored files: at once they no longer count or can be fetched, and the
+        rows go a batch at a time in the background (see REAP_BATCH), or now if nothing is running."""
+        for rowid, bid, n in self.db.execute("SELECT rowid, id, length(data) FROM blob WHERE project=?", (project,)).fetchall():
+            if rowid not in self.doomed:
+                self.doomed[rowid] = (project, bid, n)
+                self.doomed_bytes[project] += n
+        self._recount(project)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # the command line: nothing to hold up
+            while self.doomed:
+                self._reap_some()
+            return
+        if self.doomed and (self._reaper is None or self._reaper.done()):
+            self._reaper = loop.create_task(self._reap())
+
+    def _reap_some(self) -> None:
+        batch, size = [], 0
+        for rowid, (project, bid, n) in self.doomed.items():
+            batch.append((rowid, project, bid, n))
+            size += n
+            if size >= REAP_BATCH:
+                break
+        with self.db:
+            # by rowid, and only the very row that was doomed (a rowid could in principle be reused)
+            self.db.executemany("DELETE FROM blob WHERE rowid=? AND project=? AND id=?", [b[:3] for b in batch])
+        for rowid, project, _bid, n in batch:
+            del self.doomed[rowid]
+            self.doomed_bytes[project] -= n  # it no longer counted: usage stays as it is
+            if not self.doomed_bytes[project]:
+                del self.doomed_bytes[project]
+
+    async def _reap(self) -> None:
+        while self.doomed:
+            try:
+                self._reap_some()
+            except sqlite3.Error:
+                log.exception("erasing stored files")
+                return  # left for the next deletion, or the next start
+            await asyncio.sleep(0)
+
+    def _live_row(self, project: str, bid: str) -> tuple[int, int] | None:
+        """A stored file's rowid and size, unless it is waiting to be erased."""
+        row = self.db.execute("SELECT rowid, length(data) FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
+        return row if row and row[0] not in self.doomed else None
+
     def has_blob(self, project: str, bid: str) -> bool:
-        return self.db.execute("SELECT 1 FROM blob WHERE project=? AND id=?", (project, bid)).fetchone() is not None
+        return self._live_row(project, bid) is not None
 
     def put_blob(self, project: str, bid: str, data: bytes, kind: str = "file") -> None:
         with self.db:
@@ -668,6 +732,17 @@ class Store:
                                   (project, bid, data, kind))
         if cur.rowcount:
             self._grew(project, len(data))
+            return
+        # The row is there but waiting to be erased: keep it instead. Ids name the content, so it
+        # holds the same file (encrypted differently, which readers don't mind).
+        row = self.db.execute("SELECT rowid FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
+        if row and (gone := self.doomed.pop(row[0], None)):
+            self.doomed_bytes[project] -= gone[2]
+            if not self.doomed_bytes[project]:
+                del self.doomed_bytes[project]
+            if kind == "file":
+                self.mark_file(project, bid)
+            self._recount(project)
 
     def mark_file(self, project: str, bid: str) -> None:
         """Content uploaded as a project file is a file, even if it was first stored as output."""
@@ -675,6 +750,8 @@ class Store:
             self.db.execute("UPDATE blob SET kind='file' WHERE project=? AND id=? AND kind!='file'", (project, bid))
 
     def delete_blob(self, project: str, bid: str, any_kind: bool) -> bool:
+        if self._live_row(project, bid) is None:
+            return False  # not there, or already on its way out
         with self.db:
             cur = self.db.execute("DELETE FROM blob WHERE project=? AND id=?" + ("" if any_kind else " AND kind='output'"),
                                   (project, bid))
@@ -684,7 +761,7 @@ class Store:
 
     def find_blob(self, project: str, bid: str) -> tuple[int, int] | None:
         """Where a stored file is, and its size."""
-        return self.db.execute("SELECT rowid, length(data) FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
+        return self._live_row(project, bid)
 
     async def read_blob(self, rowid: int, project: str, bid: str):
         """A stored file, a piece at a time. Its own connection, so a slow download holds nothing up.

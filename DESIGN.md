@@ -200,6 +200,13 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   are remembered, each counting 100 bytes against the allowance, and eviction, purging or
   going relay-only forgets them. An older replay is harmless: updates are idempotent, and
   it counts against the allowance only until the next snapshot.
+- **Erasing:** when a project is evicted, purged, made relay-only or deleted for everyone,
+  its stored files stop counting and can no longer be fetched at once, but their rows are
+  erased 16 MiB at a time between other work (`Store._drop_files`). SQLite reads every page
+  of a row to free it, so erasing hundreds of MB in one go would hold up every connection.
+  An upload of a file waiting to be erased keeps its row instead (ids name the content). A
+  stop part-way is finished at the next start for deleted and relay-only projects; an
+  evicted project's leftovers stay and count again, as its writers may have uploaded since.
 - **Memory:** WebSocket frames are read whole before they can be checked, so they are
   capped at 16 MiB, and large frames being handled are capped server-wide (192 MiB).
   Files go over HTTP (≤ 50 MiB, a few uploads read at a time), or peer to peer
@@ -586,10 +593,6 @@ symlinks) into a new folder and shares that as a new project with the same setti
   holders with no copy can't open an evicted project until a writer returns.
 - Browser storage can be evicted: request persistent storage; the server copy and
   daemon copies are the backup.
-- Deleting a project's data on the server (delete for everyone, idle eviction, purging an
-  unused project) runs in one go on the relay's event loop, so for a very large project
-  other connections wait until it finishes. Fix: delete in batches, yielding between them,
-  or hand it to a worker thread.
 - The desktop app refreshes its project list every second, reading each project's tags
   again and rebuilding every row. Fine for tens of projects; for many more, keep the tags
   until their file changes and update only rows whose state changed.
