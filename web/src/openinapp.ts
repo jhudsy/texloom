@@ -46,7 +46,7 @@ export function newProjectInApp() {
   const send = () => { location.href = `texloom://new?${q}` }
   const dlg = dialog('settings',
     h('h3', {}, t('Opening the TeXLoom app…')),
-    h('p', {}, t('The app will ask which folder to use, then upload its files, encrypted, and keep the folder in sync with the project. Once it’s made, Open in browser in the app opens it here; with a project list it also appears under Your projects.')),
+    h('p', {}, t('The app will ask which folder to use, then upload its files, encrypted, and keep the folder in sync with the project. Once it’s made, the app opens it in your browser, which also puts it under Your projects.')),
     h('p', { class: 'muted' }, t('If nothing happens, the app probably isn’t installed. Just installed it? Open it once, then press Try again.')),
     h('p', { class: 'muted' }, t('In the app, this is Add project ▸ New project from a folder….')),
     h('div', { class: 'row end' },

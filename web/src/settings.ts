@@ -62,8 +62,9 @@ const problemText = (p: string) => ({ 'needs-code': t('needs code'), 'quota-full
 
 const engineNote = async () => (await engineCached()) ? t('already downloaded on this browser') : t('one-time download of ≈125 MB, shared by all projects')
 
-/** Shown the first time a link is opened in this browser. */
-export async function setupDialog(r: Replica, link: string): Promise<Device> {
+/** Shown the first time a link is opened in this browser. `byApp`: the desktop app opened it,
+ *  and already keeps the project in a folder, so where the files live isn't a question. */
+export async function setupDialog(r: Replica, link: string, byApp = false): Promise<Device> {
   const d = prefs.device(r.keys.project)
   const note = await engineNote()
   const nameIn = h('input', { value: prefs.name, placeholder: t('Shown to collaborators') }) as HTMLInputElement
@@ -73,8 +74,9 @@ export async function setupDialog(r: Replica, link: string): Promise<Device> {
       h('h3', {}, t('Open “{{name}}”', { name: r.meta.get('name') || t('project') })),
       h('p', { class: 'muted' }, r.keys.writable ? t('You can edit this project.') : t('This is a read-only link.')),
       h('label', { class: 'field' }, t('Your name'), nameIn),
-      h('h4', {}, t('Where do the files live?')),
-      radios('where', 'browser', [
+      byApp ? h('p', { class: 'muted' }, t('The TeXLoom app on this computer keeps this project in sync with a folder. This browser keeps a copy of its own as well.')) : '',
+      byApp ? '' : h('h4', {}, t('Where do the files live?')),
+      byApp ? '' : radios('where', 'browser', [
         ['browser', t('Only in this browser'), t('Works offline. Nothing to install. Note: clearing this browser’s data deletes this copy; keep the link so it can be reopened from the server’s copy.')],
         ['folder', t('In this browser and in a folder on this computer'), t('For editing with other tools or agents, and compiling with your own TeX. The folder is a separate copy: delete it like any folder. Choose this only for projects whose editors you trust: your own LaTeX tools may run programs the files ask for.')],
       ], (v) => (folderBox.hidden = v !== 'folder')),

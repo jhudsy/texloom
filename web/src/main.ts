@@ -43,6 +43,15 @@ import { createReviewPanel, reviewExtension, type ReviewPanel } from './review'
 import './style.css'
 import { suggestMode } from './suggestmode'
 
+// The desktop app opens its projects with ?from=app (it already keeps them in a folder); the
+// address is put back as it was, so a copied link doesn't carry it.
+const openedByApp = new URLSearchParams(location.search).get('from') === 'app'
+if (openedByApp) history.replaceState(null, '', location.pathname + location.hash)
+/** The app opened this project here, so it keeps it in a folder on this computer (as far as this
+ *  browser knows: the start page offers "In the TeXLoom app" instead of "Sync to a folder…"). */
+const inAppKey = (project: string) => `texloom.inApp.${project}`
+const keptByApp = (project: string) => { try { return !!localStorage.getItem(inAppKey(project)) } catch { return false } }
+
 const APP = 'TeXLoom'
 const server = location.origin
 const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#469990', '#9a6324']
@@ -298,7 +307,9 @@ function projectList(): HTMLElement {
         r.deleted ? h('span', { class: 'tag warn', title: t('The owner deleted this project for everyone. This browser keeps a read-only copy.') }, t('deleted by the owner'))
           : !hasServerCopy(r) ? h('span', { class: 'tag warn', title: t('The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.') }, t('not on server')) : null,
         h('span', { class: 'spacer' }),
-        r.deleted ? null : h('button', { class: 'to-app small', title: t('Keep this project in a folder on this computer, using the TeXLoom app'), 'aria-label': t('Sync {{name}} to a folder…', { name: label }), onclick: () => openInApp(`${server}/#${r.fragment}`) }, t('Sync to a folder…')),
+        r.deleted ? null : keptByApp(r.project)
+          ? h('button', { class: 'to-app small', title: t('The TeXLoom app on this computer keeps this project in a folder. Click to show it there.'), onclick: () => openInApp(`${server}/#${r.fragment}`) }, t('In the TeXLoom app'))
+          : h('button', { class: 'to-app small', title: t('Keep this project in a folder on this computer, using the TeXLoom app'), 'aria-label': t('Sync {{name}} to a folder…', { name: label }), onclick: () => openInApp(`${server}/#${r.fragment}`) }, t('Sync to a folder…')),
         h('button', { class: 'icon', title: t('Private label (only you see it)'), 'aria-label': t('Label {{name}}', { name: label }), onclick: async () => {
           const v = await askText(t('Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.', { name: r.name || t('this project'), code: projectCode(r.project) }), r.nick ?? '')
           if (v === null) return
@@ -330,6 +341,7 @@ async function openProject(keys: Keys) {
   try {
     if (keys.member && localStorage.getItem(`texloom.withdrawn.${keys.project}`)) keys = new Keys(keys.project, keys.key, null)
   } catch {}
+  if (openedByApp) try { localStorage.setItem(inAppKey(keys.project), '1') } catch {}
   let device: Device = prefs.device(keys.project)
   const r = new Replica(keys, server, device.sync)
   await r.open()
@@ -337,7 +349,7 @@ async function openProject(keys: Keys) {
   let removing = false // set while deleting, so the page doesn't re-save it to "recent"
   if (!device.setup) {
     if (r.syncMode === 'live') await new Promise((res) => setTimeout(res, 800)) // fetch the name first
-    device = await setupDialog(r, keys.link(server, writable))
+    device = await setupDialog(r, keys.link(server, writable), openedByApp)
     r.setSyncMode(device.sync)
   }
   const me = { name: prefs.name || `anon-${r.doc.clientID % 1000}`, color: COLORS[r.doc.clientID % COLORS.length] }

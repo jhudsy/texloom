@@ -109,6 +109,7 @@ const zh: Catalog = {
   "Underlined": "加下划线",
   "In full (removed text struck through)": "完整显示（被删除的文字加删除线）",
   "Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.": "从此浏览器中移除此项目；或者作为所有者，同时从服务器移除，或为所有人删除。你电脑上的文件夹会保留其中的文件。",
+  "The TeXLoom app on this computer keeps this project in sync with a folder. This browser keeps a copy of its own as well.": "这台电脑上的 TeXLoom 应用会让此项目与一个文件夹保持同步。此浏览器也会保留一份自己的副本。",
 }
 
 export default zh

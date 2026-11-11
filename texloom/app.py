@@ -293,6 +293,13 @@ class ProjectRows(QtWidgets.QStyledItemDelegate):
         painter.restore()
 
 
+def browser_link(d: Path) -> str:
+    """A folder's project link for opening in the browser, marked as opened by this app, so the web
+    app doesn't ask where the files should live: they're in this folder already."""
+    page, _hash, keys = load_config(d)["link"].partition("#")
+    return f"{page}{'&' if '?' in page else '?'}from=app#{keys}"
+
+
 def open_path(p: Path | str) -> None:
     QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(p)))
 
@@ -724,15 +731,16 @@ class ShareFolderDialog(Dialog):
         self.msg.setText(_("Uploading…"))
         code = self.code.text().strip()
         self.engine.submit(new_project(d, server, self.name.text().strip(), code),
-                           lambda keys, err: self.done_(err, server, code))
+                           lambda keys, err: self.done_(err, d, server, code))
 
-    def done_(self, err, server: str, code: str) -> None:
+    def done_(self, err, d: Path, server: str, code: str) -> None:
         if err:
             self.msg.setText(red(_("Couldn’t create the project: {err}", err=err)))
             self.go.setEnabled(True)
             return
         if code and code != listsync.code_for(server):  # a new code: keep it, and it follows your project list
             listsync.remember_code(server, code)
+        self.made = d.resolve()
         self.engine.call(self.engine.daemon.poke)
         self.accept()
 
@@ -2182,11 +2190,20 @@ class Window(QtWidgets.QMainWindow):
         self.engine.call(self.engine.daemon.poke)
         self.refresh()
 
-    def share_folder(self, server: str = "", code: str = "") -> None:
+    def share_folder(self, server: str = "", code: str = "", from_web: bool = False) -> None:
+        """`from_web`: asked for by the web app (Create project ▸ From a folder), so the new project
+        is opened there too, which puts it on that browser's list of projects."""
         self.show_window()
-        if ShareFolderDialog(self.engine, self, server, code).exec():
-            self.refresh()
-            self.statusBar().showMessage(_("The folder is now a TeXLoom project. To invite people, use Share…."), 10000)
+        dlg = ShareFolderDialog(self.engine, self, server, code)
+        if not dlg.exec():
+            return
+        self.find.clear()
+        self.clear_filter()
+        self.refresh()
+        self.select_folder(dlg.made)
+        if from_web:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(browser_link(dlg.made)))
+        self.statusBar().showMessage(_("The folder is now a TeXLoom project. To invite people, use Share…."), 10000)
 
     def open_folder(self) -> None:
         if d := self.current():
@@ -2245,9 +2262,8 @@ class Window(QtWidgets.QMainWindow):
             ProgramsDialog(self.engine, d, self).exec()
 
     def open_web(self) -> None:
-        d = self.current()
-        if d:
-            QtGui.QDesktopServices.openUrl(QtCore.QUrl(load_config(d)["link"]))
+        if d := self.current():
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(browser_link(d)))
 
     def toggle_pause(self) -> None:
         dm = self.engine.daemon
@@ -2391,7 +2407,7 @@ def main(argv: list[str] | None = None) -> None:
 
     def handle(url: str) -> None:
         if (new := new_from_url(url)) is not None:
-            win.share_folder(*new)
+            win.share_folder(*new, from_web=True)
             return
         sync_link = sync_link_from_url(url)
         link = None if sync_link else link_from_url(url)

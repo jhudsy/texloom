@@ -156,6 +156,8 @@ const de: Catalog = {
   "deleted by the owner": "vom Eigentümer gelöscht",
   "The owner deleted this project for everyone on {{date}}. This copy in your browser is read-only and is the only one left here: download it to keep it.": "Der Eigentümer hat dieses Projekt am {{date}} für alle gelöscht. Die Kopie in Ihrem Browser ist schreibgeschützt und die einzige, die hier bleibt: Laden Sie sie herunter, um sie zu behalten.",
   "Create project": "Projekt erstellen",
+  "In the TeXLoom app": "In der TeXLoom-App",
+  "The TeXLoom app on this computer keeps this project in a folder. Click to show it there.": "Die TeXLoom-App auf diesem Computer hält dieses Projekt in einem Ordner. Klicken, um es dort anzuzeigen.",
 }
 
 export default de

@@ -13,7 +13,7 @@ const de: Catalog = {
   'Copy link': 'Link kopieren',
   'Copied': 'Kopiert',
   "The app will ask before it uses this list. Then it shows the projects on the list that aren’t on this computer yet, and your creation code is filled in when you make a project there.": "Die App fragt, bevor sie diese Liste verwendet. Dann zeigt sie die Projekte der Liste, die noch nicht auf diesem Computer sind, und Ihr Erstellungscode ist schon eingetragen, wenn Sie dort ein Projekt erstellen.",
-  "The app will ask which folder to use, then upload its files, encrypted, and keep the folder in sync with the project. Once it’s made, Open in browser in the app opens it here; with a project list it also appears under Your projects.": "Die App fragt, welcher Ordner verwendet werden soll, lädt dann seine Dateien verschlüsselt hoch und hält den Ordner mit dem Projekt synchron. Sobald es erstellt ist, öffnet „Im Browser öffnen“ in der App es hier; mit einer Projektliste erscheint es auch unter Ihre Projekte.",
+  "The app will ask which folder to use, then upload its files, encrypted, and keep the folder in sync with the project. Once it’s made, the app opens it in your browser, which also puts it under Your projects.": "Die App fragt, welcher Ordner verwendet werden soll, lädt dann seine Dateien verschlüsselt hoch und hält den Ordner mit dem Projekt synchron. Sobald es erstellt ist, öffnet die App es in Ihrem Browser, wodurch es auch unter Ihre Projekte erscheint.",
   "In the app, this is Add project ▸ New project from a folder….": "In der App ist das Projekt hinzufügen ▸ Neues Projekt aus einem Ordner ….",
 }
 

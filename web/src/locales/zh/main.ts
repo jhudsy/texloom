@@ -156,6 +156,8 @@ const zh: Catalog = {
   "deleted by the owner": "已被所有者删除",
   "The owner deleted this project for everyone on {{date}}. This copy in your browser is read-only and is the only one left here: download it to keep it.": "所有者已于 {{date}} 为所有人删除此项目。你浏览器中的这份副本是只读的，也是这里仅剩的一份：请下载以便保留。",
   "Create project": "创建项目",
+  "In the TeXLoom app": "在 TeXLoom 应用中",
+  "The TeXLoom app on this computer keeps this project in a folder. Click to show it there.": "这台电脑上的 TeXLoom 应用把此项目保存在一个文件夹中。点击可在应用中查看。",
 }
 
 export default zh

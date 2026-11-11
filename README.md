@@ -420,6 +420,9 @@ time, it shows two choices; afterwards they are under **Add project** in the too
   default). In the web app, **Sync to a folder…** next to a project on the start page does the
   same in one click, as does Settings → *Keep a copy in a folder* → **Open in the TeXLoom app**.
   The app asks before joining, and says if the project already has a folder on this computer.
+  A project the app opens in the browser (**Open in browser**, or one made from the web app's
+  **Create project ▸ From a folder…**) shows **In the TeXLoom app** there instead of **Sync to a
+  folder…**, and isn't asked where its files should live.
 - **Add a TeXLoom folder from this computer…** brings back one set up earlier (e.g. left, or
   cloned on the command line).
 

@@ -109,6 +109,7 @@ const de: Catalog = {
   "Underlined": "Unterstrichen",
   "In full (removed text struck through)": "Vollständig (entfernter Text durchgestrichen)",
   "Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.": "Dieses Projekt aus diesem Browser entfernen – oder als Eigentümer auch vom Server, oder es für alle löschen. Ordner auf Ihrem Computer behalten ihre Dateien.",
+  "The TeXLoom app on this computer keeps this project in sync with a folder. This browser keeps a copy of its own as well.": "Die TeXLoom-App auf diesem Computer hält dieses Projekt mit einem Ordner synchron. Dieser Browser behält zusätzlich eine eigene Kopie.",
 }
 
 export default de

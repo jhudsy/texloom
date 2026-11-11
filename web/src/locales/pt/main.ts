@@ -156,6 +156,8 @@ const pt: Catalog = {
   "deleted by the owner": "excluído pelo proprietário",
   "The owner deleted this project for everyone on {{date}}. This copy in your browser is read-only and is the only one left here: download it to keep it.": "O proprietário excluiu este projeto para todos em {{date}}. A cópia no seu navegador é somente leitura e é a única que resta aqui: baixe-a para guardá-la.",
   "Create project": "Criar projeto",
+  "In the TeXLoom app": "No aplicativo TeXLoom",
+  "The TeXLoom app on this computer keeps this project in a folder. Click to show it there.": "O aplicativo TeXLoom deste computador mantém este projeto em uma pasta. Clique para mostrá-lo lá.",
 }
 
 export default pt

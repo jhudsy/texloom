@@ -109,6 +109,7 @@ const es: Catalog = {
   "Underlined": "Subrayados",
   "In full (removed text struck through)": "Completos (texto eliminado tachado)",
   "Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.": "Quitar este proyecto de este navegador; o, como propietario, también del servidor, o eliminarlo para todos. Las carpetas de tu ordenador conservan sus archivos.",
+  "The TeXLoom app on this computer keeps this project in sync with a folder. This browser keeps a copy of its own as well.": "La aplicación TeXLoom de este ordenador mantiene este proyecto sincronizado con una carpeta. Este navegador también guarda su propia copia.",
 }
 
 export default es
