@@ -454,6 +454,8 @@ has **Tags…**, **Make a copy…** (a new project, in a new folder, from this o
   folders keep syncing; the language, used from the next start (`TEXLOOM_LANG=fr` or `en`
   overrides it); the project list; and checking for a new version once a day (also **Help ▸
   Check for updates…**), which shows **Update to …** in the toolbar and offers the download.
+- **Quit TeXLoom** (menu, ⌘Q / Ctrl+Q, tray) asks first, since folders then stop syncing, and
+  offers to keep running in the background instead (Settings can stop it asking).
 - Closing the window keeps TeXLoom syncing in the menu bar or tray (on a Mac, click its Dock icon
   to bring the window back). On Linux desktops without a tray, closing asks whether to minimise
   instead, since quitting stops syncing.

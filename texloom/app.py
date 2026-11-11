@@ -1481,6 +1481,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self.login.setChecked(autostart.status() != "off")
         self.login.toggled.connect(self.set_autostart)
         lay.addRow(_("Startup"), self.login)
+        self.ask_quit = QtWidgets.QCheckBox(_("Ask before quitting, since folders then stop syncing"))
+        self.ask_quit.setChecked(bool(app_pref("ask_before_quit", True)))
+        self.ask_quit.toggled.connect(lambda on: set_app_pref("ask_before_quit", on))
+        lay.addRow("", self.ask_quit)
         self.updates = QtWidgets.QCheckBox(_("Check for new versions once a day"))
         self.updates.setChecked(bool(app_pref("check_updates", True)))
         self.updates.toggled.connect(lambda on: set_app_pref("check_updates", on))
@@ -1597,7 +1601,7 @@ class Window(QtWidgets.QMainWindow):
         self.a_pause = a(_("Pause syncing"), self.toggle_pause, "MediaPlaybackPause")
         self.a_settings = a(_("Settings…"), self.settings_window, "DocumentProperties", K.Preferences, QtGui.QAction.PreferencesRole)
         self.a_close = a(_("Close window"), self.close, keys=K.Close)
-        self.a_quit = a(_("Quit TeXLoom"), QtWidgets.QApplication.quit, "ApplicationExit", K.Quit, QtGui.QAction.QuitRole)
+        self.a_quit = a(_("Quit TeXLoom"), self.quit_app, "ApplicationExit", K.Quit, QtGui.QAction.QuitRole)
         self.a_open = a(_("Open folder"), self.open_folder, "FolderOpen", K.Open)
         self.a_web = a(_("Open in browser"), self.open_web, "GoNext", "Ctrl+B")
         self.a_share = a(_("Share…"), self.share_links, "MailSend")
@@ -2403,6 +2407,36 @@ class Window(QtWidgets.QMainWindow):
         if e.type() == QtCore.QEvent.ActivationChange and self.isActiveWindow() and time.time() - self.list_at > 60:
             self.keep_list_updated(force=True)
 
+    def quit_app(self) -> None:
+        """Quit TeXLoom from its menu, ⌘Q / Ctrl+Q or the tray: folders stop syncing, which people
+        may not expect of an app that lives in the menu bar, so ask first (unless told not to).
+        Logging out or shutting down quits without asking."""
+        if not app_pref("ask_before_quit", True):
+            QtWidgets.QApplication.quit()
+            return
+        box = QtWidgets.QMessageBox(self if self.isVisible() else None)
+        box.setIcon(QtWidgets.QMessageBox.Question)
+        box.setText(_("Quit TeXLoom?"))
+        starts = autostart.status() != "off"
+        box.setInformativeText(
+            _("Your folders stop syncing until TeXLoom runs again.") + " "
+            + (_("It starts again when you next log in.") if starts else
+               _("To keep them in sync, let it run in the background: closing the window does that too.")))
+        keep = box.addButton(_("Keep running in the background"), QtWidgets.QMessageBox.RejectRole)
+        stop = box.addButton(_("Quit"), QtWidgets.QMessageBox.AcceptRole)
+        box.setDefaultButton(keep)
+        again = QtWidgets.QCheckBox(_("Don’t ask again"))
+        box.setCheckBox(again)
+        box.exec()
+        if box.clickedButton() is stop:
+            if again.isChecked():
+                set_app_pref("ask_before_quit", False)
+            QtWidgets.QApplication.quit()
+        elif self.tray is not None or MAC:
+            self.hide()
+        else:
+            self.showMinimized()
+
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
         if getattr(QtWidgets.QApplication.instance(), "quitting", False):
             e.accept()
@@ -2562,7 +2596,7 @@ def main(argv: list[str] | None = None) -> None:
         pause = menu.addAction(_("Pause syncing"), win.toggle_pause)
         menu.aboutToShow.connect(lambda: pause.setText(_("Resume syncing") if engine.daemon.paused else _("Pause syncing")))
         menu.addAction(win.a_update)  # only while a newer version is out
-        menu.addAction(_("Quit TeXLoom"), app.quit)
+        menu.addAction(_("Quit TeXLoom"), win.quit_app)
         tray.setContextMenu(menu)
         tray.setToolTip("TeXLoom")
         tray.activated.connect(lambda reason: win.show_window() if reason == QtWidgets.QSystemTrayIcon.Trigger else None)

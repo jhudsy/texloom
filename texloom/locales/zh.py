@@ -301,4 +301,10 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Check for updates': '检查更新',
     'Couldn’t reach GitHub to check: {err}': '无法连接 GitHub 进行检查：{err}',
     'You have the newest version, {version}.': '你已是最新版本 {version}。',
+    'Quit TeXLoom?': '退出 TeXLoom？',
+    'Your folders stop syncing until TeXLoom runs again.': '在 TeXLoom 再次运行之前，你的文件夹将停止同步。',
+    'It starts again when you next log in.': '下次登录时它会再次启动。',
+    'To keep them in sync, let it run in the background: closing the window does that too.': '要保持同步，请让它在后台运行：关闭窗口也会这样。',
+    'Keep running in the background': '在后台继续运行',
+    'Ask before quitting, since folders then stop syncing': '退出前询问，因为退出后文件夹将停止同步',
 }
