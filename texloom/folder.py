@@ -17,9 +17,10 @@ import shutil
 import time
 from pathlib import Path
 
-from pycrdt import Assoc, Map, StickyIndex, Text
+from pycrdt import Map, Text
 from watchfiles import awatch
 
+from .anchors import assoc_of, fresh_anchor, index_in, u16
 from .replica import BLOB_RE, Replica
 
 log = logging.getLogger("texloom")
@@ -200,29 +201,36 @@ def apply_text(ytext: Text, old: str, new: str) -> None:
 def move_file(r: Replica, review: Map, a: str, b: str) -> None:
     """Move file `a` to `b` in the project, as renaming in the web app does (movePath in
     web/src/projectfiles.ts): the text is copied to the new path, and the comments and
-    suggestions on it are anchored at the same spots in the copy. Call inside a change."""
+    suggestions on it are anchored at the same spots in the copy. Call inside a change.
+
+    Where a comment was is read from its anchors when the text is ASCII, else from its quote
+    when that appears exactly once (see anchors.py on why); otherwise it keeps its old anchors
+    and, as before, loses its place."""
     yt = r.files.get(a)
     if yt is not None:
         s = str(yt)
-        r.files[b] = Text(s)
-        moved = r.files[b]
-        n16 = len(s.encode("utf-16-le")) // 2  # anchors count UTF-16 units
-        for m in review.values():
+        spots = {}
+        for iid, m in review.items():
             if not isinstance(m, Map) or m.get("file") != a:
                 continue
-            for key in ("start", "end"):
-                raw = m.get(key)
-                if not isinstance(raw, (bytes, bytearray)) or not raw:
-                    continue
-                try:
-                    old = StickyIndex.decode(bytes(raw), yt)
-                    k = old.get_index()
-                    if 0 <= k <= n16:
-                        m[key] = moved.sticky_index(k, Assoc(old.assoc)).encode()
-                except (KeyboardInterrupt, SystemExit):
-                    raise
-                except BaseException:  # noqa: BLE001 - a damaged anchor (pycrdt panics): it stays as it was
-                    pass
+            ends = [m.get("start"), m.get("end")]
+            if all(isinstance(x, (bytes, bytearray)) and x for x in ends):
+                at = [index_in(yt, s, bytes(x)) for x in ends]
+                if None in at and isinstance(q := m.get("quote"), str) and q and s.count(q) == 1:
+                    i = s.index(q)
+                    at = [u16(s, i), u16(s, i + len(q))]
+                if None not in at:
+                    spots[iid] = (at, [assoc_of(bytes(x)) for x in ends])
+        r.files[b] = Text(s)
+        moved, n16 = r.files[b], u16(s, len(s))
+        for iid, m in review.items():
+            if not isinstance(m, Map) or m.get("file") != a:
+                continue
+            if iid in spots:
+                (i, j), (ai, aj) = spots[iid]
+                start, end = fresh_anchor(moved, n16, i, ai), fresh_anchor(moved, n16, j, aj)
+                if start and end:
+                    m["start"], m["end"] = start, end
             m["file"] = b
         del r.files[a]
     if a in r.bin:
