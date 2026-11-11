@@ -9,7 +9,7 @@
 // records those entries' signing keys, so that they can be removed.
 import { ed25519 } from '@noble/curves/ed25519.js'
 import { b64d, b64e } from './crypto'
-import { canon, emptyList, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeTags, passwordSecret, tidyTags, type ListDoc, type TagDoc } from './listcore'
+import { canon, emptyList, emptySettings, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeSettings, mergeTags, passwordSecret, tidyTags, type ListDoc, type SettingsDoc, type TagDoc } from './listcore'
 import { projects } from './projects'
 import { creationCode } from './replica'
 import { tags } from './tags'
@@ -81,6 +81,28 @@ async function exchangeTags(secret: Uint8Array, list: ListDoc): Promise<boolean>
   return tags.apply(tidyTags(mergeTags(tags.doc(), doc), listed)) // tags may have changed meanwhile
 }
 
+// ---- settings: the creation code follows the list -----------------------------------------
+const settingsKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 'texloom list settings'))
+
+/** This browser's creation code, with when it was entered (one from before that was recorded
+ *  counts as older than any that was). */
+function localSettings(): SettingsDoc {
+  const doc = emptySettings(), code = creationCode.get(), at = creationCode.at()
+  if (code || at) doc.s.code = { v: code, at: at || 1 }
+  return doc
+}
+
+/** Merge the creation code with the list's, so a code entered on one device works on the others
+ *  (and in the TeXLoom app). True if this browser's code changed. */
+async function exchangeSettings(secret: Uint8Array): Promise<boolean> {
+  const local = localSettings()
+  const doc = await update<SettingsDoc>(await settingsKey(secret), (had) => mergeSettings(had ?? emptySettings(), local), emptySettings())
+  const code = doc.s.code
+  if (!code || canon(code) === canon(local.s.code)) return false
+  creationCode.set(code.v, code.at)
+  return true
+}
+
 // ---- this browser --------------------------------------------------------------------------
 let lastSynced = ''
 let tagsError: string | null = null
@@ -111,7 +133,7 @@ export function saveSecret(secret: Uint8Array | null) {
 export const lastProblem = () => lastError
 /** Why tags aren't reaching the server, if they aren't; the list itself may be fine. */
 export const tagsProblem = () => tagsError
-const localState = () => canon({ list: projects.asList(), tags: tags.doc() })
+const localState = () => canon({ list: projects.asList(), tags: tags.doc(), code: creationCode.get() })
 
 export function syncNow(): Promise<void> {
   if (!savedSecret()) return Promise.resolve()
@@ -126,6 +148,7 @@ export function syncNow(): Promise<void> {
         different = await exchangeTags(secret, doc) || different
         tagsError = null
       } catch (e) { tagsError = e instanceof ListError ? e.message : 'network' }
+      try { different = await exchangeSettings(secret) || different } catch (e) { console.warn('list settings:', e) }
       lastSynced = localState()
       lastError = null
       if (different || tagsError !== hadError) changed()
@@ -278,7 +301,7 @@ export async function unlockWithPassword(username: string, password: string): Pr
 /** Delete a list and every way into it, keeping their ids out of use. */
 async function retireList(secret: Uint8Array) {
   for (const [id, slot] of Object.entries(await readSlots(secret))) await retire(id, slot.seed)
-  for (const key of [await registryKey(secret), await tagsKey(secret), await ListKey.of(secret)]) await retire(key.id, key.signingSeed)
+  for (const key of [await registryKey(secret), await tagsKey(secret), await settingsKey(secret), await ListKey.of(secret)]) await retire(key.id, key.signingSeed)
 }
 
 /** Move the list to a new secret, for when the link has got out. Everything that opened the old

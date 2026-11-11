@@ -67,6 +67,9 @@ const es: Catalog = {
   'Replace the sync link…': 'Sustituir el enlace de sincronización…',
   'Delete this list from the server, for every device? Your projects aren’t deleted, and this browser keeps its own list.': '¿Eliminar esta lista del servidor en todos los dispositivos? Tus proyectos no se eliminan, y este navegador conserva su propia lista.',
   'Delete this list…': 'Eliminar esta lista…',
+  "Use this list, and your creation code, in the TeXLoom app on this computer": "Usar esta lista, y su código de creación, en la aplicación TeXLoom de este ordenador",
+  "Use in the TeXLoom app": "Usar en la aplicación TeXLoom",
+  "Send this browser’s list": "Enviar la lista de este navegador",
 }
 
 export default es

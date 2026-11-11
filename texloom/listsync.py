@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import time
@@ -30,7 +31,10 @@ from . import registry, tls
 from .crypto import b64d, b64e
 from .i18n import _
 
+log = logging.getLogger(__name__)
+
 SIGN_LABEL, CRYPT_LABEL, TAGS_LABEL = b"texloom list sign", b"texloom list encrypt", b"texloom list tags"
+SETTINGS_LABEL = b"texloom list settings"
 TIMEOUT = 15
 YEAR_MS = 365 * 86400_000
 # Must match web/src/listsync.ts. A password only ever opens a small entry holding the list's secret.
@@ -219,6 +223,21 @@ def tidy_tags(doc: dict, listed: set[str], now: int | None = None) -> dict:
     return out
 
 
+# --- settings that follow the list (web/src/listcore.ts must match) --------------------------------
+def empty_settings() -> dict:
+    return {"v": 1, "s": {}}
+
+
+def merge_settings(a: dict, b: dict) -> dict:
+    """Settings that travel with the list, such as the creation code, each with when it was set:
+    the latest wins, and a tie goes the same way on every device."""
+    out = empty_settings()
+    for name in sorted({*a.get("s", {}), *b.get("s", {})}):
+        x, y = a.get("s", {}).get(name), b.get("s", {}).get(name)
+        out["s"][name] = y if not x else x if not y else x if (x["at"], _canon(x)) >= (y["at"], _canon(y)) else y
+    return out
+
+
 def _request(method: str, url: str, data: bytes | None = None, headers: dict | None = None):
     """(status, body, headers)."""
     req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
@@ -288,6 +307,20 @@ def sync_tags(key: ListKey, server: str, local: dict, listed: set[str], code: st
     raise ListError("the list keeps changing: try again")
 
 
+def sync_settings(key: ListKey, server: str, local: dict, code: str | None = None) -> dict:
+    """Merge `local` with the settings kept beside the list, such as the creation code (an entry of
+    their own, like tags). A missing entry isn't made until there is something to put in it."""
+    entry = ListKey(hmac.new(key.secret, SETTINGS_LABEL, hashlib.sha256).digest())
+    for _attempt in range(5):
+        seq, remote = pull(entry, server)
+        merged = merge_settings(remote or empty_settings(), local)
+        if _canon(merged) == _canon(remote if remote is not None else empty_settings()):
+            return merged
+        if _push(entry, server, seq + 1, merged, code):
+            return merged
+    raise ListError("the list keeps changing: try again")
+
+
 def password_secret(username: str, password: str) -> bytes:
     """The secret a username and password stand for. Slow on purpose, and done on this computer:
     neither is ever sent anywhere."""
@@ -331,6 +364,38 @@ def save_link(link: str | None) -> None:
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # it opens every project on the list
     with os.fdopen(fd, "w") as f:
         json.dump({"link": link}, f)
+
+
+def _codes_file() -> Path:
+    return registry.config_dir() / "creation-codes.json"
+
+
+def _saved_codes() -> dict:
+    try:
+        codes = json.loads(_codes_file().read_text())
+        return codes if isinstance(codes, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def remember_code(server: str, code: str, at: int | None = None) -> None:
+    """Keep the creation code used on `server`, with when it was entered; with a project list, the
+    latest one entered anywhere follows the list."""
+    codes = {**_saved_codes(), server.rstrip("/"): {"v": code, "at": int(time.time() * 1000) if at is None else at}}
+    p = _codes_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(codes, f, indent=2)
+
+
+def code_for(server: str) -> str:
+    """The creation code to offer for a new project on `server`: the latest one entered here or on
+    the project list, else one a folder here already uses."""
+    saved = _saved_codes().get(server.rstrip("/"))
+    if isinstance(saved, dict) and isinstance(saved.get("v"), str) and saved["v"]:
+        return saved["v"]
+    return _known_code(server) or ""
 
 
 def folder_dates(d: Path) -> tuple[int, int]:
@@ -378,6 +443,7 @@ def sync_this_computer(code: str | None = None) -> tuple[str, dict] | None:
     key, server = ListKey.from_link(link)
     doc = sync(key, server, local_folders(server), code)
     _sync_my_tags(key, server, doc, code)
+    _sync_my_settings(key, server, code)
     return server, doc
 
 
@@ -417,3 +483,22 @@ def _sync_my_tags(key: ListKey, server: str, doc: dict, code: str | None) -> Non
         _tags_error = None
     except ListError as e:
         _tags_error = e.code
+
+
+def _sync_my_settings(key: ListKey, server: str, code: str | None) -> None:
+    """The creation code follows the list: this computer's latest one goes on it, and a later one
+    entered elsewhere (say in the web app) comes back here."""
+    saved = _saved_codes().get(server.rstrip("/"))
+    local = empty_settings()
+    if isinstance(saved, dict) and isinstance(saved.get("v"), str) and isinstance(saved.get("at"), int):
+        local["s"]["code"] = {"v": saved["v"], "at": saved["at"]}
+    elif known := _known_code(server):
+        local["s"]["code"] = {"v": known, "at": 1}  # from before codes were dated: older than any that is
+    try:
+        merged = sync_settings(key, server, local, code or code_for(server) or None)
+    except ListError as e:
+        log.debug("list settings: %s", e.code)
+        return
+    got = merged["s"].get("code")
+    if got and got != local["s"].get("code") and isinstance(got.get("v"), str) and isinstance(got.get("at"), int):
+        remember_code(server, got["v"], got["at"])

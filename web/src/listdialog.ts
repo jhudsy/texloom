@@ -9,6 +9,7 @@ import {
 import { projects } from './projects'
 import { creationCode } from './replica'
 import { askCode, serverInfo } from './storagenotice'
+import { sendListToApp } from './openinapp'
 
 function explain(code: string | null): string {
   switch (code) {
@@ -128,6 +129,7 @@ export function listDialog(onClose?: () => void) {
       h('div', { class: 'row' },
         btn(t('Sync now'), syncNow),
         h('button', { onclick: (e: any) => { navigator.clipboard.writeText(linkFor(secret)); e.target.textContent = t('Copied') } }, t('Copy sync link')),
+        h('button', { title: t('Use this list, and your creation code, in the TeXLoom app on this computer'), onclick: () => sendListToApp(linkFor(secret)) }, t('Use in the TeXLoom app')),
         passkeySupported() ? btn(t('Add a passkey'), async () => {
           const unlocking = await createPasskey()
           if (unlocking && await withCode(() => addSlot(secret, unlocking, 'passkey'))) say(t('Passkey added. Keep the sync link as well: it still opens the list if you lose this passkey.'))
@@ -251,8 +253,10 @@ export function handleListHash(what: ListHash) {
   if (confirm(ADD_WARNING())) adopt(secret).catch((e) => alert(problem(e)))
 }
 
-/** The desktop app can't use a passkey itself: unlock here, then hand it the link. */
+/** The desktop app can't use a passkey itself: unlock here (or use the list this browser already
+ *  has), then hand it the link. */
 function sendToAppDialog() {
+  const mine = savedSecret()
   const msg = h('p', { class: 'err small', role: 'status' })
   const dlg = dialog('settings',
     h('h3', {}, t('Project list')),
@@ -260,7 +264,8 @@ function sendToAppDialog() {
     msg,
     h('div', { class: 'row end' },
       h('button', { onclick: () => dlg.close() }, t('Cancel')),
-      passkeySupported() ? h('button', { class: 'primary', onclick: async () => {
+      mine ? h('button', { class: 'primary', onclick: () => { location.href = `texloom://sync?link=${encodeURIComponent(linkFor(mine))}`; dlg.close() } }, t('Send this browser’s list')) : '',
+      passkeySupported() ? h('button', { class: mine ? '' : 'primary', onclick: async () => {
         msg.textContent = ''
         try {
           const secret = await unlockWithPasskey()

@@ -64,7 +64,9 @@ export async function forgetLocalCopy(project: string): Promise<void> {
 /** Creation code for storing new projects on this server (if it requires one). */
 export const creationCode = {
   get(): string { try { return localStorage.getItem('texloom.code') || '' } catch { return '' } },
-  set(v: string) { try { localStorage.setItem('texloom.code', v) } catch {} },
+  /** When it was entered here (0: before this was recorded), so the latest one follows the project list. */
+  at(): number { try { return Number(localStorage.getItem('texloom.codeAt')) || 0 } catch { return 0 } },
+  set(v: string, at = Date.now()) { try { localStorage.setItem('texloom.code', v); localStorage.setItem('texloom.codeAt', String(at)) } catch {} },
 }
 
 /** Why the server isn't storing this project's changes (they still reach people online). */

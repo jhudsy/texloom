@@ -8,7 +8,7 @@ import { build } from 'vite'
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const out = path.join(web, 'node_modules/.cache/check-listsync')
 await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/listcore.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'listcore.mjs' } } } })
-const { ListKey, canon, emptyTags, mergeLists, mergeTags, passwordSecret, tagColour, tidyTags } = await import(pathToFileURL(path.join(out, 'listcore.mjs')).href)
+const { ListKey, canon, emptyTags, mergeLists, mergeSettings, mergeTags, passwordSecret, tagColour, tidyTags } = await import(pathToFileURL(path.join(out, 'listcore.mjs')).href)
 const v = JSON.parse(fs.readFileSync(path.join(web, '../scripts/listsync-vectors.json'), 'utf8'))
 const b64d = (s) => new Uint8Array(Buffer.from(s, 'base64url'))
 const b64e = (b) => Buffer.from(b).toString('base64url')
@@ -30,9 +30,13 @@ for (const m of v.tag_merges) {
   check(m.what, canon(mergeTags(m.a, m.b)), m.merged)
   check(`${m.what} (other way round)`, canon(mergeTags(m.b, m.a)), m.merged)
 }
+for (const m of v.setting_merges) {
+  check(m.what, canon(mergeSettings(m.a, m.b)), m.merged)
+  check(`${m.what} (other way round)`, canon(mergeSettings(m.b, m.a)), m.merged)
+}
 for (const m of v.tag_colours) check(`colour of ${m.id}`, tagColour(m.id, m.chosen ?? undefined), m.colour)
 for (const m of v.tag_tidies) check(m.what, canon(tidyTags(m.doc, new Set(m.listed), m.now)), m.tidied)
 check('no tags to merge', canon(mergeTags(emptyTags(), emptyTags())), canon(emptyTags()))
 
 if (bad.length) { console.error(bad.join('\n')); process.exit(1) }
-console.log(`listsync: ${v.keys.length} keys, ${v.passwords.length} passwords, ${v.merges.length} merges, ${v.tag_merges.length} tag merges and ${v.tag_tidies.length} tidies match`)
+console.log(`listsync: ${v.keys.length} keys, ${v.passwords.length} passwords, ${v.merges.length} merges, ${v.tag_merges.length} tag merges, ${v.setting_merges.length} setting merges and ${v.tag_tidies.length} tidies match`)

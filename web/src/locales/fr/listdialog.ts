@@ -108,5 +108,8 @@ const fr: Catalog = {
     'Supprimer cette liste du serveur, pour tous les appareils\xa0\\1 Vos projets ne sont pas supprimés, et ce navigateur conserve sa propre liste.',
   'Delete this list…':
     'Supprimer cette liste…',
+  "Use this list, and your creation code, in the TeXLoom app on this computer": "Utiliser cette liste, et votre code de création, dans l’application TeXLoom de cet ordinateur",
+  "Use in the TeXLoom app": "Utiliser dans l’application TeXLoom",
+  "Send this browser’s list": "Envoyer la liste de ce navigateur",
 }
 export default fr

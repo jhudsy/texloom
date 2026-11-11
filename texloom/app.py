@@ -678,8 +678,9 @@ class ShareFolderDialog(Dialog):
         self.server = QtWidgets.QLineEdit(known_server())
         self.server.setPlaceholderText("https://your.server")
         lay.addRow(_("Server"), self.server)
-        self.code = QtWidgets.QLineEdit()
+        self.code = QtWidgets.QLineEdit(listsync.code_for(self.server.text()))  # yours here, or from your project list
         self.code.setPlaceholderText(_("only if the server asks for one"))
+        self.server.editingFinished.connect(lambda: self.code.text() or self.code.setText(listsync.code_for(self.server.text().strip())))
         lay.addRow(_("Creation code"), self.code)
         self.msg = QtWidgets.QLabel("")
         self.msg.setWordWrap(True)
@@ -707,14 +708,17 @@ class ShareFolderDialog(Dialog):
             return
         self.go.setEnabled(False)
         self.msg.setText(_("Uploading…"))
-        self.engine.submit(new_project(d, server, self.name.text().strip(), self.code.text().strip()),
-                           lambda keys, err: self.done_(err))
+        code = self.code.text().strip()
+        self.engine.submit(new_project(d, server, self.name.text().strip(), code),
+                           lambda keys, err: self.done_(err, server, code))
 
-    def done_(self, err) -> None:
+    def done_(self, err, server: str, code: str) -> None:
         if err:
             self.msg.setText(red(_("Couldn’t create the project: {err}", err=err)))
             self.go.setEnabled(True)
             return
+        if code and code != listsync.code_for(server):  # a new code: keep it, and it follows your project list
+            listsync.remember_code(server, code)
         self.engine.call(self.engine.daemon.poke)
         self.accept()
 
@@ -731,8 +735,13 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.setWindowTitle(_("Project list"))
         self.setMinimumWidth(600)
         lay = QtWidgets.QVBoxLayout(self)
+        if from_web and link and link == listsync.saved_link():
+            from_web = False  # the list this computer already uses: nothing to decide
         if from_web:
-            warn = QtWidgets.QLabel(_("A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours."))
+            text = _("A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.")
+            if listsync.saved_link() and listsync.saved_link() != link:
+                text += " " + _("This computer uses a different list now: this one would take its place.")
+            warn = QtWidgets.QLabel(text)
             warn.setWordWrap(True)
             warn.setStyleSheet(f"color: {AMBER}")
             lay.addWidget(warn)
@@ -771,7 +780,7 @@ class ProjectListDialog(QtWidgets.QDialog):
         s.addSpacing(12)
         s.addWidget(self.heading(_("New here?")))
         row = QtWidgets.QHBoxLayout()
-        self.code = QtWidgets.QLineEdit("")
+        self.code = QtWidgets.QLineEdit(listsync.code_for(known_server()))
         self.code.setPlaceholderText(_("Creation code (if the server needs one)"))
         new = QtWidgets.QPushButton(_("Start a new list"))
         new.clicked.connect(self.start)

@@ -12,6 +12,7 @@ const zh: Catalog = {
     '也可以复制项目链接，粘贴到应用的“添加项目 ▸ 通过链接加入项目…”中。',
   'Copy link': '复制链接',
   'Copied': '已复制',
+  "The app will ask before it uses this list. Then it shows the projects on the list that aren’t on this computer yet, and your creation code is filled in when you make a project there.": "应用在使用此列表前会先询问你。之后它会显示列表中尚未在这台电脑上的项目，并且你在其中新建项目时会自动填入创建码。",
 }
 
 export default zh

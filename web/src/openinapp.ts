@@ -20,3 +20,18 @@ export function openInApp(link: string) {
   )
   send()
 }
+
+/** Hand this browser's project list to the desktop app, which asks before using it. */
+export function sendListToApp(link: string) {
+  const send = () => { location.href = `texloom://sync?link=${encodeURIComponent(link)}` }
+  const dlg = dialog('settings',
+    h('h3', {}, t('Opening the TeXLoom app…')),
+    h('p', {}, t('The app will ask before it uses this list. Then it shows the projects on the list that aren’t on this computer yet, and your creation code is filled in when you make a project there.')),
+    h('p', { class: 'muted' }, t('If nothing happens, the app probably isn’t installed. Just installed it? Open it once, then press Try again.')),
+    h('div', { class: 'row end' },
+      h('a', { class: 'button', href: DOWNLOAD_APP, target: '_blank', rel: 'noopener' }, t('Download the app')),
+      h('button', { onclick: send }, t('Try again')),
+      h('button', { class: 'primary', onclick: () => dlg.close() }, t('Close'))),
+  )
+  send()
+}

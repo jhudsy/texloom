@@ -152,6 +152,21 @@ export function tidyTags(doc: TagDoc, listed: Set<string>, now = Date.now()): Ta
   return out
 }
 
+// ---- settings that follow the list (an entry of their own, like tags) ------------------------
+/** Settings that travel with the list, such as the creation code: each with when it was set. The
+ *  latest wins, and a tie goes the same way on every device. */
+export interface SettingsDoc { v: 1; s: Record<string, { v: string; at: number }> }
+export const emptySettings = (): SettingsDoc => ({ v: 1, s: {} })
+
+export function mergeSettings(a: SettingsDoc, b: SettingsDoc): SettingsDoc {
+  const out = emptySettings()
+  for (const name of [...new Set([...Object.keys(a.s ?? {}), ...Object.keys(b.s ?? {})])].sort()) {
+    const x = a.s?.[name], y = b.s?.[name]
+    out.s[name] = !x ? y! : !y ? x : x.at > y.at || (x.at === y.at && canon(x) >= canon(y)) ? x : y
+  }
+  return out
+}
+
 /** What a username and password stand for. Slow on purpose, and done on this device: neither is
  *  ever sent anywhere. */
 export const passwordSecret = (username: string, password: string) => scryptAsync(

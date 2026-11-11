@@ -662,5 +662,95 @@
    "now": 32000000001000,
    "tidied": "{\"on\":{\"p\":{\"a\":5}},\"tags\":{\"a\":{\"at\":1,\"n\":\"A\"},\"b\":{\"at\":32000000000000,\"gone\":true,\"n\":\"\"}},\"v\":1}"
   }
+ ],
+ "setting_merges": [
+  {
+   "what": "the latest code wins",
+   "a": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "AAAA-BBBB",
+      "at": 5
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "CCCC-DDDD",
+      "at": 9
+     }
+    }
+   },
+   "merged": "{\"s\":{\"code\":{\"at\":9,\"v\":\"CCCC-DDDD\"}},\"v\":1}"
+  },
+  {
+   "what": "a tie is the same either way",
+   "a": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "AAAA",
+      "at": 5
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "ZZZZ",
+      "at": 5
+     }
+    }
+   },
+   "merged": "{\"s\":{\"code\":{\"at\":5,\"v\":\"ZZZZ\"}},\"v\":1}"
+  },
+  {
+   "what": "settings from either side are kept",
+   "a": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "AAAA",
+      "at": 5
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "other": {
+      "v": "x",
+      "at": 1
+     }
+    }
+   },
+   "merged": "{\"s\":{\"code\":{\"at\":5,\"v\":\"AAAA\"},\"other\":{\"at\":1,\"v\":\"x\"}},\"v\":1}"
+  },
+  {
+   "what": "a cleared code is a setting too",
+   "a": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "",
+      "at": 9
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "AAAA",
+      "at": 5
+     }
+    }
+   },
+   "merged": "{\"s\":{\"code\":{\"at\":9,\"v\":\"\"}},\"v\":1}"
+  }
  ]
 }

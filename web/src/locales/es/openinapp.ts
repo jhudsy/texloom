@@ -12,6 +12,7 @@ const es: Catalog = {
     'O copie el enlace del proyecto y péguelo en la aplicación, en Añadir proyecto ▸ Unirse a un proyecto con un enlace….',
   'Copy link': 'Copiar enlace',
   'Copied': 'Copiado',
+  "The app will ask before it uses this list. Then it shows the projects on the list that aren’t on this computer yet, and your creation code is filled in when you make a project there.": "La aplicación preguntará antes de usar esta lista. Luego mostrará los proyectos de la lista que aún no están en este ordenador, y su código de creación aparecerá ya escrito cuando cree un proyecto allí.",
 }
 
 export default es

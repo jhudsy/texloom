@@ -280,4 +280,5 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'TeXLoom keeps syncing in the background. To quit, use its icon in the notification area.': 'TeXLoom synchronisiert im Hintergrund weiter. Zum Beenden verwenden Sie sein Symbol im Infobereich.',
     'Keeps folders on this computer in step with TeXLoom projects.': 'Hält Ordner auf diesem Computer mit TeXLoom-Projekten synchron.',
     'Open your project list…': 'Ihre Projektliste öffnen …',
+    'This computer uses a different list now: this one would take its place.': 'Dieser Computer verwendet zurzeit eine andere Liste: Diese würde sie ersetzen.',
 }

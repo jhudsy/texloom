@@ -12,6 +12,7 @@ const pt: Catalog = {
     'Ou copie o link do projeto e cole no aplicativo, em Adicionar projeto ▸ Entrar em um projeto com um link….',
   'Copy link': 'Copiar link',
   'Copied': 'Copiado',
+  "The app will ask before it uses this list. Then it shows the projects on the list that aren’t on this computer yet, and your creation code is filled in when you make a project there.": "O aplicativo vai perguntar antes de usar esta lista. Depois, mostra os projetos da lista que ainda não estão neste computador, e seu código de criação já vem preenchido quando você cria um projeto nele.",
 }
 
 export default pt

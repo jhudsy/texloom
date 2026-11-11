@@ -129,9 +129,14 @@ good. Your projects aren't deleted, but you'll need each project's own link to o
 is also the one way in that can be guessed, by someone with the server's data, so make it long.
 
 In the desktop app, use **File ▸ Project list…** (also in Settings), which also keeps the list up to date while the app
-runs; for the helper, see `texloom projects` below (`use --password` unlocks with a password). Starting a
-list counts as creating something on the server, so servers that require a creation code ask for
-one. Servers can turn lists off with `--no-project-lists`.
+runs; or, in the web app's list dialog, **Use in the TeXLoom app** sends the list to the app on this
+computer, which asks before using it. For the helper, see `texloom projects` below (`use --password`
+unlocks with a password). Starting a list counts as creating something on the server, so servers
+that require a creation code ask for one. Servers can turn lists off with `--no-project-lists`.
+
+Your **creation code** travels with the list too: the latest one entered in any browser or in the
+app is filled in when you make a project elsewhere, such as **New project from a folder…** in the
+app. Anyone with your sync link can see it, as they can every project on the list.
 
 ### Finding and copying projects
 

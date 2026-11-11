@@ -67,6 +67,9 @@ const zh: Catalog = {
   'Replace the sync link…': '替换同步链接…',
   'Delete this list from the server, for every device? Your projects aren’t deleted, and this browser keeps its own list.': '从服务器上为所有设备删除此列表？你的项目不会被删除，此浏览器也会保留自己的列表。',
   'Delete this list…': '删除此列表…',
+  "Use this list, and your creation code, in the TeXLoom app on this computer": "在这台电脑上的 TeXLoom 应用中使用此列表和你的创建码",
+  "Use in the TeXLoom app": "在 TeXLoom 应用中使用",
+  "Send this browser’s list": "发送此浏览器的列表",
 }
 
 export default zh

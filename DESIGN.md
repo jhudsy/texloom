@@ -477,7 +477,18 @@ one to the projects it names.
   device with a replaced (perhaps leaked) link can't start the list again under that link. Replacing
   a link retires every way in, because anyone holding the old link can read what it records. The
   desktop app can't use a passkey, so it opens `/#unlock-for-app`, and the page returns the sync
-  link through `texloom://sync?link=…`, which the app confirms before using.
+  link through `texloom://sync?link=…` (at once if the browser already has the list; **Use in the
+  TeXLoom app** in the web dialog sends it unasked), which the app confirms before using unless it
+  is the list the app already has.
+- Settings that follow the list, for now just the creation code, are a further entry opened by
+  `HMAC-SHA256(K, "texloom list settings")`: `{"v":1,"s":{"code":{"v":code,"at":ms}}}`. The latest
+  `at` wins (a tie goes to the larger canonical form, the same on every device; checked by the shared
+  vectors), so a code entered in the web app reaches the desktop app's New project dialog and the
+  other way round. The web app records when its code was entered (`texloom.codeAt`); the desktop
+  app keeps one code per server in `creation-codes.json` (mode 600) in its config folder. A code
+  entered before dates were kept counts as the oldest. Anyone with the sync link can read the code,
+  as they can every project on the list. The times are each device's clock, so a device whose clock
+  is far ahead could keep an older code winning until a code is entered again after that time.
 
 - Tags are a person's own and never enter a project. They live in `texloom.tags` in the browser and,
   with a synced list, in a further entry opened by `HMAC-SHA256(K, "texloom list tags")`, separate
