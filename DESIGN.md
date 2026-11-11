@@ -187,7 +187,10 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   `project-full` (`--project-max-bytes`, not applied to unlimited owners) and `server-full`
   (`--max-bytes`, `--min-free`).
 - **No lost work:** a refused `up` is still broadcast live but not acked; it stays in the
-  sender's outbox and is retried. Clients show a "not saved on server" warning.
+  sender's outbox and is retried. Clients show a "not saved on server" warning. The desktop
+  app answers `needs-code` for a project it owns and has no code for by making it relay-only
+  (nothing stored is lost: the server stored nothing), so files reach peers and the outbox
+  empties; a code can be added later, which uploads a full copy.
 - **Snapshots** must satisfy `max(last snapshot, floor) < upto ≤ head`, at most 12 MiB
   (bigger documents just aren't compacted), and they are counted against limits by their
   size change.
@@ -200,7 +203,12 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
 - **Memory:** WebSocket frames are read whole before they can be checked, so they are
   capped at 16 MiB, and large frames being handled are capped server-wide (192 MiB).
   Files go over HTTP (≤ 50 MiB, a few uploads read at a time), or peer to peer
-  (≤ 11 MiB) in relay-only projects.
+  (≤ 50 MiB) in relay-only projects. Clients keep their own frames small: pending updates
+  are merged into `up`s of at most 6 MiB, and a `p2p` payload over 4 MiB (a whole project
+  for a peer catching up, a file) goes as encrypted `part`s of 4 MiB that the receiver puts
+  together again (at most 32 parts, 4 messages at a time), paced to stay under the rate limit.
+  A single update over 8 MiB, such as a full copy of a project with more text than that,
+  still can't be uploaded: the client says so instead of retrying.
 - **Per-connection limits:** frame-size caps per message type, a message/byte rate limit,
   at most 5 `hello`s per 10 s, one creation-code check, and a global connection cap.
   Peers that stop reading are disconnected after 20 s rather than stalling broadcasts.

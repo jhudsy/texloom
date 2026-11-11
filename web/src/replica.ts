@@ -17,7 +17,13 @@ const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
 // Keep in sync with server/relay.py: frames are at most 16 MiB (base64 adds a third).
 const MAX_SNAPSHOT = 12 * 1024 * 1024
-const P2P_BLOB = 11 * 1024 * 1024 // files sent peer to peer (relay-only projects)
+const P2P_BLOB = 50 * 1024 * 1024 // files sent peer to peer (relay-only projects): as big as any synced file
+// A peer-to-peer message bigger than this (a whole project for a peer catching up, a file) goes
+// in pieces: the server takes frames of at most 16 MiB. As in texloom/replica.py.
+const P2P_PIECE = 4 * 1024 * 1024
+const P2P_PARTS = 32, P2P_ASSEMBLING = 4
+// The server closes a connection sending more than 160 MiB in 10 s: pieces are paced below that.
+const P2P_WINDOW = 10_000, P2P_RATE = 96 * 1024 * 1024
 export const BLOB_ID = /^[0-9a-f]{32}$/
 /** Awareness colours and names come from anyone with the link: keep them harmless. */
 const COLOR = /^#[0-9a-fA-F]{3,8}$/
@@ -224,6 +230,7 @@ export class Replica {
     ws.onmessage = (ev) => this.handle(JSON.parse(ev.data)).catch((e) => console.error(e))
     ws.onclose = () => {
       this.ws = null
+      this.parts.clear()
       this.synced = false
       this.inflight.clear()
       this.peers = 0
@@ -406,11 +413,58 @@ export class Replica {
   // ---- peer-to-peer (relayed, never stored) ------------------------------------
   private async p2p(payload: Record<string, unknown>, to?: number) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
-    const d = await this.keys.encrypt(enc.encode(JSON.stringify(payload)))
-    const msg: any = { t: 'p2p', d: b64e(d) }
-    if (payload.k === 'upd') msg.s = b64e(this.keys.sign('p2p:', d))
+    const data = await this.keys.encrypt(enc.encode(JSON.stringify(payload)))
+    const d = b64e(data)
+    const s = payload.k === 'upd' ? b64e(this.keys.sign('p2p:', data)) : undefined
+    if (d.length <= P2P_PIECE) { await this.sendP2p(d, s, to); return }
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('')
+    const n = Math.ceil(d.length / P2P_PIECE)
+    for (let i = 0; i < n; i++) {
+      const part: Record<string, unknown> = { k: 'part', id, i, n, c: d.slice(i * P2P_PIECE, (i + 1) * P2P_PIECE) }
+      if (s && i === n - 1) part.s = s // checked once the message is whole
+      await this.sendP2p(b64e(await this.keys.encrypt(enc.encode(JSON.stringify(part)))), undefined, to)
+    }
+  }
+
+  private p2pWindow = { start: 0, bytes: 0 } // see P2P_RATE
+  private partAt = 0 // when a piece last came in
+
+  private async sendP2p(d: string, s: string | undefined, to?: number) {
+    const now = Date.now()
+    if (now - this.p2pWindow.start > P2P_WINDOW) this.p2pWindow = { start: now, bytes: 0 }
+    if (this.p2pWindow.bytes + d.length > P2P_RATE) {
+      await sleep(Math.max(0, P2P_WINDOW - (now - this.p2pWindow.start)))
+      this.p2pWindow = { start: Date.now(), bytes: 0 }
+    }
+    this.p2pWindow.bytes += d.length
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    const msg: any = { t: 'p2p', d }
+    if (s) msg.s = s
     if (to !== undefined) msg.to = to
     this.ws.send(JSON.stringify(msg))
+  }
+
+  /** Big peer-to-peer messages coming in pieces, by sender and id. */
+  private parts = new Map<string, { n: number; got: Map<number, string>; s?: string }>()
+
+  private async onPart(from: number, p: any) {
+    const { id, i, n, c } = p
+    if (typeof id !== 'string' || !Number.isInteger(i) || !Number.isInteger(n) || typeof c !== 'string'
+      || i < 0 || i >= n || n > P2P_PARTS || c.length > P2P_PIECE) return
+    const key = `${from}:${id}`
+    if (!this.parts.has(key)) {
+      while (this.parts.size >= P2P_ASSEMBLING) this.parts.delete(this.parts.keys().next().value!) // the oldest unfinished one goes
+      this.parts.set(key, { n, got: new Map() })
+    }
+    const whole = this.parts.get(key)!
+    if (whole.n !== n) return
+    whole.got.set(i, c)
+    this.partAt = Date.now()
+    if (typeof p.s === 'string') whole.s = p.s
+    if (whole.got.size === n) {
+      this.parts.delete(key)
+      await this.onP2p({ d: Array.from({ length: n }, (_, j) => whole.got.get(j)!).join(''), s: whole.s, from })
+    }
   }
 
   private async onP2p(m: { d: string; s?: string; from: number }) {
@@ -418,6 +472,9 @@ export class Replica {
     let p: any
     try { p = JSON.parse(dec.decode(await this.keys.decrypt(data))) } catch { return }
     switch (p.k) {
+      case 'part':
+        await this.onPart(m.from, p)
+        break
       case 'sv1': // a peer just connected: send what it lacks, and ask for what we lack
       case 'sv2': {
         this.peers = Math.max(this.peers, 1); this.onStatus()
@@ -684,7 +741,12 @@ export class Replica {
     // Ask connected peers for it.
     const got = new Promise<Uint8Array>((res) => this.blobWaiters.set(id, [...(this.blobWaiters.get(id) ?? []), res]))
     await this.p2p({ k: 'breq', id })
-    const r = await Promise.race([got, sleep(20000).then(() => null)])
+    const asked = Date.now()
+    let r: Uint8Array | null = null
+    while (!r) { // a big file comes in pieces: wait while they keep coming
+      r = await Promise.race([got, sleep(5000).then(() => null)])
+      if (!r && Date.now() - Math.max(asked, this.partAt) > 20000) break
+    }
     if (!r) throw new Error(t('file content not available yet ({{id}}): no online peer has it', { id: id.slice(0, 8) }))
     return r
   }

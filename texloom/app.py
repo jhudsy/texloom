@@ -33,7 +33,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from . import __version__, autostart, listsync, registry, tags
-from .cli import DEFAULT_CONFIG, clone_project, load, load_config, new_project, peek, run, update_config
+from .cli import DEFAULT_CONFIG, clone_project, code_ok, load, load_config, new_project, peek, run, update_config
 from .crypto import Keys
 from .daemon import CURRENT, FOLDER, Daemon, FolderProblem, FolderTag
 from .folder import copy_project_files
@@ -205,9 +205,9 @@ def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
         return _("Catching up…"), AMBER, ""
     if r.refused:
         return _("Change refused"), RED, _("The server refused a change from this folder: {reason}", reason=r.refused)
-    if r.store_problem:
+    if r.store_problem and r.storage != "relay":
         why = {
-            "needs-code": _("This server needs a creation code to store new projects: add it to the folder's .texloom/config.json as \"create_code\" and restart the app."),
+            "needs-code": _("This server keeps projects only with a creation code, and this one has none. Its owner can add one, or make it sync-only."),
             "code-expired": _("This project's creation code has expired: renewing it restores storage."),
             "quota-full": _("The storage allowance of this project's creation code is used up."),
             "project-full": _("This project has reached the server's size limit."),
@@ -219,6 +219,9 @@ def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
         return ngettext(pending, "Sending {n} change…", "Sending {n} changes…", n=pending), AMBER, ""
     if not r.keys.writable:
         return _("Up to date (read-only)"), GREEN, _("This link can read but not change the project: edits here aren't shared.")
+    if r.storage == "relay":
+        return _("Up to date (sync-only)"), GREEN, _("The server keeps no copy of this project: changes and files reach your other "
+                                                    "computers and collaborators while you're online at the same time.")
     return _("Up to date"), GREEN, ""
 
 
@@ -724,6 +727,12 @@ class ShareFolderDialog(Dialog):
         self.code.setPlaceholderText(_("only if the server asks for one"))
         self.server.editingFinished.connect(lambda: self.code.text() or self.code.setText(listsync.code_for(self.server.text().strip())))
         lay.addRow(_("Creation code"), self.code)
+        hint = QtWidgets.QLabel(_("Without a code, a server that asks for one keeps no copy: the project syncs only between "
+                                  "computers that are online at the same time. You can add a code later."))
+        hint.setWordWrap(True)
+        hint.setProperty("class", "hint")
+        hint.setEnabled(False)  # greyed, as a note
+        lay.addRow("", hint)
         self.msg = QtWidgets.QLabel("")
         self.msg.setWordWrap(True)
         lay.addRow(self.msg)
@@ -1607,6 +1616,8 @@ class Window(QtWidgets.QMainWindow):
         self.a_share = a(_("Share…"), self.share_links, "MailSend")
         self.a_tags = a(_("Tags…"), self.edit_tags)
         self.a_copy = a(_("Make a copy…"), self.copy_project)
+        self.a_store = a(_("Keep a copy on the server…"), self.keep_on_server)
+        self.a_store.setToolTip(_("This project is sync-only: with a creation code, the server keeps an encrypted copy"))
         self.a_count = a(_("Word count…"), self.word_count)
         self.a_count.setToolTip(_("Count the words with TeXCount, from your own TeX installation"))
         self.a_scratch = a(_("Compile from scratch"), self.compile_from_scratch)
@@ -1626,7 +1637,7 @@ class Window(QtWidgets.QMainWindow):
         for act in (self.a_new, self.a_join, self.a_add):
             self.add_menu.addAction(act)
         self.more_menu = QtWidgets.QMenu(self)
-        for act in (self.a_tags, self.a_copy, self.a_count, self.a_mcp, None, self.a_leave):
+        for act in (self.a_tags, self.a_copy, self.a_store, self.a_count, self.a_mcp, None, self.a_leave):
             self.more_menu.addSeparator() if act is None else self.more_menu.addAction(act)
 
     def build_toolbar(self) -> None:
@@ -1656,7 +1667,7 @@ class Window(QtWidgets.QMainWindow):
                     self.a_settings, self.a_close, self.a_quit):
             m.addSeparator() if act is None else m.addAction(act)
         m = mb.addMenu(_("Project"))
-        for act in (self.a_open, self.a_web, self.a_share, None, self.a_tags, self.a_copy, self.a_count,
+        for act in (self.a_open, self.a_web, self.a_share, None, self.a_tags, self.a_copy, self.a_store, self.a_count,
                     self.a_scratch, self.a_mcp, None, self.a_leave):
             m.addSeparator() if act is None else m.addAction(act)
         m = mb.addMenu(_("View"))
@@ -1939,8 +1950,9 @@ class Window(QtWidgets.QMainWindow):
             m.addSeparator()
         m.addAction(self.a_tags)
         if one:
-            for act in (self.a_copy, self.a_count, self.a_mcp):
-                m.addAction(act)
+            for act in (self.a_copy, self.a_store, self.a_count, self.a_mcp):
+                if act.isVisible():
+                    m.addAction(act)
         m.addSeparator()
         m.addAction(self.a_leave)
         m.exec(self.list.viewport().mapToGlobal(pos))
@@ -1967,6 +1979,42 @@ class Window(QtWidgets.QMainWindow):
 
     def connect_tool(self) -> None:
         ConnectToolDialog(self.selected()[0], self).exec()
+
+    def keep_on_server(self) -> None:
+        """A sync-only project (no creation code): with a code, the server keeps a copy again."""
+        d = self.current()
+        st = self.engine.daemon.states.get(d) if d else None
+        r = st.replica if st else None
+        if not d or r is None:
+            return
+        server = r.server
+        code, ok = QtWidgets.QInputDialog.getText(
+            self, _("Keep a copy on the server"),
+            _("The server keeps an encrypted copy of a project only with a creation code from its owner. "
+              "With one, your other computers and collaborators get changes even when you're not online "
+              "together, and the project opens anywhere in the browser.") + "\n\n" + _("Creation code:"),
+            QtWidgets.QLineEdit.Normal, listsync.code_for(server))
+        code = code.strip()
+        if not ok or not code:
+            return
+
+        def checked(good, err) -> None:
+            if err or not good:
+                QtWidgets.QMessageBox.warning(self, _("Keep a copy on the server"),
+                                              _("The server didn't accept that code.") if not err else
+                                              _("Couldn't reach the server: {err}", err=err))
+                return
+            update_config(d, create_code=code)
+            if code != listsync.code_for(server):
+                listsync.remember_code(server, code)
+
+            def switch() -> None:  # on the sync thread: the setting goes to everyone, then sync starts again with the code
+                r.set_storage("server")
+                self.engine.daemon.restart(d)
+            self.engine.call(switch)
+            self.statusBar().showMessage(_("Uploading a copy to the server…"), 5000)
+
+        self.engine.submit(code_ok(server, code), checked)
 
     def copy_project(self) -> None:
         d = self.current()
@@ -2179,6 +2227,9 @@ class Window(QtWidgets.QMainWindow):
             act.setEnabled(one)
         for act in (self.a_tags, self.a_leave):
             act.setEnabled(bool(picked))
+        st = self.engine.daemon.states.get(picked[0]) if one else None
+        r = st.replica if st else None
+        self.a_store.setVisible(bool(r and r.storage == "relay" and r.keys.seed and r.deleted_at is None))
         for b in self.buttons:
             b.setEnabled(one)
         self.options.setVisible(not several)

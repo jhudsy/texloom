@@ -31,7 +31,14 @@ BLOB_RE = re.compile(r"^[0-9a-f]{32}$")  # blob ids are HMAC hex digests, never 
 MAX_SNAPSHOT = 12 * 1024 * 1024
 MAX_UPDATE = 8 * 1024 * 1024  # one change, after encryption
 UPDATE_BATCH = 6 * 1024 * 1024  # pending changes are merged up to this much per message
-P2P_BLOB = 11 * 1024 * 1024  # files sent peer to peer (relay-only projects)
+P2P_BLOB = 50 * 1024 * 1024  # files sent peer to peer (relay-only projects): as big as any synced file
+# A peer-to-peer message bigger than this (a whole project for a computer catching up, a file)
+# goes in pieces: the server takes frames of at most 16 MiB. Pieces are put together again
+# up to P2P_PARTS of them, for a few messages at a time.
+P2P_PIECE = 4 * 1024 * 1024
+P2P_PARTS, P2P_ASSEMBLING = 32, 4
+# The server closes a connection sending more than 160 MiB in 10 s: pieces are paced below that.
+P2P_WINDOW, P2P_RATE = 10.0, 96 * 1024 * 1024
 
 
 class Replica:
@@ -41,6 +48,9 @@ class Replica:
         self.server = server.rstrip("/")
         self.create_code = create_code  # needed only to store a *new* project on some servers
         self._warned: set[str] = set()
+        self._parts: dict[tuple, dict] = {}  # big peer-to-peer messages coming in pieces
+        self._part_at = 0.0  # when a piece last came in
+        self._p2p_window: list = [0.0, 0]  # [start, bytes sent] (see P2P_RATE)
         self.doc = Doc(skip_gc=True)  # keep deleted text so past versions can be reconstructed
         self.files: Map = self.doc.get("files", type=Map)
         self.bin: Map = self.doc.get("bin", type=Map)
@@ -129,9 +139,10 @@ class Replica:
             return  # stays in outbox; flushed on reconnect
         data = self.keys.encrypt(update)
         if len(data) > MAX_UPDATE:  # the server would refuse it on every try
+            self.refused = f"a change of {len(data) >> 20} MB is more than the server takes at once (8 MB)"
             if "too-big" not in self._warned:
                 self._warned.add("too-big")
-                log.warning("NOT SENT: a change of %d MB is more than the server takes at once (8 MB)", len(data) >> 20)
+                log.warning("NOT SENT: %s", self.refused)
             return
         sig = self.keys.sign(b"upd:" + data)
         try:
@@ -308,7 +319,15 @@ class Replica:
             fut = asyncio.get_running_loop().create_future()
             self._blob_waiters.setdefault(bid, []).append(fut)
             await self.p2p({"k": "breq", "id": bid})
-            plaintext = await asyncio.wait_for(fut, 20)
+            asked = time.monotonic()
+            while True:  # a big file comes in pieces: wait while they keep coming
+                try:
+                    plaintext = await asyncio.wait_for(asyncio.shield(fut), 5)
+                    break
+                except asyncio.TimeoutError:
+                    if time.monotonic() - max(asked, self._part_at) > 20:
+                        fut.cancel()
+                        raise
         cache.parent.mkdir(exist_ok=True)
         cache.write_bytes(plaintext)
         return plaintext
@@ -318,12 +337,59 @@ class Replica:
         if self.ws is None or self.ws.closed:
             return
         data = self.keys.encrypt(json.dumps(payload).encode())
-        msg: dict = {"t": "p2p", "d": b64e(data)}
-        if payload.get("k") == "upd":
-            msg["s"] = b64e(self.keys.sign(b"p2p:" + data))
+        d = b64e(data)
+        sig = b64e(self.keys.sign(b"p2p:" + data)) if payload.get("k") == "upd" else None
+        if len(d) <= P2P_PIECE:
+            await self._send_p2p(d, sig, to)
+            return
+        pid, n = secrets.token_hex(8), -(-len(d) // P2P_PIECE)
+        for i in range(n):
+            part = {"k": "part", "id": pid, "i": i, "n": n, "c": d[i * P2P_PIECE:(i + 1) * P2P_PIECE]}
+            if sig and i == n - 1:
+                part["s"] = sig  # checked once the message is whole
+            await self._send_p2p(b64e(self.keys.encrypt(json.dumps(part).encode())), None, to)
+
+    async def _send_p2p(self, d: str, sig: str | None, to: int | None) -> None:
+        now = time.monotonic()
+        if now - self._p2p_window[0] > P2P_WINDOW:
+            self._p2p_window = [now, 0]
+        if self._p2p_window[1] + len(d) > P2P_RATE:
+            await asyncio.sleep(max(0.0, P2P_WINDOW - (now - self._p2p_window[0])))
+            self._p2p_window = [time.monotonic(), 0]
+        self._p2p_window[1] += len(d)
+        if self.ws is None or self.ws.closed:
+            return
+        msg: dict = {"t": "p2p", "d": d}
+        if sig:
+            msg["s"] = sig
         if to is not None:
             msg["to"] = to
         await self.ws.send_json(msg)
+
+    async def _on_part(self, frm, p: dict) -> None:
+        """A piece of a big peer-to-peer message: once all are in, handle it as one."""
+        pid, i, n, c = p.get("id"), p.get("i"), p.get("n"), p.get("c")
+        if not (isinstance(pid, str) and isinstance(i, int) and isinstance(n, int) and isinstance(c, str)
+                and 0 <= i < n <= P2P_PARTS and len(c) <= P2P_PIECE):
+            return
+        key = (frm, pid)
+        if key not in self._parts:
+            while len(self._parts) >= P2P_ASSEMBLING:  # the oldest unfinished one goes
+                self._parts.pop(next(iter(self._parts)))
+            self._parts[key] = {"n": n, "got": {}, "s": None}
+        whole = self._parts[key]
+        if whole["n"] != n:
+            return
+        whole["got"][i] = c
+        self._part_at = time.monotonic()
+        if isinstance(p.get("s"), str):
+            whole["s"] = p["s"]
+        if len(whole["got"]) == n:
+            del self._parts[key]
+            m = {"d": "".join(whole["got"][j] for j in range(n)), "from": frm}
+            if whole["s"]:
+                m["s"] = whole["s"]
+            await self._on_p2p(m)
 
     async def _on_p2p(self, m: dict) -> None:
         data = b64d(m["d"])
@@ -332,7 +398,9 @@ class Replica:
         except (InvalidTag, ValueError):
             return
         k, frm = p.get("k"), m.get("from")
-        if k in ("sv1", "sv2"):
+        if k == "part":
+            await self._on_part(frm, p)
+        elif k in ("sv1", "sv2"):
             if self.keys.writable:
                 diff = self.doc.get_update(b64d(p["sv"]))
                 if len(diff) > 2:
@@ -397,6 +465,17 @@ class Replica:
         self.pending_mode = mode
         self.save()
 
+    async def _sync_only(self) -> None:
+        """The server keeps projects only with a creation code, and this one has none: rather than
+        changes it refuses and files nobody can fetch, pass everything straight to the other
+        computers, while they're online (the server's copy, if any, is nothing to lose)."""
+        log.warning("This server keeps projects only with a creation code. Without one, this project now "
+                    "syncs only between computers that are online at the same time.")
+        self.store_refusal = None
+        self.set_storage("relay")
+        await self.send_mode("relay")
+        await self.flush_outbox()
+
     def pending_count(self) -> int:
         """Changes and files waiting for the server. Files of a project the server doesn't
         store (relay mode) go to collaborators on request instead, so they don't count."""
@@ -410,14 +489,16 @@ class Replica:
         return self.store_refusal
 
     def _storage_warning(self, code: str) -> None:
+        if code == "needs-code" and (self.storage == "relay" or (self.keys.seed and not self.create_code)):
+            return  # sync-only, or about to be (see _sync_only): the server isn't meant to keep it
         self.store_refusal = code
         code = self.store_problem
         if code in self._warned:
             return
         self._warned.add(code)
         log.warning({
-            "needs-code": "NOT SAVED ON SERVER: this server needs a creation code to store new projects. "
-                          "Add \"create_code\" to .texloom/config.json and restart. "
+            "needs-code": "NOT SAVED ON SERVER: this server keeps projects only with a creation code, and this "
+                          "project has none. Its owner can add one, or make it sync-only. "
                           "Changes still reach collaborators who are online.",
             "code-expired": "NOT SAVED ON SERVER: this project's creation code has expired; renewing it restores storage.",
             "quota-full": "NOT SAVED ON SERVER: the storage allowance of this project's creation code is used up.",
@@ -452,10 +533,12 @@ class Replica:
                                 await self._handle(json.loads(msg.data))
                             except Exception as e:  # noqa: BLE001 - never let one bad frame kill the helper
                                 log.warning("ignored a malformed message (%s: %s)", type(e).__name__, str(e)[:120])
+                        log.info("disconnected (%s%s)", ws.close_code, f": {ws.exception()}" if ws.exception() else "")
                 except (aiohttp.ClientError, OSError) as e:
                     log.info("offline (%s); retrying in %ds", e.__class__.__name__, backoff)
                 finally:
                     self.ws = None
+                    self._parts.clear()
                     self.connected.clear()
                 if self.deleted_at is not None:
                     break
@@ -539,6 +622,10 @@ class Replica:
                                 if self.denied == "code-expired" else
                                 "NOT SYNCING: this server is private, and this project needs a creation code. "
                                 "Add \"create_code\" to .texloom/config.json and restart.")
+            elif m.get("code") == "needs-code" and self.storage == "relay":
+                pass  # sent before the switch to sync-only: it's sent again
+            elif m.get("code") == "needs-code" and self.keys.seed and not self.create_code:
+                await self._sync_only()
             elif m.get("code") in ("needs-code", "quota-full", "code-expired", "project-full", "server-full"):
                 self._storage_warning(m["code"])  # kept in the outbox; retried on reconnect
             else:

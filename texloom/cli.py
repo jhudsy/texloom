@@ -152,22 +152,33 @@ async def clone_project(link: str, d: Path) -> None:
     registry.add(d)
 
 
-async def refuse_if_private(server: str, code: str) -> None:
+async def refuse_if_private(server: str, code: str) -> dict:
     """A private server only takes new projects from people with a valid creation code. If it
-    can't be asked, carry on: the server still decides when the project connects."""
+    can't be asked, carry on: the server still decides when the project connects. Returns
+    what the server says about itself ({} if it couldn't be asked)."""
     import aiohttp
     base = server.rstrip("/")
+    info: dict = {}
     try:
         async with aiohttp.ClientSession(connector=tls.connector(), timeout=aiohttp.ClientTimeout(total=10)) as http:
             async with http.get(f"{base}/api/info") as r:
-                if not r.ok or not (await r.json()).get("private"):
-                    return
+                info = (await r.json()) if r.ok else {}
+                if not isinstance(info, dict) or not info.get("private"):
+                    return info if isinstance(info, dict) else {}
             async with http.post(f"{base}/api/code", json={"code": code}) as r:
                 if (await r.json()).get("ok"):
-                    return
+                    return info
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-        return
+        return info
     raise FolderProblem(f"{base} is a private server: a new project needs a valid creation code from its owner")
+
+
+async def code_ok(server: str, code: str) -> bool:
+    """Whether the server takes this creation code."""
+    import aiohttp
+    async with aiohttp.ClientSession(connector=tls.connector(), timeout=aiohttp.ClientTimeout(total=10)) as http:
+        async with http.post(f"{server.rstrip('/')}/api/code", json={"code": code}) as r:
+            return r.ok and (await r.json()).get("ok") is True
 
 
 async def new_project(d: Path, server: str, name: str = "", code: str = "", settings: dict | None = None) -> Keys:
@@ -175,7 +186,7 @@ async def new_project(d: Path, server: str, name: str = "", code: str = "", sett
     `settings` are further shared project settings (the main file, engine…)."""
     if config_path(d).exists():
         raise FolderProblem(f"{d} is already a texloom project")
-    await refuse_if_private(server, code)
+    info = await refuse_if_private(server, code)
     d.mkdir(parents=True, exist_ok=True)
     keys = Keys.generate()
     save(d, keys.link(server), code)
@@ -187,6 +198,9 @@ async def new_project(d: Path, server: str, name: str = "", code: str = "", sett
             r.meta[k] = v
 
     r.local_change(describe)
+    if not code and info.get("creation") == "code":  # the server wouldn't keep it: sync-only from the start
+        log.info("no creation code: this project syncs only between computers that are online at the same time")
+        r.set_storage("relay")
     r.save()
     await run(d, False, once=True)
     registry.add(d)

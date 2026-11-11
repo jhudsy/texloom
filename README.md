@@ -339,7 +339,9 @@ K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
 - A code's allowance is the total stored across **all** projects created with it.
   `default` covers people without a code. `0` means "not stored on the server": those
   people can still create projects, but only as live, relay-only projects whose copies
-  live on their devices.
+  live on their devices. The desktop app makes a project relay-only ("sync-only") by itself
+  when it's created without a code, or when the server refuses to store one that has none;
+  **Keep a copy on the server…** (Project menu) adds a code later.
 - Anyone with a project's link can open and edit it; codes only govern **storage of new
   projects**. A code is entered once per browser (**Create project** asks, or ⚙ Settings → Sync & storage →
   Creation code…). The folder helper takes `texloom new … --code`, `create_code` in
