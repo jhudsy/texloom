@@ -4,7 +4,7 @@ import { Keys } from './crypto'
 import { Replica } from './replica'
 import { projects, projectCode, latexTitle, whenOpened, type Recent } from './projects'
 import { bulkRemoveDialog, removeDialog, type RemoveScope } from './remove'
-import { prefs, setupDialog, settingsDialog, languagePicker, type Device } from './settings'
+import { prefs, setupDialog, settingsDialog, languagePicker, type Device, type SettingsTab } from './settings'
 import { createAssistantPanel } from './assistant/panel'
 import { setupLayout } from './layout'
 import { askCode, chooseNewProject, riskBanner, SAFARI_NOTE } from './storagenotice'
@@ -739,7 +739,7 @@ async function openProject(keys: Keys) {
     arrow('←', t('Go to the source of the spot you last clicked in the PDF, or the middle of the view (⌘⌥← / Ctrl+Alt+←). Double-click or right-click the PDF also works.'), () => syncToSource()))
   const splitR = h('div', { class: 'split' }, syncArrows)
   const mainEl = h('main', {})
-  const risk = riskBanner(r, writable, () => openSettings())
+  const risk = riskBanner(r, writable, () => openSettings('storage'))
 
   /** On-screen keyboards hide the characters LaTeX is made of. */
   function latexKeys() {
@@ -823,7 +823,7 @@ async function openProject(keys: Keys) {
   app.addEventListener('dragover', (e) => e.preventDefault())
   app.addEventListener('drop', (e) => e.preventDefault())
 
-  function openSettings() {
+  function openSettings(tab?: SettingsTab) {
     settingsDialog(r, keys.link(server, writable), applyDevice, folderSyncSupported() && writable ? chooseFolder : null, async () => {
       removeDialog({ name: projects.list().find((p) => p.project === keys.project)?.nick || r.meta.get('name') || t('Untitled project'), code: projectCode(keys.project),
         owner: keys.owner && !r.deletedAt, onServer: r.storage !== 'relay' && !r.deletedAt, pending: r.pending, folder: folder?.name ?? null },
@@ -837,7 +837,7 @@ async function openProject(keys: Keys) {
           await projects.forget(keys.project)
           location.href = '/'
         })
-    })
+    }, tab)
   }
   function applyDevice(d: Device) {
     device = d

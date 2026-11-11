@@ -2,7 +2,6 @@ import type { Catalog } from '../../i18n'
 
 const fr: Catalog = {
   'Remove…': 'Supprimer…',
-  'Language': 'Langue',
   'Interface language': 'Langue de l’interface',
   'Automatic (the browser’s language)': 'Automatique (langue du navigateur)',
   // folder help
@@ -69,7 +68,6 @@ const fr: Catalog = {
   // settings dialog: project
   'Settings': 'Paramètres',
   'Project': 'Projet',
-  'shared with all collaborators': 'commun à tous les collaborateurs',
   'read-only': 'lecture seule',
   'Main file': 'Fichier principal',
   'Engine': 'Moteur',
@@ -93,7 +91,6 @@ const fr: Catalog = {
   'Codes come from whoever runs this server.': 'Les codes sont fournis par la personne qui gère ce serveur.',
 
   // settings dialog: this device
-  'This device': 'Cet appareil',
   'Live sync': 'Synchronisation en direct',
   'Manual sync': 'Synchronisation manuelle',
   'Changes stay here until you press Sync (e.g. to finish a thought, or save bandwidth).':
@@ -102,7 +99,6 @@ const fr: Catalog = {
   'Compile with my own TeX': 'Compiler avec mon propre TeX',
   'Recompile automatically': 'Recompiler automatiquement',
   'Recompile automatically after I stop typing': 'Recompiler automatiquement quand j’arrête de taper',
-  'Editing': 'Édition',
   'Check spelling': 'Vérifier l’orthographe',
   'Check spelling (uses the browser’s dictionary; LaTeX commands, maths and labels are skipped)':
     'Vérifier l’orthographe (avec le dictionnaire du navigateur ; les commandes LaTeX, les formules et les étiquettes sont ignorées)',
@@ -141,6 +137,19 @@ const fr: Catalog = {
   "Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.": "Retirer ce projet de ce navigateur ; ou, en tant que propriétaire, aussi du serveur, ou le supprimer pour tout le monde. Les dossiers de votre ordinateur gardent leurs fichiers.",
   "The TeXLoom app on this computer keeps this project in sync with a folder. This browser keeps a copy of its own as well.": "L’application TeXLoom de cet ordinateur garde ce projet synchronisé avec un dossier. Ce navigateur en garde aussi sa propre copie.",
   "Your computer compiles it: the TeXLoom app, with “Compile with my own TeX” ticked for this project’s folder (or texloom run <folder> --compile). Its PDF appears here.": "Votre ordinateur le compile : l’application TeXLoom, avec « Compiler avec mon propre TeX » coché pour le dossier de ce projet (ou texloom run <folder> --compile). Son PDF apparaît ici.",
+  "Shared with everyone in the project.": "Partagés avec tout le monde dans le projet.",
+  "Shared with everyone in the project. This link can only read them.": "Partagés avec tout le monde dans le projet. Ce lien peut seulement les lire.",
+  "Only on this device.": "Seulement sur cet appareil.",
+  "Downloaded TeX engine": "Moteur TeX téléchargé",
+  "This browser keeps the in-browser TeX engine after the first compile (about 125 MB, shared by all projects). Remove it to free the space; it downloads again when needed.": "Ce navigateur conserve le moteur TeX intégré après la première compilation (environ 125 Mo, partagés par tous les projets). Supprimez-le pour libérer l’espace ; il sera retéléchargé au besoin.",
+  "Sync & storage": "Synchronisation et stockage",
+  "only on this device": "seulement sur cet appareil",
+  "shared with everyone in the project": "partagé avec tout le monde dans le projet",
+  "Integrations": "Intégrations",
+  "Your accounts are yours alone and stay with you; what a project links to is shared with everyone in it.": "Vos comptes sont à vous seul et vous suivent ; ce à quoi un projet est lié est partagé avec tout le monde dans le projet.",
+  "You": "Vous",
+  "Yours, in every project in this browser.": "À vous, dans tous les projets de ce navigateur.",
+  "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "Visible par vos collaborateurs : à côté de votre curseur, sur les commentaires et suggestions, et dans « Qui a écrit ceci ».",
 }
 
 export default fr

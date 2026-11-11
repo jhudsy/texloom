@@ -2,7 +2,6 @@ import type { Catalog } from '../../i18n'
 
 const zh: Catalog = {
   'Remove…': '移除…',
-  'Language': '语言',
   'Interface language': '界面语言',
   'Automatic (the browser’s language)': '自动（浏览器语言）',
   'A web page can’t keep a folder in sync while it’s closed. The TeXLoom app can, for all your projects, from the menu bar or tray, and starting at login if you like:': '网页关闭后无法保持文件夹同步。TeXLoom 应用可以为所有项目做到这一点，它在菜单栏或系统托盘中运行，也可以设置为登录时启动：',
@@ -52,7 +51,6 @@ const zh: Catalog = {
   'Remove downloaded TeX engine': '移除已下载的 TeX 引擎',
   'Settings': '设置',
   'Project': '项目',
-  'shared with all collaborators': '与所有协作者共享',
   'read-only': '只读',
   'Main file': '主文件',
   'Engine': '引擎',
@@ -74,7 +72,6 @@ const zh: Catalog = {
   'Server storage': '服务器存储',
   'Enter creation code…': '输入创建码…',
   'Codes come from whoever runs this server.': '创建码由此服务器的管理者提供。',
-  'This device': '此设备',
   'Live sync': '实时同步',
   'Manual sync': '手动同步',
   'Changes stay here until you press Sync (e.g. to finish a thought, or save bandwidth).': '更改保留在这里，直到你点击“同步”（例如为了写完一段内容或节省流量）。',
@@ -82,7 +79,6 @@ const zh: Catalog = {
   'Compile with my own TeX': '使用我自己的 TeX 编译',
   'Recompile automatically': '自动重新编译',
   'Recompile automatically after I stop typing': '停止输入后自动重新编译',
-  'Editing': '编辑',
   'Check spelling': '检查拼写',
   'Check spelling (uses the browser’s dictionary; LaTeX commands, maths and labels are skipped)': '检查拼写（使用浏览器词典；跳过 LaTeX 命令、公式和标签）',
   'Preview equations': '预览公式',
@@ -109,6 +105,19 @@ const zh: Catalog = {
   "Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.": "从此浏览器中移除此项目；或者作为所有者，同时从服务器移除，或为所有人删除。你电脑上的文件夹会保留其中的文件。",
   "The TeXLoom app on this computer keeps this project in sync with a folder. This browser keeps a copy of its own as well.": "这台电脑上的 TeXLoom 应用会让此项目与一个文件夹保持同步。此浏览器也会保留一份自己的副本。",
   "Your computer compiles it: the TeXLoom app, with “Compile with my own TeX” ticked for this project’s folder (or texloom run <folder> --compile). Its PDF appears here.": "由你的电脑编译：为此项目的文件夹勾选了“使用我自己的 TeX 编译”的 TeXLoom 应用（或 texloom run <folder> --compile）。生成的 PDF 会显示在这里。",
+  "Shared with everyone in the project.": "与项目中的所有人共享。",
+  "Shared with everyone in the project. This link can only read them.": "与项目中的所有人共享。此链接只能查看。",
+  "Only on this device.": "仅限此设备。",
+  "Downloaded TeX engine": "已下载的 TeX 引擎",
+  "This browser keeps the in-browser TeX engine after the first compile (about 125 MB, shared by all projects). Remove it to free the space; it downloads again when needed.": "首次编译后，此浏览器会保留浏览器内 TeX 引擎（约 125 MB，所有项目共用）。删除它可释放空间；需要时会重新下载。",
+  "Sync & storage": "同步与存储",
+  "only on this device": "仅限此设备",
+  "shared with everyone in the project": "与项目中的所有人共享",
+  "Integrations": "集成",
+  "Your accounts are yours alone and stay with you; what a project links to is shared with everyone in it.": "你的账户只属于你并随你同步；项目关联的内容会与项目中的所有人共享。",
+  "You": "你",
+  "Yours, in every project in this browser.": "你的设置，适用于此浏览器中的所有项目。",
+  "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "对协作者可见：显示在你的光标旁、评论和建议中，以及“谁写的”中。",
 }
 
 export default zh

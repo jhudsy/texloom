@@ -2,7 +2,6 @@ import type { Catalog } from '../../i18n'
 
 const pt: Catalog = {
   'Remove…': 'Remover…',
-  'Language': 'Idioma',
   'Interface language': 'Idioma da interface',
   'Automatic (the browser’s language)': 'Automático (idioma do navegador)',
   'A web page can’t keep a folder in sync while it’s closed. The TeXLoom app can, for all your projects, from the menu bar or tray, and starting at login if you like:': 'Uma página da web não consegue manter uma pasta sincronizada enquanto está fechada. O aplicativo TeXLoom consegue, para todos os seus projetos, pela barra de menus ou bandeja do sistema, e iniciando com o login, se você quiser:',
@@ -52,7 +51,6 @@ const pt: Catalog = {
   'Remove downloaded TeX engine': 'Remover o mecanismo TeX baixado',
   'Settings': 'Configurações',
   'Project': 'Projeto',
-  'shared with all collaborators': 'compartilhado com todos os colaboradores',
   'read-only': 'somente leitura',
   'Main file': 'Arquivo principal',
   'Engine': 'Mecanismo',
@@ -74,7 +72,6 @@ const pt: Catalog = {
   'Server storage': 'Armazenamento no servidor',
   'Enter creation code…': 'Inserir código de criação…',
   'Codes come from whoever runs this server.': 'Os códigos são fornecidos por quem administra este servidor.',
-  'This device': 'Este dispositivo',
   'Live sync': 'Sincronização ao vivo',
   'Manual sync': 'Sincronização manual',
   'Changes stay here until you press Sync (e.g. to finish a thought, or save bandwidth).': 'As alterações ficam aqui até você clicar em Sincronizar (ex.: para terminar uma ideia ou economizar dados).',
@@ -82,7 +79,6 @@ const pt: Catalog = {
   'Compile with my own TeX': 'Compilar com meu próprio TeX',
   'Recompile automatically': 'Recompilar automaticamente',
   'Recompile automatically after I stop typing': 'Recompilar automaticamente quando eu parar de digitar',
-  'Editing': 'Edição',
   'Check spelling': 'Verificar ortografia',
   'Check spelling (uses the browser’s dictionary; LaTeX commands, maths and labels are skipped)': 'Verificar ortografia (usa o dicionário do navegador; comandos do LaTeX, fórmulas e rótulos são ignorados)',
   'Preview equations': 'Visualizar equações',
@@ -109,6 +105,19 @@ const pt: Catalog = {
   "Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.": "Remover este projeto deste navegador; ou, como proprietário, também do servidor, ou excluí-lo para todos. As pastas do seu computador mantêm os arquivos.",
   "The TeXLoom app on this computer keeps this project in sync with a folder. This browser keeps a copy of its own as well.": "O aplicativo TeXLoom deste computador mantém este projeto sincronizado com uma pasta. Este navegador também guarda uma cópia própria.",
   "Your computer compiles it: the TeXLoom app, with “Compile with my own TeX” ticked for this project’s folder (or texloom run <folder> --compile). Its PDF appears here.": "Seu computador compila: o aplicativo TeXLoom, com “Compilar com meu próprio TeX” marcado para a pasta deste projeto (ou texloom run <folder> --compile). O PDF aparece aqui.",
+  "Shared with everyone in the project.": "Compartilhadas com todos no projeto.",
+  "Shared with everyone in the project. This link can only read them.": "Compartilhadas com todos no projeto. Este link só pode lê-las.",
+  "Only on this device.": "Somente neste dispositivo.",
+  "Downloaded TeX engine": "Mecanismo TeX baixado",
+  "This browser keeps the in-browser TeX engine after the first compile (about 125 MB, shared by all projects). Remove it to free the space; it downloads again when needed.": "Este navegador guarda o mecanismo TeX após a primeira compilação (cerca de 125 MB, compartilhados por todos os projetos). Remova-o para liberar espaço; ele é baixado de novo quando necessário.",
+  "Sync & storage": "Sincronização e armazenamento",
+  "only on this device": "somente neste dispositivo",
+  "shared with everyone in the project": "compartilhado com todos no projeto",
+  "Integrations": "Integrações",
+  "Your accounts are yours alone and stay with you; what a project links to is shared with everyone in it.": "Suas contas são só suas e ficam com você; o que um projeto vincula é compartilhado com todos nele.",
+  "You": "Você",
+  "Yours, in every project in this browser.": "Suas, em todos os projetos neste navegador.",
+  "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "Visível para colaboradores: ao lado do seu cursor, em comentários e sugestões, e em “Quem escreveu isto”.",
 }
 
 export default pt

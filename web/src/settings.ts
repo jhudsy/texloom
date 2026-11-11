@@ -106,7 +106,12 @@ export async function setupDialog(r: Replica, link: string, byApp = false, appCo
 }
 
 /** Project (shared) + device (local) settings. */
-export async function settingsDialog(r: Replica, link: string, onDevice: (d: Device) => void, chooseFolder: (() => Promise<void>) | null, onRemove: () => Promise<void>) {
+/** The tabs of a project's Settings, for opening it at one. */
+export type SettingsTab = 'project' | 'compiling' | 'editor' | 'storage' | 'integrations' | 'you'
+const TAB_KEY = 'texloom.settingsTab'
+
+/** Project (shared) + device (local) + your own settings, in tabs; `open` picks the tab (else the last one used). */
+export async function settingsDialog(r: Replica, link: string, onDevice: (d: Device) => void, chooseFolder: (() => Promise<void>) | null, onRemove: () => Promise<void>, open?: SettingsTab) {
   const d = prefs.device(r.keys.project)
   const w = r.keys.writable
   const texFiles = [...r.files.keys()].filter((p) => p.endsWith('.tex')).sort()
@@ -143,80 +148,116 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
   })
   storageBox.append(storageRadios())
   const cacheBtn = h('button', { onclick: async () => { await clearEngineCache(); cacheBtn.textContent = t('Cleared') } }, t('Remove downloaded TeX engine'))
-  const dlg = dialog('settings',
-    h('h3', {}, t('Settings')),
-    h('h4', {}, t('Project'), h('small', { class: 'muted' }, ' — ' + (w ? t('shared with all collaborators') : t('read-only')))),
-    h('div', { class: 'grid' },
-      h('span', {}, t('Main file')), sel('main', texFiles.map((p) => [p, p]), detectedMain),
-      h('span', {}, t('Engine')), sel('engine', [['pdflatex', 'pdfLaTeX'], ['xelatex', 'XeLaTeX'], ['lualatex', 'LuaLaTeX']], 'pdflatex'),
-      h('span', {}, t('Bibliography')), sel('bib', [['auto', t('Detect automatically')], ['bibtex', 'BibTeX'], ['biber', 'Biber'], ['none', t('None')]], 'auto'),
-      h('span', {}, t('Spelling')), sel('lang', [['', t('Browser’s language')], ['en-GB', t('English (UK)')], ['en-US', t('English (US)')], ['de', t('German')], ['fr', t('French')],
-        ['es', t('Spanish')], ['it', t('Italian')], ['nl', t('Dutch')], ['pt', t('Portuguese')], ['sv', t('Swedish')], ['pl', t('Polish')]], ''),
-    ),
-    h('h4', {}, t('Server storage')),
-    storageBox,
-    codeRow = noStorage ? h('div', { class: 'row' },
-      h('button', { onclick: async () => {
-        const { askCode } = await import('./storagenotice')
-        if (!(await askCode())) return
-        r.retryStore() // reconnects with the code; the server then stores this project
-        noStorage = false
-        storageBox.replaceChildren(storageRadios())
-        codeRow?.remove()
-      } }, t('Enter creation code…')),
-      h('span', { class: 'muted small' }, t('Codes come from whoever runs this server.'))) : null,
-    h('h4', {}, t('This device')),
-    h('label', { class: 'field' }, t('Your name'), h('input', { value: prefs.name, onchange: (e: any) => (prefs.name = e.target.value) })),
-    h('h5', {}, t('Syncing')),
-    radios('sync', d.sync, [
-      ['live', t('Live sync')],
-      ['manual', t('Manual sync'), t('Changes stay here until you press Sync (e.g. to finish a thought, or save bandwidth).')],
-    ], (v) => { d.sync = v; prefs.saveDevice(r.keys.project, d); onDevice(d) }),
-    h('h5', {}, t('Compiling')),
-    radios('compile', d.compile, [
-      ['browser', t('Compile in this browser'), `${note[0].toUpperCase()}${note.slice(1)}.`],
-      ['local', t('Compile with my own TeX'), t('Your computer compiles it: the TeXLoom app, with “Compile with my own TeX” ticked for this project’s folder (or texloom run <folder> --compile). Its PDF appears here.')],
-      ['none', t('Don’t compile here')],
-    ], (v) => { d.compile = v; prefs.saveDevice(r.keys.project, d); onDevice(d) }),
-    h('label', { class: 'check' },
-      h('input', { type: 'checkbox', 'aria-label': t('Recompile automatically'), checked: d.autoCompile, onchange: (e: any) => { d.autoCompile = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
-      t('Recompile automatically after I stop typing')),
-    h('h5', {}, t('Language')),
-    languagePicker(),
-    h('h5', {}, t('Editing')),
-    h('label', { class: 'check' },
-      h('input', { type: 'checkbox', 'aria-label': t('Check spelling'), checked: d.spell, onchange: (e: any) => { d.spell = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
-      t('Check spelling (uses the browser’s dictionary; LaTeX commands, maths and labels are skipped)')),
-    h('label', { class: 'check' },
-      h('input', { type: 'checkbox', 'aria-label': t('Preview equations'), checked: d.mathPreview, onchange: (e: any) => { d.mathPreview = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
-      t('Preview the equation under the cursor')),
-    h('label', { class: 'check' },
-      h('input', { type: 'checkbox', 'aria-label': t('Point out common mistakes'), checked: d.checks, onchange: (e: any) => { d.checks = e.target.checked; prefs.saveDevice(r.keys.project, d); onDevice(d) } }),
-      t('Point out common LaTeX mistakes (unclosed environments, stray braces, \\label before \\caption, quotes, ties, …)')),
-    h('label', { class: 'row' }, t('Suggested changes in the editor:'),
-      h('select', { 'aria-label': t('Suggested changes in the editor:'), onchange: (e: any) => editorMarkup.set(e.target.value as Markup) },
-        ...([['none', t('Not marked (see the Review tab)')], ['simple', t('Underlined')], ['all', t('In full (removed text struck through)')]] as [Markup, string][])
-          .map(([v, label]) => h('option', { value: v, selected: editorMarkup.mode() === v }, label)))),
-    h('div', { class: 'row' },
-      h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, t('Creation code…')),
-      h('span', { class: 'muted small' }, t('Needed only to store new projects on servers that ask for one.'))),
-    h('details', {}, h('summary', {}, t('Keep a copy in a folder on this computer')),
+  const saveDevice = () => { prefs.saveDevice(r.keys.project, d); onDevice(d) }
+  const check = (label: string, aria: string, on: boolean, set: (v: boolean) => void) =>
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', 'aria-label': aria, checked: on, onchange: (e: any) => { set(e.target.checked); saveDevice() } }), label)
+  const whose = (text: string) => h('p', { class: 'muted small whose' }, text)
+  let dlg: HTMLDialogElement
+
+  // Each tab: what it is, and whose settings it holds.
+  const tabs: Record<SettingsTab, { label: string; body: () => (HTMLElement | null)[] }> = {
+    project: { label: t('Project'), body: () => [
+      whose(w ? t('Shared with everyone in the project.') : t('Shared with everyone in the project. This link can only read them.')),
+      h('div', { class: 'grid' },
+        h('span', {}, t('Main file')), sel('main', texFiles.map((p) => [p, p]), detectedMain),
+        h('span', {}, t('Engine')), sel('engine', [['pdflatex', 'pdfLaTeX'], ['xelatex', 'XeLaTeX'], ['lualatex', 'LuaLaTeX']], 'pdflatex'),
+        h('span', {}, t('Bibliography')), sel('bib', [['auto', t('Detect automatically')], ['bibtex', 'BibTeX'], ['biber', 'Biber'], ['none', t('None')]], 'auto'),
+        h('span', {}, t('Spelling')), sel('lang', [['', t('Browser’s language')], ['en-GB', t('English (UK)')], ['en-US', t('English (US)')], ['de', t('German')], ['fr', t('French')],
+          ['es', t('Spanish')], ['it', t('Italian')], ['nl', t('Dutch')], ['pt', t('Portuguese')], ['sv', t('Swedish')], ['pl', t('Polish')]], ''),
+      ),
+      h('h4', {}, t('Remove')),
+      h('p', { class: 'muted small' },
+        t('Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.')),
+      h('div', { class: 'row' }, h('button', { class: 'danger', onclick: async () => { dlg.close(); await onRemove() } }, t('Remove…'))),
+    ] },
+    compiling: { label: t('Compiling'), body: () => [
+      whose(t('Only on this device.')),
+      radios('compile', d.compile, [
+        ['browser', t('Compile in this browser'), `${note[0].toUpperCase()}${note.slice(1)}.`],
+        ['local', t('Compile with my own TeX'), t('Your computer compiles it: the TeXLoom app, with “Compile with my own TeX” ticked for this project’s folder (or texloom run <folder> --compile). Its PDF appears here.')],
+        ['none', t('Don’t compile here')],
+      ], (v) => { d.compile = v; saveDevice() }),
+      check(t('Recompile automatically after I stop typing'), t('Recompile automatically'), d.autoCompile, (v) => (d.autoCompile = v)),
+      h('h4', {}, t('Downloaded TeX engine')),
+      h('p', { class: 'muted small' }, t('This browser keeps the in-browser TeX engine after the first compile (about 125 MB, shared by all projects). Remove it to free the space; it downloads again when needed.')),
+      h('div', { class: 'row' }, cacheBtn),
+    ] },
+    editor: { label: t('Editor'), body: () => [
+      whose(t('Only on this device.')),
+      check(t('Check spelling (uses the browser’s dictionary; LaTeX commands, maths and labels are skipped)'), t('Check spelling'), d.spell, (v) => (d.spell = v)),
+      check(t('Preview the equation under the cursor'), t('Preview equations'), d.mathPreview, (v) => (d.mathPreview = v)),
+      check(t('Point out common LaTeX mistakes (unclosed environments, stray braces, \\label before \\caption, quotes, ties, …)'), t('Point out common mistakes'), d.checks, (v) => (d.checks = v)),
+      h('label', { class: 'field' }, t('Suggested changes in the editor:'),
+        h('select', { 'aria-label': t('Suggested changes in the editor:'), onchange: (e: any) => editorMarkup.set(e.target.value as Markup) },
+          ...([['none', t('Not marked (see the Review tab)')], ['simple', t('Underlined')], ['all', t('In full (removed text struck through)')]] as [Markup, string][])
+            .map(([v, label]) => h('option', { value: v, selected: editorMarkup.mode() === v }, label)))),
+    ] },
+    storage: { label: t('Sync & storage'), body: () => [
+      h('h4', {}, t('Syncing'), h('small', { class: 'muted' }, ' — ' + t('only on this device'))),
+      radios('sync', d.sync, [
+        ['live', t('Live sync')],
+        ['manual', t('Manual sync'), t('Changes stay here until you press Sync (e.g. to finish a thought, or save bandwidth).')],
+      ], (v) => { d.sync = v; saveDevice() }),
+      h('h4', {}, t('Server storage'), h('small', { class: 'muted' }, ' — ' + t('shared with everyone in the project'))),
+      storageBox,
+      codeRow = noStorage ? h('div', { class: 'row' },
+        h('button', { onclick: async () => {
+          const { askCode } = await import('./storagenotice')
+          if (!(await askCode())) return
+          r.retryStore() // reconnects with the code; the server then stores this project
+          noStorage = false
+          storageBox.replaceChildren(storageRadios())
+          codeRow?.remove()
+        } }, t('Enter creation code…')),
+        h('span', { class: 'muted small' }, t('Codes come from whoever runs this server.'))) : h('div', { class: 'row' },
+        h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, t('Creation code…')),
+        h('span', { class: 'muted small' }, t('Needed only to store new projects on servers that ask for one.'))),
+      h('h4', {}, t('Keep a copy in a folder on this computer')),
       chooseFolder ? h('div', {},
         h('p', { class: 'muted small' }, t('This browser can sync a folder itself while this tab is open: nothing to install. Changes go both ways; files changed on both sides take the folder’s version (it stays in History).')),
         h('p', { class: 'muted small' }, t('Collaborators’ files are written there. TeXLoom won’t write files that LaTeX tools run as programs, and points out lines that ask to run one, but compile the folder with your own tools only if you trust everyone who can edit this project.')),
         h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => { dlg.close(); await chooseFolder() } }, t('Choose a folder…')))) : null,
       chooseFolder ? h('p', { class: 'muted small' }, t('Or, to keep it in sync without a browser (and compile with your own TeX):')) : null,
-      folderHelp(r, link)),
-    h('h4', {}, 'Zotero'),
-    zoteroSection(r, () => prefs.name, w),
-    h('h4', {}, t('Remove')),
-    h('p', { class: 'muted small' },
-      t('Remove this project from this browser; or, as the owner, from the server too, or delete it for everyone. Folders on your computer keep their files.')),
-    h('div', { class: 'row' }, h('button', { class: 'danger', onclick: async () => {
-      dlg.close()
-      await onRemove()
-    } }, t('Remove…'))),
-    sourceNote(),
-    h('div', { class: 'row end' }, cacheBtn, h('button', { class: 'primary', onclick: () => dlg.close() }, t('Done'))),
+      folderHelp(r, link),
+    ] },
+    integrations: { label: t('Integrations'), body: () => [
+      whose(t('Your accounts are yours alone and stay with you; what a project links to is shared with everyone in it.')),
+      h('h4', {}, 'Zotero'),
+      zoteroSection(r, () => prefs.name, w),
+    ] },
+    you: { label: t('You'), body: () => [
+      whose(t('Yours, in every project in this browser.')),
+      h('label', { class: 'field' }, t('Your name'), h('input', { value: prefs.name, onchange: (e: any) => (prefs.name = e.target.value) })),
+      h('p', { class: 'muted small' }, t('Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.')),
+      languagePicker(),
+    ] },
+  }
+
+  const ids = Object.keys(tabs) as SettingsTab[]
+  let current: SettingsTab = open ?? (() => { try { const v = localStorage.getItem(TAB_KEY) as SettingsTab; return ids.includes(v) ? v : 'project' } catch { return 'project' } })()
+  const panel = h('div', { class: 'tabpanel', role: 'tabpanel' })
+  const buttons = ids.map((id) => h('button', { class: 'tab', role: 'tab', id: `settings-tab-${id}`, onclick: () => show(id), onkeydown: (e: KeyboardEvent) => {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key]
+    if (!step) return
+    e.preventDefault()
+    const next = ids[(ids.indexOf(id) + step + ids.length) % ids.length]
+    show(next)
+    buttons[ids.indexOf(next)].focus()
+  } }, tabs[id].label))
+  function show(id: SettingsTab) {
+    current = id
+    try { localStorage.setItem(TAB_KEY, id) } catch {}
+    buttons.forEach((b, i) => { const on = ids[i] === id; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1 })
+    panel.setAttribute('aria-labelledby', `settings-tab-${id}`)
+    panel.replaceChildren(...tabs[id].body().filter((x): x is HTMLElement => !!x))
+    panel.scrollTop = 0
+    buttons[ids.indexOf(id)].scrollIntoView({ block: 'nearest', inline: 'nearest' }) // in a row of tabs on a phone
+  }
+  dlg = dialog('settings tabbed',
+    h('h3', {}, t('Settings')),
+    h('div', { class: 'tabbox' }, h('div', { class: 'tablist', role: 'tablist', 'aria-orientation': 'vertical' }, ...buttons), panel),
+    h('div', { class: 'row end foot' }, sourceNote(), h('span', { class: 'spacer' }), h('button', { class: 'primary', onclick: () => dlg.close() }, t('Done'))),
   )
+  show(current)
+
 }

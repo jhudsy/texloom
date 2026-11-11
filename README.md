@@ -64,6 +64,12 @@ data after about 7 days without a visit. A project stored on the server can be r
 from its link. One that isn't (marked **not on server**, with a warning in the editor)
 survives only on devices, so keep a folder copy or download a `.zip`.
 
+A project's **⚙ Settings** has tabs: **Project** (main file, engine, bibliography, spelling
+language, and removing it: shared with everyone in it), **Compiling** and **Editor** (this device),
+**Sync & storage** (syncing on this device; the server's copy and creation code; a copy in a folder),
+**Integrations** (Zotero; your account is yours, the links are the project's) and **You** (your name
+and the interface language, in every project). It opens on the tab you used last.
+
 The start page lists the projects you've opened **in that browser** (your name and the
 language are under ⚙ at the top):
 - each shows the document's `\title`, who started it and who else you've seen in it, and
@@ -73,7 +79,7 @@ language are under ⚙ at the top):
 - the folder icon keeps the project in a folder through the TeXLoom app (highlighted once the
   app does); ✎ gives a project a private label that only you see;
 - tick boxes, shown when you point at a project, select several to tag or remove together;
-- ✕ (or Settings → **Remove…**) asks what to remove: **from this browser only** (the
+- ✕ (or ⚙ Settings → Project → **Remove…**) asks what to remove: **from this browser only** (the
   server's and collaborators' copies stay; the link brings it back), or, for the owner,
   **from the server too** (the server deletes its encrypted copy and stops storing the
   project; collaborators keep their copies and can still work together while online at the
@@ -194,7 +200,7 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   you type into suggestions instead of changes, like tracked changes. You edit as usual; each changed
   stretch becomes a suggestion in the Review tab, shown word by word (removed words struck through in
   red, new ones green), for someone to accept or reject. Until then the file, the PDF and everyone
-  else's copy stay as they were. ⚙ Settings → *Suggested changes in the editor* also shows them in the
+  else's copy stay as they were. ⚙ Settings → Editor → *Suggested changes in the editor* also shows them in the
   editor, underlined or in full; by default the editor shows just the text. Undo takes a suggestion back. Search and replace, and
   adding a package for a symbol, suggest too while it's on. It's remembered per project in that
   browser, and a bar across the editor says when it's on. Suggestions are blue in the Review tab and
@@ -219,7 +225,7 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   `vaswani2017attention`, and cites it at the cursor. Type words from the title and authors to search
   (Crossref for published work, DataCite for arXiv preprints) and pick the paper, or paste a DOI, a
   doi.org or arXiv link, or an arXiv id. The entry comes from doi.org.
-- **Zotero:** project ⚙ Settings → **Zotero** keeps a `.bib` file in step with a Zotero collection (or
+- **Zotero:** project ⚙ Settings → **Integrations** → Zotero keeps a `.bib` file in step with a Zotero collection (or
   a whole library, yours or a group's). Connect once with a Zotero API key (made at
   zotero.org/settings/keys, read access is enough): it stays in your browser, and with a project
   list it travels with the list, encrypted, like the creation code; it never enters a project.
@@ -335,7 +341,7 @@ K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
   people can still create projects, but only as live, relay-only projects whose copies
   live on their devices.
 - Anyone with a project's link can open and edit it; codes only govern **storage of new
-  projects**. A code is entered once per browser (**Create project** asks, or ⚙ Settings →
+  projects**. A code is entered once per browser (**Create project** asks, or ⚙ Settings → Sync & storage →
   Creation code…). The folder helper takes `texloom new … --code`, `create_code` in
   `.texloom/config.json`. `TEXLOOM_CODE` is read only when creating something new, so it can't reach
   whichever server a link you open points at.
@@ -418,7 +424,7 @@ Tailscale or WireGuard, or a firewall.
 
 Use this for Claude Code or any other tool, and to compile with your own TeX installation.
 
-**In Chrome or Edge, nothing to install:** Settings → *Keep a copy in a folder* →
+**In Chrome or Edge, nothing to install:** ⚙ Settings → Sync & storage → *Keep a copy in a folder* →
 **Choose a folder…**. The tab keeps the folder in sync both ways while it is open. After a
 browser restart, click **📁 Reconnect folder** once.
 
@@ -440,7 +446,7 @@ time, it shows two choices; afterwards they are under **Add project** in the too
 - **Join a project with a link…** takes a link (from the Share dialog or an email), shows the
   project's name and your access, and puts it in a folder you choose (`~/TeXLoom/<name>` by
   default). In the web app, **Sync to a folder…** next to a project on the start page does the
-  same in one click, as does Settings → *Keep a copy in a folder* → **Open in the TeXLoom app**.
+  same in one click, as does ⚙ Settings → Sync & storage → *Keep a copy in a folder* → **Open in the TeXLoom app**.
   The app asks before joining, and says if the project already has a folder on this computer.
   A project the app opens in the browser (**Open in browser**, or one made from the web app's
   **Create project ▸ From a folder…**) shows **In the TeXLoom app** there instead of **Sync to a

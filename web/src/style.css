@@ -564,3 +564,24 @@ dialog.templates h4 { margin: 16px 0 8px; font-size: 13px; color: var(--muted); 
 .zotero .zlink { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
 .zotero .zlink .spacer, .zotero-account .spacer { flex: 1; }
 .zotero code { font-size: 12px; }
+
+/* project Settings, in tabs: a list on the left, a row across the top on narrow screens */
+dialog.settings.tabbed { width: min(800px, 94vw); height: min(640px, 88vh); padding-bottom: 12px; overflow: hidden; }
+dialog.settings.tabbed[open] { display: flex; flex-direction: column; }
+.tabbox { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 18px; flex: 1; min-height: 0; margin-top: 10px; }
+.tablist { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); padding-right: 10px; }
+.tablist .tab { text-align: left; border: 1px solid transparent; background: transparent; padding: 7px 10px; border-radius: 6px; color: var(--fg); font: inherit; cursor: pointer; }
+.tablist .tab:hover { background: var(--panel); }
+.tablist .tab[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); font-weight: 600; }
+.tabpanel { overflow: auto; min-height: 0; padding-right: 6px; }
+.tabpanel > :first-child { margin-top: 0; }
+.tabpanel h4 { margin: 18px 0 8px; }
+.tabbed .foot { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; align-items: center; }
+.tabbed .foot .source-note { margin: 0; }
+.tabbed .foot .spacer { flex: 1; }
+@media (max-width: 640px) {
+  .tabbox { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
+  .tablist { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 0 0 6px; }
+  .tablist .tab { white-space: nowrap; }
+  .tabbed .foot .source-note { display: none; }
+}
