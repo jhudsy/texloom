@@ -116,18 +116,8 @@ const last = (r) => r.versions.get(r.versions.length - 1)
   check('damaged chain throws', threw)
 }
 
-{ // old whole-snapshot versions and new ones side by side
-  const r = replica(), want = new Map()
-  for (let i = 0; i < 20; i++) {
-    edit(r, 50, 500); const now = state(r.doc)
-    if (i < 10) { const snap = Y.encodeSnapshot(Y.snapshot(r.doc)); r.versions.push([{ at: i, by: 'old', auto: true, snap }]) } else saveVersion(r, 'new')
-    want.set(last(r), now)
-  }
-  want.forEach((s, v) => opens(r, v, s, 'mixed'))
-}
-
 // Size and speed at the scale of a thesis: a million characters typed, saving every 2,000.
-function oldSave(r) { // what the code did before
+function oldSave(r) { // a whole snapshot per version, for comparison
   const snap = Y.encodeSnapshot(Y.snapshot(r.doc))
   r.doc.transact(() => { r.versions.push([{ at: 1, by: 'someone', auto: true, snap }]); if (r.versions.length > 300) r.versions.delete(0, 1) })
 }

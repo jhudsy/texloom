@@ -7,7 +7,6 @@ const CACHE = `texloom-${VERSION}`
 const TEX = 'texloom-tex' // in-browser TeX engine scripts and WebAssembly (kept until the engine changes)
 const ENGINE = __ENGINE__ // the engine these should be from
 const ENGINE_MARK = '/__engine-version' // in the cache: the engine what's there is from
-const FIRST_MARKED_ENGINE = '1.4.1' // caches from before the mark existed
 const TEXLIVE = 'texloom-texlive' // TeX Live files fetched on demand (URLs name the release; kept across versions)
 
 // Each file is cached on its own: one that fails (a stale list, a dropped connection)
@@ -25,7 +24,7 @@ self.addEventListener('activate', (event) => {
     for (const key of await caches.keys()) if (key !== CACHE && key !== TEX && key !== TEXLIVE) await caches.delete(key)
     // The engine's files keep their names between versions: the old WebAssembly mustn't meet the new scripts.
     const mark = await (await caches.open(TEX)).match(ENGINE_MARK)
-    if ((mark ? await mark.text() : FIRST_MARKED_ENGINE) !== ENGINE) await caches.delete(TEX)
+    if (!mark || await mark.text() !== ENGINE) await caches.delete(TEX)
     await (await caches.open(TEX)).put(ENGINE_MARK, new Response(ENGINE))
     await self.clients.claim()
   })())

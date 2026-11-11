@@ -204,17 +204,14 @@ class CodeBook:
 
     @staticmethod
     def _line_fields(parts: list[str]) -> tuple[str, list[str], str | None]:
-        """The size, label words and until= date after the code on a line of a codes file."""
+        """The size, label words and until= date after the code on a line of a codes file
+        (`CODE SIZE [label…] [until=YYYY-MM-DD]`). ValueError if the size is missing or wrong."""
         rest = [p for p in parts[1:] if not UNTIL_RE.match(p)]
         dates = [UNTIL_RE.match(p)[1] for p in parts[1:] if UNTIL_RE.match(p)]  # the last day the code is valid
-        size, label = "unlimited", rest
-        if rest:
-            try:
-                parse_size(rest[0])
-                size, label = rest[0], rest[1:]
-            except ValueError:  # old format "code label": unlimited
-                pass
-        return size, label, dates[-1] if dates else None
+        if not rest:
+            raise ValueError("no allowance")
+        parse_size(rest[0])
+        return rest[0], rest[1:], dates[-1] if dates else None
 
     def _load(self) -> None:
         if not self.path:
@@ -234,7 +231,11 @@ class CodeBook:
             parts = line.split("#", 1)[0].split()
             if not parts:
                 continue
-            size, label, until_text = self._line_fields(parts)
+            try:
+                size, label, until_text = self._line_fields(parts)
+            except ValueError as e:
+                log.warning("%s line %d: %s (ignored: a line is `code allowance [until=YYYY-MM-DD] [label]`)", path, n, e)
+                continue
             allowance, label = parse_size(size), " ".join(label)
             expires = None
             if until_text:
@@ -266,7 +267,7 @@ class CodeBook:
     def lapsed(self, owner: str) -> bool:
         """True if `owner` was a creation code that has since expired or been removed."""
         self._load()
-        return bool(self.path) and owner not in ("default", "existing") and (owner not in self.codes or self.expired(owner))
+        return bool(self.path) and owner != "default" and (owner not in self.codes or self.expired(owner))
 
     def lapsed_since(self, code: str) -> int | None:
         """Whole days since an expired code's last valid day (None if it hasn't expired)."""
@@ -290,9 +291,9 @@ class CodeBook:
         return None if found is None or self.expired(found) else found
 
     def allowance(self, owner: str) -> float:
-        """Allowance for an owner: a code, 'default', or 'existing' (grandfathered)."""
+        """Allowance for an owner: a code, or 'default'."""
         self._load()
-        if owner == "existing" or self.path is None:
+        if self.path is None:
             return UNLIMITED
         if owner in self.codes and not self.expired(owner):
             return self.codes[owner][0]
@@ -381,51 +382,33 @@ class Store:
             """
             CREATE TABLE IF NOT EXISTS log (
               project TEXT NOT NULL, seq INTEGER NOT NULL, snap INTEGER NOT NULL DEFAULT 0,
-              data BLOB NOT NULL, sig BLOB NOT NULL, PRIMARY KEY (project, seq));
+              data BLOB NOT NULL, sig BLOB NOT NULL,
+              h BLOB NOT NULL,  -- content hash, to recognise replayed updates
+              PRIMARY KEY (project, seq));
             CREATE TABLE IF NOT EXISTS head (project TEXT PRIMARY KEY, seq INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS mode (project TEXT PRIMARY KEY, relay INTEGER NOT NULL);
+            -- kind 'output' = compiled PDF/log/SyncTeX, replaced by every compile: any writer may
+            -- erase the stored content. 'file' = content of project files: only the owner may erase
+            -- it (deleting a file from the project is a document edit, and History can restore it
+            -- only while this content exists)
             CREATE TABLE IF NOT EXISTS blob (
-              project TEXT NOT NULL, id TEXT NOT NULL, data BLOB NOT NULL,
+              project TEXT NOT NULL, id TEXT NOT NULL, data BLOB NOT NULL, kind TEXT NOT NULL DEFAULT 'file',
               PRIMARY KEY (project, id));
             CREATE TABLE IF NOT EXISTS revoked (
               project TEXT NOT NULL, pub TEXT NOT NULL, sig BLOB NOT NULL, at REAL NOT NULL,
               PRIMARY KEY (project, pub));
+            -- seen: the last time anyone connected (for idle-project eviction)
             CREATE TABLE IF NOT EXISTS projects (
-              project TEXT PRIMARY KEY, created REAL NOT NULL, label TEXT NOT NULL DEFAULT '');
+              project TEXT PRIMARY KEY, created REAL NOT NULL, owner TEXT NOT NULL,
+              seen REAL NOT NULL DEFAULT 0, evicted REAL NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS gone (
               project TEXT NOT NULL, h BLOB NOT NULL, seq INTEGER NOT NULL DEFAULT 0,
               PRIMARY KEY (project, h)) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS floor (project TEXT PRIMARY KEY, seq INTEGER NOT NULL);
-            CREATE TABLE IF NOT EXISTS deleted (project TEXT PRIMARY KEY, at REAL NOT NULL, sig BLOB NOT NULL, ts INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS deleted (project TEXT PRIMARY KEY, at REAL NOT NULL, sig BLOB NOT NULL, ts INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS log_h ON log(project, h);
             """
         )
-        cols = {r[1] for r in self.db.execute("PRAGMA table_info(projects)")}
-        if "owner" not in cols:
-            self.db.execute("ALTER TABLE projects ADD COLUMN owner TEXT NOT NULL DEFAULT 'existing'")
-        if "seen" not in cols:  # last time anyone connected (for idle-project eviction)
-            self.db.execute("ALTER TABLE projects ADD COLUMN seen REAL NOT NULL DEFAULT 0")
-            self.db.execute("ALTER TABLE projects ADD COLUMN evicted REAL NOT NULL DEFAULT 0")
-        if "kind" not in {r[1] for r in self.db.execute("PRAGMA table_info(blob)")}:
-            # 'output' = compiled PDF/log/SyncTeX, replaced by every compile: any writer may erase
-            # the stored content. 'file' = content of project files: only the owner may erase it
-            # (deleting a file from the project is a document edit, and History can restore it
-            # only while this content exists)
-            self.db.execute("ALTER TABLE blob ADD COLUMN kind TEXT NOT NULL DEFAULT 'file'")
-        cols = {r[1] for r in self.db.execute("PRAGMA table_info(log)")}
-        if "h" not in cols:  # content hash, to recognise replayed updates
-            self.db.execute("ALTER TABLE log ADD COLUMN h BLOB")
-            for project, seq, data in self.db.execute("SELECT project, seq, data FROM log").fetchall():
-                self.db.execute("UPDATE log SET h=? WHERE project=? AND seq=?",
-                                (hashlib.sha256(data).digest(), project, seq))
-        self.db.execute("CREATE INDEX IF NOT EXISTS log_h ON log(project, h)")
-        if "seq" not in {r[1] for r in self.db.execute("PRAGMA table_info(gone)")}:
-            self.db.execute("ALTER TABLE gone ADD COLUMN seq INTEGER NOT NULL DEFAULT 0")
-        with self.db:  # projects stored before registration existed are grandfathered in
-            self.db.execute(
-                "INSERT OR IGNORE INTO projects(project, created, label, owner) "
-                "SELECT project, ?, 'existing', 'existing' FROM (SELECT project FROM log UNION SELECT project FROM blob)",
-                (time.time(),),
-            )
         self.usage: dict[str, int] = defaultdict(int)
         for q in ("SELECT project, SUM(length(data) + length(sig)) FROM log GROUP BY project",
                   "SELECT project, SUM(length(data)) FROM blob GROUP BY project",
@@ -434,8 +417,6 @@ class Store:
                 self.usage[project] += n or 0
         self.total = sum(self.usage.values())
         self.owners: dict[str, str] = dict(self.db.execute("SELECT project, owner FROM projects"))
-        if "ts" not in {r[1] for r in self.db.execute("PRAGMA table_info(deleted)")}:
-            self.db.execute("ALTER TABLE deleted ADD COLUMN ts INTEGER NOT NULL DEFAULT 0")
         # project -> the message telling clients, with the owner's signature so they needn't trust the server
         self.deleted: dict[str, dict] = {p: self._deleted_msg(at, ts, sig) for p, at, ts, sig in self.db.execute("SELECT project, at, ts, sig FROM deleted")}
         self.owner_bytes: dict[str, int] = defaultdict(int)  # checked on every stored edit: kept, not added up
@@ -452,8 +433,8 @@ class Store:
 
     def register(self, project: str, owner: str, label: str) -> None:
         with self.db:
-            self.db.execute("INSERT OR IGNORE INTO projects(project, created, label, owner) VALUES (?,?,?,?)",
-                            (project, time.time(), label, owner))
+            self.db.execute("INSERT OR IGNORE INTO projects(project, created, owner) VALUES (?,?,?)",
+                            (project, time.time(), owner))
         self._own(project, owner)
         log.info("registered project %s… (%s)", project[:8], label)
 
@@ -578,7 +559,7 @@ class Store:
     def snapshot_delta(self, project: str, upto: int, size: int) -> int:
         """Bytes a snapshot would add (negative when it frees space)."""
         freed, remembered = self.db.execute(
-            "SELECT COALESCE(SUM(length(data) + length(sig)), 0), COALESCE(SUM(snap=0 AND h IS NOT NULL), 0) "
+            "SELECT COALESCE(SUM(length(data) + length(sig)), 0), COALESCE(SUM(snap=0), 0) "
             "FROM log WHERE project=? AND seq<=?", (project, upto)).fetchone()
         forgotten = self.db.execute("SELECT COUNT(*) FROM gone WHERE project=? AND seq<=?",
                                     (project, upto - GONE_KEEP)).fetchone()[0]
@@ -588,7 +569,7 @@ class Store:
         with self.db:
             # remember what the snapshot replaces, so those updates can't be stored again
             self.db.execute("INSERT OR IGNORE INTO gone(project, h, seq) SELECT project, h, seq FROM log "
-                            "WHERE project=? AND seq<=? AND snap=0 AND h IS NOT NULL", (project, upto))
+                            "WHERE project=? AND seq<=? AND snap=0", (project, upto))
             self.db.execute("DELETE FROM gone WHERE project=? AND seq<=?", (project, upto - GONE_KEEP))
             self.db.execute("DELETE FROM log WHERE project=? AND seq<=?", (project, upto))
             self.db.execute("INSERT INTO log(project, seq, snap, data, sig, h) VALUES (?,?,1,?,?,?)",
@@ -846,7 +827,7 @@ class Relay:
         if not self.private:
             return None
         owner = self.store.owner(project)
-        if owner and owner not in ("default", "existing"):
+        if owner and owner != "default":
             return "code-expired" if self.codes.lapsed(owner) else None
         valid = self.codes.check(code)
         if not valid:
@@ -895,6 +876,8 @@ class Relay:
             owner = code or "default"
             if self.codes.allowance(owner) <= 0:
                 return "needs-code" if owner == "default" else "quota-full"
+        elif self.codes.lapsed(owner) and nbytes > 0 and self.codes.allowance(owner) <= self.store.owner_usage(owner) + nbytes:
+            return "code-expired"
         allowance = self.codes.allowance(owner)
         if nbytes > 0:
             if self.store.owner_usage(owner) + nbytes > allowance:
@@ -952,9 +935,6 @@ class Relay:
         allowance = self.codes.allowance(owner or conn.code or "default")
         return {
             "registered": owner is not None,
-            # its creation code has expired or was removed (the refusal itself stays quota-full,
-            # which older clients understand)
-            "codeExpired": bool(owner and self.codes.lapsed(owner)),
             "creation": "open" if self._open() else "code",
             "canCreate": self._open() or bool(conn.code),
             "used": self.store.usage.get(project, 0),
@@ -1307,7 +1287,7 @@ class Relay:
             return web.Response(status=200)
         refused = self.may_store(project, len(data), self.codes.check(request.headers.get("X-Create-Code")))
         if refused:
-            status = {"needs-code": 403, "quota-full": 507, "project-full": 413, "server-full": 507}[refused]
+            status = {"needs-code": 403, "code-expired": 403, "quota-full": 507, "project-full": 413, "server-full": 507}[refused]
             return web.json_response({"code": refused}, status=status)
         self.store.put_blob(project, bid, data, kind)
         return web.Response(status=201)
@@ -1633,12 +1613,11 @@ def main() -> None:
             n = sum(1 for o in store.owners.values() if o == c)
             print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {fmt_size(allowance):>9}  used {fmt_size(store.owner_usage(c)):>7}  "
                   f"{n} project(s){expiry(c)}  {label}")
-        removed = sorted({o for o in store.owners.values() if o not in codes.codes and o not in ("default", "existing")})
+        removed = sorted({o for o in store.owners.values() if o not in codes.codes and o != "default"})
         for c in removed:
             if store.owner_usage(c):
                 print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {'removed':>9}  used {fmt_size(store.owner_usage(c)):>7}  "
                       f"{len(store.stored_by(c))} stored project(s)  (--purge-code to delete them)")
-        print(f"{'existing':16}  {'unlimited':>9}  used {fmt_size(store.owner_usage('existing')):>7}  (stored before allowances)")
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     admin_token = (a.admin_token_file.read_text().strip() if a.admin_token_file else

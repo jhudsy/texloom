@@ -56,8 +56,7 @@ class Replica:
         self.on_compile_request: Callable[[int, bool], Awaitable[None]] | None = None
         self.server_mode = "server"  # what the server says: "server" (stores) or "relay"
         self.pending_mode: str | None = None  # storage change not yet sent to the server
-        self.code_expired = False  # the server says this project's creation code has expired
-        self.store_refusal: str | None = None  # what the server last said; see store_problem
+        self.store_refusal: str | None = None  # what the server last said
         self.denied: str | None = None  # a private server turned this project away: why
         self.deleted_at: float | None = None  # the owner deleted the project for everyone (seconds): read-only from then on
         self.refused: str | None = None  # the server's reason for rejecting the last change sent
@@ -392,9 +391,8 @@ class Replica:
 
     @property
     def store_problem(self) -> str | None:
-        """Why the server isn't storing changes (needs-code, quota-full, code-expired, …). It refuses
-        with quota-full when a code has expired, which older clients understand."""
-        return "code-expired" if self.store_refusal == "quota-full" and self.code_expired else self.store_refusal
+        """Why the server isn't storing changes (needs-code, quota-full, code-expired, …)."""
+        return self.store_refusal
 
     def _storage_warning(self, code: str) -> None:
         self.store_refusal = code
@@ -470,7 +468,6 @@ class Replica:
             return
         if t == "log":
             self.denied = None
-            self.code_expired = bool((m.get("store") or {}).get("codeExpired"))
             self.server_mode = m.get("mode", "server")
             self._revoked(m.get("rv", []))
             # the server dropped its copy (idle eviction): everything up to `floor` is gone
@@ -527,7 +524,7 @@ class Replica:
                                 if self.denied == "code-expired" else
                                 "NOT SYNCING: this server is private, and this project needs a creation code. "
                                 "Add \"create_code\" to .texloom/config.json and restart.")
-            elif m.get("code") in ("needs-code", "quota-full", "project-full", "server-full"):
+            elif m.get("code") in ("needs-code", "quota-full", "code-expired", "project-full", "server-full"):
                 self._storage_warning(m["code"])  # kept in the outbox; retried on reconnect
             else:
                 log.warning("server: %s", m.get("m"))

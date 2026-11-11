@@ -1,14 +1,14 @@
 // Saved versions. A Yjs snapshot lists everything deleted so far, and the document never
 // forgets anything stored in it, so keeping a whole snapshot per version made documents
-// grow with the square of their history. Versions are now a chain: each link holds only
-// what changed since the link it builds on. Versions saved before this keep their own
-// whole snapshot (`snap`). No DOM here, so scripts/check-versions.mjs can test it.
+// grow with the square of their history. So versions are a chain: each link holds only
+// what changed since the link it builds on. No DOM here, so scripts/check-versions.mjs can
+// test it.
 import * as Y from 'yjs'
 import type { Replica } from './replica'
 
 /** Every link stays: later versions are built on it. Removing a version only unlists it. */
 export interface Link { id: string; base: string | null; snap: Uint8Array }
-export interface Version { at: number; by: string; label?: string; auto?: boolean; snap?: Uint8Array; link?: string }
+export interface Version { at: number; by: string; label?: string; auto?: boolean; link: string }
 type Saved = Pick<Replica, 'doc' | 'versions' | 'versionChain'>
 type Deletions = ReturnType<typeof Y.createDeleteSet>
 
@@ -118,5 +118,5 @@ export function saveVersion(r: Saved, by: string, label?: string, auto = false) 
 
 /** The project as it was at a version (a read-only Y.Doc). */
 export function docAt(r: Saved, v: Version): Y.Doc {
-  return Y.createDocFromSnapshot(r.doc, v.link ? rebuild(indexOf(r.versionChain), v.link) : Y.decodeSnapshot(v.snap!))
+  return Y.createDocFromSnapshot(r.doc, rebuild(indexOf(r.versionChain), v.link))
 }

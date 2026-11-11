@@ -100,7 +100,7 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
     h('div', { class: 'history-body' }, list, detail))
 
   function render() {
-    const all = r.versions.toArray().filter((v) => v && (v.snap || v.link)) as Version[]
+    const all = r.versions.toArray().filter((v) => v?.link) as Version[]
     const shown = all.filter((v) => filter === 'all' || versionLabel(r, v)).sort((a, b) => b.at - a.at)
     if (!shown.length) {
       list.replaceChildren(h('li', { class: 'muted small' },
@@ -118,7 +118,7 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
   function showVersion(v: Version) {
     let past: Snap
     try { past = contents(docAt(r, v)) } catch (e) {
-      detail.replaceChildren(h('p', { class: 'err' }, t('This version can’t be reconstructed ({{error}}). It predates full history.', { error: e })))
+      detail.replaceChildren(h('p', { class: 'err' }, t('This version can’t be reconstructed ({{error}}).', { error: e })))
       return
     }
     const now = contents(r.doc)

@@ -81,7 +81,7 @@ class Admin:
         rows = st.db.execute("SELECT project, created, owner, seen, evicted FROM projects").fetchall()
         online = {p: len(ws) for p, ws in r.rooms.items() if ws}
         label = {c: lab for c, (_, lab) in r.codes.codes.items()}
-        label.update({"default": "default (no code)", "existing": "stored before allowances"})
+        label["default"] = "default (no code)"
 
         def code_name(c: str) -> str:
             name = label.get(c, f"{c[:4]}… (code removed)")
@@ -113,7 +113,7 @@ class Admin:
         crow = "".join(
             f"<tr><td>{e(code_name(c))}</td>{code_cell(c)}{expiry_cell(c)}<td class=n>{_size(r.codes.allowance(c))}</td>"
             f"<td class=n>{_size(st.owner_usage(c))}</td><td class=n>{len(owners.get(c, []))}</td></tr>"
-            for c in ["default", *r.codes.codes.keys(), *(["existing"] if "existing" in owners else [])])
+            for c in ["default", *r.codes.codes.keys()])
         lim = r.limits
         body = f"""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width">
 <title>TeXLoom admin</title><style>{STYLE}</style></head><body>

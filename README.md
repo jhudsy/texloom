@@ -330,7 +330,6 @@ K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
   `TEXLOOM_CODES_FILES` (separated by `:`), for example one kept by hand and one kept by a
   sales service. The first file that sets `default` decides it; `--add-code` writes to the
   first file given; `--renew-code` finds the code in whichever file lists it.
-- Projects stored before allowances existed are grandfathered as unlimited.
 
 ```bash
 texloom-server --codes-file /etc/texloom/codes.txt --add-code alice --allowance 2G --months 12   # prints a new code

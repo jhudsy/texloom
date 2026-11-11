@@ -16,7 +16,7 @@ const zh: Catalog = {
   'No named versions yet.': '还没有已命名的版本。',
   'No versions yet. Versions are saved automatically a couple of minutes after you stop editing; use “Save version…” to name one.': '还没有版本。停止编辑几分钟后会自动保存版本；使用“保存版本…”可为版本命名。',
   'Auto-saved': '自动保存',
-  'This version can’t be reconstructed ({{error}}). It predates full history.': '无法重建此版本（{{error}}）。它早于完整历史记录。',
+  'This version can’t be reconstructed ({{error}}).': '无法重建此版本（{{error}}）。',
   'Give this version a name (named versions are kept for good)': '为此版本命名（已命名的版本会永久保留）',
   'Rename…': '重命名…',
   'Name…': '命名…',

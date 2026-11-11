@@ -15,21 +15,6 @@ ORIGINAL = """        for (const { path, contents } of files)
             FS.writeFile(this.work_dir + '/' + basename(path), contents);
 """
 
-# v1 (deployed briefly): every tail of each file's path. Replaced by v2.
-V1 = """        // texloom patch: bib files in folders (\\addbibresource{bib/own.bib})
-        for (const { path, contents } of files) {
-            const parts = path.split('/').filter(p => p && p !== '.' && p !== '..');
-            for (let i = 0; i < parts.length; i++) {
-                let dir = this.work_dir;
-                for (const seg of parts.slice(i, -1)) {
-                    dir += '/' + seg;
-                    if (!FS.analyzePath(dir).exists) FS.mkdir(dir);
-                }
-                FS.writeFile(this.work_dir + '/' + parts.slice(i).join('/'), contents);
-            }
-        }
-"""
-
 # v2: biber looks for each data source the .bcf names (bib/own.bib, ../refs.bib, Bib/Own.bib)
 # relative to the main file's folder, which the engine flattened away. Write each project
 # file at every tail of its path, and each named data source exactly where biber will look,
@@ -76,7 +61,7 @@ ARGV_NODECODE = """        // texloom patch: biber accents (macros left to LaTeX
 
 PATCHES = [
     # (file, name, [texts it replaces], new text)
-    ("busytex/busytex_biber.js", "bib files in folders v2", [ORIGINAL, V1], V2),
+    ("busytex/busytex_biber.js", "bib files in folders v2", [ORIGINAL], V2),
     ("busytex/busytex_biber.js", "biber accents", [ARGV], ARGV_NODECODE),
 ]
 

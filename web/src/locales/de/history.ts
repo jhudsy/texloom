@@ -16,7 +16,7 @@ const de: Catalog = {
   'No named versions yet.': 'Noch keine benannten Versionen.',
   'No versions yet. Versions are saved automatically a couple of minutes after you stop editing; use “Save version…” to name one.': 'Noch keine Versionen. Versionen werden einige Minuten nach dem Ende der Bearbeitung automatisch gespeichert; mit „Version speichern …“ können Sie eine benennen.',
   'Auto-saved': 'Automatisch gespeichert',
-  'This version can’t be reconstructed ({{error}}). It predates full history.': 'Diese Version kann nicht wiederhergestellt werden ({{error}}). Sie ist älter als der vollständige Verlauf.',
+  'This version can’t be reconstructed ({{error}}).': 'Diese Version lässt sich nicht wiederherstellen ({{error}}).',
   'Give this version a name (named versions are kept for good)': 'Dieser Version einen Namen geben (benannte Versionen bleiben dauerhaft erhalten)',
   'Rename…': 'Umbenennen …',
   'Name…': 'Benennen …',

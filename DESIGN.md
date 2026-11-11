@@ -46,7 +46,7 @@ No accounts: a project is shared by sending a link.
 | `dirs`: Y.Map     | path → true for explicit folders (folders are otherwise implied by file paths) |
 | `meta`: Y.Map     | `name`, `main` (main .tex file), settings                       |
 | `out`: Y.Map      | latest compiled output: `{pdf, log, synctex, by, at}` (blob ids; stored as *output*, see below) |
-| `versions`: Y.Array | saved versions: `{at, by, label?, auto?, link}` (older ones: `snap`, a whole encoded `Y.snapshot`) |
+| `versions`: Y.Array | saved versions: `{at, by, label?, auto?, link}` |
 | `versionChain`: Y.Array | what versions are built from: `{id, base, snap}`, see History |
 | `clients`: Y.Map  | Yjs client id → display name (for "who wrote this")             |
 | `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, resolved, outcome?, replies: Y.Array, typed?, conflict?}`; `start`/`end` are encoded Yjs relative positions, so they follow edits; `typed` and `conflict` come from suggest mode (see below). Moving a file makes a new `Y.Text`, so `movePath` re-anchors its items at the same places in the copy and updates `file` |
@@ -167,14 +167,14 @@ switch. Switching back to `server` re-uploads a full snapshot and all blobs.
 
 **Private servers** (`--private`). A connection does nothing until its `hello` is accepted (a silent
 one is dropped after 15 s). A project is admitted if its owner is a current creation code. One with no
-code yet (unregistered, or `default`/`existing`) gets the first valid code offered; one whose code has
+code yet (unregistered, or `default`) gets the first valid code offered; one whose code has
 lapsed is refused until it's renewed, and can't be taken over by another code. A refusal is
 `{t:"err", code, denied:true}` followed by a close. Open connections are checked again about once a
 minute. File uploads and downloads and new project lists follow the same rule.
 
 **Storage allowances.** The server can't inspect content and project ids are free to
 mint, so storage is governed by allowances in a codes file: `<code|default> <0|size|unlimited>
-[until=YYYY-MM-DD] [label]`.
+[until=YYYY-MM-DD] [label]`. A line without an allowance is skipped, with a warning in the log.
 - **Owner:** the first stored write to a project registers it to the creation code sent
   in `hello` or `X-Create-Code`, or to `default`.
 - **Allowance:** an owner's allowance is the sum over all its projects.
@@ -182,8 +182,9 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   `default`, and it no longer registers new projects. `--purge-expired-after DAYS` evicts
   (as idle eviction does) the stored projects of codes expired longer than that; re-uploads
   are then refused until the code is renewed. The owner of a project never changes.
-- **Refusals:** `needs-code` (default allowance 0), `quota-full`, `project-full`
-  (`--project-max-bytes`, not applied to unlimited owners) and `server-full`
+- **Refusals:** `needs-code` (default allowance 0), `quota-full`, `code-expired` (the owner's
+  code has expired or was removed, and the default allowance doesn't cover the write),
+  `project-full` (`--project-max-bytes`, not applied to unlimited owners) and `server-full`
   (`--max-bytes`, `--min-free`).
 - **No lost work:** a refused `up` is still broadcast live but not acked; it stays in the
   sender's outbox and is retried. Clients show a "not saved on server" warning.
@@ -354,7 +355,7 @@ shared `Y.Text` at all. It shows this tab's view: the shared text with the tab's
 suggestions applied. Each of those is a hunk, a range `[a, b)` of the shared text and its
 replacement, stored as an ordinary `review` entry (`quote` = the shared text there, `text` = the
 replacement) with `typed` set to this browser's id for the project (`texloom.suggester.<project>`, different in each project so a browser can't be followed between them), so every other reader (the Review tab,
-accept and reject, the assistant, the MCP tools, older clients) needs nothing new.
+accept and reject, the assistant, the MCP tools) needs nothing new.
 
 - **Typing:** each change in the editor, in view positions, merges with the hunks it touches into
   one hunk; it's trimmed to what actually differs from the shared text and grown to whole words (an
@@ -408,8 +409,7 @@ deletions and clocks new since the link it builds on (`base`), and a version nam
 Simultaneous saves just fork the chain. Before writing a link, the saver rebuilds it and
 compares with the real state; if they differ, or the chain is damaged, the link holds the
 whole snapshot (`base: null`). Removing a version only unlists it, since later links build
-on it. Older versions keep their own `snap` and clients that predate the chain ignore new
-ones. Every 64th link holds a whole snapshot anyway, so rebuilding a version never walks
+on it. Every 64th link holds a whole snapshot anyway, so rebuilding a version never walks
 more than 64 links, and each tab remembers the snapshot at the tip of the chain, so saving
 a version rebuilds nothing it has already rebuilt. `npm run check-versions` in `web/` tests
 all this.

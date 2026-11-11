@@ -71,8 +71,8 @@ export const creationCode = {
 
 /** Why the server isn't storing this project's changes (they still reach people online). */
 export type StoreProblem = 'needs-code' | 'quota-full' | 'code-expired' | 'project-full' | 'server-full' | null
-const STORE_PROBLEMS = new Set(['needs-code', 'quota-full', 'project-full', 'server-full'])
-export interface StoreInfo { codeExpired?: boolean; registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number | null; allowance: number | null }
+const STORE_PROBLEMS = new Set(['needs-code', 'quota-full', 'code-expired', 'project-full', 'server-full'])
+export interface StoreInfo { registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number | null; allowance: number | null }
 
 export type Status = 'offline' | 'connecting' | 'online' | 'paused'
 export type SyncMode = 'live' | 'manual'
@@ -84,7 +84,7 @@ export class Replica {
   readonly files = this.doc.getMap<Y.Text>('files')
   readonly bin = this.doc.getMap<{ h: string; size: number }>('bin')
   readonly dirs = this.doc.getMap<boolean>('dirs') // explicit (possibly empty) folders
-  readonly versions = this.doc.getArray<any>('versions') // saved versions: {at, by, label, auto, link} (older ones: snap)
+  readonly versions = this.doc.getArray<any>('versions') // saved versions: {at, by, label, auto, link}
   readonly versionChain = this.doc.getArray<Link>('versionChain') // what those versions are built from (versions.ts)
   readonly members = this.doc.getMap<any>('members') // personal links: public key -> {name, at, by, revoked?}
   /** This personal link was revoked by the owner. */
@@ -102,16 +102,16 @@ export class Replica {
   pending = 0 // local updates not yet acknowledged
   peers = 0 // other connections to this project right now
   serverMode: StorageMode = 'server'
-  private refusal: StoreProblem = null // what the server last said; see storeProblem
+  private refusal: StoreProblem = null // what the server last said
   storeInfo: StoreInfo | null = null
-  /** Why the server isn't storing changes. It refuses with quota-full when a code has expired, which older clients understand. */
   /** A private server turned this project away: why. Everything here keeps working on this device. */
   denied: 'needs-code' | 'code-expired' | null = null
   /** When the owner deleted the project for everyone (ms), or null. This copy then stays as it
    *  is, read-only: nothing connects, and nothing is sent. */
   deletedAt: number | null = null
   onDeleted: () => void = () => {}
-  get storeProblem(): StoreProblem { return this.refusal === 'quota-full' && this.storeInfo?.codeExpired ? 'code-expired' : this.refusal }
+  /** Why the server isn't storing changes. */
+  get storeProblem(): StoreProblem { return this.refusal }
   onStatus: () => void = () => {}
   onCompileAck: (info: { by: string }) => void = () => {}
 

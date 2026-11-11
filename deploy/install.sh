@@ -7,8 +7,7 @@
 # alongside other nginx sites). It only adds things: a `texloom` system user, the app in
 # /var/www/texloom (set TEXLOOM_DIR for elsewhere), its data in /var/lib/texloom, settings
 # in /etc/texloom, a systemd service on 127.0.0.1:8787 and an nginx site for the domain,
-# plus a Let's Encrypt certificate via certbot. Other sites are left alone. An install in
-# the old place (/opt/texloom) is moved over and then removed. It keeps no backups: back up
+# plus a Let's Encrypt certificate via certbot. Other sites are left alone. It keeps no backups: back up
 # /var/lib/texloom (the data) and /etc/texloom (codes, admin token) yourself. Extra ssh
 # options can be passed in SSH_OPTS; set SKIP_CERT=1 to skip certbot.
 set -euo pipefail
@@ -62,10 +61,6 @@ if ((${#need[@]})); then apt-get update -qq && apt-get install -y -qq "${need[@]
 id texloom >/dev/null 2>&1 || useradd --system --home /var/lib/texloom --shell /usr/sbin/nologin texloom
 install -d -o texloom -g texloom -m 750 /var/lib/texloom
 install -d -m 700 /root/texloom-backups
-OLD=/opt/texloom  # where earlier versions of this script installed it
-if [ "$APP_DIR" != "$OLD" ] && [ -d "$OLD/tex-assets" ] && [ ! -e "$APP_DIR/tex-assets" ]; then
-  mv "$OLD/tex-assets" "$APP_DIR/tex-assets"  # ~700 MB: moved, not downloaded again
-fi
 cd "$APP_DIR"
 python3 -m venv .venv
 .venv/bin/pip install -q --no-cache-dir --upgrade pip
@@ -267,10 +262,9 @@ server {
 NGINX
   ln -sf "$SITE" "/etc/nginx/sites-enabled/$DOMAIN"
 else
-  # Updating: point it at this install's folder, and add routes introduced since the site
+  # Updating: add routes introduced since the site
   # was first written, before the catch-all /api/ location (certbot's lines stay as they are).
   cp "$SITE" "/root/texloom-backups/nginx-$DOMAIN.bak"
-  sed -i "s#$OLD/#$APP_DIR/#g" "$SITE"
   python3 - "$SITE" "$APP_DIR" <<'PY'
 import sys
 path, app_dir = sys.argv[1], sys.argv[2]
@@ -343,15 +337,6 @@ fi
 sleep 1
 systemctl is-active --quiet texloom && echo "    texloom service: running" || { journalctl -u texloom -n 30 --no-pager; exit 1; }
 
-# The old install, once this one answers through nginx: remove it.
-if [ "$APP_DIR" != "$OLD" ] && [ -d "$OLD" ]; then
-  for i in 1 2 3 4 5; do curl -fsS -o /dev/null "http://127.0.0.1:8787/api/info" && break; sleep 1; done
-  if curl -fsS -o /dev/null "http://127.0.0.1:8787/api/info" && ! grep -rqs "$OLD/" /etc/nginx/sites-enabled/ /etc/systemd/system/texloom.service; then
-    rm -rf "$OLD" && echo "    removed the old install in $OLD"
-  else
-    echo "    kept $OLD: the new install in $APP_DIR didn't check out"
-  fi
-fi
 REMOTE
 
 echo "==> Done: https://$DOMAIN"

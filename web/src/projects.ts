@@ -136,9 +136,6 @@ export const projects = {
   },
 }
 
-// Entries from before dates were kept: when they were last opened is the best guess there is.
-if (read().some((r) => !r.created)) write(read().map((r) => ({ ...r, created: r.created ?? r.at })), true)
-
 /** Pull a plain-text title out of a LaTeX source, if it has \title{…}. */
 export function latexTitle(src: string): string | undefined {
   const m = /\\title\s*(?:\[[^\]]*\])?\s*\{((?:[^{}]|\{[^{}]*\})*)\}/.exec(src)
