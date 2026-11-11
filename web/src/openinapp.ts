@@ -2,6 +2,7 @@
 // tell whether anything handles texloom:// links, so it always says what to do if nothing happens.
 import { dialog, h } from './dom'
 import { t } from './i18n'
+import { creationCode } from './replica'
 
 export const DOWNLOAD_APP = 'https://github.com/jhudsy/texloom/releases/latest'
 
@@ -28,6 +29,26 @@ export function sendListToApp(link: string) {
     h('h3', {}, t('Opening the TeXLoom app…')),
     h('p', {}, t('The app will ask before it uses this list. Then it shows the projects on the list that aren’t on this computer yet, and your creation code is filled in when you make a project there.')),
     h('p', { class: 'muted' }, t('If nothing happens, the app probably isn’t installed. Just installed it? Open it once, then press Try again.')),
+    h('div', { class: 'row end' },
+      h('a', { class: 'button', href: DOWNLOAD_APP, target: '_blank', rel: 'noopener' }, t('Download the app')),
+      h('button', { onclick: send }, t('Try again')),
+      h('button', { class: 'primary', onclick: () => dlg.close() }, t('Close'))),
+  )
+  send()
+}
+
+/** Make a project from a folder on this computer: the desktop app asks which folder, uploads it
+ *  (encrypted, with keys it makes itself) and keeps it in sync. This server and the creation code
+ *  entered here go with the request, so nothing needs typing again. */
+export function newProjectInApp() {
+  const q = new URLSearchParams({ server: location.origin })
+  if (creationCode.get()) q.set('code', creationCode.get())
+  const send = () => { location.href = `texloom://new?${q}` }
+  const dlg = dialog('settings',
+    h('h3', {}, t('Opening the TeXLoom app…')),
+    h('p', {}, t('The app will ask which folder to use, then upload its files, encrypted, and keep the folder in sync with the project. Once it’s made, Open in browser in the app opens it here; with a project list it also appears under Your projects.')),
+    h('p', { class: 'muted' }, t('If nothing happens, the app probably isn’t installed. Just installed it? Open it once, then press Try again.')),
+    h('p', { class: 'muted' }, t('In the app, this is Add project ▸ New project from a folder….')),
     h('div', { class: 'row end' },
       h('a', { class: 'button', href: DOWNLOAD_APP, target: '_blank', rel: 'noopener' }, t('Download the app')),
       h('button', { onclick: send }, t('Try again')),

@@ -31,10 +31,12 @@ const de: Catalog = {
   'That isn’t a readable .zip file.': 'Das ist keine lesbare .zip-Datei.',
   'That doesn’t look like an arXiv id (e.g. 1706.03762 or hep-th/9901001).': 'Das sieht nicht nach einer arXiv-ID aus (z. B. 1706.03762 oder hep-th/9901001).',
   'Fetching arXiv:{{id}}…': 'arXiv:{{id}} wird abgerufen …',
-  'New project': 'Neues Projekt',
   'Import…': 'Importieren …',
   'From a .zip (e.g. Overleaf, GitHub) or an arXiv paper.': 'Aus einer .zip-Datei (z. B. Overleaf, GitHub) oder einem arXiv-Artikel.',
   'Cancel': 'Abbrechen',
+  "Create project": "Projekt erstellen",
+  "From a folder on this computer…": "Aus einem Ordner auf diesem Computer …",
+  "A folder you already have, kept in sync with the project by the TeXLoom app.": "Ein Ordner, den Sie schon haben, von der TeXLoom-App mit dem Projekt synchron gehalten.",
 }
 
 export default de

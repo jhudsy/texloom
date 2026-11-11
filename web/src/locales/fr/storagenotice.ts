@@ -18,7 +18,6 @@ const fr: Catalog = {
   'Save code': 'Enregistrer le code',
 
   // new project
-  'New project': 'Nouveau projet',
   'This server keeps an encrypted copy of new projects only for people with a creation code.':
     'Ce serveur ne garde une copie chiffrée des nouveaux projets que pour les personnes ayant un code de création.',
   'I have a code': 'J’ai un code',
@@ -56,6 +55,7 @@ const fr: Catalog = {
     'Synchronisation arrêtée : ce serveur est privé, et ce projet nécessite un code de création fourni par son propriétaire.',
   'Your copy here is safe and you can keep working, but nobody else gets your changes.':
     'Votre copie locale est intacte et vous pouvez continuer à travailler, mais personne d’autre ne reçoit vos modifications.',
+  "Create project": "Créer un projet",
 }
 
 export default fr

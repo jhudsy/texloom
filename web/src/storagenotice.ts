@@ -53,7 +53,7 @@ export function askCode(intro?: string): Promise<boolean> {
   })
 }
 
-/** "New project": on servers that need a code, ask for one or offer a project without a server copy. */
+/** "Create project": on servers that need a code, ask for one or offer a project without a server copy. */
 export async function chooseNewProject(): Promise<'server' | 'relay' | null> {
   if (!(await privateServerAllows())) return null
   const info = await serverInfo()
@@ -61,7 +61,7 @@ export async function chooseNewProject(): Promise<'server' | 'relay' | null> {
   return new Promise((resolve) => {
     let choice: 'server' | 'relay' | null = null
     const dlg = dialog('settings',
-      h('h3', {}, t('New project')),
+      h('h3', {}, t('Create project')),
       h('p', {}, t('This server keeps an encrypted copy of new projects only for people with a creation code.')),
       h('div', { class: 'radios' },
         h('button', { class: 'radio choice', onclick: async () => { if (await askCode()) { choice = 'server'; dlg.close() } } },

@@ -15,7 +15,6 @@ const fr: Catalog = {
   'Project link': 'Lien du projet',
   'Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.': 'LaTeX collaboratif, local d’abord. Vos fichiers restent sur vos appareils ; le serveur ne fait que relayer des modifications chiffrées.',
   'Name': 'Nom',
-  'New project': 'Nouveau projet',
   'Open': 'Ouvrir',
   'Your projects': 'Vos projets',
   'More': 'Plus',
@@ -156,5 +155,6 @@ const fr: Catalog = {
   "The owner deleted this project for everyone. This browser keeps a read-only copy.": "Le propriétaire a supprimé ce projet pour tout le monde. Ce navigateur en garde une copie en lecture seule.",
   "deleted by the owner": "supprimé par le propriétaire",
   "The owner deleted this project for everyone on {{date}}. This copy in your browser is read-only and is the only one left here: download it to keep it.": "Le propriétaire a supprimé ce projet pour tout le monde le {{date}}. La copie dans votre navigateur est en lecture seule et c’est la seule qui reste ici : téléchargez-la pour la garder.",
+  "Create project": "Créer un projet",
 }
 export default fr

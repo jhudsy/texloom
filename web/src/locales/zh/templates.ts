@@ -31,10 +31,12 @@ const zh: Catalog = {
   'That isn’t a readable .zip file.': '这不是可读取的 .zip 文件。',
   'That doesn’t look like an arXiv id (e.g. 1706.03762 or hep-th/9901001).': '这看起来不像 arXiv 编号（例如 1706.03762 或 hep-th/9901001）。',
   'Fetching arXiv:{{id}}…': '正在获取 arXiv:{{id}}…',
-  'New project': '新建项目',
   'Import…': '导入…',
   'From a .zip (e.g. Overleaf, GitHub) or an arXiv paper.': '从 .zip（例如 Overleaf、GitHub）或 arXiv 论文导入。',
   'Cancel': '取消',
+  "Create project": "创建项目",
+  "From a folder on this computer…": "来自这台电脑上的文件夹…",
+  "A folder you already have, kept in sync with the project by the TeXLoom app.": "使用你已有的文件夹，由 TeXLoom 应用与项目保持同步。",
 }
 
 export default zh

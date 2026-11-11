@@ -15,7 +15,6 @@ const zh: Catalog = {
   'Project link': '项目链接',
   'Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.': '本地优先的协作式 LaTeX。文件保存在你的设备上；服务器只转发加密的更改。',
   'Name': '名称',
-  'New project': '新建项目',
   'Open': '打开',
   'Your projects': '你的项目',
   'More': '更多',
@@ -156,6 +155,7 @@ const zh: Catalog = {
   "The owner deleted this project for everyone. This browser keeps a read-only copy.": "所有者已为所有人删除此项目。此浏览器保留一份只读副本。",
   "deleted by the owner": "已被所有者删除",
   "The owner deleted this project for everyone on {{date}}. This copy in your browser is read-only and is the only one left here: download it to keep it.": "所有者已于 {{date}} 为所有人删除此项目。你浏览器中的这份副本是只读的，也是这里仅剩的一份：请下载以便保留。",
+  "Create project": "创建项目",
 }
 
 export default zh

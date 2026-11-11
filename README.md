@@ -204,9 +204,12 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   working files (`.aux`, `.bbl`, …) first: in-browser compiles always start from scratch,
   so it matters when a texloom helper compiles with your own TeX (it keeps them in
   `.texloom/build`).
-- **New projects** start from a template (article, paper with bibliography, Beamer, thesis
+- **Create project** starts from a template (article, paper with bibliography, Beamer, thesis
   with chapters, letter) or an import: a `.zip` (Overleaf: Menu → Download → Source; a
-  GitHub "Download ZIP"; any zipped folder) or an arXiv paper's LaTeX source. **New → Import…** in
+  GitHub "Download ZIP"; any zipped folder) or an arXiv paper's LaTeX source. **From a folder
+  on this computer…** hands over to the [TeXLoom app](#working-on-a-project-as-a-folder), which asks
+  for the folder, uploads it and keeps it in sync, with this server and your creation code
+  filled in. **New → Import…** in
   the file list does the same for an existing project. From git: clone it and run
   `texloom new` in the folder.
 - **New → Reference…** in the file list adds a bibliography entry from a DOI or arXiv id (via doi.org) with a
@@ -310,7 +313,7 @@ K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
   people can still create projects, but only as live, relay-only projects whose copies
   live on their devices.
 - Anyone with a project's link can open and edit it; codes only govern **storage of new
-  projects**. A code is entered once per browser (**New project** asks, or ⚙ Settings →
+  projects**. A code is entered once per browser (**Create project** asks, or ⚙ Settings →
   Creation code…). The folder helper takes `texloom new … --code`, `create_code` in
   `.texloom/config.json`. `TEXLOOM_CODE` is read only when creating something new, so it can't reach
   whichever server a link you open points at.

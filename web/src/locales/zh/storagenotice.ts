@@ -11,7 +11,6 @@ const zh: Catalog = {
   'Code': '代码',
   'Cancel': '取消',
   'Save code': '保存创建码',
-  'New project': '新建项目',
   'This server keeps an encrypted copy of new projects only for people with a creation code.': '此服务器只为持有创建码的用户保留新项目的加密副本。',
   'I have a code': '我有创建码',
   'The server keeps an encrypted copy, so collaborators get your changes even when you’re offline, and the link always restores the project.': '服务器保留加密副本，因此即使你离线，协作者也能收到更改，链接也始终可以恢复项目。',
@@ -33,6 +32,7 @@ const zh: Catalog = {
   'Not syncing: this server is private, and the creation code this project was created with has expired or been removed. Renewing it restores access.': '未同步：此服务器为私有服务器，创建此项目所用的创建码已过期或被移除。续期后可恢复访问。',
   'Not syncing: this server is private, and this project needs a creation code from its owner.': '未同步：此服务器为私有服务器，此项目需要其所有者提供的创建码。',
   'Your copy here is safe and you can keep working, but nobody else gets your changes.': '你在此处的副本是安全的，可以继续工作，但其他人收不到你的更改。',
+  "Create project": "创建项目",
 }
 
 export default zh

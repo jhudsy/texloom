@@ -11,7 +11,6 @@ const de: Catalog = {
   'Code': 'Code',
   'Cancel': 'Abbrechen',
   'Save code': 'Code speichern',
-  'New project': 'Neues Projekt',
   'This server keeps an encrypted copy of new projects only for people with a creation code.': 'Dieser Server speichert eine verschlüsselte Kopie neuer Projekte nur für Personen mit einem Erstellungscode.',
   'I have a code': 'Ich habe einen Code',
   'The server keeps an encrypted copy, so collaborators get your changes even when you’re offline, and the link always restores the project.': 'Der Server speichert eine verschlüsselte Kopie. So erhalten Mitwirkende Ihre Änderungen auch, wenn Sie offline sind, und der Link stellt das Projekt immer wieder her.',
@@ -33,6 +32,7 @@ const de: Catalog = {
   'Not syncing: this server is private, and the creation code this project was created with has expired or been removed. Renewing it restores access.': 'Keine Synchronisation: Dieser Server ist privat, und der Erstellungscode dieses Projekts ist abgelaufen oder wurde entfernt. Eine Verlängerung stellt den Zugriff wieder her.',
   'Not syncing: this server is private, and this project needs a creation code from its owner.': 'Keine Synchronisation: Dieser Server ist privat, und dieses Projekt benötigt einen Erstellungscode vom Betreiber.',
   'Your copy here is safe and you can keep working, but nobody else gets your changes.': 'Ihre Kopie hier ist sicher und Sie können weiterarbeiten, aber niemand sonst erhält Ihre Änderungen.',
+  "Create project": "Projekt erstellen",
 }
 
 export default de

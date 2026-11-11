@@ -315,6 +315,19 @@ def sync_link_from_url(url: str) -> str | None:
     return link if link.startswith(("https://", "http://")) and "#sync=" in link else None
 
 
+def new_from_url(url: str) -> tuple[str, str] | None:
+    """(server, creation code) from a texloom://new?server=…&code=… URL, sent by the web app's
+    Create project ▸ From a folder on this computer. Only fills in the New project dialog: the
+    person still chooses the folder, and the keys are made here, so the server never sees the files."""
+    u = urlparse(url)
+    if u.scheme != SCHEME or u.netloc != "new":
+        return None
+    q = parse_qs(u.query)
+    server = (q.get("server") or [""])[0].rstrip("/")
+    code = (q.get("code") or [""])[0].strip()[:64]
+    return (server if re.fullmatch(r"https?://[^/\s?#]+", server) else "", code)
+
+
 def link_from_url(url: str) -> str | None:
     """The project link in a texloom://join?link=… URL."""
     u = urlparse(url)
@@ -655,7 +668,8 @@ class JoinDialog(Dialog):
 class ShareFolderDialog(Dialog):
     """Share an existing folder as a new project (`texloom new`)."""
 
-    def __init__(self, engine: Engine, parent=None) -> None:
+    def __init__(self, engine: Engine, parent=None, server: str = "", code: str = "") -> None:
+        """`server` and `code` come from the web app (texloom://new), to fill in."""
         super().__init__(parent)
         self.engine = engine
         self.setWindowTitle(_("New project from a folder"))
@@ -675,10 +689,10 @@ class ShareFolderDialog(Dialog):
         lay.addRow(_("Folder"), row)
         self.name = QtWidgets.QLineEdit()
         lay.addRow(_("Project name"), self.name)
-        self.server = QtWidgets.QLineEdit(known_server())
+        self.server = QtWidgets.QLineEdit(server or known_server())
         self.server.setPlaceholderText("https://your.server")
         lay.addRow(_("Server"), self.server)
-        self.code = QtWidgets.QLineEdit(listsync.code_for(self.server.text()))  # yours here, or from your project list
+        self.code = QtWidgets.QLineEdit(code or listsync.code_for(self.server.text()))  # yours here, or from your project list
         self.code.setPlaceholderText(_("only if the server asks for one"))
         self.server.editingFinished.connect(lambda: self.code.text() or self.code.setText(listsync.code_for(self.server.text().strip())))
         lay.addRow(_("Creation code"), self.code)
@@ -2168,8 +2182,9 @@ class Window(QtWidgets.QMainWindow):
         self.engine.call(self.engine.daemon.poke)
         self.refresh()
 
-    def share_folder(self) -> None:
-        if ShareFolderDialog(self.engine, self).exec():
+    def share_folder(self, server: str = "", code: str = "") -> None:
+        self.show_window()
+        if ShareFolderDialog(self.engine, self, server, code).exec():
             self.refresh()
             self.statusBar().showMessage(_("The folder is now a TeXLoom project. To invite people, use Share…."), 10000)
 
@@ -2375,6 +2390,9 @@ def main(argv: list[str] | None = None) -> None:
     win = Window(engine, activity)
 
     def handle(url: str) -> None:
+        if (new := new_from_url(url)) is not None:
+            win.share_folder(*new)
+            return
         sync_link = sync_link_from_url(url)
         link = None if sync_link else link_from_url(url)
         if sync_link:

@@ -25,7 +25,7 @@ import { createSymbolPalette } from './symbolpalette'
 import { openPdfWindow, pdfWindowProject } from './pdfwindow'
 import { tags, type Tag } from './tags'
 import { manageTags, pickTags } from './tagdialogs'
-import { openInApp } from './openinapp'
+import { newProjectInApp, openInApp } from './openinapp'
 import { createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
@@ -115,6 +115,7 @@ function landing() {
       h('button', { class: 'primary', onclick: async () => {
         const template = await chooseTemplate()
         if (!template) return
+        if (template === 'folder') return newProjectInApp()
         const where = await chooseNewProject()
         if (!where) return
         const k = Keys.generate()
@@ -123,7 +124,7 @@ function landing() {
           localStorage.setItem(`texloom.newTemplate.${k.project}`, template)
         } catch {}
         location.hash = k.fragment()
-      } }, t('New project')),
+      } }, t('Create project')),
     ),
     h('div', { class: 'row' },
       linkIn,
@@ -353,7 +354,7 @@ async function openProject(keys: Keys) {
   // a brand-new project: fill it from the chosen template (or open Import)
   let template: string | null = null
   try { template = localStorage.getItem(`texloom.newTemplate.${keys.project}`); localStorage.removeItem(`texloom.newTemplate.${keys.project}`) } catch {}
-  // Only projects made here with New project: one opened from a link already exists, and
+  // Only projects made here with Create project: one opened from a link already exists, and
   // starter files added before its own arrive would clash with them (clashes.ts).
   if (template && writable && r.files.size === 0 && r.bin.size === 0 && !r.meta.get('seeded')) {
     const seed = () => {

@@ -323,16 +323,18 @@ export function importDialog(r: Replica, opts: { onDone?: () => void; fresh?: bo
   return dlg
 }
 
-/** New project: pick a template (or import). Resolves to the template id, 'import', or null. */
+/** Create project: pick a template, an import, or a folder on this computer (kept in sync by the
+ *  TeXLoom app). Resolves to the template id, 'import', 'folder', or null. */
 export function chooseTemplate(): Promise<string | null> {
   return new Promise((resolve) => {
     let choice: string | null = null
     const pick = (id: string) => { choice = id; dlg.close() }
     const dlg = dialog('settings templates',
-      h('h3', {}, t('New project')),
+      h('h3', {}, t('Create project')),
       h('div', { class: 'tgrid' },
         ...TEMPLATES.map((tpl) => h('button', { class: 'radio choice', onclick: () => pick(tpl.id) }, h('span', {}, h('b', {}, tpl.name), h('small', { class: 'muted' }, tpl.info)))),
-        h('button', { class: 'radio choice', onclick: () => pick('import') }, h('span', {}, h('b', {}, t('Import…')), h('small', { class: 'muted' }, t('From a .zip (e.g. Overleaf, GitHub) or an arXiv paper.'))))),
+        h('button', { class: 'radio choice', onclick: () => pick('import') }, h('span', {}, h('b', {}, t('Import…')), h('small', { class: 'muted' }, t('From a .zip (e.g. Overleaf, GitHub) or an arXiv paper.')))),
+        h('button', { class: 'radio choice', onclick: () => pick('folder') }, h('span', {}, h('b', {}, t('From a folder on this computer…')), h('small', { class: 'muted' }, t('A folder you already have, kept in sync with the project by the TeXLoom app.'))))),
       h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Cancel'))))
     dlg.addEventListener('close', () => resolve(choice))
   })
