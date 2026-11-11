@@ -436,6 +436,15 @@ main thread only reads `Daemon.states` and hands work (join, share, restart) to 
   (registered by the macOS bundle, in HKCU on Windows, by a .desktop file on Linux). It
   stays on the machine, and nothing is joined without confirming in the app. A page can't tell
   whether the app is installed, so the web app always says what to do if nothing happens.
+- **Following each system:** one window built from `QAction`s shared by the toolbar, the menu
+  bar, the folder's **More** button and the right-click menu. Icons are `QIcon.ThemeIcon`s, which
+  Qt draws with SF Symbols on macOS, Fluent icons on Windows and the icon theme on Linux (none
+  there means text only). On macOS: the toolbar joins the title bar, dialogs that belong to the
+  window (`Dialog`) open as sheets, Settings and About move into the app menu through their
+  menu roles (every other action is `NoRole`, so Qt doesn't guess from its text), Settings is
+  its own window, and closing the window hides it (the Dock icon brings it back). Windows and
+  Linux get a Settings button in the toolbar; closing hides the window in the tray, saying so the
+  first time, and on a desktop with no tray asks whether to minimise instead of quitting.
 
 ## Project lists
 

@@ -23,8 +23,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     "Compiling {name} from scratch…": "Recompilation de {name} depuis zéro…",
 
     # -- language menu
-    "Language of this app (takes effect when it restarts)": "Langue de l’application (prise en compte au prochain démarrage)",
-    "Language: automatic": "Langue : automatique",
     "Language": "Langue",
     "The new language is used the next time TeXLoom starts. Quit TeXLoom (from its menu) and open it again.": "La nouvelle langue sera utilisée au prochain démarrage de TeXLoom. Quittez TeXLoom (depuis son menu) et rouvrez-le.",
 
@@ -144,29 +142,20 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     "Couldn’t join: {err}": "Impossible de rejoindre le projet : {err}",
 
     # -- sharing a folder
-    "Share a folder as a new project": "Partager un dossier comme nouveau projet",
     "Folder": "Dossier",
     "Project name": "Nom du projet",
     "Server": "Serveur",
     "only if the server asks for one": "seulement si le serveur en demande un",
     "Creation code": "Code de création",
-    "Share": "Partager",
-    "Folder to share": "Dossier à partager",
     "Choose an existing folder.": "Choisissez un dossier existant.",
     "The server address starts with https://": "L’adresse du serveur commence par https://",
     "Uploading…": "Envoi en cours…",
-    "Couldn’t share it: {err}": "Impossible de le partager : {err}",
 
     # -- main window
-    "Join project…": "Rejoindre un projet…",
-    "Share a folder…": "Partager un dossier…",
-    "Add existing folder…": "Ajouter un dossier existant…",
     "Pause syncing": "Suspendre la synchronisation",
     "Resume syncing": "Reprendre la synchronisation",
-    "Start at login": "Démarrer à l’ouverture de session",
     "Open folder": "Ouvrir le dossier",
     "Open in browser": "Ouvrir dans le navigateur",
-    "Links…": "Liens…",
     "Leave…": "Quitter…",
     "Keep this folder’s git repository in step (commit, pull, push)":
         "Garder le dépôt git de ce dossier synchronisé (commit, pull, push)",
@@ -179,21 +168,9 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     "Activity": "Activité",
     "{n} folders": ("{n} dossier", "{n} dossiers"),
     "{n} not syncing": ("{n} non synchronisé", "{n} non synchronisés"),
-    "No folders yet: Join project… or Share a folder…":
-        "Aucun dossier pour l’instant : Rejoindre un projet… ou Partager un dossier…",
-    "This folder isn't a git repository (run `git init` in it first).":
-        "Ce dossier n’est pas un dépôt git (lancez d’abord `git init` dedans).",
     "A texloom folder": "Un dossier texloom",
     "Add folder": "Ajouter un dossier",
-    "{d} isn’t a TeXLoom folder. To join a project, use Join project…; to share this folder as a new project, "
-    "Share a folder….":
-        "{d} n’est pas un dossier TeXLoom. Pour rejoindre un projet, utilisez Rejoindre un projet… ; pour partager "
-        "ce dossier comme nouveau projet, Partager un dossier….",
     "That folder is already on the list.": "Ce dossier est déjà dans la liste.",
-    "Shared": "Partagé",
-    "The folder is now a TeXLoom project. Open it in the browser and use Share there to invite people.":
-        "Le dossier est maintenant un projet TeXLoom. Ouvrez-le dans le navigateur et utilisez Partager pour y "
-        "inviter des personnes.",
     "Leave": "Quitter",
     "Stop syncing “{project}”?\n\nThe folder and its files stay where they are ({d}); you can delete them yourself.":
         "Arrêter de synchroniser « {project} » ?\n\nLe dossier et ses fichiers restent où ils sont ({d}) ; vous "
@@ -214,10 +191,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     # -- project list
     'Project list':
         'Liste de projets',
-    "Keep the list of your projects on the server, encrypted, so it follows you to other computers and browsers. The server can't read it. It is opened by a sync link: keep that link in a password manager, because it opens every project on the list.":
-        'Conservez la liste de vos projets sur le serveur, chiffrée, pour la retrouver sur d’autres ordinateurs et navigateurs. Le serveur ne peut pas la lire. Elle s’ouvre avec un lien de synchronisation\xa0: gardez ce lien dans un gestionnaire de mots de passe, car il ouvre tous les projets de la liste.',
-    'Sync link':
-        'Lien de synchronisation',
     'Use this link':
         'Utiliser ce lien',
     'Creation code (if the server needs one)':
@@ -228,8 +201,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
         'Déverrouiller avec une clé d’accès…',
     "Opens the server's page in your browser, which sends the list back to this app.":
         'Ouvre la page du serveur dans votre navigateur, qui renvoie la liste à cette application.',
-    'Stop on this computer':
-        'Arrêter sur cet ordinateur',
     'Join…':
         'Rejoindre…',
     'Unlock the list in your browser; it will come back here.':
@@ -253,8 +224,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
         'Projets de la liste absents de cet ordinateur\xa0:',
     'This computer has no project list yet.':
         'Cet ordinateur n’a pas encore de liste de projets.',
-    'Join or share a project first, so TeXLoom knows which server to use.':
-        'Rejoignez ou partagez d’abord un projet, pour que TeXLoom sache quel serveur utiliser.',
     'Untitled project':
         'Projet sans titre',
     "That isn't a sync link.":
@@ -316,14 +285,12 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'New name for “{name}”:': 'Nouveau nom pour « {name} » :',
     'A tag called “{name}” already exists. Merge the two?': 'Une étiquette nommée « {name} » existe déjà. Fusionner les deux ?',
     'Search by name or tag…': 'Rechercher par nom ou étiquette…',
-    'Sort folders': 'Trier les dossiers',
     'Oldest first': 'Les plus anciens d’abord',
     'Newest first': 'Les plus récents d’abord',
     'Last changed': 'Dernière modification',
     'Name (A to Z)': 'Nom (A à Z)',
     'Name (Z to A)': 'Nom (Z à A)',
     'Filter by tag': 'Filtrer par étiquette',
-    'Filter by tag ({n})': 'Filtrer par étiquette ({n})',
     'No tags yet': 'Aucune étiquette pour le moment',
     'Clear filter': 'Effacer le filtre',
     'Tags…': 'Étiquettes…',
@@ -344,4 +311,60 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     "Deleted by the owner": "Supprimé par le propriétaire",
     "The owner deleted this project for everyone. The files in this folder stay, but nothing syncs any more: use Leave… to take it off the list.": "Le propriétaire a supprimé ce projet pour tout le monde. Les fichiers de ce dossier restent, mais plus rien n’est synchronisé : utilisez Quitter… pour le retirer de la liste.",
     "TeXCount took too long.": "TeXCount a mis trop de temps.",
+
+    # -- the window, menus, settings and welcome page
+    'New project from a folder': 'Nouveau projet à partir d’un dossier',
+    'The folder’s files are uploaded, encrypted, and the folder stays in step with the project from then on. You can invite people once it’s made.': 'Les fichiers du dossier sont envoyés, chiffrés, et le dossier reste ensuite synchronisé avec le projet. Vous pourrez inviter des personnes une fois le projet créé.',
+    'Create project': 'Créer le projet',
+    'Folder for the new project': 'Dossier du nouveau projet',
+    'Your project list follows you to your other computers and browsers. It is kept on the server, encrypted, and opened by a sync link that only you have.': 'Votre liste de projets vous suit sur vos autres ordinateurs et navigateurs. Elle est conservée sur le serveur, chiffrée, et s’ouvre avec un lien de synchronisation que vous seul possédez.',
+    'or paste its sync link': 'ou collez son lien de synchronisation',
+    'Copy sync link': 'Copier le lien de synchronisation',
+    'Stop using it here': 'Ne plus l’utiliser ici',
+    'Settings': 'Réglages',
+    'Start TeXLoom when I log in, so folders keep syncing': 'Lancer TeXLoom à l’ouverture de session, pour que les dossiers restent synchronisés',
+    'Startup': 'Démarrage',
+    'Automatic (the system’s language)': 'Automatique (langue du système)',
+    'New project from a folder…': 'Nouveau projet à partir d’un dossier…',
+    'Join a project with a link…': 'Rejoindre un projet avec un lien…',
+    'Add a TeXLoom folder from this computer…': 'Ajouter un dossier TeXLoom de cet ordinateur…',
+    'Settings…': 'Réglages…',
+    'Close window': 'Fermer la fenêtre',
+    'Share…': 'Partager…',
+    'Show activity': 'Afficher l’activité',
+    'TeXLoom help': 'Aide de TeXLoom',
+    'About TeXLoom': 'À propos de TeXLoom',
+    'Add project': 'Ajouter un projet',
+    'Make a new project from a folder, or join one with a link': 'Créer un projet à partir d’un dossier, ou en rejoindre un avec un lien',
+    'File': 'Fichier',
+    'Project': 'Projet',
+    'View': 'Présentation',
+    'Sort by': 'Trier par',
+    'Help': 'Aide',
+    'Window': 'Fenêtre',
+    'Welcome to TeXLoom': 'Bienvenue dans TeXLoom',
+    'TeXLoom keeps a folder on this computer in step with a project that you and your collaborators edit in the browser, so you can also work on it with your own tools.': 'TeXLoom synchronise un dossier de cet ordinateur avec un projet que vous et vos collaborateurs modifiez dans le navigateur, pour que vous puissiez aussi y travailler avec vos propres outils.',
+    'More': 'Plus',
+    'This folder isn’t a git repository. Run “git init” in it first to use this.': 'Ce dossier n’est pas un dépôt git. Lancez «\xa0git init\xa0» dedans pour utiliser cette option.',
+    'Already have a list?': 'Vous avez déjà une liste\xa0?',
+    'New here?': 'Première fois\xa0?',
+    'Keep the sync link in a password manager: it opens every project on the list, and a lost list can’t be recovered.': 'Gardez le lien de synchronisation dans un gestionnaire de mots de passe\xa0: il ouvre tous les projets de la liste, et une liste perdue ne peut pas être récupérée.',
+    'A new language is used the next time TeXLoom starts.': 'Une nouvelle langue est utilisée au prochain démarrage de TeXLoom.',
+    'Keeps the list of your projects in step across your computers and browsers.': 'Synchronise la liste de vos projets entre vos ordinateurs et navigateurs.',
+    'In use on this computer': 'Utilisée sur cet ordinateur',
+    'Not set up': 'Non configurée',
+    'Sort and filter': 'Trier et filtrer',
+    'Compiling': 'Compilation',
+    'Git': 'Git',
+    '{d} isn’t a TeXLoom folder yet. To turn it into a project, use Add project ▸ New project from a folder….': '{d} n’est pas encore un dossier TeXLoom. Pour en faire un projet, utilisez Ajouter un projet ▸ Nouveau projet à partir d’un dossier….',
+    'The folder is now a TeXLoom project. To invite people, use Share….': 'Le dossier est maintenant un projet TeXLoom. Pour inviter des personnes, utilisez Partager….',
+    'Keep syncing?': 'Continuer la synchronisation\xa0?',
+    'This desktop has no notification area for TeXLoom to wait in, so closing the window stops syncing. Minimise it instead to keep your folders in step.': 'Ce bureau n’a pas de zone de notification où TeXLoom peut patienter, donc fermer la fenêtre arrête la synchronisation. Réduisez-la plutôt pour garder vos dossiers synchronisés.',
+    'Minimise': 'Réduire',
+    'Quit': 'Quitter',
+    'Don’t ask again': 'Ne plus demander',
+    'Couldn’t create the project: {err}': 'Impossible de créer le projet\xa0: {err}',
+    'TeXLoom keeps syncing in the background. To quit, use its icon in the notification area.': 'TeXLoom continue la synchronisation en arrière-plan. Pour quitter, utilisez son icône dans la zone de notification.',
+    'Keeps folders on this computer in step with TeXLoom projects.': 'Synchronise des dossiers de cet ordinateur avec des projets TeXLoom.',
+    'Open your project list…': 'Ouvrir votre liste de projets…',
 }

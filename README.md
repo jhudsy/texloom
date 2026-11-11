@@ -27,7 +27,7 @@ no copy at all. No accounts: you share a link. (The command-line tools are calle
   one-click fixes; spell check that skips LaTeX; search and replace across files; an outline with
   word counts; paste or drop images; add references from a DOI or arXiv id.
 - In English, French, German, Spanish, Brazilian Portuguese or Simplified Chinese: the browser's language is used, or choose one in Settings (the
-  desktop app follows the system language, or the language menu in its toolbar).
+  desktop app follows the system language, or the one chosen in its Settings).
 - Start from templates, or import a `.zip` (e.g. from Overleaf) or an arXiv paper's source.
 - Read-only links, and personal edit links that can be revoked one by one.
 - The server is a single Python process with SQLite, small enough for a Raspberry Pi.
@@ -128,7 +128,7 @@ a passkey. If you lose the link and every passkey, and forget any password, the 
 good. Your projects aren't deleted, but you'll need each project's own link to open it. A password
 is also the one way in that can be guessed, by someone with the server's data, so make it long.
 
-In the desktop app, use **Project list…**, which also keeps the list up to date while the app
+In the desktop app, use **File ▸ Project list…** (also in Settings), which also keeps the list up to date while the app
 runs; for the helper, see `texloom projects` below (`use --password` unlocks with a password). Starting a
 list counts as creating something on the server, so servers that require a creation code ask for
 one. Servers can turn lists off with `--no-project-lists`.
@@ -403,29 +403,42 @@ browser stops if it finds the app or `texloom run` keeping the same folder.
 **With the TeXLoom app** (macOS, Windows, Linux): download it from the
 [releases page](https://github.com/jhudsy/texloom/releases/latest), or install it with
 `uv tool install 'texloom[app] @ git+https://github.com/jhudsy/texloom'` and run
-`texloom app`. It keeps all your project folders in sync from the menu bar or tray:
-- **Join project…** takes a link (from the Share dialog or an email), shows the project's
-  name and your access, and puts it in a folder you choose (`~/TeXLoom/<name>` by default).
-  In the web app, **Sync to a folder…** next to a project on the start page does the same in
-  one click, as does Settings → *Keep a copy in a folder* → **Open in the TeXLoom app**. The
-  app asks before joining, and says if the project already has a folder on this computer.
-- The search box above the folders finds them by name or tag; beside it you sort them and filter
-  by tag. Tags show in colour, which **Manage tags…** lets you change. Select several (Shift or ⌘/Ctrl-click) to change their **Tags…** or **Leave…** them
-  together, and right-click for the same actions. Tags are the same ones as in the web app, through
-  your project list. **Make a copy…** starts a new project, in a new folder, from a folder's files.
-  **Connect an AI tool via MCP…** on the right-click menu shows how to connect a tool you already use through [MCP](#agents-mcp).
-- **Share a folder…** turns an existing folder into a new project; **Add existing folder…**
-  brings back one set up earlier (e.g. left, or cloned on the command line).
-- Each folder shows whether it is up to date, offline or sending changes, with its recent
-  activity, and switches for compiling with your own TeX (with **Compile from scratch**,
-  which first deletes LaTeX's working files) and for keeping its git repository in step. **Running programs when compiling** is *Never* (default), *TeX Live's safe list*,
-  or *Anything the document asks, once I allow it*, with **Review lines…** to see and allow
-  them (as `texloom allow`). **Leave…** stops syncing a folder (its files stay).
-- **Links…** shows the read-only link and your own edit link. Owners can create **edit
-  links for others** there: one per person, or one for a group, to copy or email. Revoking
-  one is in the web app's Share dialog.
-- **Start at login** keeps it running in the menu bar or tray; the language menu next to it
-  takes effect when the app restarts (`TEXLOOM_LANG=fr` or `en` overrides it).
+`texloom app`. It keeps all your project folders in sync from the menu bar or tray. The first
+time, it shows two choices; afterwards they are under **Add project** in the toolbar (and the
+**File** menu):
+- **New project from a folder…** turns a folder you already have into a project: its files are
+  uploaded, encrypted, to `app.texloom.org` (or the server you type) and the folder stays in step.
+- **Join a project with a link…** takes a link (from the Share dialog or an email), shows the
+  project's name and your access, and puts it in a folder you choose (`~/TeXLoom/<name>` by
+  default). In the web app, **Sync to a folder…** next to a project on the start page does the
+  same in one click, as does Settings → *Keep a copy in a folder* → **Open in the TeXLoom app**.
+  The app asks before joining, and says if the project already has a folder on this computer.
+- **Add a TeXLoom folder from this computer…** brings back one set up earlier (e.g. left, or
+  cloned on the command line).
+
+Choosing a folder in the list shows whether it is up to date, offline or sending changes, with
+**Open folder**, **Open in browser** and **Share…** (the read-only link, your own edit link, and
+for owners **edit links for others**: one per person or group, to copy or email; revoking one
+is in the web app's Share dialog). **More** (also the **Project** menu and the right-click menu)
+has **Tags…**, **Make a copy…** (a new project, in a new folder, from this one's files),
+**Word count…**, **Connect an AI tool via MCP…** (how to connect a tool you already use through
+[MCP](#agents-mcp)) and **Leave…**, which stops syncing a folder (its files stay).
+- **Compiling:** compile with your own TeX when files change. Once that's on, **Running programs
+  when compiling** is *Never* (default), *TeX Live's safe list*, or *Anything the document asks,
+  once I allow it*, with **Review lines…** to see and allow them (as `texloom allow`), and
+  **Compile from scratch** first deletes LaTeX's working files.
+- **Git:** keep the folder's git repository in step (commit, pull, push).
+- **Activity** unfolds the folder's recent log.
+- The search box finds folders by name or tag; the ⇅ button beside it (or the **View** menu)
+  sorts them and filters by tag. Tags show in colour, which **Manage tags…** lets you change.
+  Select several (Shift or ⌘/Ctrl-click) to change their **Tags…** or **Leave…** them together.
+  Tags are the same ones as in the web app, through your project list.
+- **Settings** (TeXLoom ▸ Settings… or ⌘, on a Mac; the toolbar elsewhere): start at login, so
+  folders keep syncing; the language, used from the next start (`TEXLOOM_LANG=fr` or `en`
+  overrides it); and the project list.
+- Closing the window keeps TeXLoom syncing in the menu bar or tray (on a Mac, click its Dock icon
+  to bring the window back). On Linux desktops without a tray, closing asks whether to minimise
+  instead, since quitting stops syncing.
 
 The downloads aren't signed with paid certificates yet. On macOS, the first time,
 right-click the app → **Open** (or System Settings → Privacy & Security → **Open Anyway**);

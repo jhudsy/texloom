@@ -15,6 +15,7 @@ import asyncio
 import collections
 import functools
 import getpass
+import html
 import json
 import logging
 import platform
@@ -44,6 +45,34 @@ log = logging.getLogger("texloom")
 ICON = Path(__file__).with_name("assets") / "icon.png"
 SOCKET = f"texloom-app-{re.sub(r'[^A-Za-z0-9]', '', getpass.getuser())}"
 SCHEME = "texloom"
+MAC = sys.platform == "darwin"
+DEFAULT_SERVER = "https://app.texloom.org"
+HELP_URL = "https://github.com/jhudsy/texloom#readme"
+
+
+def theme_icon(name: str) -> QtGui.QIcon:
+    """A standard icon from the system (SF Symbols on macOS, Fluent on Windows, the icon theme on
+    Linux), or none, in which case buttons show their text alone."""
+    try:
+        return QtGui.QIcon.fromTheme(getattr(QtGui.QIcon.ThemeIcon, name))
+    except AttributeError:
+        return QtGui.QIcon()
+
+
+class Dialog(QtWidgets.QDialog):
+    """A dialog that, on macOS, slides down from the main window as a sheet."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        if MAC and isinstance(parent, QtWidgets.QMainWindow):
+            self.setWindowModality(Qt.WindowModal)
+
+
+def grey_note(text: str) -> QtWidgets.QLabel:
+    label = QtWidgets.QLabel(text)
+    label.setWordWrap(True)
+    label.setStyleSheet(f"color: {GREY}")
+    return label
 
 
 # ---- the sync engine, on its own thread -------------------------------------------------
@@ -308,7 +337,7 @@ async def program_lines(engine: Engine, d: Path) -> tuple[list, set[str]]:
 
 
 # ---- dialogs ----------------------------------------------------------------------------
-class ProgramsDialog(QtWidgets.QDialog):
+class ProgramsDialog(Dialog):
     """`texloom allow` in a window: see the lines that run programs, allow exactly those."""
 
     def __init__(self, engine: Engine, d: Path, parent=None) -> None:
@@ -401,7 +430,7 @@ def mailto(link: str, project: str, who: str) -> QtCore.QUrl:
     return QtCore.QUrl(f"mailto:?subject={quote(subject)}&body={quote(body)}")
 
 
-class LinksDialog(QtWidgets.QDialog):
+class LinksDialog(Dialog):
     """This folder's links: read-only, your own edit link, and (owners) edit links for others."""
 
     def __init__(self, d: Path, parent=None, engine: Engine | None = None, project: str = "") -> None:
@@ -486,7 +515,7 @@ class LinksDialog(QtWidgets.QDialog):
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
 
-class JoinDialog(QtWidgets.QDialog):
+class JoinDialog(Dialog):
     """Paste a link → see what it is → choose a folder → join."""
 
     def __init__(self, engine: Engine, parent=None, link: str = "", from_web: bool = False) -> None:
@@ -623,15 +652,20 @@ class JoinDialog(QtWidgets.QDialog):
         self.accept()
 
 
-class ShareFolderDialog(QtWidgets.QDialog):
+class ShareFolderDialog(Dialog):
     """Share an existing folder as a new project (`texloom new`)."""
 
     def __init__(self, engine: Engine, parent=None) -> None:
         super().__init__(parent)
         self.engine = engine
-        self.setWindowTitle(_("Share a folder as a new project"))
+        self.setWindowTitle(_("New project from a folder"))
         self.setMinimumWidth(560)
         lay = QtWidgets.QFormLayout(self)
+        lay.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)  # macOS keeps fields narrow otherwise
+        intro = QtWidgets.QLabel(_("The folder’s files are uploaded, encrypted, and the folder stays in step with the "
+                                   "project from then on. You can invite people once it’s made."))
+        intro.setWordWrap(True)
+        lay.addRow(intro)
         row = QtWidgets.QHBoxLayout()
         self.folder = QtWidgets.QLineEdit()
         choose = QtWidgets.QPushButton(_("Choose…"))
@@ -651,13 +685,13 @@ class ShareFolderDialog(QtWidgets.QDialog):
         self.msg.setWordWrap(True)
         lay.addRow(self.msg)
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
-        self.go = bb.addButton(_("Share"), QtWidgets.QDialogButtonBox.AcceptRole)
+        self.go = bb.addButton(_("Create project"), QtWidgets.QDialogButtonBox.AcceptRole)
         self.go.clicked.connect(self.do_share)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
 
     def choose(self) -> None:
-        d = QtWidgets.QFileDialog.getExistingDirectory(self, _("Folder to share"), str(Path.home()))
+        d = QtWidgets.QFileDialog.getExistingDirectory(self, _("Folder for the new project"), str(Path.home()))
         if d:
             self.folder.setText(d)
             if not self.name.text():
@@ -678,7 +712,7 @@ class ShareFolderDialog(QtWidgets.QDialog):
 
     def done_(self, err) -> None:
         if err:
-            self.msg.setText(red(_("Couldn’t share it: {err}", err=err)))
+            self.msg.setText(red(_("Couldn’t create the project: {err}", err=err)))
             self.go.setEnabled(True)
             return
         self.engine.call(self.engine.daemon.poke)
@@ -686,7 +720,7 @@ class ShareFolderDialog(QtWidgets.QDialog):
 
 
 class ProjectListDialog(QtWidgets.QDialog):
-    """The encrypted project list: set it up, and join projects from it."""
+    """The encrypted project list: set it up or unlock it, then join projects from it."""
 
     work_done = QtCore.Signal(object, object, object)  # what to do next, its result, or the error
 
@@ -702,66 +736,103 @@ class ProjectListDialog(QtWidgets.QDialog):
             warn.setWordWrap(True)
             warn.setStyleSheet(f"color: {AMBER}")
             lay.addWidget(warn)
-        intro = QtWidgets.QLabel(_(
-            "Keep the list of your projects on the server, encrypted, so it follows you to other computers and "
-            "browsers. The server can't read it. It is opened by a sync link: keep that link in a password manager, "
-            "because it opens every project on the list."))
+        intro = QtWidgets.QLabel(_("Your project list follows you to your other computers and browsers. It is kept on the "
+                                   "server, encrypted, and opened by a sync link that only you have."))
         intro.setWordWrap(True)
         lay.addWidget(intro)
-        no_recovery = QtWidgets.QLabel(_("There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it."))
-        no_recovery.setWordWrap(True)
-        no_recovery.setStyleSheet(f"color: {AMBER}")
-        lay.addWidget(no_recovery)
+        self.pages = QtWidgets.QStackedWidget()
+        lay.addWidget(self.pages, 1)
+
+        # not set up on this computer: unlock a list you have, or start one
+        setup = QtWidgets.QWidget()
+        s = QtWidgets.QVBoxLayout(setup)
+        s.setContentsMargins(0, 8, 0, 0)
+        s.addWidget(self.heading(_("Already have a list?")))
         row = QtWidgets.QHBoxLayout()
-        self.link = QtWidgets.QLineEdit(link or listsync.saved_link() or "")
-        self.link.setEchoMode(QtWidgets.QLineEdit.Password)
-        self.link.setPlaceholderText(_("Sync link"))
-        use = QtWidgets.QPushButton(_("Use this link"))
-        use.clicked.connect(self.use)
-        copy = QtWidgets.QPushButton(_("Copy"))
-        copy.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(self.link.text()))
-        row.addWidget(self.link, 1)
-        row.addWidget(use)
-        row.addWidget(copy)
-        lay.addLayout(row)
-        row = QtWidgets.QHBoxLayout()
-        self.code = QtWidgets.QLineEdit("")
-        self.code.setPlaceholderText(_("Creation code (if the server needs one)"))
-        new = QtWidgets.QPushButton(_("Start a new list"))
-        new.clicked.connect(self.start)
         passkey = QtWidgets.QPushButton(_("Unlock with a passkey…"))
         passkey.setToolTip(_("Opens the server's page in your browser, which sends the list back to this app."))
         passkey.clicked.connect(self.passkey)
         password = QtWidgets.QPushButton(_("Unlock with a password…"))
         password.clicked.connect(self.password)
-        off = QtWidgets.QPushButton(_("Stop on this computer"))
-        off.clicked.connect(self.off)
-        for w in (self.code, new, passkey, password, off):
-            row.addWidget(w)
-        lay.addLayout(row)
-        self.status = QtWidgets.QLabel("")
-        self.status.setWordWrap(True)
-        lay.addWidget(self.status)
-        lay.addWidget(QtWidgets.QLabel(_("Projects on the list that aren't on this computer:")))
+        row.addWidget(passkey)
+        row.addWidget(password)
+        row.addStretch(1)
+        s.addLayout(row)
+        row = QtWidgets.QHBoxLayout()
+        self.link = QtWidgets.QLineEdit(link or listsync.saved_link() or "")
+        self.link.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.link.setPlaceholderText(_("or paste its sync link"))
+        use = QtWidgets.QPushButton(_("Use this link"))
+        use.clicked.connect(self.use)
+        self.link.returnPressed.connect(self.use)
+        row.addWidget(self.link, 1)
+        row.addWidget(use)
+        s.addLayout(row)
+        s.addSpacing(12)
+        s.addWidget(self.heading(_("New here?")))
+        row = QtWidgets.QHBoxLayout()
+        self.code = QtWidgets.QLineEdit("")
+        self.code.setPlaceholderText(_("Creation code (if the server needs one)"))
+        new = QtWidgets.QPushButton(_("Start a new list"))
+        new.clicked.connect(self.start)
+        row.addWidget(self.code, 1)
+        row.addWidget(new)
+        s.addLayout(row)
+        no_recovery = QtWidgets.QLabel(_("There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it."))
+        no_recovery.setWordWrap(True)
+        no_recovery.setStyleSheet(f"color: {AMBER}")
+        s.addWidget(no_recovery)
+        s.addStretch(1)
+        self.pages.addWidget(setup)
+
+        # in use: the projects on it that aren't here yet
+        inuse = QtWidgets.QWidget()
+        u = QtWidgets.QVBoxLayout(inuse)
+        u.setContentsMargins(0, 8, 0, 0)
+        self.count = QtWidgets.QLabel("")
+        u.addWidget(self.count)
+        u.addWidget(QtWidgets.QLabel(_("Projects on the list that aren't on this computer:")))
         self.find = QtWidgets.QLineEdit()
         self.find.setPlaceholderText(_("Search by name or tag…"))
         self.find.setClearButtonEnabled(True)
         self.find.textChanged.connect(lambda _text: self.apply_find())
-        lay.addWidget(self.find)
+        u.addWidget(self.find)
         self.items = QtWidgets.QListWidget()
         self.items.itemDoubleClicked.connect(lambda _item: self.join())
-        lay.addWidget(self.items, 1)
+        u.addWidget(self.items, 1)
         row = QtWidgets.QHBoxLayout()
         join = QtWidgets.QPushButton(_("Join…"))
         join.clicked.connect(self.join)
-        close = QtWidgets.QPushButton(_("Close"))
-        close.clicked.connect(self.accept)
+        copy = QtWidgets.QPushButton(_("Copy sync link"))
+        copy.clicked.connect(lambda: (QtWidgets.QApplication.clipboard().setText(listsync.saved_link() or ""), copy.setText(_("Copied"))))
+        off = QtWidgets.QPushButton(_("Stop using it here"))
+        off.clicked.connect(self.off)
         row.addWidget(join)
         row.addStretch(1)
-        row.addWidget(close)
-        lay.addLayout(row)
-        if listsync.saved_link() and not from_web:
+        row.addWidget(copy)
+        row.addWidget(off)
+        u.addLayout(row)
+        u.addWidget(grey_note(_("Keep the sync link in a password manager: it opens every project on the list, and a lost list can’t be recovered.")))
+        self.pages.addWidget(inuse)
+
+        self.status = QtWidgets.QLabel("")
+        self.status.setWordWrap(True)
+        lay.addWidget(self.status)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+        bb.rejected.connect(self.accept)
+        lay.addWidget(bb)
+        in_use = bool(listsync.saved_link()) and not from_web
+        self.pages.setCurrentIndex(1 if in_use else 0)
+        if in_use:
             self.refresh_list()
+
+    @staticmethod
+    def heading(text: str) -> QtWidgets.QLabel:
+        label = QtWidgets.QLabel(text)
+        f = label.font()
+        f.setBold(True)
+        label.setFont(f)
+        return label
 
     def _server(self) -> str:
         try:
@@ -787,6 +858,7 @@ class ProjectListDialog(QtWidgets.QDialog):
 
     def after_work(self, then, result, error) -> None:
         if error is None:
+            self.status.setText("")
             then(result)
         else:
             self.status.setText(listsync.explain(error.code) if isinstance(error, listsync.ListError) else str(error))
@@ -803,10 +875,10 @@ class ProjectListDialog(QtWidgets.QDialog):
 
     def show_list(self, found) -> None:
         if found is None:
-            self.status.setText(_("This computer has no project list yet."))
+            self.count.setText(_("This computer has no project list yet."))
             return
         server, doc, away = found
-        self.status.setText(ngettext(len(doc["projects"]), "The list has {n} project.", "The list has {n} projects.", n=len(doc["projects"])))
+        self.count.setText(ngettext(len(doc["projects"]), "The list has {n} project.", "The list has {n} projects.", n=len(doc["projects"])))
         of = tags.reader()
         for project, entry in away:
             names = [t.name for t in of(project)]
@@ -825,12 +897,8 @@ class ProjectListDialog(QtWidgets.QDialog):
     def adopt(self, link: str) -> None:
         self.link.setText(link)
         listsync.save_link(link)
+        self.pages.setCurrentIndex(1)
         self.refresh_list()
-
-    def need_server(self, server: str) -> str:
-        if not server:
-            self.status.setText(_("Join or share a project first, so TeXLoom knows which server to use."))
-        return server
 
     def use(self) -> None:
         try:
@@ -841,18 +909,14 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.adopt(self.link.text().strip())
 
     def start(self) -> None:
-        if server := self.need_server(known_server()):
-            self.adopt(listsync.ListKey.generate().link(server))
+        self.adopt(listsync.ListKey.generate().link(known_server()))
 
     def passkey(self) -> None:
-        if server := self.need_server(self._server()):
-            QtGui.QDesktopServices.openUrl(QtCore.QUrl(f"{server}/#unlock-for-app"))
-            self.status.setText(_("Unlock the list in your browser; it will come back here."))
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(f"{self._server()}/#unlock-for-app"))
+        self.status.setText(_("Unlock the list in your browser; it will come back here."))
 
     def password(self) -> None:
-        server = self.need_server(self._server())
-        if not server:
-            return
+        server = self._server()
         username, ok = QtWidgets.QInputDialog.getText(self, _("Project list"), _("Username or email:"))
         if not ok or not username.strip():
             return
@@ -864,6 +928,7 @@ class ProjectListDialog(QtWidgets.QDialog):
         listsync.save_link(None)
         self.link.clear()
         self.items.clear()
+        self.pages.setCurrentIndex(0)
         self.status.setText(_("This computer no longer uses a project list. The list itself stays on the server."))
 
     def join(self) -> None:
@@ -970,7 +1035,7 @@ class ConnectToolDialog(QtWidgets.QDialog):
             copy.setText(_("Copy"))
 
 
-class CopyFolderDialog(QtWidgets.QDialog):
+class CopyFolderDialog(Dialog):
     """Start a new project from a folder's current files."""
 
     def __init__(self, engine: Engine, src: Path, parent=None) -> None:
@@ -979,6 +1044,7 @@ class CopyFolderDialog(QtWidgets.QDialog):
         self.setWindowTitle(_("Make a copy"))
         self.setMinimumWidth(560)
         lay = QtWidgets.QFormLayout(self)
+        lay.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)  # macOS keeps fields narrow otherwise
         note = QtWidgets.QLabel(_("The copy is a new project of your own, with its own links, in a folder of its own. It starts "
                                   "with the current files and settings, without the history, comments or collaborators, and "
                                   "it counts towards your storage."))
@@ -1136,7 +1202,7 @@ async def texcount_report(st, d: Path, exe: str) -> str:
     return await asyncio.to_thread(run_it)
 
 
-class TagsDialog(QtWidgets.QDialog):
+class TagsDialog(Dialog):
     """Assign or unassign tags on one project or several, and create new ones."""
 
     def __init__(self, projects: list[str], title: str, parent=None) -> None:
@@ -1215,7 +1281,7 @@ class TagsDialog(QtWidgets.QDialog):
         self.render()
 
 
-class ManageTagsDialog(QtWidgets.QDialog):
+class ManageTagsDialog(Dialog):
     """Add, rename and delete tags."""
 
     def __init__(self, parent=None) -> None:
@@ -1338,54 +1404,108 @@ def folder_of(project: str) -> Path | None:
 
 
 def known_server() -> str:
+    """The server of this computer's projects, else TeXLoom's own."""
     for d in registry.folders():
         try:
             return Keys.from_link(load_config(d)["link"])[1]
         except Exception:  # noqa: BLE001
             continue
-    return ""
+    return DEFAULT_SERVER
+
+
+class SettingsDialog(QtWidgets.QDialog):
+    """Settings for the whole app. On macOS a window of its own (TeXLoom ▸ Settings…, ⌘,) that
+    applies changes at once; elsewhere a dialog with a Close button."""
+
+    def __init__(self, window) -> None:
+        super().__init__(window if not MAC else None)
+        self.window_ = window
+        self.setWindowTitle(_("Settings"))
+        self.setMinimumWidth(520)
+        lay = QtWidgets.QFormLayout(self)
+        lay.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)  # macOS keeps fields narrow otherwise
+        lay.setRowWrapPolicy(QtWidgets.QFormLayout.WrapLongRows)
+        self.login = QtWidgets.QCheckBox(_("Start TeXLoom when I log in, so folders keep syncing"))
+        self.login.setChecked(autostart.status() != "off")
+        self.login.toggled.connect(self.set_autostart)
+        lay.addRow(_("Startup"), self.login)
+        self.lang = QtWidgets.QComboBox()
+        self.lang.addItem(_("Automatic (the system’s language)"), "auto")
+        for code, name in NAMES.items():
+            self.lang.addItem(name, code)
+        self.lang.setCurrentIndex(max(0, self.lang.findData(lang_pref())))
+        self.lang.activated.connect(self.set_language)
+        lay.addRow(_("Language"), self.lang)
+        lay.addRow("", grey_note(_("A new language is used the next time TeXLoom starts.")))
+        row = QtWidgets.QHBoxLayout()
+        self.list_state = QtWidgets.QLabel()
+        open_list = QtWidgets.QPushButton(_("Project list…"))
+        open_list.setAutoDefault(False)
+        open_list.clicked.connect(lambda: window.project_list())
+        row.addWidget(self.list_state, 1)
+        row.addWidget(open_list)
+        lay.addRow(_("Project list"), row)
+        lay.addRow("", grey_note(_("Keeps the list of your projects in step across your computers and browsers.")))
+        self.msg = grey_note("")
+        lay.addRow(self.msg)
+        if not MAC:
+            bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+            bb.rejected.connect(self.accept)
+            lay.addRow(bb)
+        else:
+            QtGui.QShortcut(QtGui.QKeySequence.Close, self, self.close)
+
+    def showEvent(self, e) -> None:
+        self.list_state.setText(_("In use on this computer") if listsync.saved_link() else _("Not set up"))
+        super().showEvent(e)
+
+    def set_language(self, _i: int) -> None:
+        set_lang_pref(self.lang.currentData())
+        self.msg.setText(_("The new language is used the next time TeXLoom starts. Quit TeXLoom (from its menu) and open it again."))
+
+    def set_autostart(self, on: bool) -> None:
+        try:
+            self.msg.setText(autostart.enable(app=True) if on else autostart.disable())
+        except Exception as e:  # noqa: BLE001
+            self.msg.setText(red(_("Couldn’t change it: {e}", e=e)))
+
+
+def short_path(d: Path) -> str:
+    """A folder as people read it: ~/Papers/thesis, and the middle left out if it's long."""
+    try:
+        text = str(Path("~") / d.relative_to(Path.home()))
+    except ValueError:
+        text = str(d)
+    return text if len(text) <= 72 else text[:30] + "…" + text[-40:]
 
 
 # ---- the window ----------------------------------------------------------------------------
+
+
 class Window(QtWidgets.QMainWindow):
     def __init__(self, engine: Engine, activity: Activity) -> None:
         super().__init__()
         self.engine, self.activity = engine, activity
+        self.tray: QtWidgets.QSystemTrayIcon | None = None
+        self.settings_dlg: SettingsDialog | None = None
         self.setWindowTitle("TeXLoom")
         self.setWindowIcon(QtGui.QIcon(str(ICON)))
-        self.resize(860, 540)
+        self.resize(900, 580)
+        self.sort_key = app_pref("folder_sort", "oldest")
+        self.build_actions()
+        self.build_toolbar()
+        self.build_menus()
 
-        tb = self.addToolBar("main")
-        tb.setMovable(False)
-        tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        tb.addAction(_("Join project…"), self.join)
-        tb.addAction(_("Share a folder…"), self.share_folder)
-        tb.addAction(_("Add existing folder…"), self.add_existing)
-        tb.addAction(_("Project list…"), lambda: self.project_list())
-        tb.addSeparator()
-        self.pause_act = tb.addAction(_("Pause syncing"), self.toggle_pause)
-        spacer = QtWidgets.QWidget()
-        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
-        tb.addWidget(spacer)
-        self.login_box = QtWidgets.QCheckBox(_("Start at login"))
-        self.login_box.setChecked(autostart.status() != "off")
-        self.login_box.toggled.connect(self.set_autostart)
-        tb.addWidget(self.login_box)
-        self.lang_box = QtWidgets.QComboBox()
-        self.lang_box.setToolTip(_("Language of this app (takes effect when it restarts)"))
-        self.lang_box.addItem(_("Language: automatic"), "auto")
-        for code, name in NAMES.items():
-            self.lang_box.addItem(name, code)
-        self.lang_box.setCurrentIndex(max(0, self.lang_box.findData(lang_pref())))
-        self.lang_box.currentIndexChanged.connect(self.set_language)
-        tb.addWidget(self.lang_box)
-
+        self.pages = QtWidgets.QStackedWidget()
+        self.pages.addWidget(self.build_welcome())
         split = QtWidgets.QSplitter()
+        split.setChildrenCollapsible(False)
         split.addWidget(self.build_list())
         split.addWidget(self.build_detail())
         split.setStretchFactor(1, 1)
-        self.setCentralWidget(split)
-        self.statusBar().addPermanentWidget(QtWidgets.QLabel(f"texloom {__version__}"))
+        split.setSizes([260, 640])
+        self.pages.addWidget(split)
+        self.setCentralWidget(self.pages)
 
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.refresh)
@@ -1397,6 +1517,163 @@ class Window(QtWidgets.QMainWindow):
         self.list_timer.start(60_000)
         self.refresh()
 
+    # -- actions, toolbar and menus
+    def action(self, text: str, slot, icon: str = "", keys=None, role=QtGui.QAction.NoRole) -> QtGui.QAction:
+        act = QtGui.QAction(text, self)
+        if icon:
+            act.setIcon(theme_icon(icon))
+        if keys is not None:
+            act.setShortcut(QtGui.QKeySequence(keys))
+        act.setMenuRole(role)  # NoRole: macOS mustn't move "Settings"-like items by guessing from their text
+        act.triggered.connect(lambda _checked=False: slot())
+        return act
+
+    def build_actions(self) -> None:
+        a, K = self.action, QtGui.QKeySequence
+        self.a_new = a(_("New project from a folder…"), self.share_folder, "FolderNew", K.New)
+        self.a_join = a(_("Join a project with a link…"), self.join, "InsertLink", "Ctrl+J")
+        self.a_add = a(_("Add a TeXLoom folder from this computer…"), self.add_existing, "FolderOpen")
+        self.a_list = a(_("Project list…"), self.project_list)
+        self.a_pause = a(_("Pause syncing"), self.toggle_pause, "MediaPlaybackPause")
+        self.a_settings = a(_("Settings…"), self.settings_window, "DocumentProperties", K.Preferences, QtGui.QAction.PreferencesRole)
+        self.a_close = a(_("Close window"), self.close, keys=K.Close)
+        self.a_quit = a(_("Quit TeXLoom"), QtWidgets.QApplication.quit, "ApplicationExit", K.Quit, QtGui.QAction.QuitRole)
+        self.a_open = a(_("Open folder"), self.open_folder, "FolderOpen", K.Open)
+        self.a_web = a(_("Open in browser"), self.open_web, "GoNext", "Ctrl+B")
+        self.a_share = a(_("Share…"), self.share_links, "MailSend")
+        self.a_tags = a(_("Tags…"), self.edit_tags)
+        self.a_copy = a(_("Make a copy…"), self.copy_project)
+        self.a_count = a(_("Word count…"), self.word_count)
+        self.a_count.setToolTip(_("Count the words with TeXCount, from your own TeX installation"))
+        self.a_scratch = a(_("Compile from scratch"), self.compile_from_scratch)
+        self.a_scratch.setToolTip(_("Delete LaTeX’s working files (.aux, .bbl, …) in .texloom/build and compile again"))
+        self.a_mcp = a(_("Connect an AI tool via MCP…"), self.connect_tool)
+        self.a_leave = a(_("Leave…"), self.leave)
+        self.a_activity = QtGui.QAction(_("Show activity"), self, checkable=True)
+        self.a_activity.setChecked(bool(app_pref("show_activity", False)))
+        self.a_activity.toggled.connect(self.show_activity)
+        self.a_help = a(_("TeXLoom help"), lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(HELP_URL)), keys=K.HelpContents)
+        self.a_about = a(_("About TeXLoom"), self.about, role=QtGui.QAction.AboutRole)
+        self.add_menu = QtWidgets.QMenu(self)
+        for act in (self.a_new, self.a_join, self.a_add):
+            self.add_menu.addAction(act)
+        self.more_menu = QtWidgets.QMenu(self)
+        for act in (self.a_tags, self.a_copy, self.a_count, self.a_mcp, None, self.a_leave):
+            self.more_menu.addSeparator() if act is None else self.more_menu.addAction(act)
+
+    def build_toolbar(self) -> None:
+        tb = self.addToolBar("main")
+        tb.setMovable(False)
+        tb.setFloatable(False)
+        tb.setContextMenuPolicy(Qt.PreventContextMenu)  # no menu offering to hide it
+        tb.setToolButtonStyle(Qt.ToolButtonTextUnderIcon if MAC else Qt.ToolButtonTextBesideIcon)
+        add = QtGui.QAction(theme_icon("ListAdd"), _("Add project"), self)
+        add.setMenu(self.add_menu)
+        add.setToolTip(_("Make a new project from a folder, or join one with a link"))
+        tb.addAction(add)
+        tb.widgetForAction(add).setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        tb.addAction(self.a_pause)
+        spacer = QtWidgets.QWidget()
+        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        tb.addWidget(spacer)
+        if not MAC:  # on macOS, Settings is in the TeXLoom menu (⌘,)
+            tb.addAction(self.a_settings)
+        self.setUnifiedTitleAndToolBarOnMac(True)
+
+    def build_menus(self) -> None:
+        mb = self.menuBar()
+        m = mb.addMenu(_("File"))
+        for act in (self.a_new, self.a_join, self.a_add, None, self.a_list, None, self.a_pause, None,
+                    self.a_settings, self.a_close, self.a_quit):
+            m.addSeparator() if act is None else m.addAction(act)
+        m = mb.addMenu(_("Project"))
+        for act in (self.a_open, self.a_web, self.a_share, None, self.a_tags, self.a_copy, self.a_count,
+                    self.a_scratch, self.a_mcp, None, self.a_leave):
+            m.addSeparator() if act is None else m.addAction(act)
+        m = mb.addMenu(_("View"))
+        self.sort_menu = m.addMenu(_("Sort by"))
+        self.fill_sort_menu(self.sort_menu)
+        self.view_filter = m.addMenu(_("Filter by tag"))
+        self.view_filter.aboutToShow.connect(lambda: self.fill_filter_menu(self.view_filter))
+        m.addSeparator()
+        m.addAction(self.a_activity)
+        if MAC:
+            m = mb.addMenu(_("Window"))
+            m.addAction(self.action(_("Minimise"), self.showMinimized, keys="Ctrl+M"))
+            m.addAction(self.action("TeXLoom", self.show_window))
+        m = mb.addMenu(_("Help"))
+        m.addAction(self.a_help)
+        m.addAction(self.a_about)
+
+    def fill_sort_menu(self, m: QtWidgets.QMenu) -> None:
+        group = QtGui.QActionGroup(m)
+        labels = {"oldest": _("Oldest first"), "newest": _("Newest first"), "changed": _("Last changed"),
+                  "az": _("Name (A to Z)"), "za": _("Name (Z to A)")}
+        for key, label in labels.items():
+            act = m.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(key == self.sort_key)
+            group.addAction(act)
+            act.triggered.connect(lambda _c=False, k=key: self.set_sorting(k))
+
+    def about(self) -> None:
+        QtWidgets.QMessageBox.about(self, _("About TeXLoom"), f"<b>TeXLoom {__version__}</b><br><br>"
+                                    + html.escape(_("Keeps folders on this computer in step with TeXLoom projects."))
+                                    + f"<br><br><a href='{HELP_URL}'>{html.escape(_('TeXLoom help'))}</a>")
+
+    def settings_window(self) -> None:
+        if MAC:  # a window of its own, like other Mac apps' settings
+            if self.settings_dlg is None:
+                self.settings_dlg = SettingsDialog(self)
+            self.settings_dlg.show()
+            self.settings_dlg.raise_()
+            self.settings_dlg.activateWindow()
+        else:
+            SettingsDialog(self).exec()
+
+    # -- the welcome page, while there are no folders
+    def build_welcome(self) -> QtWidgets.QWidget:
+        w = QtWidgets.QWidget()
+        lay = QtWidgets.QVBoxLayout(w)
+        lay.addStretch(1)
+        icon = QtWidgets.QLabel()
+        icon.setPixmap(QtGui.QIcon(str(ICON)).pixmap(80, 80))
+        icon.setAlignment(Qt.AlignCenter)
+        lay.addWidget(icon)
+        title = QtWidgets.QLabel(_("Welcome to TeXLoom"))
+        f = title.font()
+        f.setPointSize(f.pointSize() + 8)
+        f.setBold(True)
+        title.setFont(f)
+        title.setAlignment(Qt.AlignCenter)
+        lay.addWidget(title)
+        text = QtWidgets.QLabel(_("TeXLoom keeps a folder on this computer in step with a project that you and your "
+                                  "collaborators edit in the browser, so you can also work on it with your own tools."))
+        text.setWordWrap(True)
+        text.setAlignment(Qt.AlignCenter)
+        text.setFixedWidth(500)
+        text.setMinimumHeight(text.heightForWidth(500))  # a wrapped label doesn't otherwise get its full height here
+        lay.addWidget(text, 0, Qt.AlignHCenter)
+        lay.addSpacing(16)
+        row = QtWidgets.QHBoxLayout()
+        row.addStretch(1)
+        for act, default in ((self.a_new, True), (self.a_join, False)):
+            b = QtWidgets.QPushButton(act.icon(), act.text())
+            b.setDefault(default)
+            b.setMinimumHeight(36)
+            b.clicked.connect(act.trigger)
+            row.addWidget(b)
+        row.addStretch(1)
+        lay.addLayout(row)
+        more = QtWidgets.QLabel(f"<a href='add'>{html.escape(_('Add a TeXLoom folder from this computer…'))}</a>"
+                                f" · <a href='list'>{html.escape(_('Open your project list…'))}</a>")
+        more.setAlignment(Qt.AlignCenter)
+        more.linkActivated.connect(lambda what: self.add_existing() if what == "add" else self.project_list())
+        lay.addSpacing(8)
+        lay.addWidget(more)
+        lay.addStretch(2)
+        return w
+
     # -- the list of folders
     def build_list(self) -> QtWidgets.QWidget:
         self.tag_filter: set[str] = set()
@@ -1406,35 +1683,26 @@ class Window(QtWidgets.QMainWindow):
         w = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
+        row = QtWidgets.QHBoxLayout()
         self.find = QtWidgets.QLineEdit()
         self.find.setPlaceholderText(_("Search by name or tag…"))
         self.find.setClearButtonEnabled(True)
         self.find.textChanged.connect(lambda _text: self.refresh())
-        lay.addWidget(self.find)
-        row = QtWidgets.QHBoxLayout()
-        self.sort_box = QtWidgets.QComboBox()
-        self.sort_box.setToolTip(_("Sort folders"))
-        for label, key in ((_("Oldest first"), "oldest"), (_("Newest first"), "newest"), (_("Last changed"), "changed"),
-                           (_("Name (A to Z)"), "az"), (_("Name (Z to A)"), "za")):
-            self.sort_box.addItem(label, key)
-        self.sort_box.setCurrentIndex(max(0, self.sort_box.findData(app_pref("folder_sort", "oldest"))))
-        self.sort_box.currentIndexChanged.connect(self.set_sorting)
-        self.sort_box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.sort_box.setMinimumContentsLength(8)  # long translations mustn't push the filter out of view
-        self.filter_btn = QtWidgets.QToolButton()
-        self.filter_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self.filter_menu = QtWidgets.QMenu(self.filter_btn)
-        self.filter_menu.aboutToShow.connect(self.fill_filter_menu)
-        self.filter_btn.setMenu(self.filter_menu)
-        self.filter_btn.setStyleSheet("QToolButton::menu-indicator { image: none; }")  # it covered the text
-        row.addWidget(self.sort_box, 1)
-        row.addWidget(self.filter_btn)
+        self.view_btn = QtWidgets.QToolButton()
+        self.view_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.view_btn.setStyleSheet("QToolButton::menu-indicator { image: none; }")
+        self.view_menu = QtWidgets.QMenu(self.view_btn)
+        self.view_menu.aboutToShow.connect(self.fill_view_menu)
+        self.view_btn.setMenu(self.view_menu)
+        row.addWidget(self.find, 1)
+        row.addWidget(self.view_btn)
         lay.addLayout(row)
         self.list = QtWidgets.QListWidget()
         self.list.setItemDelegate(ProjectRows(self.list))
-        self.list.setMinimumWidth(240)
+        self.list.setMinimumWidth(220)
         self.list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.list.itemSelectionChanged.connect(self.show_detail)
+        self.list.itemDoubleClicked.connect(lambda _it: self.open_folder())
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self.list_menu)
         lay.addWidget(self.list, 1)
@@ -1443,21 +1711,32 @@ class Window(QtWidgets.QMainWindow):
 
     @property
     def sorting(self) -> str:
-        return self.sort_box.currentData()
+        return self.sort_key
 
-    def set_sorting(self, _i: int) -> None:
-        set_app_pref("folder_sort", self.sorting)
+    def set_sorting(self, key: str) -> None:
+        self.sort_key = key
+        set_app_pref("folder_sort", key)
+        self.sort_menu.clear()
+        self.fill_sort_menu(self.sort_menu)
         self.scan_dates()
         self.refresh()
 
     def show_filter(self) -> None:
         names = [t.name for t in tags.all_tags() if t.id in self.tag_filter]
-        self.filter_btn.setText((_("Filter by tag ({n})", n=len(names)) if names else _("Filter by tag")) + " ▾")
-        self.filter_btn.setToolTip(", ".join(names))
+        self.view_btn.setText(f"⇅ {len(names)}" if names else "⇅")
+        self.view_btn.setToolTip(_("Sort and filter") + (": " + ", ".join(names) if names else ""))
 
-    def fill_filter_menu(self) -> None:
-        m = self.filter_menu
+    def fill_view_menu(self) -> None:
+        m = self.view_menu
         m.clear()
+        m.addSection(_("Sort by"))
+        self.fill_sort_menu(m)
+        m.addSection(_("Filter by tag"))
+        self.fill_filter_menu(m, clear=False)
+
+    def fill_filter_menu(self, m: QtWidgets.QMenu, clear: bool = True) -> None:
+        if clear:
+            m.clear()
         every = tags.all_tags()
         for tag in every:
             act = m.addAction(dot(tag_hex(tag.colour)), tag.name.replace("&", "&&"))
@@ -1552,12 +1831,17 @@ class Window(QtWidgets.QMainWindow):
         if not it.isSelected():
             self.list.setCurrentItem(it)
         m = QtWidgets.QMenu(self)
-        m.addAction(_("Tags…"), self.edit_tags)
-        if len(self.selected()) == 1:
-            m.addAction(_("Make a copy…"), self.copy_project)
-            m.addAction(_("Connect an AI tool via MCP…"), self.connect_tool)
+        one = len(self.selected()) == 1
+        if one:
+            for act in (self.a_open, self.a_web, self.a_share):
+                m.addAction(act)
+            m.addSeparator()
+        m.addAction(self.a_tags)
+        if one:
+            for act in (self.a_copy, self.a_count, self.a_mcp):
+                m.addAction(act)
         m.addSeparator()
-        m.addAction(_("Leave…"), self.leave)
+        m.addAction(self.a_leave)
         m.exec(self.list.viewport().mapToGlobal(pos))
 
     def edit_tags(self) -> None:
@@ -1632,59 +1916,54 @@ class Window(QtWidgets.QMainWindow):
                 self.list.setCurrentRow(i)
 
     # -- detail pane
+    @staticmethod
+    def section(text: str) -> QtWidgets.QLabel:
+        label = QtWidgets.QLabel(text)
+        f = label.font()
+        f.setBold(True)
+        label.setFont(f)
+        return label
+
     def build_detail(self) -> QtWidgets.QWidget:
         w = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(w)
+        lay.setContentsMargins(16, 8, 12, 8)
         self.title = QtWidgets.QLabel()
         f = self.title.font()
-        f.setPointSize(f.pointSize() + 4)
+        f.setPointSize(f.pointSize() + 6)
         f.setBold(True)
         self.title.setFont(f)
         self.path_lbl = QtWidgets.QLabel()
-        self.path_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.path_lbl.linkActivated.connect(lambda _href: self.open_folder())
         self.status_lbl = QtWidgets.QLabel()
         self.status_lbl.setWordWrap(True)
         for x in (self.title, self.path_lbl, self.status_lbl):
             lay.addWidget(x)
+        lay.addSpacing(4)
         btns = QtWidgets.QHBoxLayout()
-        self.b_open = QtWidgets.QPushButton(_("Open folder"))
-        self.b_open.clicked.connect(lambda: self.current() and open_path(self.current()))
-        self.b_web = QtWidgets.QPushButton(_("Open in browser"))
-        self.b_web.clicked.connect(self.open_web)
-        self.b_ro = QtWidgets.QPushButton(_("Links…"))
-        self.b_ro.clicked.connect(lambda: self.current() and LinksDialog(
-            self.current(), self, self.engine, project_name(self.current(), self.engine)).exec())
-        self.b_leave = QtWidgets.QPushButton(_("Leave…"))
-        self.b_leave.clicked.connect(self.leave)
-        self.b_tags = QtWidgets.QPushButton(_("Tags…"))
-        self.b_tags.clicked.connect(self.edit_tags)
-        self.b_copy = QtWidgets.QPushButton(_("Make a copy…"))
-        self.b_copy.clicked.connect(self.copy_project)
-        self.b_count = QtWidgets.QPushButton(_("Word count…"))
-        self.b_count.setToolTip(_("Count the words with TeXCount, from your own TeX installation"))
-        self.b_count.clicked.connect(self.word_count)
-        for b in (self.b_open, self.b_web, self.b_ro, self.b_tags, self.b_copy, self.b_count):
+        self.buttons = []
+        for act in (self.a_open, self.a_web, self.a_share):
+            b = QtWidgets.QPushButton(act.icon(), act.text())
+            b.clicked.connect(act.trigger)
             btns.addWidget(b)
+            self.buttons.append(b)
+        more = QtWidgets.QPushButton(_("More"))
+        more.setMenu(self.more_menu)
+        btns.addWidget(more)
         btns.addStretch(1)
-        btns.addWidget(self.b_leave)
         lay.addLayout(btns)
+        lay.addSpacing(10)
+
+        self.options = QtWidgets.QWidget()  # one folder's settings: hidden while several are selected
+        o = QtWidgets.QVBoxLayout(self.options)
+        o.setContentsMargins(0, 0, 0, 0)
+        o.addWidget(self.section(_("Compiling")))
         self.c_compile = QtWidgets.QCheckBox(_("Compile with my own TeX (latexmk) when files change"))
         self.c_compile.clicked.connect(lambda on: self.set_option("compile", on))
-        self.c_git = QtWidgets.QCheckBox(_("Keep this folder’s git repository in step (commit, pull, push)"))
-        self.c_git.clicked.connect(lambda on: self.set_option("git", on))
-        self.settings = QtWidgets.QWidget()  # one folder's settings: off while several are selected
-        slay = QtWidgets.QVBoxLayout(self.settings)
-        slay.setContentsMargins(0, 0, 0, 0)
-        crow = QtWidgets.QHBoxLayout()
-        crow.addWidget(self.c_compile)
-        crow.addStretch(1)
-        self.b_scratch = QtWidgets.QPushButton(_("Compile from scratch"))
-        self.b_scratch.setToolTip(_("Delete LaTeX’s working files (.aux, .bbl, …) in .texloom/build and compile again"))
-        self.b_scratch.clicked.connect(self.compile_from_scratch)
-        self.b_scratch.setEnabled(False)  # until a folder that compiles is selected
-        crow.addWidget(self.b_scratch)
-        slay.addLayout(crow)
-        slay.addWidget(self.c_git)
+        o.addWidget(self.c_compile)
+        self.compile_more = QtWidgets.QWidget()  # only while compiling is on
+        c = QtWidgets.QVBoxLayout(self.compile_more)
+        c.setContentsMargins(24, 0, 0, 0)
         prow = QtWidgets.QHBoxLayout()
         prow.addWidget(QtWidgets.QLabel(_("Running programs when compiling:")))
         self.p_mode = QtWidgets.QComboBox()
@@ -1696,17 +1975,43 @@ class Window(QtWidgets.QMainWindow):
         self.p_review.clicked.connect(lambda: self.current() and ProgramsDialog(self.engine, self.current(), self).exec())
         prow.addWidget(self.p_mode, 1)
         prow.addWidget(self.p_review)
-        slay.addLayout(prow)
-        lay.addWidget(self.settings)
-        lay.addWidget(QtWidgets.QLabel(_("Activity")))
+        c.addLayout(prow)
+        srow = QtWidgets.QHBoxLayout()
+        scratch = QtWidgets.QPushButton(self.a_scratch.text())
+        scratch.setToolTip(self.a_scratch.toolTip())
+        scratch.clicked.connect(self.a_scratch.trigger)
+        srow.addWidget(scratch)
+        srow.addStretch(1)
+        c.addLayout(srow)
+        o.addWidget(self.compile_more)
+        o.addSpacing(8)
+        o.addWidget(self.section(_("Git")))
+        self.c_git = QtWidgets.QCheckBox(_("Keep this folder’s git repository in step (commit, pull, push)"))
+        self.c_git.clicked.connect(lambda on: self.set_option("git", on))
+        o.addWidget(self.c_git)
+        self.git_note = grey_note(_("This folder isn’t a git repository. Run “git init” in it first to use this."))
+        o.addWidget(self.git_note)
+        lay.addWidget(self.options)
+        lay.addSpacing(10)
+
+        self.act_btn = QtWidgets.QToolButton()
+        self.act_btn.setStyleSheet("QToolButton { border: none; font-weight: bold; padding: 0; }")
+        self.act_btn.clicked.connect(self.a_activity.toggle)
+        lay.addWidget(self.act_btn)
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(300)
-        mono = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
-        self.log.setFont(mono)
-        lay.addWidget(self.log, 1)
+        self.log.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
+        lay.addWidget(self.log, 10)
+        lay.addStretch(1)
         self.detail = w
+        self.show_activity(self.a_activity.isChecked())
         return w
+
+    def show_activity(self, on: bool) -> None:
+        set_app_pref("show_activity", on)
+        self.act_btn.setText(("▾ " if on else "▸ ") + _("Activity"))
+        self.log.setVisible(on)
 
     def folders(self) -> list[Path]:
         return registry.folders()
@@ -1749,22 +2054,30 @@ class Window(QtWidgets.QMainWindow):
             it.setData(TAGS_ROLE, tuple(own))
             it.setIcon(dot(colour))
             it.setToolTip(str(d))
+        self.pages.setCurrentIndex(1 if every else 0)
         self.detail.setVisible(bool(fs))
-        self.statusBar().showMessage(
-            _("Paused") if self.engine.daemon.paused else
-            ngettext(len(every), "{n} folder", "{n} folders", n=len(every))
-            + (" · " + ngettext(len(fs), "{n} shown", "{n} shown", n=len(fs)) if len(fs) != len(every) else "")
-            + (" · " + ngettext(problems, "{n} not syncing", "{n} not syncing", n=problems) if problems else "") if every else
-            _("No folders yet: Join project… or Share a folder…"))
-        self.pause_act.setText(_("Resume syncing") if self.engine.daemon.paused else _("Pause syncing"))
+        self.statusBar().setVisible(bool(every))
+        if every:
+            self.statusBar().showMessage(
+                _("Paused") if self.engine.daemon.paused else
+                ngettext(len(every), "{n} folder", "{n} folders", n=len(every))
+                + (" · " + ngettext(len(fs), "{n} shown", "{n} shown", n=len(fs)) if len(fs) != len(every) else "")
+                + (" · " + ngettext(problems, "{n} not syncing", "{n} not syncing", n=problems) if problems else ""))
+        paused = self.engine.daemon.paused
+        self.a_pause.setText(_("Resume syncing") if paused else _("Pause syncing"))
+        self.a_pause.setIcon(theme_icon("MediaPlaybackStart" if paused else "MediaPlaybackPause"))
         self.show_detail()
 
     def show_detail(self) -> None:
         picked = self.selected()
-        several = len(picked) > 1
-        self.settings.setEnabled(not several)
-        for b in (self.b_open, self.b_web, self.b_ro, self.b_copy, self.b_count):
-            b.setEnabled(not several)
+        one, several = len(picked) == 1, len(picked) > 1
+        for act in (self.a_open, self.a_web, self.a_share, self.a_copy, self.a_count, self.a_scratch, self.a_mcp):
+            act.setEnabled(one)
+        for act in (self.a_tags, self.a_leave):
+            act.setEnabled(bool(picked))
+        for b in self.buttons:
+            b.setEnabled(one)
+        self.options.setVisible(not several)
         if several:
             self.title.setText(ngettext(len(picked), "{n} folder selected", "{n} folders selected", n=len(picked)))
             self.path_lbl.setText("")
@@ -1776,22 +2089,24 @@ class Window(QtWidgets.QMainWindow):
             return
         short, colour, longer = describe(d, self.engine)
         self.title.setText(project_name(d, self.engine))
-        self.path_lbl.setText(str(d))
-        self.status_lbl.setText(f"<span style='color:{colour}'>●</span> <b>{short}</b>" + (f" — {longer}" if longer else ""))
+        self.path_lbl.setText(f"<a href='open' style='color:{GREY}; text-decoration:none'>{html.escape(short_path(d))}</a>")
+        self.path_lbl.setToolTip(_("Open folder") + f": {d}")
+        self.status_lbl.setText(f"<span style='color:{colour}'>●</span> <b>{html.escape(short)}</b>" + (f" — {html.escape(longer)}" if longer else ""))
         try:
             cfg = {**DEFAULT_CONFIG, **load_config(d)}
         except (OSError, ValueError):
             cfg = DEFAULT_CONFIG
-        self.c_compile.setChecked(bool(cfg.get("compile")))
-        self.b_scratch.setEnabled(bool(cfg.get("compile")))
+        compiles = bool(cfg.get("compile"))
+        self.c_compile.setChecked(compiles)
+        self.compile_more.setVisible(compiles)
+        self.a_scratch.setEnabled(compiles)
         mode = cfg.get("shell_escape")
         self.p_mode.setCurrentIndex(2 if mode is True else 1 if mode == "restricted" else 0)
-        self.p_mode.setEnabled(bool(cfg.get("compile")))
-        self.p_review.setEnabled(bool(cfg.get("compile")) and mode is True)
+        self.p_review.setEnabled(mode is True)
         is_git = (d / ".git").exists()
         self.c_git.setEnabled(is_git)
         self.c_git.setChecked(bool(cfg.get("git")) and is_git)
-        self.c_git.setToolTip("" if is_git else _("This folder isn't a git repository (run `git init` in it first)."))
+        self.git_note.setVisible(not is_git)
         text = "\n".join(self.activity.lines.get(str(d), []))
         if text != self.log.toPlainText():
             self.log.setPlainText(text)
@@ -1837,8 +2152,7 @@ class Window(QtWidgets.QMainWindow):
         d = Path(d)
         if not (d / ".texloom" / "config.json").is_file():
             QtWidgets.QMessageBox.warning(self, _("Add folder"), _(
-                "{d} isn’t a TeXLoom folder. To join a project, use "
-                "Join project…; to share this folder as a new project, Share a folder….", d=d))
+                "{d} isn’t a TeXLoom folder yet. To turn it into a project, use Add project ▸ New project from a folder….", d=d))
             return
         if not registry.add(d):
             self.statusBar().showMessage(_("That folder is already on the list."), 4000)
@@ -1848,8 +2162,15 @@ class Window(QtWidgets.QMainWindow):
     def share_folder(self) -> None:
         if ShareFolderDialog(self.engine, self).exec():
             self.refresh()
-            QtWidgets.QMessageBox.information(self, _("Shared"), _("The folder is now a TeXLoom project. Open it in the "
-                                                                "browser and use Share there to invite people."))
+            self.statusBar().showMessage(_("The folder is now a TeXLoom project. To invite people, use Share…."), 10000)
+
+    def open_folder(self) -> None:
+        if d := self.current():
+            open_path(d)
+
+    def share_links(self) -> None:
+        if d := self.current():
+            LinksDialog(d, self, self.engine, project_name(d, self.engine)).exec()
 
     def leave(self) -> None:
         fs = self.selected()
@@ -1910,17 +2231,6 @@ class Window(QtWidgets.QMainWindow):
         self.engine.call(dm.poke)
         self.refresh()
 
-    def set_language(self, _i: int) -> None:
-        set_lang_pref(self.lang_box.currentData())
-        QtWidgets.QMessageBox.information(self, _("Language"), _("The new language is used the next time TeXLoom starts. Quit TeXLoom (from its menu) and open it again."))
-
-    def set_autostart(self, on: bool) -> None:
-        try:
-            msg = autostart.enable(app=True) if on else autostart.disable()
-            self.statusBar().showMessage(msg, 6000)
-        except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(self, _("Start at login"), _("Couldn’t change it: {e}", e=e))
-
     def show_window(self) -> None:
         self.show()
         self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
@@ -1933,11 +2243,42 @@ class Window(QtWidgets.QMainWindow):
             self.keep_list_updated(force=True)
 
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
-        if QtWidgets.QSystemTrayIcon.isSystemTrayAvailable():
-            e.ignore()  # keep syncing from the tray
+        if getattr(QtWidgets.QApplication.instance(), "quitting", False):
+            e.accept()
+            return
+        if self.tray is not None or MAC:  # keep syncing from the tray / menu bar; on a Mac the Dock icon reopens it
+            e.ignore()
             self.hide()
-        else:
+            if self.tray is not None and not MAC and not app_pref("told_tray", False):  # on Windows and Linux, people expect closing to quit
+                set_app_pref("told_tray", True)
+                self.tray.showMessage("TeXLoom", _("TeXLoom keeps syncing in the background. To quit, use its icon in the notification area."),
+                                      QtGui.QIcon(str(ICON)), 10000)
+            return
+        # No notification area (e.g. GNOME without an extension): closing would stop syncing.
+        choice = app_pref("on_close", "")
+        if not choice:
+            box = QtWidgets.QMessageBox(self)
+            box.setIcon(QtWidgets.QMessageBox.Question)
+            box.setText(_("Keep syncing?"))
+            box.setInformativeText(_("This desktop has no notification area for TeXLoom to wait in, so closing the window "
+                                     "stops syncing. Minimise it instead to keep your folders in step."))
+            keep = box.addButton(_("Minimise"), QtWidgets.QMessageBox.AcceptRole)
+            leave = box.addButton(_("Quit"), QtWidgets.QMessageBox.DestructiveRole)
+            box.addButton(QtWidgets.QMessageBox.Cancel)
+            box.setDefaultButton(keep)
+            again = QtWidgets.QCheckBox(_("Don’t ask again"))
+            box.setCheckBox(again)
+            box.exec()
+            choice = "minimise" if box.clickedButton() is keep else "quit" if box.clickedButton() is leave else ""
+            if choice and again.isChecked():
+                set_app_pref("on_close", choice)
+        if choice == "quit":
+            e.accept()
             QtWidgets.QApplication.quit()
+        else:
+            e.ignore()
+            if choice == "minimise":
+                self.showMinimized()
 
 
 # ---- links from the browser, and only one copy running --------------------------------------
@@ -1975,11 +2316,14 @@ class App(QtWidgets.QApplication):
     def __init__(self, argv: list[str]) -> None:
         super().__init__(argv)
         self.on_url = lambda url: None
+        self.quitting = False
 
-    def event(self, e: QtCore.QEvent) -> bool:  # macOS delivers texloom:// URLs here
-        if e.type() == QtCore.QEvent.FileOpen and e.url().scheme() == SCHEME:
+    def event(self, e: QtCore.QEvent) -> bool:
+        if e.type() == QtCore.QEvent.FileOpen and e.url().scheme() == SCHEME:  # macOS delivers texloom:// URLs here
             self.on_url(e.url().toString())
             return True
+        if e.type() == QtCore.QEvent.Quit:  # Quit (menu, tray, ⌘Q, Dock, logging out) first asks windows to close: let them
+            self.quitting = True
         return super().event(e)
 
 
@@ -2047,7 +2391,8 @@ def main(argv: list[str] | None = None) -> None:
         tray = QtWidgets.QSystemTrayIcon(QtGui.QIcon(str(ICON)))
         menu = QtWidgets.QMenu()
         menu.addAction(_("Open TeXLoom"), win.show_window)
-        menu.addAction(_("Join project…"), lambda: win.join())
+        menu.addAction(_("New project from a folder…"), lambda: (win.show_window(), win.share_folder()))
+        menu.addAction(_("Join a project with a link…"), lambda: win.join())
         menu.addSeparator()
         pause = menu.addAction(_("Pause syncing"), win.toggle_pause)
         menu.aboutToShow.connect(lambda: pause.setText(_("Resume syncing") if engine.daemon.paused else _("Pause syncing")))
@@ -2056,6 +2401,12 @@ def main(argv: list[str] | None = None) -> None:
         tray.setToolTip("TeXLoom")
         tray.activated.connect(lambda reason: win.show_window() if reason == QtWidgets.QSystemTrayIcon.Trigger else None)
         tray.show()
+        win.tray = tray
+
+    if MAC:  # clicking the Dock icon brings the window back, as in other Mac apps
+        started = time.time()
+        app.applicationStateChanged.connect(lambda state: state == Qt.ApplicationActive and not win.isVisible()
+                                            and time.time() - started > 3 and win.show_window())
 
     register_url_scheme()
     engine.start()
