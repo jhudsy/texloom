@@ -281,4 +281,8 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Keeps folders on this computer in step with TeXLoom projects.': '让这台电脑上的文件夹与 TeXLoom 项目保持同步。',
     'Open your project list…': '打开你的项目列表…',
     'This computer uses a different list now: this one would take its place.': '这台电脑目前使用的是另一个列表：此列表将取而代之。',
+    'TeXLoom is free software (AGPL-3.0).': 'TeXLoom 是自由软件（AGPL-3.0）。',
+    'Source code': '源代码',
+    'Licences…': '许可证…',
+    'Licences': '许可证',
 }

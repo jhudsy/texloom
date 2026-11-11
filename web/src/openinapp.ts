@@ -5,6 +5,14 @@ import { t } from './i18n'
 import { creationCode } from './replica'
 
 export const DOWNLOAD_APP = 'https://github.com/jhudsy/texloom/releases/latest'
+export const SOURCE = 'https://github.com/jhudsy/texloom'
+
+/** "Free software (AGPL-3.0): source code · licences": TeXLoom's licence asks that people using
+ *  it over a network can get its source, including the changes made to the TeX engine. */
+export const sourceNote = () => h('p', { class: 'muted small source-note' },
+  t('TeXLoom is free software (AGPL-3.0).'), ' ',
+  h('a', { href: SOURCE, target: '_blank', rel: 'noopener' }, t('Source code')), ' · ',
+  h('a', { href: '/licenses.txt', target: '_blank', rel: 'noopener' }, t('Licences')))
 
 export function openInApp(link: string) {
   const send = () => { location.href = `texloom://join?link=${encodeURIComponent(link)}` }

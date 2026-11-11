@@ -1,5 +1,5 @@
 // Per-device settings, the first-open setup dialog and the settings dialog.
-import { DOWNLOAD_APP, openInApp } from './openinapp'
+import { DOWNLOAD_APP, openInApp, sourceNote } from './openinapp'
 import type { Replica, StorageMode, SyncMode } from './replica'
 import { engineCached, clearEngineCache } from './compile'
 import { h, dialog } from './dom'
@@ -212,6 +212,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       dlg.close()
       await onRemove()
     } }, t('Remove…'))),
+    sourceNote(),
     h('div', { class: 'row end' }, cacheBtn, h('button', { class: 'primary', onclick: () => dlg.close() }, t('Done'))),
   )
 }

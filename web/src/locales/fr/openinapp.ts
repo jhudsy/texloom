@@ -16,6 +16,9 @@ const fr: Catalog = {
   "The app will ask before it uses this list. Then it shows the projects on the list that aren’t on this computer yet, and your creation code is filled in when you make a project there.": "L’application vous demandera avant d’utiliser cette liste. Elle affichera ensuite les projets de la liste qui ne sont pas encore sur cet ordinateur, et votre code de création sera prérempli quand vous y créerez un projet.",
   "The app will ask which folder to use, then upload its files, encrypted, and keep the folder in sync with the project. Once it’s made, the app opens it in your browser, which also puts it under Your projects.": "L’application vous demandera quel dossier utiliser, puis enverra ses fichiers, chiffrés, et gardera le dossier synchronisé avec le projet. Une fois le projet créé, l’application l’ouvre dans votre navigateur, ce qui l’ajoute aussi à Vos projets.",
   "In the app, this is Add project ▸ New project from a folder….": "Dans l’application, c’est Ajouter un projet ▸ Nouveau projet à partir d’un dossier….",
+  "TeXLoom is free software (AGPL-3.0).": "TeXLoom est un logiciel libre (AGPL-3.0).",
+  "Source code": "Code source",
+  "Licences": "Licences",
 }
 
 export default fr

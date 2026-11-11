@@ -48,6 +48,7 @@ SCHEME = "texloom"
 MAC = sys.platform == "darwin"
 DEFAULT_SERVER = "https://app.texloom.org"
 HELP_URL = "https://github.com/jhudsy/texloom#readme"
+SOURCE_URL = "https://github.com/jhudsy/texloom"
 
 
 def theme_icon(name: str) -> QtGui.QIcon:
@@ -1648,9 +1649,40 @@ class Window(QtWidgets.QMainWindow):
             act.triggered.connect(lambda _c=False, k=key: self.set_sorting(k))
 
     def about(self) -> None:
-        QtWidgets.QMessageBox.about(self, _("About TeXLoom"), f"<b>TeXLoom {__version__}</b><br><br>"
-                                    + html.escape(_("Keeps folders on this computer in step with TeXLoom projects."))
-                                    + f"<br><br><a href='{HELP_URL}'>{html.escape(_('TeXLoom help'))}</a>")
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle(_("About TeXLoom"))
+        box.setIconPixmap(QtGui.QIcon(str(ICON)).pixmap(64, 64))
+        box.setTextFormat(Qt.RichText)
+        box.setText(f"<b>TeXLoom {__version__}</b>")
+        box.setInformativeText(
+            html.escape(_("Keeps folders on this computer in step with TeXLoom projects.")) + "<br><br>"
+            + html.escape(_("TeXLoom is free software (AGPL-3.0).")) + "<br>"
+            + f"<a href='{SOURCE_URL}'>{html.escape(_('Source code'))}</a> · <a href='{HELP_URL}'>{html.escape(_('TeXLoom help'))}</a>")
+        licences = box.addButton(_("Licences…"), QtWidgets.QMessageBox.ActionRole)
+        box.setDefaultButton(box.addButton(QtWidgets.QMessageBox.Close))
+        for label in box.findChildren(QtWidgets.QLabel):
+            label.setOpenExternalLinks(True)
+        box.exec()
+        if box.clickedButton() is licences:
+            self.show_licences()
+
+    def show_licences(self) -> None:
+        """The licences of TeXLoom and everything it bundles (assets/third-party.txt, made by scripts/licences.py)."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(_("Licences"))
+        dlg.resize(680, 560)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        text = QtWidgets.QPlainTextEdit(readOnly=True)
+        text.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
+        try:
+            text.setPlainText(ICON.with_name("third-party.txt").read_text(encoding="utf-8"))
+        except OSError:
+            text.setPlainText(_("TeXLoom is free software (AGPL-3.0).") + f"\n{SOURCE_URL}")
+        lay.addWidget(text, 1)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        dlg.exec()
 
     def settings_window(self) -> None:
         if MAC:  # a window of its own, like other Mac apps' settings

@@ -15,6 +15,9 @@ const zh: Catalog = {
   "The app will ask before it uses this list. Then it shows the projects on the list that aren’t on this computer yet, and your creation code is filled in when you make a project there.": "应用在使用此列表前会先询问你。之后它会显示列表中尚未在这台电脑上的项目，并且你在其中新建项目时会自动填入创建码。",
   "The app will ask which folder to use, then upload its files, encrypted, and keep the folder in sync with the project. Once it’s made, the app opens it in your browser, which also puts it under Your projects.": "应用会询问要使用哪个文件夹，然后加密上传其中的文件，并让该文件夹与项目保持同步。创建完成后，应用会在你的浏览器中打开它，它也会因此出现在“你的项目”中。",
   "In the app, this is Add project ▸ New project from a folder….": "在应用中，对应的是“添加项目 ▸ 从文件夹新建项目…”。",
+  "TeXLoom is free software (AGPL-3.0).": "TeXLoom 是自由软件（AGPL-3.0）。",
+  "Source code": "源代码",
+  "Licences": "许可证",
 }
 
 export default zh

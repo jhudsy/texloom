@@ -15,6 +15,9 @@ const pt: Catalog = {
   "The app will ask before it uses this list. Then it shows the projects on the list that aren’t on this computer yet, and your creation code is filled in when you make a project there.": "O aplicativo vai perguntar antes de usar esta lista. Depois, mostra os projetos da lista que ainda não estão neste computador, e seu código de criação já vem preenchido quando você cria um projeto nele.",
   "The app will ask which folder to use, then upload its files, encrypted, and keep the folder in sync with the project. Once it’s made, the app opens it in your browser, which also puts it under Your projects.": "O aplicativo vai perguntar qual pasta usar, enviar os arquivos dela, criptografados, e manter a pasta sincronizada com o projeto. Depois de criado, o aplicativo abre o projeto no seu navegador, o que também o coloca em Seus projetos.",
   "In the app, this is Add project ▸ New project from a folder….": "No aplicativo, é Adicionar projeto ▸ Novo projeto a partir de uma pasta….",
+  "TeXLoom is free software (AGPL-3.0).": "O TeXLoom é software livre (AGPL-3.0).",
+  "Source code": "Código-fonte",
+  "Licences": "Licenças",
 }
 
 export default pt

@@ -25,7 +25,7 @@ import { createSymbolPalette } from './symbolpalette'
 import { openPdfWindow, pdfWindowProject } from './pdfwindow'
 import { tags, type Tag } from './tags'
 import { manageTags, pickTags } from './tagdialogs'
-import { newProjectInApp, openInApp } from './openinapp'
+import { newProjectInApp, openInApp, sourceNote } from './openinapp'
 import { createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
@@ -143,6 +143,7 @@ function landing() {
     syncNote,
     finderRow,
     list,
+    sourceNote(),
   )
   refreshProjects = () => {
     finderRow.hidden = !projects.list().length

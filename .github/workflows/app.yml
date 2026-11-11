@@ -31,6 +31,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0
       - run: uv sync --extra app
+      - run: uv run python scripts/licences.py  # the licences of exactly what's bundled, for the About box
       - name: Check that the app starts
         shell: bash
         env:

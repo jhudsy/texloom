@@ -799,6 +799,11 @@ Early prototype. Not yet built:
 ## License
 
 AGPL-3.0-or-later. In-browser TeX uses [texlyre-busytex](https://github.com/TeXlyre/texlyre-busytex) (AGPL-3.0); the equation preview uses [KaTeX](https://katex.org) (MIT).
+Everything the web app bundles, with its licence, is listed at `/licenses.txt` on every server
+(made by the build; linked at the foot of the start page and in Settings), and the desktop app's
+under **Help ▸ About TeXLoom ▸ Licences…** (`texloom/assets/third-party.txt`, made by
+`scripts/licences.py` when the app is built). The TeX engine is patched at deploy time
+(`deploy/patch-busytex.py`); those changes are part of this repository, as the AGPL asks.
 
 `web/public/vendor/texcount.pl` is TeXcount 3.1.1 by Einar Andreas Rodland, included unmodified under the
 LaTeX Project Public License.

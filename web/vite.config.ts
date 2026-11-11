@@ -50,9 +50,67 @@ function pdfjsCmaps(): Plugin {
   }
 }
 
+/** Write /licenses.txt: TeXLoom's own licence and where its source is, then every package bundled
+ *  into the app (the dependencies in package.json and theirs) with its licence text, then what
+ *  isn't an npm package: TeX Live, TeXCount and the TeX engine's patches. */
+function licences(): Plugin {
+  const root = new URL('./', import.meta.url)
+  const read = (path: string) => { try { return readFileSync(new URL(path, root), 'utf8') } catch { return null } }
+  return {
+    name: 'texloom-licences',
+    apply: 'build',
+    generateBundle() {
+      const seen = new Map<string, { version: string; license: string; home: string; text: string }>()
+      const visit = (name: string) => {
+        if (seen.has(name)) return
+        const meta = read(`node_modules/${name}/package.json`)
+        if (!meta) return
+        const pkg = JSON.parse(meta)
+        const dir = `node_modules/${name}/`
+        let files: string[] = []
+        try { files = readdirSync(new URL(dir, root)).filter((f) => /^(licen[cs]e|copying|notice)/i.test(f)) } catch {}
+        const repo = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
+        seen.set(name, {
+          version: pkg.version, license: typeof pkg.license === 'string' ? pkg.license : pkg.license?.type ?? 'see its files',
+          home: pkg.homepage ?? (repo ? String(repo).replace(/^git\+/, '').replace(/\.git$/, '') : `https://www.npmjs.com/package/${name}`),
+          text: files.map((f) => read(dir + f) ?? '').join('\n\n').trim(),
+        })
+        for (const dep of Object.keys(pkg.dependencies ?? {})) visit(dep)
+      }
+      for (const dep of Object.keys(JSON.parse(read('package.json')!).dependencies)) visit(dep)
+      const line = '='.repeat(78)
+      const parts = [
+        'TeXLoom web app: licences',
+        '',
+        'TeXLoom is free software under the GNU Affero General Public License, version 3 or later',
+        '(AGPL-3.0-or-later). Its complete source, including the changes made to the TeX engine below,',
+        'is at https://github.com/jhudsy/texloom.',
+        '',
+        'It includes the software listed below, each under its own licence.',
+        '',
+        line,
+        'TeX Live engines and packages, through BusyTeX (https://github.com/busytex/busytex) and texlyre-busytex',
+        'Each TeX Live component is free software under its own licence (GPL, LPPL, the Knuth licence',
+        'and others): https://tug.org/texlive/copying.html. Packages are fetched unchanged from CTAN',
+        'mirrors, where their sources are. The engine is patched at deploy time so that Biber finds',
+        'bibliographies in folders and keeps accented names: deploy/patch-busytex.py in the source above.',
+        '',
+        line,
+        'TeXCount (web/public/vendor/texcount.pl), unchanged',
+        'Copyright Einar Andreas Rødland. LaTeX Project Public License (LPPL): https://www.latex-project.org/lppl/',
+        'http://app.uio.no/ifi/texcount/',
+        '',
+        ...[...seen].sort(([a], [b]) => a.localeCompare(b)).flatMap(([name, p]) => [
+          line, `${name} ${p.version}`, `Licence: ${p.license}`, p.home, '', p.text || '(no licence file in the package)', ''])
+      ]
+      this.emitFile({ type: 'asset', fileName: 'licenses.txt', source: parts.join('\n') })
+    },
+  }
+}
+
 // In development, the Python relay runs on :8787 and Vite proxies to it.
 export default defineConfig({
-  plugins: [pdfjsCmaps(), serviceWorker()],
+  plugins: [pdfjsCmaps(), serviceWorker(), licences()],
   server: {
     port: 5173,
     proxy: {
