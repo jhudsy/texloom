@@ -42,7 +42,27 @@ def doc() -> dict:
     return {**empty_tags(), **data} if isinstance(data, dict) else empty_tags()
 
 
+# the last read of the file, for reading it many times a second: (path, date, size, inode), data
+_cache: tuple[tuple, dict] | None = None
+
+
+def _shared() -> dict:
+    """The stored tags, read again only when the file changes. Shared: not to be changed."""
+    global _cache
+    f = _file()
+    try:
+        st = f.stat()
+    except OSError:
+        return empty_tags()
+    key = (f, st.st_mtime_ns, st.st_size, st.st_ino)  # each write replaces the file: a new inode
+    if _cache is None or _cache[0] != key:
+        _cache = (key, doc())
+    return _cache[1]
+
+
 def _write(data: dict) -> None:
+    global _cache
+    _cache = None
     f = _file()
     f.parent.mkdir(parents=True, exist_ok=True)
     tmp = f.with_suffix(".tmp")
@@ -75,7 +95,7 @@ def _live(data: dict) -> list[Tag]:
 
 
 def all_tags() -> list[Tag]:
-    return _live(doc())
+    return _live(_shared())
 
 
 def find(name: str) -> Tag | None:
@@ -86,7 +106,7 @@ def find(name: str) -> Tag | None:
 
 def reader() -> Callable[[str], list[Tag]]:
     """For looking up many projects: reads the stored tags once."""
-    data = doc()
+    data = _shared()
     every = _live(data)
 
     def of(project: str) -> list[Tag]:
@@ -98,7 +118,7 @@ def reader() -> Callable[[str], list[Tag]]:
 
 def uses(tid: str) -> int:
     """How many projects have this tag."""
-    return sum(1 for marks in doc()["on"].values() if marks.get(tid, 0) > 0)
+    return sum(1 for marks in _shared()["on"].values() if marks.get(tid, 0) > 0)
 
 
 def create(name: str) -> Tag | None:

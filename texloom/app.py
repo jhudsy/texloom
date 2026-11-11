@@ -229,6 +229,7 @@ def project_name(d: Path, engine: Engine) -> str:
     return engine.names.get(d) or d.name
 
 
+@functools.cache
 def dot(colour: str) -> QtGui.QIcon:
     pm = QtGui.QPixmap(14, 14)
     pm.fill(Qt.transparent)
@@ -1580,6 +1581,7 @@ class Window(QtWidgets.QMainWindow):
         self.timer.timeout.connect(self.refresh)
         self.timer.start(1000)
         self.list_busy, self.list_at, self.list_folders, self.tags_dirty = False, 0.0, None, False
+        self.row_shown: dict[str, tuple] = {}  # folder -> what its row last showed
         self.list_timer = QtCore.QTimer(self)
         self.list_timer.timeout.connect(self.keep_list_updated)
         self.list_timer.timeout.connect(lambda: self.sorting == "changed" and self.scan_dates())
@@ -2182,6 +2184,7 @@ class Window(QtWidgets.QMainWindow):
         if [self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())] != [str(d) for d in fs]:
             self.list.blockSignals(True)
             self.list.clear()
+            self.row_shown.clear()
             for d in fs:
                 it = QtWidgets.QListWidgetItem()
                 it.setData(Qt.UserRole, str(d))
@@ -2201,9 +2204,13 @@ class Window(QtWidgets.QMainWindow):
             short, colour, _longer = describe(d, self.engine)
             it = self.list.item(i)
             name = project_name(d, self.engine)
-            own = of(self.project_of(d) or "")
+            own = tuple(of(self.project_of(d) or ""))
+            shown = (name, short, colour, own)
+            if self.row_shown.get(str(d)) == shown:
+                continue  # redrawn only where something changed
+            self.row_shown[str(d)] = shown
             it.setText(f"{name}\n{short}" + (f" · {d.name}" if d.name != name else "") + (f"\n{', '.join(t.name for t in own)}" if own else ""))
-            it.setData(TAGS_ROLE, tuple(own))
+            it.setData(TAGS_ROLE, own)
             it.setIcon(dot(colour))
             it.setToolTip(str(d))
         self.pages.setCurrentIndex(1 if every else 0)

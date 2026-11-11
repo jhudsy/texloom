@@ -593,8 +593,5 @@ symlinks) into a new folder and shares that as a new project with the same setti
   holders with no copy can't open an evicted project until a writer returns.
 - Browser storage can be evicted: request persistent storage; the server copy and
   daemon copies are the backup.
-- The desktop app refreshes its project list every second, reading each project's tags
-  again and rebuilding every row. Fine for tens of projects; for many more, keep the tags
-  until their file changes and update only rows whose state changed.
 
 [texlyre-busytex]: https://github.com/TeXlyre/texlyre-busytex

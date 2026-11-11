@@ -27,15 +27,27 @@ def _file() -> Path:
     return config_dir() / "folders.json"
 
 
+# the last read of the list, as the app reads it every second: (path, date, size, inode), folders
+_cache: tuple[tuple, list[Path]] | None = None
+
+
 def folders() -> list[Path]:
+    global _cache
+    f = _file()
     try:
-        data = json.loads(_file().read_text())
+        st = f.stat()
+        key = (f, st.st_mtime_ns, st.st_size, st.st_ino)  # each write replaces the file: a new inode
+        if _cache is None or _cache[0] != key:
+            data = json.loads(f.read_text())
+            _cache = (key, [Path(p) for p in data.get("folders", []) if isinstance(p, str)] if isinstance(data, dict) else [])
     except (OSError, ValueError):
         return []
-    return [Path(p) for p in data.get("folders", []) if isinstance(p, str)]
+    return list(_cache[1])
 
 
 def _write(paths: list[Path]) -> None:
+    global _cache
+    _cache = None
     f = _file()
     f.parent.mkdir(parents=True, exist_ok=True)
     tmp = f.with_suffix(".tmp")
