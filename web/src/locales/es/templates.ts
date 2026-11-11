@@ -37,6 +37,8 @@ const es: Catalog = {
   "Create project": "Crear un proyecto",
   "From a folder on this computer…": "Desde una carpeta de este ordenador…",
   "A folder you already have, kept in sync with the project by the TeXLoom app.": "Una carpeta que ya tiene, sincronizada con el proyecto por la aplicación TeXLoom.",
+  "Start from a template": "Empezar con una plantilla",
+  "Or bring your own": "O traiga el suyo",
 }
 
 export default es

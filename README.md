@@ -64,12 +64,15 @@ data after about 7 days without a visit. A project stored on the server can be r
 from its link. One that isn't (marked **not on server**, with a warning in the editor)
 survives only on devices, so keep a folder copy or download a `.zip`.
 
-The start page lists the projects you've opened **in that browser**:
-- each has a short **project code** (the same one `texloom links` prints), so two
-  projects with the same name can always be told apart;
+The start page lists the projects you've opened **in that browser** (your name and the
+language are under ⚙ at the top):
 - each shows the document's `\title`, who started it and who else you've seen in it, and
-  whether you have edit or read-only access;
-- ✎ gives a project a private label that only you see;
+  is marked **read-only** if that's all your link allows;
+- each has a short **project code** (the same one `texloom links` prints), shown beside the
+  name when two projects share a name, and otherwise when you point at the name;
+- the folder icon keeps the project in a folder through the TeXLoom app (highlighted once the
+  app does); ✎ gives a project a private label that only you see;
+- tick boxes, shown when you point at a project, select several to tag or remove together;
 - ✕ (or Settings → **Remove…**) asks what to remove: **from this browser only** (the
   server's and collaborators' copies stay; the link brings it back), or, for the owner,
   **from the server too** (the server deletes its encrypted copy and stops storing the

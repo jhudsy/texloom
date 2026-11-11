@@ -37,6 +37,8 @@ const zh: Catalog = {
   "Create project": "创建项目",
   "From a folder on this computer…": "来自这台电脑上的文件夹…",
   "A folder you already have, kept in sync with the project by the TeXLoom app.": "使用你已有的文件夹，由 TeXLoom 应用与项目保持同步。",
+  "Start from a template": "从模板开始",
+  "Or bring your own": "或使用你自己的",
 }
 
 export default zh

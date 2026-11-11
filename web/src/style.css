@@ -28,7 +28,16 @@ input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-r
 .row input { flex: 1; min-width: 0; }
 
 /* landing */
-.landing { max-width: 640px; margin: 8vh auto; padding: 0 16px; }
+.landing { max-width: 940px; margin: 6vh auto; padding: 0 16px; }
+.landing .masthead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.landing .gear { font-size: 18px; width: 34px; height: 34px; padding: 0; border: 1px solid transparent; background: transparent; color: var(--muted); flex: none; }
+.landing .gear:hover, .landing .gear:focus-visible { color: var(--fg); background: var(--panel); border-color: var(--line); }
+.landing .startrow { margin-top: 20px; }
+.landing .listhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 32px; }
+.landing .listhead h2 { margin: 0; }
+.landing .syncnote { display: inline-flex; align-items: baseline; gap: 8px; }
+.landing .empty { margin-top: 8px; }
+.landing .empty .tgrid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 .landing h1 { font-size: 32px; margin: 0 0 4px; letter-spacing: -.02em; }
 .landing .sub { color: var(--muted); margin-top: 0; }
 .landing label { display: flex; flex-direction: column; gap: 4px; margin: 24px 0 16px; color: var(--muted); }
@@ -206,7 +215,7 @@ html.narrow dialog.dlg { padding: 14px 16px; max-height: 92dvh; }
   .landing { margin-top: 4vh; }
 }
 @media (pointer: coarse) {
-  .recent .to-app { display: none; } /* the app is for computers */
+  .recent .icon.to-app { display: none; } /* the app is for computers */
   button { min-height: 40px; touch-action: manipulation; }
   input, select, textarea, .editor .cm-editor { font-size: 16px; } /* smaller text makes iOS zoom in when focused */
   .peer { min-height: 0; }
@@ -303,14 +312,27 @@ details { margin-top: 12px; }
 .check.small { margin: 0; gap: 4px; }
 button.danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 50%, var(--line)); }
 button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent); }
-.recent li { padding: 10px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 3px; }
+.recent li { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; row-gap: 3px; }
+.recent li > * { grid-column: 2; }
+.recent li > .pick { grid-column: 1; grid-row: 1; align-self: start; margin-top: 3px !important; }
+.findrow { padding-left: 0; }
+.findrow .selectall { width: 16px; flex: none; margin-right: 2px !important; }
 .recent .top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .recent .pname { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent .pcode { font: 11px ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .recent li.dupe .pcode { color: var(--fg); border-color: var(--warn); }
 .recent .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; white-space: nowrap; }
 .recent .tag.ro { color: var(--warn); }
-.recent .details { font-size: 12px; overflow-wrap: anywhere; }
+.recent .details { font-size: 12px; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
+.recent .dtitle { font-size: 13px; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent .to-app.on { color: var(--accent); }
+/* Tick boxes and "+ Tag" appear where the pointer is, or once something is selected; always on touch screens */
+.recent .pick, .findrow .selectall, .recent .details .addtag { opacity: 0; transition: opacity .12s; }
+.recent li:hover .pick, .recent li:focus-within .pick, .recent li:hover .addtag, .recent li:focus-within .addtag,
+.landing.selecting .pick, .landing.selecting .selectall, .findrow:hover .selectall, .landing:has(.recent li:hover) .selectall,
+.findrow .selectall:focus-visible, .recent .addtag:focus-visible { opacity: 1; }
+@media (hover: none) { .recent .pick, .findrow .selectall, .recent .details .addtag { opacity: 1; } }
+.findrow .selectall, .recent .pick { align-self: center; margin: 0; }
 .recent .icon { border: 1px solid transparent; background: transparent; color: var(--muted); padding: 0; width: 26px; height: 26px; display: inline-grid; place-items: center; flex: none; }
 .recent .icon:hover, .recent .icon:focus-visible { color: var(--fg); background: var(--panel); border-color: var(--line); }
 .recent .forget:hover, .recent .forget:focus-visible { color: var(--err); }
@@ -327,7 +349,8 @@ dialog.dlg input.tagfind { width: 100%; box-sizing: border-box; margin-top: 8px;
 .findrow[hidden] { display: none; }
 .landing .finder { flex: 1; min-width: 0; box-sizing: border-box; }
 .sorter { flex: 0 1 auto; max-width: 45%; }
-.selectbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; min-height: 26px; }
+.selectbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 2px 0 6px; min-height: 26px; }
+.selectbar[hidden] { display: none; }
 .landing .selectbar label { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; }
 .selectbar .bulk { display: flex; flex-wrap: wrap; gap: 6px; }
 .selectbar .bulk[hidden] { display: none; }
@@ -484,6 +507,9 @@ aside .tab.symtab { flex-shrink: 0; }
 .refdlg { width: min(560px, 92vw); }
 .bibpreview { background: var(--panel); padding: 8px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; max-height: 40vh; overflow: auto; }
 .tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.tgrid.two { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+dialog.templates { width: min(640px, 94vw); }
+dialog.templates h4 { margin: 16px 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
 .tgrid .choice { text-align: left; }
 .importdlg .row input { flex: 1; min-width: 0; }
 .members { list-style: none; padding: 0; margin: 6px 0; }

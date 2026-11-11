@@ -10,6 +10,7 @@ const PATHS = {
   pencil: 'M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4',
   copy: 'M10 9h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zM5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5',
   close: 'M6 6l12 12M18 6L6 18',
+  folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
 } as const
 export type IconName = keyof typeof PATHS
 

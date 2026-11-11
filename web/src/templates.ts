@@ -323,19 +323,29 @@ export function importDialog(r: Replica, opts: { onDone?: () => void; fresh?: bo
   return dlg
 }
 
-/** Create project: pick a template, an import, or a folder on this computer (kept in sync by the
- *  TeXLoom app). Resolves to the template id, 'import', 'folder', or null. */
-export function chooseTemplate(): Promise<string | null> {
+/** What Create project starts from: a template's id, 'import' (a .zip or an arXiv paper), or
+ *  'folder' (a folder on this computer, kept in sync by the TeXLoom app); and the name, if given. */
+export interface NewProject { from: string; name: string }
+
+/** Create project: a name, then a template, or a project of your own (an import, or a folder). */
+export function chooseTemplate(): Promise<NewProject | null> {
   return new Promise((resolve) => {
-    let choice: string | null = null
-    const pick = (id: string) => { choice = id; dlg.close() }
+    let choice: NewProject | null = null
+    const name = h('input', { placeholder: t('Untitled project'), 'aria-label': t('Project name'), maxlength: '120' }) as HTMLInputElement
+    const pick = (from: string) => { choice = { from, name: name.value.trim() }; dlg.close() }
+    const card = (from: string, title: string, info: string) =>
+      h('button', { class: 'radio choice', onclick: () => pick(from) }, h('span', {}, h('b', {}, title), h('small', { class: 'muted' }, info)))
     const dlg = dialog('settings templates',
       h('h3', {}, t('Create project')),
-      h('div', { class: 'tgrid' },
-        ...TEMPLATES.map((tpl) => h('button', { class: 'radio choice', onclick: () => pick(tpl.id) }, h('span', {}, h('b', {}, tpl.name), h('small', { class: 'muted' }, tpl.info)))),
-        h('button', { class: 'radio choice', onclick: () => pick('import') }, h('span', {}, h('b', {}, t('Import…')), h('small', { class: 'muted' }, t('From a .zip (e.g. Overleaf, GitHub) or an arXiv paper.')))),
-        h('button', { class: 'radio choice', onclick: () => pick('folder') }, h('span', {}, h('b', {}, t('From a folder on this computer…')), h('small', { class: 'muted' }, t('A folder you already have, kept in sync with the project by the TeXLoom app.'))))),
+      h('label', { class: 'field' }, t('Name'), name),
+      h('h4', {}, t('Start from a template')),
+      h('div', { class: 'tgrid' }, ...TEMPLATES.map((tpl) => card(tpl.id, tpl.name, tpl.info))),
+      h('h4', {}, t('Or bring your own')),
+      h('div', { class: 'tgrid two' },
+        card('import', t('Import…'), t('From a .zip (e.g. Overleaf, GitHub) or an arXiv paper.')),
+        card('folder', t('From a folder on this computer…'), t('A folder you already have, kept in sync with the project by the TeXLoom app.'))),
       h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Cancel'))))
     dlg.addEventListener('close', () => resolve(choice))
+    name.focus()
   })
 }
