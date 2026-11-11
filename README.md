@@ -829,9 +829,7 @@ To add a language (`it`, say):
 
 ## Status
 
-Early prototype. Not yet built:
-- direct browser-to-browser WebRTC (changes always pass through a relay)
-- a desktop app bundling the helper (for now: `uv tool install`, or folder sync in Chrome/Edge)
+Early prototype. Not yet built: direct browser-to-browser WebRTC (changes always pass through a relay).
 
 ## License
 
