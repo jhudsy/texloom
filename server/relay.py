@@ -96,6 +96,9 @@ GONE_COST = 100  # bytes a remembered edit counts for
 # so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
 META_RATE, META_BURST = 1.0, 600
 SEND_TIMEOUT = 20  # seconds; a peer that doesn't read is disconnected rather than holding up others
+PEER_BUFFER_MAX = 8 * MiB  # bytes waiting to go to one peer: beyond this it isn't reading, and is cut off
+OUT_MAX = 256 * MiB  # bytes waiting to go out on all connections: beyond this, peers holding a lot are cut off
+STALL = 10  # seconds a large reply may make no progress before its reader is cut off
 HELLO_WAIT = 15  # seconds a private server gives a new connection to say who it is
 RECHECK = 60  # seconds between a private server's checks that a connected project's code still counts
 BLOB_PIECE = 256 * KiB  # files go out this much at a time, so a download holds little memory
@@ -393,7 +396,7 @@ class Store:
               project TEXT NOT NULL, h BLOB NOT NULL, seq INTEGER NOT NULL DEFAULT 0,
               PRIMARY KEY (project, h)) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS floor (project TEXT PRIMARY KEY, seq INTEGER NOT NULL);
-            CREATE TABLE IF NOT EXISTS deleted (project TEXT PRIMARY KEY, at REAL NOT NULL, sig BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS deleted (project TEXT PRIMARY KEY, at REAL NOT NULL, sig BLOB NOT NULL, ts INTEGER NOT NULL DEFAULT 0);
             """
         )
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(projects)")}
@@ -431,7 +434,10 @@ class Store:
                 self.usage[project] += n or 0
         self.total = sum(self.usage.values())
         self.owners: dict[str, str] = dict(self.db.execute("SELECT project, owner FROM projects"))
-        self.deleted: dict[str, float] = dict(self.db.execute("SELECT project, at FROM deleted"))  # project -> when
+        if "ts" not in {r[1] for r in self.db.execute("PRAGMA table_info(deleted)")}:
+            self.db.execute("ALTER TABLE deleted ADD COLUMN ts INTEGER NOT NULL DEFAULT 0")
+        # project -> the message telling clients, with the owner's signature so they needn't trust the server
+        self.deleted: dict[str, dict] = {p: self._deleted_msg(at, ts, sig) for p, at, ts, sig in self.db.execute("SELECT project, at, ts, sig FROM deleted")}
         self.owner_bytes: dict[str, int] = defaultdict(int)  # checked on every stored edit: kept, not added up
         for project, n in self.usage.items():
             if project in self.owners:
@@ -650,17 +656,21 @@ class Store:
 
     # --- deleted for everyone ---------------------------------------------------------
 
-    def delete_project(self, project: str, sig: bytes) -> float:
+    @staticmethod
+    def _deleted_msg(at: float, ts: int, sig: bytes) -> dict:
+        return {"t": "deleted", "at": int(at * 1000), "ts": ts, "s": b64e(sig)}
+
+    def delete_project(self, project: str, sig: bytes, ts: int) -> dict:
         """The owner deleted the project for everyone: forget what's stored and keep, for good, the
         fact (the owner's signature proves it), so that no copy can bring it back here."""
         at = time.time()
         with self.db:
-            self.db.execute("INSERT OR IGNORE INTO deleted(project, at, sig) VALUES (?,?,?)", (project, at, sig))
+            self.db.execute("INSERT OR IGNORE INTO deleted(project, at, sig, ts) VALUES (?,?,?,?)", (project, at, sig, ts))
             for table in ("log", "blob", "gone", "head", "floor", "mode"):
                 self.db.execute(f"DELETE FROM {table} WHERE project=?", (project,))  # noqa: S608 - fixed names
-        at = self.deleted.setdefault(project, at)  # a second deletion keeps the first one's time
+        msg = self.deleted.setdefault(project, self._deleted_msg(at, ts, sig))  # a second deletion keeps the first
         self._recount(project)
-        return at
+        return msg
 
     def has_blob(self, project: str, bid: str) -> bool:
         return self.db.execute("SELECT 1 FROM blob WHERE project=? AND id=?", (project, bid)).fetchone() is not None
@@ -689,10 +699,15 @@ class Store:
         """Where a stored file is, and its size."""
         return self.db.execute("SELECT rowid, length(data) FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
 
-    async def read_blob(self, rowid: int):
-        """A stored file, a piece at a time. Its own connection, so a slow download holds nothing up."""
+    async def read_blob(self, rowid: int, project: str, bid: str):
+        """A stored file, a piece at a time. Its own connection, so a slow download holds nothing up.
+        The row is looked up again there: it may have been deleted, and its rowid reused, meanwhile."""
         db = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
         try:
+            db.execute("BEGIN")  # one snapshot for the check and the read
+            row = db.execute("SELECT rowid FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
+            if not row or row[0] != rowid:
+                return
             with db.blobopen("blob", "data", rowid, readonly=True) as blob:
                 while piece := blob.read(BLOB_PIECE):
                     yield piece
@@ -706,6 +721,7 @@ class Conn:
 
     def __init__(self, peer_id: int):
         self.id = peer_id
+        self.transport = None  # to cut off a peer that stops reading (a polite close would wait for it)
         self.code: str | None = None
         self.code_tried = False
         self.hellos: list[float] = []
@@ -823,7 +839,7 @@ class Relay:
         self.held = 0  # bytes held for connections, see Metered
 
     # --- private servers -----------------------------------------------------------
-    def denied(self, project: str, code: object) -> str | None:
+    def denied(self, project: str, code: object, claim: bool = True) -> str | None:
         """On a private server, why this project may not use it (None if it may). A project
         belongs to a creation code, so people with its link need nothing else. One that has no
         code yet gets the first valid one offered; one whose code has lapsed waits for a renewal."""
@@ -835,6 +851,8 @@ class Relay:
         valid = self.codes.check(code)
         if not valid:
             return "needs-code"
+        if not claim:  # asked before anything is verified: say yes, but don't bind the project yet
+            return None
         if owner:
             self.store.claim(project, valid)
         else:
@@ -945,21 +963,75 @@ class Relay:
         }
 
     # --- websocket ---------------------------------------------------------------------
+    def cut_off(self, ws: web.WebSocketResponse, why: str = "stopped reading") -> None:
+        """Drop a connection at once. Closing politely would wait to write to a peer that isn't
+        reading, holding its buffers and its connection slot for as long as it likes."""
+        conn = self.conns.get(ws)
+        log.info("disconnecting a peer that %s", why)
+        if conn and conn.transport is not None:
+            conn.transport.abort()
+        else:
+            asyncio.create_task(ws.close(code=1008, message=b"too slow"))
+
+    async def close_or_cut(self, ws: web.WebSocketResponse, why: bytes) -> None:
+        """Close politely, or cut off a peer that doesn't let us."""
+        try:
+            await asyncio.wait_for(ws.close(code=1008, message=why), 5)
+        except (asyncio.TimeoutError, ConnectionError, RuntimeError):
+            self.cut_off(ws, "didn't take its close")
+
+    def backed_up(self, ws: web.WebSocketResponse) -> bool:
+        conn = self.conns.get(ws)
+        return bool(conn and conn.transport is not None and conn.transport.get_write_buffer_size() > PEER_BUFFER_MAX)
+
     async def send(self, ws: web.WebSocketResponse, text: str) -> None:
-        """Send to one peer; one that doesn't keep up is disconnected instead of stalling the room."""
+        """Send to one peer; one that doesn't keep up is cut off instead of stalling the room or
+        piling up what's sent to it."""
         if ws.closed:
+            return
+        if self.backed_up(ws):
+            self.cut_off(ws)
             return
         try:
             await asyncio.wait_for(ws.send_str(text), SEND_TIMEOUT)
         except asyncio.TimeoutError:
-            log.info("disconnecting a peer that stopped reading")
-            asyncio.create_task(ws.close(code=1008, message=b"too slow"))
+            self.cut_off(ws)
         except (ConnectionError, RuntimeError):
             pass
+
+    async def send_large(self, ws: web.WebSocketResponse, msg: dict) -> None:
+        """Send a large reply, cutting off a reader that stops taking it, so that it can't hold
+        the memory (and the catch-up budget) for long."""
+        conn = self.conns.get(ws)
+        task = asyncio.ensure_future(ws.send_json(msg))
+        waiting = -1
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=STALL)
+            if done:
+                task.result()
+                return
+            now = conn.transport.get_write_buffer_size() if conn and conn.transport is not None else 0
+            if waiting != -1 and now >= waiting:  # nothing taken since the last look
+                self.cut_off(ws)
+                task.cancel()
+                return
+            waiting = now
+
+    def make_room(self, need: int) -> None:
+        """Before sending something large: if what's waiting to go out on every connection would
+        pass OUT_MAX, cut off the connections holding a lot, which aren't reading."""
+        waiting = [(c.transport.get_write_buffer_size(), ws) for ws, c in self.conns.items() if c.transport is not None]
+        if sum(n for n, _ in waiting) + need <= OUT_MAX:
+            return
+        for n, ws in waiting:
+            if n > MiB:
+                self.cut_off(ws, "held too much unsent data")
 
     async def broadcast(self, project: str, msg: dict, exclude=None) -> None:
         text = json.dumps(msg)
         peers = [ws for ws in self.rooms.get(project, ()) if ws is not exclude]
+        if peers and len(text) > MiB:
+            self.make_room(len(text) * len(peers))
         if peers:
             await asyncio.gather(*(self.send(ws, text) for ws in peers))
 
@@ -969,16 +1041,19 @@ class Relay:
             raise web.HTTPBadRequest(text="bad project id")
         if len(self.conns) >= MAX_CONNECTIONS:
             raise web.HTTPServiceUnavailable(text="too many connections")
-        ws = web.WebSocketResponse(heartbeat=30, max_msg_size=MAX_FRAME)
+        # no compression: what's sent is ciphertext, and compressed frames would let a client make
+        # the server hold far more than it sent (Metered counts bytes as they arrive)
+        ws = web.WebSocketResponse(heartbeat=30, max_msg_size=MAX_FRAME, compress=False)
         await ws.prepare(request)
         conn = self.conns[ws] = Conn(self._next_id)
         self._next_id += 1
         if request.transport:
+            conn.transport = request.transport
             request.transport.set_protocol(Metered(request.transport.get_protocol(), self, conn, request.transport))
         gone = self.store.deleted.get(project)
         if gone is not None:  # the owner deleted it for everyone: say so, and nothing more
             self.conns.pop(ws, None)
-            await ws.send_json({"t": "deleted", "at": int(gone * 1000)})
+            await ws.send_json(gone)
             await ws.close(code=1008, message=b"deleted")
             return ws
         first = None
@@ -1058,14 +1133,14 @@ class Relay:
             await self.catchup.take(cost)
             try:
                 entries = self.store.since(project, since)
-                await asyncio.wait_for(ws.send_json(
+                await asyncio.wait_for(self.send_large(ws,
                     {"t": "log", "entries": entries, "head": self.store.head(project),
                      "floor": self.store.floor(project), "count": self.store.count(project), "you": conn.id,
                      "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
                      "store": self.store_status(project, conn),
                      "rv": [{"p": p, "s": b64e(sig)} for p, sig in self.store.revoked(project).items()]}), CATCHUP_TIMEOUT)
-            except (asyncio.TimeoutError, ConnectionError):  # it stopped reading, or has gone
-                asyncio.create_task(ws.close(code=1008, message=b"too slow"))
+            except (asyncio.TimeoutError, ConnectionError, RuntimeError):  # too slow, or it has gone
+                self.cut_off(ws, "was too slow to catch up")
             finally:
                 self.catchup.give(cost)
         elif t == "up":
@@ -1149,12 +1224,18 @@ class Relay:
             if abs(time.time() - ts) > MODE_SKEW or signer(project, f"delete:{ts}".encode(), sig) != "owner":
                 await ws.send_json({"t": "err", "code": "delete-rejected", "m": "rejected deletion"})
                 return
-            at = self.store.delete_project(project, sig)
+            # a project this server has never held anything for costs a permanent row: from the
+            # same budget as other rows that store nothing, so ids can't be minted to fill the disk
+            known = self.store.owner(project) is not None or self.store.has_mode(project) or self.store.head(project) > 0
+            if not known and not self.store.meta_budget():
+                await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
+                return
+            gone = self.store.delete_project(project, sig, ts)
             log.info("project %s… deleted for everyone by its owner", project[:8])
             room = list(self.rooms.get(project, ()))
-            await self.broadcast(project, {"t": "deleted", "at": int(at * 1000)})  # including the owner
-            for peer in room:
-                await peer.close(code=1008, message=b"deleted")
+            await self.broadcast(project, gone)  # including the owner
+            for peer in room:  # each at once: one that isn't reading mustn't hold up the rest
+                asyncio.create_task(self.close_or_cut(peer, b"deleted"))
         elif t == "revoke":  # the owner withdraws a personal edit link
             pub, sig = canonical_pub(field(msg, "p", str)[:64]), b64d(field(msg, "s", str))
             if pub is None or signer(project, revoke_msg(pub), sig) != "owner":
@@ -1178,7 +1259,8 @@ class Relay:
             raise web.HTTPRequestEntityTooLarge(max_size=MAX_BLOB, actual_size=request.content_length or 0)
         if project in self.store.deleted:
             return web.json_response({"code": "deleted"}, status=410)
-        why = self.denied(project, request.headers.get("X-Create-Code"))  # before reading a large body
+        # before reading a large body; the project is bound to the code only once the upload is signed
+        why = self.denied(project, request.headers.get("X-Create-Code"), claim=False)
         if why:
             return web.json_response({"code": why}, status=403)
         try:
@@ -1208,6 +1290,8 @@ class Relay:
             raise web.HTTPForbidden(text="bad signature")
         if project in self.store.deleted:  # deleted while it was uploading
             return web.json_response({"code": "deleted"}, status=410)
+        if self.denied(project, request.headers.get("X-Create-Code")):  # a genuine upload: now it may claim
+            return web.json_response({"code": "needs-code"}, status=403)
         if self.store.relay_only(project):
             raise web.HTTPConflict(text="project is relay-only: blobs are exchanged peer to peer")
         kind = "output" if request.headers.get("X-Kind") == "output" else "file"
@@ -1254,7 +1338,7 @@ class Relay:
         found = self.store.find_blob(project, bid)
         if found is None:
             raise web.HTTPNotFound()
-        return web.Response(body=self.store.read_blob(found[0]), content_type="application/octet-stream", headers={
+        return web.Response(body=self.store.read_blob(found[0], project, bid), content_type="application/octet-stream", headers={
             "Content-Length": str(found[1]),
             "Cache-Control": "public, max-age=31536000, immutable",
             "Content-Disposition": "attachment",  # ciphertext; never something to render

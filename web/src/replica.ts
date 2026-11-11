@@ -285,7 +285,10 @@ export class Replica {
       case 'rv':
         this.learnRevoked([m])
         break
-      case 'deleted': { // the owner deleted the project for everyone
+      case 'deleted': { // the owner deleted the project for everyone: only if the owner signed it
+        let signed = false
+        try { signed = Number.isInteger(m.ts) && typeof m.s === 'string' && !!(signer(this.keys.project, new TextEncoder().encode(`delete:${m.ts}`), b64d(m.s)) as { owner?: true } | null)?.owner } catch {}
+        if (!signed) { console.warn('ignored a deletion notice without the owner’s signature'); break }
         this.deletedAt = Number(m.at) || Date.now()
         await idbPut(this.db, 'kv', 'deleted', this.deletedAt)
         this.deleteAck?.(null)

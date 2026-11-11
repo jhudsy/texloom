@@ -950,7 +950,14 @@ class ConnectToolDialog(QtWidgets.QDialog):
 
     @staticmethod
     def quoted(arg: str) -> str:
-        return arg if re.fullmatch(r"[\w.-]+", arg) else f'"{arg}"'  # double quotes work in every common shell
+        """For pasting into a terminal. Single quotes, so nothing inside is expanded ($(...), `...`,
+        $VAR): a folder's name can come from a project name a collaborator chose."""
+        if re.fullmatch(r"[\w./:\\-]+", arg):
+            return arg
+        if sys.platform == "win32":  # PowerShell: '' is a quote inside single quotes
+            return "'" + arg.replace("'", "''") + "'"
+        import shlex
+        return shlex.quote(arg)
 
     def choose(self, access: str, on: bool) -> None:
         if on:
@@ -1001,7 +1008,7 @@ class CopyFolderDialog(QtWidgets.QDialog):
 
     def free_folder(self) -> Path:
         """Next to the original, under a name that is free and valid on every system."""
-        base = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", self.name.text()).strip(" .") or "copy"
+        base = slug(self.name.text())  # as for joined projects: letters, digits, spaces and dashes only
         for n in range(1, 1000):
             d = self.src.parent / (base if n == 1 else f"{base} {n}")
             if not d.exists():
@@ -1070,22 +1077,61 @@ def texcount_language(text: str) -> list[str]:
     return []
 
 
+INCLUDE_RE = re.compile(r"\\(?:input|include)\s*\{([^{}\n]*)\}")
+
+
+def with_includes(files, main: str, depth: int = 0, seen: frozenset = frozenset()) -> str:
+    """The main file with its \\input and \\include files written in, taken only from the project's
+    own files (resolved from the main file's folder, as LaTeX does). TeXCount then counts one
+    file and opens nothing itself: its own -inc option opens whatever name a document gives it,
+    and Perl runs a name ending in "|" as a command."""
+    text = str(files[main])
+    if depth > 20:
+        return text
+    base = os.path.dirname(main)
+
+    def expand(m: re.Match) -> str:
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        if re.search(r"(?<!\\)%", text[line_start:m.start()]):
+            return m.group(0)  # commented out
+        name = m.group(1).strip()
+        target = os.path.normpath(os.path.join(base, name)).replace(os.sep, "/")
+        for cand in (target, target + ".tex"):
+            if cand in files and cand not in seen and cand.endswith(".tex") and not cand.startswith("../"):
+                return "\n" + with_includes(files, cand, depth + 1, seen | {main}) + "\n"
+        return m.group(0)
+
+    return INCLUDE_RE.sub(expand, text)
+
+
 async def texcount_report(st, d: Path, exe: str) -> str:
-    """Runs on the sync thread, the only place a folder's project can be read. TeXCount only reads text."""
+    """Runs on the sync thread, the only place a folder's project can be read. TeXCount reads one
+    temporary file, the project's main file with its inputs written in (see with_includes)."""
+    import tempfile
     files, meta = st.replica.files, st.replica.meta
     main = main_file(files, meta)
     if not main:
         raise FolderProblem(_("No .tex file with \\documentclass found."))
-    text = "\n".join(str(files[p]) for p in files.keys() if p.endswith(".tex"))
-    # from the main file's folder, as LaTeX runs: that's what \input paths are relative to
-    source = d / main
-    args = [exe, "-inc", "-utf8", *texcount_language(text), f"./{source.name}"]
+    whole = with_includes(files, main)
 
     def run_it() -> str:
-        out = subprocess.run(args, cwd=source.parent, env=tex_env(), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
-        if out.returncode:
-            raise FolderProblem(out.stderr.strip()[-500:] or str(out.returncode))
-        return out.stdout
+        with tempfile.TemporaryDirectory(prefix="texloom-count-") as tmp:
+            (Path(tmp) / "main.tex").write_text(whole, encoding="utf-8")
+            args = [exe, "-utf8", *texcount_language(whole), "./main.tex"]
+            proc = subprocess.Popen(args, cwd=tmp, env=tex_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, encoding="utf-8", errors="replace", start_new_session=True)
+            try:
+                out, err = proc.communicate(timeout=60)
+            except subprocess.TimeoutExpired:  # stop it, and anything it started
+                try:
+                    os.killpg(proc.pid, 9) if hasattr(os, "killpg") else proc.kill()
+                except OSError:
+                    pass
+                proc.communicate()
+                raise FolderProblem(_("TeXCount took too long.")) from None
+            if proc.returncode:
+                raise FolderProblem(err.strip()[-500:] or str(proc.returncode))
+            return out
 
     return await asyncio.to_thread(run_it)
 

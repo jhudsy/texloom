@@ -245,4 +245,5 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'No .tex file with \\documentclass found.': '未找到包含 \\documentclass 的 .tex 文件。',
     "Deleted by the owner": "已被所有者删除",
     "The owner deleted this project for everyone. The files in this folder stay, but nothing syncs any more: use Leave… to take it off the list.": "所有者已为所有人删除此项目。此文件夹中的文件会保留，但不再同步：使用 退出… 将其从列表中移除。",
+    "TeXCount took too long.": "TeXCount 运行时间过长。",
 }

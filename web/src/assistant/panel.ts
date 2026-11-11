@@ -276,7 +276,9 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     if (c?.suggesting) ctxLines.push('The user is in suggest mode: what they type becomes suggestions in the Review tab instead of changing the file. Propose changes with suggest_edit unless they ask you to edit directly.')
     if (c?.selection) ctxLines.push(`Selected text (lines ${c.fromLine}-${c.toLine}):\n${c.selection.slice(0, 8000)}`)
     if (c?.fileSelection !== undefined) ctxLines.push(`That selection includes the user's own suggestions. In the file itself it reads:\n${c.fileSelection.slice(0, 8000)}`)
-    const message = `<context>\n${ctxLines.join('\n')}\n</context>\n\n${text}`
+    // what's inside comes from the project, which collaborators write: it mustn't end the block
+    const inert = (s: string) => s.replace(/<(\/?)(context)/gi, '‹$1$2')
+    const message = `<context>\n${inert(ctxLines.join('\n'))}\n</context>\n\n${text}`
 
     chat ??= { meta: { id: crypto.randomUUID(), project: r.keys.project, title: text.replace(/\s+/g, ' ').slice(0, 80), provider: providerId, model: cfg.model, at: Date.now() }, entries: [] }
     chat.entries.push({ k: 'user', text })

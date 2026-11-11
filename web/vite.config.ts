@@ -41,7 +41,11 @@ function pdfjsCmaps(): Plugin {
       for (const fileName of readdirSync(dir)) this.emitFile({ type: 'asset', fileName: `cmaps/${fileName}`, source: readFileSync(new URL(fileName, dir)) })
     },
     configureServer(server) {
-      server.middlewares.use('/cmaps', (req, res) => { res.end(readFileSync(new URL(`.${req.url}`, dir))) })
+      server.middlewares.use('/cmaps', (req, res) => {
+        const name = decodeURIComponent((req.url ?? '').split('?')[0]).replace(/^\/+/, '')
+        if (!/^[\w.-]+$/.test(name) || name.startsWith('.')) { res.statusCode = 404; res.end(); return } // one file in the folder, nothing else
+        res.end(readFileSync(new URL(name, dir)))
+      })
     },
   }
 }

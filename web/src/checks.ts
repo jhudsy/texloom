@@ -101,7 +101,7 @@ const NOT_DOUBLED = new Set(['that', 'had', 'is', 'can', 'do', 'la', 'ha', 'bye'
 
 function hints(text: string, src: string, out: Check[]) {
   const p = proseMask(text, src)
-  const german = /\\usepackage\s*(?:\[[^\]]*\b(?:n?german|ngerman|austrian|swissgerman|dutch|icelandic)\b[^\]]*\])\s*\{babel\}/.test(src)
+  const german = /\\usepackage\s*(?:\[[^\]]{0,300}\b(?:n?german|ngerman|austrian|swissgerman|dutch|icelandic)\b[^\]]{0,300}\])\s*\{babel\}/.test(src)
   if (!german) {
     for (const m of p.matchAll(/(^|[\s(\[])"([^"\n]{1,200}?)"(?=[\s.,;:!?)\]]|$)/gm)) {
       const from = m.index! + m[1].length, to = m.index! + m[0].length

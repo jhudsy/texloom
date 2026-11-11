@@ -272,7 +272,7 @@ function suggestionDiff(quote: string, text: string): HTMLElement {
   const out = h('div', { class: 'rsuggest' })
   if (!ops.some((o) => o.op !== 'eq')) { out.append(h('span', { class: 'muted' }, t('(no change)'))); return out }
   ops.forEach((o, i) => {
-    if (o.op !== 'eq') out.append(diffPiece(o))
+    if (o.op !== 'eq') out.append(diffPiece(o.text.length > 2000 ? { ...o, text: `${o.text.slice(0, 2000)}…` } : o))
     else {
       const first = i === 0, last = i === ops.length - 1
       const keep = (first || last ? 1 : 2) * CONTEXT

@@ -119,7 +119,7 @@ without compiling.
 | `{t:"p2p", d, s?, from}` | a peer's payload |
 | `{t:"mode", m}` | storage mode changed |
 | `{t:"rv", p, s}` | a personal key was revoked |
-| `{t:"deleted", at}` | the owner deleted the project for everyone (at, ms); the connection then closes. Clients keep their copy read-only and stop connecting (web: `deleted` in the replica's kv store; helper: `state.json`) |
+| `{t:"deleted", at, ts, s}` | the owner deleted the project for everyone (at, ms), with the owner's signature `s` over `"delete:<ts>"`, which clients check, so a server can't fake it; the connection then closes. Clients keep their copy read-only and stop connecting (web: `deleted` in the replica's kv store; helper: `state.json`) |
 
 Ciphertext = `iv(12 bytes) ‖ AES-256-GCM(plaintext)`.
 
@@ -353,7 +353,7 @@ A suggestion changes nothing until accepted, so while suggesting the editor isn'
 shared `Y.Text` at all. It shows this tab's view: the shared text with the tab's own open typed
 suggestions applied. Each of those is a hunk, a range `[a, b)` of the shared text and its
 replacement, stored as an ordinary `review` entry (`quote` = the shared text there, `text` = the
-replacement) with `typed` set to this browser's id (`texloom.suggester`), so every other reader (the Review tab,
+replacement) with `typed` set to this browser's id for the project (`texloom.suggester.<project>`, different in each project so a browser can't be followed between them), so every other reader (the Review tab,
 accept and reject, the assistant, the MCP tools, older clients) needs nothing new.
 
 - **Typing:** each change in the editor, in view positions, merges with the hunks it touches into
@@ -378,9 +378,11 @@ accept and reject, the assistant, the MCP tools, older clients) needs nothing ne
   only the letters that differ (`refine` in `worddiff.ts`). A pure insertion anchors both ends to the character
   before it, so text others type at that spot comes after; other hunks hold their first and last
   replaced characters, so text typed at either edge falls outside.
-- **Whose:** a tab suggesting in a file holds a lock on it in localStorage (renewed every 5 s,
-  stale after 15 s); another tab of the same browser then uses its own page's id there, so two tabs
-  never edit the same suggestions. Collaborators' cursors are mapped into the view, and this tab's
+- **Whose:** `typed` is public, so anyone could write a suggestion with someone else's; a browser
+  takes back as its own only suggestions it recorded making (`texloom.madehere.<project>`). A tab
+  suggesting in a file holds a lock on it in localStorage (renewed every 5 s, stale after 15 s);
+  another tab of the same browser then uses its own page's id there, so two tabs never edit the
+  same suggestions. Collaborators' cursors are mapped into the view, and this tab's
   is published on the shared text in the usual `cursor` awareness field.
 - **Positions** outside the editor (comments on a selection, search results, compile errors, the
   assistant's context) are in the shared file; the editor maps them to and from its view.

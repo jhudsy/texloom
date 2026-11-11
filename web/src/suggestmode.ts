@@ -21,17 +21,34 @@ import { commonEnds, refine, wordDiff } from './worddiff'
 const ORIGIN = { suggestMode: true }
 /** Marks editor changes that come from the shared document rather than from typing. */
 const fromShared = Annotation.define<boolean>()
-/** Whose typed suggestions these are. This browser's, so that they can be edited again on a later
- *  visit; but while one tab suggests in a file it holds a lock on that file (LOCK), and another
- *  tab of the same browser uses its own page's id there, so two tabs never edit the same ones. */
+/** Whose typed suggestions these are. This browser's, for this project (a different id in each
+ *  project, so they can't be linked), so that they can be edited again on a later visit; but
+ *  while one tab suggests in a file it holds a lock on that file, and another tab of the same
+ *  browser uses its own page's id there, so two tabs never edit the same ones. */
 const PAGE = crypto.randomUUID()
-const BROWSER = (() => {
+function browserId(project: string): string {
   try {
-    const id = localStorage.getItem('texloom.suggester') || crypto.randomUUID()
-    localStorage.setItem('texloom.suggester', id)
+    const key = `texloom.suggester.${project}`
+    const id = localStorage.getItem(key) || crypto.randomUUID()
+    localStorage.setItem(key, id)
     return id
   } catch { return PAGE }
-})()
+}
+
+/** The suggestions this browser made in a project. The `typed` id in a suggestion is public, so
+ *  anyone could write one with it: only those recorded here are taken back as one's own. */
+function madeHere(project: string) {
+  const key = `texloom.madehere.${project}`
+  let ids: Set<string>
+  try { ids = new Set(JSON.parse(localStorage.getItem(key) || '[]')) } catch { ids = new Set() }
+  const save = () => { try { localStorage.setItem(key, JSON.stringify([...ids].slice(-5000))) } catch {} }
+  return {
+    has: (id: string) => ids.has(id),
+    add(more: Iterable<string>) { const n = ids.size; for (const id of more) ids.add(id); if (ids.size !== n) save() },
+    /** Forget ones that no longer exist. */
+    keep(exists: (id: string) => boolean) { const n = ids.size; for (const id of ids) if (!exists(id)) ids.delete(id); if (ids.size !== n) save() },
+  }
+}
 const LOCK_FRESH = 15_000 // ms: a lock not renewed for this long was left by a tab that's gone
 
 /** Take this browser's suggestions in `file` for this tab, if no other tab has them. Returns the
@@ -42,6 +59,7 @@ function claim(project: string, file: string): { me: string; release(): void } {
   try {
     const held = JSON.parse(localStorage.getItem(key) || 'null') as { tab: string; at: number } | null
     if (held && held.tab !== PAGE && Date.now() - held.at < LOCK_FRESH) return { me: PAGE, release() {} }
+    const BROWSER = browserId(project)
     localStorage.setItem(key, mine())
     const renew = setInterval(() => { try { localStorage.setItem(key, mine()) } catch {} }, LOCK_FRESH / 3)
     return { me: BROWSER, release() { clearInterval(renew); try { if (JSON.parse(localStorage.getItem(key) || 'null')?.tab === PAGE) localStorage.removeItem(key) } catch {} } }
@@ -136,6 +154,8 @@ class Struck extends WidgetType {
 export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => string, stop: () => void): SuggestSession {
   const lock = claim(r.keys.project, file)
   const ME = lock.me
+  const mine = madeHere(r.keys.project)
+  mine.keep((id) => r.review.has(id))
   let shared = yt.toString()
   let hunks: Hunk[] = []
   let gone = new Set<string>()
@@ -149,7 +169,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
   const unsaved = (h: Hunk) => !!h.id && saved.get(h.id) !== sig(h)
   /** Start again from what's stored. */
   function load() {
-    const res = loadHunks(r.doc, r.review, yt, file, ME)
+    const res = loadHunks(r.doc, r.review, yt, file, ME, mine.has)
     hunks = res.hunks
     anchor(yt, hunks)
     gone = new Set(res.gone)
@@ -168,6 +188,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
     const kept = hunks.filter((h) => !h.id || r.review.has(h.id)) // (reconcile drops deleted ones first)
     const lost = kept.length !== hunks.length
     hunks = saveHunks(r.doc, r.review, yt, kept, gone, { file, by: by(), me: ME, origin: ORIGIN })
+    mine.add(hunks.flatMap((h) => (h.id ? [h.id] : [])))
     anchor(yt, hunks)
     gone = new Set()
     remember()

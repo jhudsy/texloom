@@ -25,7 +25,7 @@ from pathlib import Path
 SHELL = [
     (re.compile(r"\\write\s*18\b"), "runs a shell command (\\write18)"),
     (re.compile(r"\\(?:Delayed)?ShellEscape\b"), "runs a shell command (\\ShellEscape)"),
-    (re.compile(r"\\input\s*\{?\s*\|"), "reads the output of a command (\\input|)"),
+    (re.compile(r"\\input\s*\{?\s*\||\\(?:input|include)\s*\{[^}]*\|"), "reads the output of a command (\\input|)"),
     (re.compile(r"\b(?:os\.execute|io\.popen|os\.spawn|os\.exec)\b"), "runs a program from Lua"),
     (re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]{0,300}\])?\s*\{[^}]{0,300}"
                 r"\b(?:minted|pythontex|sagetex|gnuplottex|svg|auto-pst-pdf|shellesc|bashful|pyluatex)\b"),

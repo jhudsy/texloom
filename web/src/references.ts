@@ -120,7 +120,7 @@ export function bibPlan(r: Replica, index: ProjectIndex): BibPlan {
   let biblatex = false
   for (const p of [...(main ? [main] : []), ...idx.texFiles.filter((f) => f !== main)]) {
     const t = stripComments(r.files.get(p)?.toString() ?? '')
-    if (/\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bbiblatex\b/.test(t)) biblatex = true
+    if (/\\usepackage\s*(?:\[[^\]]{0,300}\])?\s*\{[^}]{0,2000}\bbiblatex\b/.test(t)) biblatex = true
     for (const m of t.matchAll(/\\(addbibresource|bibliography)\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/g)) {
       for (const n of m[1] === 'bibliography' ? m[2].split(',') : [m[2]]) {
         const name = n.trim().replace(/^\.\//, '')
@@ -166,7 +166,7 @@ export function addBibliography(r: Replica, plan: BibPlan, file: string): boolea
     } else {
       let all = ''
       for (const [p, f] of r.files) if (p.endsWith('.tex')) all += stripComments(f.toString())
-      const natbib = /\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bnatbib\b/.test(all)
+      const natbib = /\\usepackage\s*(?:\[[^\]]{0,300}\])?\s*\{[^}]{0,2000}\bnatbib\b/.test(all)
       const style = /\\bibliographystyle\s*\{/.test(all) ? '' : `\\bibliographystyle{${natbib ? 'plainnat' : 'plain'}}\n`
       changeOrSuggest(r, main, end, end, atLine(end) + style + line + '\n\n')
     }

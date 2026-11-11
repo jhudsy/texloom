@@ -258,14 +258,17 @@ export const TOOLS: ToolDef[] = [
         for (let i = text.indexOf('\n'); i >= 0 && i < pos; i = text.indexOf('\n', i + 1)) n++
         return n
       }
-      const rows = listItems(r) // including what's just been typed in suggest mode.filter((i) => include_resolved || !i.resolved)
+      // including what's just been typed in suggest mode
+      const rows = listItems(r).filter((i) => include_resolved || !i.resolved)
         .map((i) => ({ i, at: rangeOf(r, i.id) }))
         .sort((a, b) => a.i.file.localeCompare(b.i.file) || (a.at?.from ?? 0) - (b.at?.from ?? 0))
         .map(({ i, at }) => {
           const where = at && (at.to > at.from || !i.quote) ? `${i.file}:${lineOf(i.file, at.from)}` : `${i.file} (the text it was on has changed)`
           const status = i.resolved ? i.outcome ?? 'resolved' : 'open'
-          const body = i.kind === 'suggestion' ? (!i.quote ? `insert “${i.text}”` : !i.text ? `delete “${i.quote}”` : `replace “${i.quote}” with “${i.text}”`) : `on “${i.quote.slice(0, 200)}”: ${i.text}`
-          return [`[${i.id}] ${i.kind} by ${i.by} at ${where} (${status}): ${body}`, ...i.replies.map((x) => `    ↳ ${x.by}: ${x.text}`)].join('\n')
+          // people wrote these: quoted as JSON strings, so a comment can't pass for another row
+          const q = (s: string) => JSON.stringify(s)
+          const body = i.kind === 'suggestion' ? (!i.quote ? `insert ${q(i.text)}` : !i.text ? `delete ${q(i.quote)}` : `replace ${q(i.quote)} with ${q(i.text)}`) : `on ${q(i.quote.slice(0, 200))}: ${q(i.text)}`
+          return [`[${i.id}] ${i.kind} by ${q(i.by)} at ${where} (${status}): ${body}`, ...i.replies.map((x) => `    ↳ ${q(String(x.by))}: ${q(x.text)}`)].join('\n')
         })
       const all = rows.join('\n\n')
       return !all ? 'No open comments or suggestions.' : all.length > MAX_COMMENTS ? `${all.slice(0, MAX_COMMENTS)}\n\n[cut off: there are more]` : all

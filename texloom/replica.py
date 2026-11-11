@@ -450,7 +450,15 @@ class Replica:
 
     async def _handle(self, m: dict) -> None:
         t = m.get("t")
-        if t == "deleted":  # the owner deleted the project for everyone
+        if t == "deleted":  # the owner deleted the project for everyone: only if the owner signed it
+            ts, sig = m.get("ts"), m.get("s")
+            try:
+                ok = isinstance(ts, int) and isinstance(sig, str) and signer(self.keys.project, f"delete:{ts}".encode(), b64d(sig)) == "owner"
+            except (ValueError, TypeError):
+                ok = False
+            if not ok:
+                log.warning("ignored a deletion notice without the owner's signature")
+                return
             at = m.get("at")
             self.deleted_at = at / 1000 if isinstance(at, (int, float)) else time.time()
             self.save()

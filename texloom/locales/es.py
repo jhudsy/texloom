@@ -245,4 +245,5 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'No .tex file with \\documentclass found.': 'No se ha encontrado ningún archivo .tex con \\documentclass.',
     "Deleted by the owner": "Eliminado por el propietario",
     "The owner deleted this project for everyone. The files in this folder stay, but nothing syncs any more: use Leave… to take it off the list.": "El propietario ha eliminado este proyecto para todos. Los archivos de esta carpeta se quedan, pero ya no se sincroniza nada: usa Abandonar… para quitarlo de la lista.",
+    "TeXCount took too long.": "TeXCount ha tardado demasiado.",
 }

@@ -124,9 +124,13 @@ class Project:
 
     def _anchored(self, path: str, s: str, start) -> int | None:
         """Where a comment or suggestion starts now (a Python index into `s`), from its stored anchor."""
+        if not isinstance(start, (bytes, bytearray)) or not start:
+            return None
         try:
             k = StickyIndex.decode(bytes(start), self.r.files[path]).get_index()
-        except Exception:  # noqa: BLE001 - an old or damaged anchor: fall back to the quote
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException:  # noqa: BLE001 - a damaged anchor (pycrdt panics, which isn't an Exception): use the quote
             return None
         return len(s.encode("utf-16-le")[: 2 * k].decode("utf-16-le", errors="ignore")) if k >= 0 else None
 
@@ -493,7 +497,9 @@ class Server:
             else:
                 self.send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Method not found: {method}"}})
                 return
-        except Exception as e:  # noqa: BLE001
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as e:  # noqa: BLE001 - including pycrdt panics from crafted data: one request fails, not the server
             log.exception("error handling %s", method)
             if mid is not None:
                 self.send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32603, "message": str(e)}})

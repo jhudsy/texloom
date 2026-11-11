@@ -22,7 +22,7 @@ MAX_LIST = 256 * 1024  # bytes per entry: thousands of projects
 MAX_PER_OWNER = 32  # entries per creation code (a list, and the passkeys that unlock it)
 MAX_TOTAL = 50_000  # entries in all, for servers that let anyone create them
 RETIRED = -1  # sequence number of a replaced or deleted list: its id can't be used again
-MAX_RETIRED = 256  # markers kept per creation code; a code can't fill the server with them
+RETIRED_KEEP = 365 * 86400  # seconds a retired id is remembered (like removal records in a list)
 
 
 class Lists:
@@ -62,9 +62,9 @@ class Lists:
         (perhaps leaked) link can't quietly start the list again under that link."""
         with self.db:
             self.db.execute("UPDATE lists SET seq=?, data=x'', seen=? WHERE id=?", (RETIRED, time.time(), lid))
-            self.db.execute("DELETE FROM lists WHERE seq=?1 AND owner=(SELECT owner FROM lists WHERE id=?2) AND id NOT IN "
-                            "(SELECT id FROM lists WHERE seq=?1 AND owner=(SELECT owner FROM lists WHERE id=?2) "
-                            "ORDER BY seen DESC LIMIT ?3)", (RETIRED, lid, MAX_RETIRED))
+            # old markers go after a year; none are pushed out to make room, or anyone could retire
+            # enough lists of their own to bring a replaced (leaked) id back to life
+            self.db.execute("DELETE FROM lists WHERE seq=? AND seen<?", (RETIRED, time.time() - RETIRED_KEEP))
 
     def count(self, owner: str) -> int:
         return self.db.execute("SELECT COUNT(*) FROM lists WHERE owner=? AND seq<>?", (owner, RETIRED)).fetchone()[0]

@@ -26,7 +26,7 @@ const declared = (r: Replica): Set<string> => {
   const out = new Set<string>()
   r.files.forEach((text, p) => {
     if (!/\.(?:tex|ltx|sty|cls)$/i.test(p)) return
-    for (const m of stripComments(text.toString()).matchAll(/\\(?:usepackage|RequirePackage|documentclass|LoadClass)\s*(?:\[[^\]]*\]\s*)?\{([^}]*)\}/g)) for (const n of m[1].split(',')) out.add(n.trim())
+    for (const m of stripComments(text.toString()).matchAll(/\\(?:usepackage|RequirePackage|documentclass|LoadClass)\s*(?:\[[^\]]{0,300}\]\s*)?\{([^}]{0,2000})\}/g)) for (const n of m[1].split(',')) out.add(n.trim())
   })
   return out
 }
@@ -40,7 +40,7 @@ function addPackage(r: Replica, file: string, pkg: string): boolean {
   const clean = stripComments(yt.toString())
   const stop = clean.search(/\\begin\s*\{document\}/)
   const preamble = stop < 0 ? '' : clean.slice(0, stop)
-  const lines = [...preamble.matchAll(/\\(?:usepackage|documentclass)\s*(?:\[[^\]]*\]\s*)?\{[^}]*\}[^\n]*\n?/g)]
+  const lines = [...preamble.matchAll(/\\(?:usepackage|documentclass)\s*(?:\[[^\]]{0,300}\]\s*)?\{[^}]{0,2000}\}[^\n]*\n?/g)]
   const lastPackage = lines.at(-1)
   if (!lastPackage) return false
   const at = lastPackage.index + lastPackage[0].length

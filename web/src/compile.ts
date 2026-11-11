@@ -86,8 +86,8 @@ export function requestedFiles(files: Map<string, string | Uint8Array>): string[
   for (const [path, v] of files) {
     if (typeof v !== 'string' || !/\.(tex|sty|cls|ltx)$/i.test(path)) continue
     const src = stripComments(v)
-    for (const m of src.matchAll(/\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\]\s*)?\{([^}]*)\}/g)) add(m[1], '.sty')
-    for (const m of src.matchAll(/\\(?:documentclass|LoadClass)\s*(?:\[[^\]]*\]\s*)?\{([^}]*)\}/g)) add(m[1], '.cls')
+    for (const m of src.matchAll(/\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]{0,300}\]\s*)?\{([^}]{0,2000})\}/g)) add(m[1], '.sty')
+    for (const m of src.matchAll(/\\(?:documentclass|LoadClass)\s*(?:\[[^\]]{0,300}\]\s*)?\{([^}]{0,2000})\}/g)) add(m[1], '.cls')
     for (const m of src.matchAll(/\\bibliographystyle\s*\{([^}]*)\}/g)) add(m[1], '.bst')
     for (const m of src.matchAll(/\\use(|color|font|inner|outer)theme\s*(?:\[[^\]]*\]\s*)?\{([^}]*)\}/g)) add(`beamer${m[1]}theme${m[2].trim()}`, '.sty')
   }
@@ -204,7 +204,7 @@ async function compiling(
     let biber = false, bibtex = false
     const bib = opts.bib ?? 'auto'
     if (bib === 'auto') {
-      const usesBiblatex = /\\usepackage(\[[^\]]*\])?\{biblatex\}/.test(all)
+      const usesBiblatex = /\\usepackage(\[[^\]]{0,300}\])?\{biblatex\}/.test(all)
       biber = usesBiblatex && !/backend\s*=\s*bibtex/.test(all)
       bibtex = !biber && /\\bibliography\{/.test(all)
     } else {

@@ -244,11 +244,11 @@ export function placeOf(doc: Y.Doc, yt: Y.Text, m: Y.Map<any>): { a: number; b: 
 
 /** This tab's open typed suggestions in `file`, as hunks, and the ids of any that others' edits
  *  have since pushed together into one (to be removed when next saved). */
-export function loadHunks(doc: Y.Doc, review: Y.Map<any>, yt: Y.Text, file: string, me: string): { hunks: Hunk[]; gone: string[] } {
+export function loadHunks(doc: Y.Doc, review: Y.Map<any>, yt: Y.Text, file: string, me: string, madeHere: (id: string) => boolean = () => true): { hunks: Hunk[]; gone: string[] } {
   const shared = yt.toString()
   const hunks: Hunk[] = []
   for (const [id, m] of review) {
-    if (!(m instanceof Y.Map) || m.get('kind') !== 'suggestion' || m.get('resolved') || m.get('file') !== file || m.get('typed') !== me) continue
+    if (!(m instanceof Y.Map) || m.get('kind') !== 'suggestion' || m.get('resolved') || m.get('file') !== file || m.get('typed') !== me || !madeHere(id)) continue
     const at = placeOf(doc, yt, m)
     const quote = String(m.get('quote') ?? '')
     if (at) hunks.push({ id, a: at.a, b: at.b, text: String(m.get('text') ?? ''), base: shared.slice(at.a, at.b), conflict: !!m.get('conflict') || shared.slice(at.a, at.b) !== quote })
