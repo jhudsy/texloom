@@ -38,6 +38,7 @@ import { autoSave, createHistoryPanel } from './history'
 import { referenceDialog } from './references'
 import { watchClashes, type Clash } from './clashes'
 import { watchMerges } from './merges'
+import { githubAccountBox, runGitHub } from './githubui'
 import { shareDialog } from './sharing'
 import { folderFiles, folderPermission, folderSyncSupported, pickFolder, rememberFolder, savedFolder, startFolderSync, type FolderSync } from './foldersync'
 import { applyTemplate, chooseTemplate, importDialog, TEMPLATES, type NewProject } from './templates'
@@ -171,6 +172,8 @@ function startSettings() {
     languagePicker(),
     h('h4', {}, 'Zotero'),
     zoteroAccountBox(),
+    h('h4', {}, 'GitHub'),
+    githubAccountBox(),
     h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => { dlg.close(); refreshProjects() } }, t('Done'))))
 }
 
@@ -924,6 +927,7 @@ async function openProject(keys: Keys) {
   r.onDeleted = () => { if (!removing) location.reload() } // reopen read-only, with the notice
   watchClashes(r, (c) => { clashes.push(c); renderClashes() })
   watchMerges(r, () => me.name) // paragraphs changed by two people apart: a note in Review
+  runGitHub(r, () => me.name) // keep it in step with a GitHub repository, if it's linked to one
   r.meta.observe(renderMoved); renderMoved()
   r.onStatus = () => {
     renderStatus()

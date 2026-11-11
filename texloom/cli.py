@@ -105,6 +105,7 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
     if git or cfg.get("git"):
         from .gitsync import GitBridge
         bridge = GitBridge(d, fs, cfg["git"] if isinstance(cfg.get("git"), dict) else None)
+        bridge.name = name
         if why := await bridge.check():
             raise FolderProblem(f"--git: {why}")
     async with replica.lock:
@@ -117,6 +118,13 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
         cid = str(replica.doc.client_id)
         if replica.can_write and replica.clients.get(cid) != name:  # for "who wrote this"
             replica.local_change(lambda: replica.clients.__setitem__(cid, name))
+        if not bridge:
+            from .gitsync import clone_of_link
+            if await clone_of_link(d, replica.meta.get("github")):
+                log.warning("This folder is a git clone of %s, which the project is kept in step with on GitHub. Pulling "
+                            "here by hand while that runs can bring the same changes in twice: turn on “Keep this "
+                            "folder’s git repository in step” (texloom run --git) instead, so the app takes turns.",
+                            replica.meta.get("github", {}).get("repo"))
         async with replica.lock:
             await fs.write_out()
     later = asyncio.create_task(after_connect())

@@ -7,6 +7,7 @@ import { detectMain } from './projectfiles'
 import { t, LANGUAGES, langPref, setLangPref, type Lang } from './i18n'
 import { editorMarkup, type Markup } from './review'
 import { zoteroSection } from './zoteroui'
+import { githubSection } from './githubui'
 
 export type CompileWhere = 'browser' | 'local' | 'none'
 export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean; spell: boolean; mathPreview: boolean; checks: boolean }
@@ -224,6 +225,8 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       whose(t('Your accounts are yours alone and stay with you; what a project links to is shared with everyone in it.')),
       h('h4', {}, 'Zotero'),
       zoteroSection(r, () => prefs.name, w),
+      h('h4', {}, 'GitHub'),
+      githubSection(r, () => prefs.name, w),
     ] },
     you: { label: t('You'), body: () => [
       whose(t('Yours, in every project in this browser.')),

@@ -69,7 +69,7 @@ survives only on devices, so keep a folder copy or download a `.zip`.
 A project's **⚙ Settings** has tabs: **Project** (main file, engine, bibliography, spelling
 language, and removing it: shared with everyone in it), **Compiling** and **Editor** (this device),
 **Sync & storage** (syncing on this device; the server's copy and creation code; a copy in a folder),
-**Integrations** (Zotero; your account is yours, the links are the project's) and **You** (your name
+**Integrations** (Zotero and GitHub; your accounts are yours, the links are the project's) and **You** (your name
 and the interface language, in every project). It opens on the tab you used last.
 
 The start page lists the projects you've opened **in that browser** (your name and the
@@ -635,6 +635,33 @@ existing project: `texloom clone '<link>' ~/papers/demo`, then in that folder `g
 once.) Lines that ask to run programs, arriving from git, are pointed out as they are for
 collaborators' changes.
 
+**Keeping a GitHub repository in step from the browser** (nothing to install, nothing left
+running): project ⚙ Settings → **Integrations** → GitHub.
+- **Connect** once with a GitHub token: a fine-grained token (github.com → Settings →
+  Developer settings → Personal access tokens) for just the repositories you'll use, with
+  *Contents: Read and write*. It stays in your browser, and with a project list it follows the
+  list, encrypted; it never goes into a project.
+- **Link a repository…**: the repository (owner/name or its address), the branch, and
+  optionally a folder in it that holds the project. Files only in the repository come into the
+  project and files only in the project go to the repository; where both have a file that
+  differs, you choose whose version stays. An empty repository gets the project as its first
+  commits.
+- **Then, while the project is open:** new commits come in every minute, merged with
+  collaborators' edits (each file three ways); the project's changes go up as one commit once
+  it has been quiet for 2 minutes. **Sync now** does both at once.
+- **Clashes:** if GitHub and the project changed the same lines, nothing comes in, and Settings
+  says which files. Make one side match the other, or press **Keep the project's version**,
+  which brings in the rest of GitHub's changes and sends the project's version of the clashing
+  lines.
+- **One at a time:** everyone in the project sees the link, and it syncs from the browser of
+  whoever has connected GitHub (or the TeXLoom app, below), one copy at a time, so the same
+  commit is never brought in twice. Settings says who it is; if they close the project, another
+  takes over within two minutes.
+- **The same repository in a folder too:** turn on *Keep this folder's git repository in step*
+  (`--git`) for that folder in the TeXLoom app. It then takes turns with browsers. Pulling into
+  a synced clone of the linked repository by hand, while a browser syncs it, could bring the
+  same changes in twice; the app warns about such a folder.
+
 ### Agents (MCP)
 
 `texloom mcp` is an [MCP](https://modelcontextprotocol.io) server, so Claude Code, Claude
@@ -769,6 +796,7 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | `texloom/crypto.py` | keys, links, AES-GCM, Ed25519 (mirrors `web/src/crypto.ts`) |
 | `texloom/replica.py` | folder helper's replica: pycrdt document, outbox, peer handshake, blobs |
 | `texloom/folder.py` | two-way folder ⇄ CRDT sync, path safety, locked-down latexmk |
+| `texloom/gitsync.py` | `--git`: a synced folder's git repository kept in step, taking turns with browsers |
 | `texloom/cli.py` | command line |
 | `texloom/mcp.py` | MCP server (stdio JSON-RPC): tools, presence, comments and suggestions |
 | `server/arxiv.py`, `server/admin.py` | arXiv source import proxy; read-only admin page |
@@ -787,6 +815,7 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | `web/src/merges.ts`, `texloom/merges.py` | notes paragraphs two people changed while apart, to check |
 | `web/src/latexlog.ts`, `synctex.ts` | log parsing into problems; SyncTeX |
 | `web/src/templates.ts`, `references.ts`, `pasteimage.ts` | templates and import; DOI/arXiv references; pasted images |
+| `web/src/zotero.ts`, `github.ts` (and `*ui.ts`) | integrations: a `.bib` file from Zotero; keeping a GitHub repository in step |
 | `web/src/sharing.ts`, `crypto.ts` | links, personal links, revocation, moving to new keys |
 | `web/src/foldersync.ts` | folder sync from the browser (File System Access API) |
 | `web/sw-template.js` | service worker (offline app) |

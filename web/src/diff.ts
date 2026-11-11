@@ -100,8 +100,19 @@ const joinLines = (lines: string[], from: number, to: number) => { let s = ''; f
  *  inserted at one place is kept twice only if it differs. Same rules as merge3 in
  *  texloom/folder.py. */
 export function merge3(base: string, theirs: string, ours: string): string {
-  if (ours === base || theirs === ours) return theirs
-  if (theirs === base) return ours
+  return merge3With(base, theirs, ours).text
+}
+
+/** As merge3, but null where both sides changed the same lines differently (git would call it a
+ *  conflict), instead of keeping ours there. */
+export function merge3Strict(base: string, theirs: string, ours: string): string | null {
+  const m = merge3With(base, theirs, ours)
+  return m.clashes ? null : m.text
+}
+
+function merge3With(base: string, theirs: string, ours: string): { text: string; clashes: number } {
+  if (ours === base || theirs === ours) return { text: theirs, clashes: 0 }
+  if (theirs === base) return { text: ours, clashes: 0 }
   const b = base.split('\n'), t = theirs.split('\n'), o = ours.split('\n')
   const ht = hunks(base, theirs), ho = hunks(base, ours)
   const at = (hs: Hunk[], i: number, end: boolean) => { // base line i (never inside a hunk) in the other text
@@ -114,7 +125,7 @@ export function merge3(base: string, theirs: string, ours: string): string {
   }
   const all = [...ht.map((h) => ({ ...h, side: 't' })), ...ho.map((h) => ({ ...h, side: 'o' }))]
     .sort((x, y) => x.i1 - y.i1 || x.i2 - y.i2)
-  let out = '', pos = 0, k = 0
+  let out = '', pos = 0, k = 0, clashes = 0
   while (k < all.length) {
     let s = all[k].i1, e = all[k].i2
     const sides = new Set([all[k].side]); k++
@@ -123,10 +134,11 @@ export function merge3(base: string, theirs: string, ours: string): string {
     }
     out += joinLines(b, pos, s)
     const mine = joinLines(o, at(ho, s, false), at(ho, e, true)), other = joinLines(t, at(ht, s, false), at(ht, e, true))
+    if (sides.size > 1 && mine !== other) clashes++
     out += sides.size === 1 ? (sides.has('o') ? mine : other) : s === e && mine !== other ? other + mine : mine
     pos = e
   }
-  return out + joinLines(b, pos, b.length)
+  return { text: out + joinLines(b, pos, b.length), clashes }
 }
 
 /** Turn a Y.Text from `old` (its current content) into `next` with one edit per changed run of

@@ -13,6 +13,7 @@ import { canon, emptyList, emptySettings, emptyTags, forgetOldRemovals, hmac, Li
 import { projects } from './projects'
 import { creationCode } from './replica'
 import { zoteroAccount } from './zotero'
+import { githubAccount } from './github'
 import { tags } from './tags'
 
 /** The message is a code: needs-code, code-expired, list-full, list-retired, password-taken,
@@ -85,7 +86,7 @@ async function exchangeTags(secret: Uint8Array, list: ListDoc): Promise<boolean>
 // ---- settings: the creation code follows the list -----------------------------------------
 const settingsKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 'texloom list settings'))
 
-/** Settings that follow the list: this browser's creation code and Zotero account, each with when
+/** Settings that follow the list: this browser's creation code and Zotero and GitHub accounts, each with when
  *  it was set (one from before that was recorded counts as older than any that was). */
 const SETTINGS: Record<string, { get(): string; at(): number; set(v: string, at: number): void }> = {
   code: { get: () => creationCode.get(), at: () => creationCode.at(), set: (v, at) => creationCode.set(v, at) },
@@ -93,6 +94,11 @@ const SETTINGS: Record<string, { get(): string; at(): number; set(v: string, at:
     get: () => { const a = zoteroAccount.get(); return a ? JSON.stringify(a) : '' },
     at: () => zoteroAccount.at(),
     set: (v, at) => { try { zoteroAccount.set(v ? JSON.parse(v) : null, at) } catch {} },
+  },
+  github: {
+    get: () => { const a = githubAccount.get(); return a ? JSON.stringify(a) : '' },
+    at: () => githubAccount.at(),
+    set: (v, at) => { try { githubAccount.set(v ? JSON.parse(v) : null, at) } catch {} },
   },
 }
 

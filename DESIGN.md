@@ -590,6 +590,44 @@ refresh it. A refresh exports the collection's top-level items as BibTeX or BibL
 request, using `Total-Results`) and applies the difference to the file (`applyText`), directly
 even in suggest mode, as the file is generated. Keys are Zotero's own.
 
+## GitHub
+
+`web/src/github.ts` keeps a project in step with a GitHub repository through api.github.com,
+from the browser. As for Zotero, the **account** (a token and its login) is the person's
+(`localStorage`, and the project list's settings entry `github`); the **link** is the
+project's: `meta.github = {repo, branch, dir, head, by, at, blocked, clash}`, where `head` is
+the commit last brought in or sent, the base for the next three-way merge, whoever syncs.
+
+- **Bringing in** (every minute): for each kept file GitHub changed between `head` and the
+  branch's commit: if the project has GitHub's version already, nothing; if the project still
+  has `head`'s version, GitHub's; if both changed a text file, `merge3Strict` (diff.ts: null
+  where both changed the same lines differently); anything else clashes. One clash and nothing
+  comes in: `blocked` and `clash` record the commit and files until the branch moves on, or
+  someone keeps the project's version (`merge3`, ours where they clash). The decisions are
+  made first (fetching what they need), then applied in one change, after checking that
+  neither `head` nor the files changed meanwhile.
+- **Sending** (after 2 minutes quiet, or Sync now): files whose git blob id (SHA-1 of
+  `blob <size>\0…`) differs from `head`'s tree go up as blobs, then one tree (`base_tree` =
+  `head`'s, deletions as `sha: null`), one commit (parent `head`) and a fast-forward ref update.
+  GitHub having moved (422) means bringing that in first. An empty repository takes no git-API
+  writes (409): its first commit goes through the contents API, then the rest as above.
+- **Kept files:** inside `dir`, names `cleanPath` accepts, not build output, at most 50 MB.
+  Repository files TeXLoom wouldn't keep are left alone (sends build on `base_tree`).
+- **One at a time:** two copies merging the same commit at once would insert its text twice
+  (Yjs keeps both insertions). `meta.githubLease = {id, by, n}` names the copy that syncs; it
+  rewrites it (n+1) every 30 s, and another copy takes it only after seeing no change for
+  100 s by its own clock (so clocks needn't agree), and acts 10 s after claiming, once any
+  rival claim has met it (the map keeps one). Ids are per tab (sessionStorage, so a reload
+  resumes) and, for the TeXLoom app, per folder (`.texloom/git-device`). A closing tab gives
+  the lease up if it can.
+- **The app's git bridge** (`texloom/gitsync.py`, `--git`) takes part when its folder's
+  upstream is the linked repository and branch (and `dir` is empty): it brings in, commits and
+  pushes only while holding the lease, and records the commit it matches as `head`. While it
+  waits, collaborators' changes (including those a browser brought in from GitHub) reach its
+  folder through TeXLoom as usual; when its turn comes, git merges the identical change once.
+  A synced folder that is a plain clone of the linked repository, without `--git`, gets a
+  warning: pulling there by hand while a browser syncs could bring changes in twice.
+
 ## Copying a project
 
 `web/src/copyproject.ts` makes a new project (new keys, the copier as owner) from the current state
