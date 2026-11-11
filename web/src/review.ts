@@ -15,9 +15,17 @@ export interface Item {
   id: string; kind: Kind; file: string; quote: string; text: string; by: string; at: number
   resolved: boolean; outcome?: 'accepted' | 'rejected'; replies: { by: string; at: number; text: string }[]
   conflict?: boolean // someone changed the text it replaces while it was being typed (suggest mode)
+  merge?: string[] // a note to check a paragraph changed by `by` and these people while apart (merges.ts)
 }
 
 // ---- data ---------------------------------------------------------------------
+/** What a note says (also shown in the card, in the reader's language). */
+export function mergeText(me: string, others: string[]): string {
+  return others.length
+    ? t('{{me}} and {{others}} both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.', { me, others: others.join(', ') })
+    : t('{{me}} and someone else both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.', { me })
+}
+
 /** Saves what's being typed in suggest mode (suggestmode.ts registers it), so that settling or
  *  listing suggestions sees the latest. */
 let flushTyped = () => {}
@@ -47,6 +55,7 @@ export function itemOf(r: Replica, id: string): Item | null {
     id, kind: m.get('kind') === 'suggestion' ? 'suggestion' : 'comment', file: String(m.get('file') ?? ''),
     quote: String(m.get('quote') ?? ''), text: String(m.get('text') ?? ''), by: String(m.get('by') ?? '?').slice(0, 64),
     at: Number(m.get('at')) || 0, resolved: !!m.get('resolved'), outcome: m.get('outcome'), conflict: !!m.get('conflict'),
+    merge: Array.isArray(m.get('merge')) ? (m.get('merge') as unknown[]).filter((x): x is string => typeof x === 'string').map((x) => x.slice(0, 64)).slice(0, 20) : undefined,
     replies: replies instanceof Y.Array ? replies.toArray().filter((x: any) => x && typeof x.text === 'string') : [],
   }
 }
@@ -180,7 +189,8 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
       if (!rg) continue
       const from = at(rg.from), to = at(rg.to)
       if (i.kind === 'comment') {
-        if (to > from) ranges.push(Decoration.mark({ class: 'cm-comment', attributes: { 'data-review': i.id, title: `${i.by}: ${i.text.slice(0, 200)}` } }).range(from, to))
+        const title = i.merge ? mergeText(i.by, i.merge) : `${i.by}: ${i.text.slice(0, 200)}`
+        if (to > from) ranges.push(Decoration.mark({ class: i.merge ? 'cm-merge' : 'cm-comment', attributes: { 'data-review': i.id, title } }).range(from, to))
         continue
       }
       if (markup === 'simple') { // the text as it is, underlined where a change is suggested
@@ -403,12 +413,12 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
       reply(r, it.id, replyIn.value, host.userName())
       replyIn.value = ''
     })
-    return h('div', { class: `rcard ${it.kind} ${it.resolved ? 'resolved' : ''} ${it.id === focused ? 'focused' : ''}`, 'data-id': it.id },
+    return h('div', { class: `rcard ${it.kind}${it.merge ? ' merge' : ''} ${it.resolved ? 'resolved' : ''} ${it.id === focused ? 'focused' : ''}`, 'data-id': it.id },
       h('div', { class: 'rhead', onclick: go, title: rg ? t('Show in the editor') : t('The text it referred to was deleted') },
-        h('span', { class: 'rkind' }, it.kind === 'comment' ? t('💬 Comment') : t('✎ Suggestion')),
+        h('span', { class: 'rkind' }, it.merge ? t('⚠ Check merge') : it.kind === 'comment' ? t('💬 Comment') : t('✎ Suggestion')),
         h('span', { class: 'rloc' }, it.file), h('span', { class: 'muted small' }, ` · ${it.by} · ${when(it.at)}`)),
       it.kind === 'comment'
-        ? h('div', {}, h('div', { class: 'rquote' }, it.quote.slice(0, 300)), h('div', { class: 'rtext' }, it.text))
+        ? h('div', {}, h('div', { class: 'rquote' }, it.quote.slice(0, 300)), h('div', { class: 'rtext' }, it.merge ? mergeText(it.by, it.merge) : it.text))
         : suggestionDiff(it.quote, it.text),
       it.resolved ? h('div', { class: 'muted small' }, it.outcome ? (it.outcome === 'accepted' ? t('Suggestion accepted') : t('Suggestion rejected')) : t('Resolved')) : null,
       ...it.replies.map((rp) => h('div', { class: 'rreply' }, h('b', {}, String(rp.by).slice(0, 64)), ` ${rp.text}`, h('span', { class: 'muted small' }, ` · ${when(rp.at)}`))),

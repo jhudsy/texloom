@@ -25,9 +25,10 @@ import tempfile
 import time
 from pathlib import Path
 
-from pycrdt import Array, Assoc, Map, StickyIndex, Text
+from pycrdt import Array, Assoc, Map, Text
 
 from . import __version__
+from .anchors import index_in
 from .crypto import Keys, b64e
 from .folder import apply_text
 from .paths import latexmk_command, main_file, safe_rel, tex_env
@@ -108,6 +109,10 @@ class Project:
         s = str(yt)
         start = max(0, min(start, len(s)))
         end = start if end is None else max(start, min(end, len(s)))
+        if not s.isascii():  # pycrdt would place the cursor wrongly (anchors.py): just the file
+            self.where = {"file": path}
+            asyncio.get_event_loop().create_task(self.announce())
+            return
         try:
             a = self._sticky(yt, s, start, start == len(s))
             h = self._sticky(yt, s, end, end == len(s) or end > start)
@@ -123,16 +128,11 @@ class Project:
         return yt.sticky_index(u16(s, i), Assoc.AFTER)
 
     def _anchored(self, path: str, s: str, start) -> int | None:
-        """Where a comment or suggestion starts now (a Python index into `s`), from its stored anchor."""
-        if not isinstance(start, (bytes, bytearray)) or not start:
+        """Where a comment or suggestion starts now (a Python index into `s`), from its stored
+        anchor; None when that can't be told reliably (non-ASCII text: then use the quote)."""
+        if not isinstance(start, (bytes, bytearray)) or path not in self.r.files:
             return None
-        try:
-            k = StickyIndex.decode(bytes(start), self.r.files[path]).get_index()
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except BaseException:  # noqa: BLE001 - a damaged anchor (pycrdt panics, which isn't an Exception): use the quote
-            return None
-        return len(s.encode("utf-16-le")[: 2 * k].decode("utf-16-le", errors="ignore")) if k >= 0 else None
+        return index_in(self.r.files[path], s, bytes(start))  # ASCII: UTF-16 offsets are string indices
 
     # --- helpers -------------------------------------------------------------------
     def text(self, path: str) -> str:
@@ -250,13 +250,16 @@ class Project:
         yt = self.r.files[path]
         s = str(yt)
         iid = f"{secrets.token_hex(4)}-{secrets.token_hex(2)}-4{secrets.token_hex(2)[1:]}-a{secrets.token_hex(2)[1:]}-{secrets.token_hex(6)}"
-        a = self._sticky(yt, s, start, start == len(s))
-        b = self._sticky(yt, s, end, True) if end > 0 else self._sticky(yt, s, end, False)
-        item = Map({
+        fields = {
             "kind": kind, "file": path, "text": text[:20000], "by": self.name, "at": int(time.time() * 1000),
-            "quote": s[start:end][:20000], "resolved": False,
-            "start": a.encode(), "end": b.encode(), "replies": Array(),
-        })
+            "quote": s[start:end][:20000], "resolved": False, "replies": Array(),
+        }
+        # pycrdt places anchors wrongly in non-ASCII text (anchors.py): there, the item goes without,
+        # and the web app anchors it where its quote is (merges.ts)
+        if s.isascii():
+            fields["start"] = self._sticky(yt, s, start, start == len(s)).encode()
+            fields["end"] = (self._sticky(yt, s, end, True) if end > 0 else self._sticky(yt, s, end, False)).encode()
+        item = Map(fields)
         self.r.local_change(lambda: self.review.__setitem__(iid, item))
         self.point_at(path, start, end)
         return iid

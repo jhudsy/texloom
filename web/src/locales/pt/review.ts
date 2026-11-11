@@ -44,6 +44,9 @@ const pt: Catalog = {
   "{{name}} suggests “{{old}}” → “{{new}}”": "{{name}} sugere “{{old}}” → “{{new}}”",
   "Suggest mode: what you type in the editor becomes suggestions for others to accept or reject (⌘⌥E / Ctrl+Alt+E)": "Modo sugestão: o que você digita no editor vira sugestões para os outros aceitarem ou recusarem (⌘⌥E / Ctrl+Alt+E)",
   "No open comments or suggestions. Select text in the editor and choose 💬 Comment, or turn on ✎ Suggest mode and type.": "Nenhum comentário ou sugestão em aberto. Selecione texto no editor e escolha 💬 Comentar, ou ative o ✎ Modo sugestão e digite.",
+  "⚠ Check merge": "⚠ Verificar a fusão",
+  "{{me}} and {{others}} both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} e {{others}} alteraram este parágrafo cada um por seu lado, e as alterações foram combinadas. Verifique se o texto está como pretendido.",
+  "{{me}} and someone else both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} e outra pessoa alteraram este parágrafo cada um por seu lado, e as alterações foram combinadas. Verifique se o texto está como pretendido.",
 }
 
 export default pt

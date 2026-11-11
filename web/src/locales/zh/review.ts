@@ -44,6 +44,9 @@ const zh: Catalog = {
   "{{name}} suggests “{{old}}” → “{{new}}”": "{{name}} 建议“{{old}}”→“{{new}}”",
   "Suggest mode: what you type in the editor becomes suggestions for others to accept or reject (⌘⌥E / Ctrl+Alt+E)": "建议模式：你在编辑器中输入的内容会成为建议，由他人接受或拒绝（⌘⌥E / Ctrl+Alt+E）",
   "No open comments or suggestions. Select text in the editor and choose 💬 Comment, or turn on ✎ Suggest mode and type.": "没有未处理的评论或建议。在编辑器中选择文本并点击 💬 评论，或者打开 ✎ 建议模式 后直接输入。",
+  "⚠ Check merge": "⚠ 检查合并",
+  "{{me}} and {{others}} both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} 和 {{others}} 在彼此未同步时都修改了这一段，修改已被合并。请检查这段文字是否符合原意。",
+  "{{me}} and someone else both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} 和另一个人在彼此未同步时都修改了这一段，修改已被合并。请检查这段文字是否符合原意。",
 }
 
 export default zh

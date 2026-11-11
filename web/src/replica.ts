@@ -156,6 +156,15 @@ export class Replica {
   /** A transaction applied changes received from others. */
   isRemote(origin: unknown): boolean { return origin === REMOTE }
 
+  /** A transaction made changes here (not received, and not this browser's copy loading). */
+  isLocal(origin: unknown): boolean { return origin !== REMOTE && origin !== this.persistence }
+
+  /** Changes made now don't reach anyone yet: offline, still catching up, or sync-only with nobody else online. */
+  get apart(): boolean { return !this.synced || (this.storage === 'relay' && this.peers === 0) }
+
+  /** Everything made here has reached the server (or, sync-only, the others online), and theirs is in. */
+  get exchanged(): boolean { return !this.apart && this.pending === 0 }
+
   get storage(): StorageMode { return this.meta.get('storage') === 'relay' ? 'relay' : 'server' }
 
   async open(): Promise<void> {

@@ -44,6 +44,9 @@ const de: Catalog = {
   "{{name}} suggests “{{old}}” → “{{new}}”": "{{name}} schlägt vor: „{{old}}“ → „{{new}}“",
   "Suggest mode: what you type in the editor becomes suggestions for others to accept or reject (⌘⌥E / Ctrl+Alt+E)": "Vorschlagsmodus: Was Sie im Editor tippen, wird zu Vorschlägen, die andere annehmen oder ablehnen (⌘⌥E / Strg+Alt+E)",
   "No open comments or suggestions. Select text in the editor and choose 💬 Comment, or turn on ✎ Suggest mode and type.": "Keine offenen Kommentare oder Vorschläge. Markieren Sie Text im Editor und wählen Sie 💬 Kommentieren – oder schalten Sie den ✎ Vorschlagsmodus ein und tippen Sie.",
+  "⚠ Check merge": "⚠ Zusammenführung prüfen",
+  "{{me}} and {{others}} both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} und {{others}} haben diesen Absatz getrennt voneinander geändert, und die Änderungen wurden zusammengeführt. Prüfen Sie, ob er sich wie beabsichtigt liest.",
+  "{{me}} and someone else both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} und jemand anderes haben diesen Absatz getrennt voneinander geändert, und die Änderungen wurden zusammengeführt. Prüfen Sie, ob er sich wie beabsichtigt liest.",
 }
 
 export default de

@@ -37,6 +37,7 @@ import { ProjectIndex } from './latex'
 import { autoSave, createHistoryPanel } from './history'
 import { referenceDialog } from './references'
 import { watchClashes, type Clash } from './clashes'
+import { watchMerges } from './merges'
 import { shareDialog } from './sharing'
 import { folderFiles, folderPermission, folderSyncSupported, pickFolder, rememberFolder, savedFolder, startFolderSync, type FolderSync } from './foldersync'
 import { applyTemplate, chooseTemplate, importDialog, TEMPLATES, type NewProject } from './templates'
@@ -922,6 +923,7 @@ async function openProject(keys: Keys) {
   }
   r.onDeleted = () => { if (!removing) location.reload() } // reopen read-only, with the notice
   watchClashes(r, (c) => { clashes.push(c); renderClashes() })
+  watchMerges(r, () => me.name) // paragraphs changed by two people apart: a note in Review
   r.meta.observe(renderMoved); renderMoved()
   r.onStatus = () => {
     renderStatus()

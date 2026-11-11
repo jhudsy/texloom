@@ -8,7 +8,9 @@ no copy at all. No accounts: you share a link. (The command-line tools are calle
 
 - Live editing with other people's cursors (click someone's avatar to jump to them);
   offline edits merge automatically on reconnect. Two files created under the same name while
-  apart are both kept (one as `name (conflict).tex`). Installs as an offline-capable app.
+  apart are both kept (one as `name (conflict).tex`), and a paragraph two people both changed
+  while apart gets a **⚠ Check merge** note in the Review tab, since word-by-word merging can
+  leave it reading oddly. Installs as an offline-capable app.
 - Compile in the browser (TeX Live 2026 in WebAssembly), or with your own TeX installation.
   Errors are listed with clickable locations; SyncTeX jumps between source and PDF
   (the → / ← arrows on the editor/PDF divider, ⌘⌥→ / ⌘⌥←, or double-click / right-click the PDF).
@@ -782,6 +784,7 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | `web/src/suggestmode.ts`, `suggestcore.ts` | suggest mode: typing that becomes suggestions |
 | `web/src/navigate.ts`, `spell.ts`, `mathpreview.ts`, `checks.ts` | search and replace, outline, word count; spell check; equation preview; common mistakes |
 | `web/src/clashes.ts` | keeps both files when two people create the same name while apart |
+| `web/src/merges.ts`, `texloom/merges.py` | notes paragraphs two people changed while apart, to check |
 | `web/src/latexlog.ts`, `synctex.ts` | log parsing into problems; SyncTeX |
 | `web/src/templates.ts`, `references.ts`, `pasteimage.ts` | templates and import; DOI/arXiv references; pasted images |
 | `web/src/sharing.ts`, `crypto.ts` | links, personal links, revocation, moving to new keys |

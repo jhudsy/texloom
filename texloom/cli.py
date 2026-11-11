@@ -96,6 +96,9 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
             "shell_escape": cfg["shell_escape"] or shell_escape,
             "label": cfg["label"] or f"latexmk on {platform.node().split('.')[0]}"}
     fs = FolderSync(d, replica, compile_ or cfg["compile"], opts)
+    name = cfg.get("name") or f"folder copy on {platform.node().split('.')[0]}"
+    from .merges import MergeWatch
+    merges = MergeWatch(replica, lambda: name, d / STATE)  # before ingesting: edits made while stopped count as apart
     if (state := CURRENT.get()) is not None:  # running under the app or `texloom start`
         state.replica, state.fs = replica, fs
     bridge = None
@@ -112,7 +115,6 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
     async def after_connect() -> None:  # retry anything that couldn't be fetched offline
         await replica.synced.wait()
         cid = str(replica.doc.client_id)
-        name = cfg.get("name") or f"folder copy on {platform.node().split('.')[0]}"
         if replica.can_write and replica.clients.get(cid) != name:  # for "who wrote this"
             replica.local_change(lambda: replica.clients.__setitem__(cid, name))
         async with replica.lock:
@@ -135,9 +137,10 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
         log.info(f"git: committing project changes after {bridge.quiet:g}s of quiet"
               + (f", fetching {up} every {bridge.interval:g}s and pushing to it." if up else " (no upstream: commits stay local)."))
     try:
-        await asyncio.gather(conn, fs.watch(), *([bridge.loop()] if bridge else []))
+        await asyncio.gather(conn, fs.watch(), merges.run(), *([bridge.loop()] if bridge else []))
     finally:
         later.cancel()
+        merges._save()
         replica.save()
 
 

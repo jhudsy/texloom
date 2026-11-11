@@ -431,6 +431,8 @@ dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: cen
 
 /* comments and suggested changes */
 .cm-comment { background: color-mix(in srgb, var(--comment) 26%, transparent); border-bottom: 2px solid var(--comment); cursor: pointer; }
+/* a paragraph changed by two people apart (merges.ts) */
+.cm-merge { background: color-mix(in srgb, var(--del) 10%, transparent); border-bottom: 2px dashed var(--del); cursor: pointer; }
 .cm-suggest-del { text-decoration: line-through; text-decoration-color: var(--del); color: color-mix(in srgb, var(--del) 75%, var(--fg)); background: color-mix(in srgb, var(--del) 12%, transparent); cursor: pointer; }
 .cm-suggest-ins { color: var(--ins); background: color-mix(in srgb, var(--ins) 15%, transparent); border-radius: 2px; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--ins) 60%, transparent); }
 /* suggest mode: the words you add are real text in your view; the words you remove are shown struck */
@@ -454,6 +456,8 @@ dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: cen
 .rcard.suggestion { border-left-color: var(--suggest); background: color-mix(in srgb, var(--suggest) 7%, var(--bg)); }
 .rkind { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--comment); }
 .rcard.suggestion .rkind { color: var(--suggest); }
+.rcard.merge { border-left-color: var(--del); background: color-mix(in srgb, var(--del) 6%, var(--bg)); }
+.rcard.merge .rkind { color: var(--del); }
 .rcard.resolved { opacity: .6; }
 .rcompose { padding: 8px; border-bottom: 1px solid var(--line); background: var(--panel); flex-shrink: 0; max-height: 60%; overflow: auto; }
 .rcompose[hidden] { display: none; }

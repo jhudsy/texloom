@@ -437,6 +437,31 @@ accept and reject, the assistant, the MCP tools) needs nothing new.
   and from a collaborator, checking that the view always equals the shared text with the hunks
   applied, that saving and loading round-trips, and that accepting everything gives what was typed.
 
+## Paragraphs changed apart
+
+Yjs merges concurrent edits character by character, so two people rewriting the same sentence
+while apart can end up with their words interleaved. Nothing is lost, but it can read oddly, so
+such paragraphs get a note in Review (`web/src/merges.ts`, `texloom/merges.py`, same rules):
+
+- **Edits made apart.** While a copy's changes can't reach anyone (offline; connected but not
+  yet caught up; or sync-only with nobody else online, web only), each place it edits is
+  remembered: the web app as Yjs relative positions, the desktop as UTF-8 byte ranges moved
+  along with every change (pycrdt's deltas are exact; its sticky indices aren't, see Known
+  limitations). They are kept across restarts (localStorage; `.texloom/apart.json`, with the
+  text's hash). The desktop counts edits made while it wasn't running as long apart.
+- **Merged into.** When changes from others then land in a paragraph (text between blank lines;
+  only the lines changed if it is over 3000 characters) holding one of those places, and that
+  edit is at least 30 s old (brief reconnections don't count), the paragraph is noted.
+- **The note.** After changes have stopped arriving for 1.5 s: a review item of kind `comment`
+  with `merge: [names]` (the others whose changes came in, from `clients`), `by` the noticing
+  copy's name, and the paragraph as `quote`; one per paragraph, not if one is already open
+  there. Shown as **⚠ Check merge**, highlighted in the editor, resolved like a comment.
+  Only the copy that was apart notices; the one that stayed online sees the note arrive. The
+  desktop's notes have no anchors (pycrdt): the web app anchors any item that has none where
+  its quote occurs exactly once.
+- **Forgetting.** Once everything has been exchanged (caught up, nothing waiting to be sent)
+  and nothing has arrived for 10 s, the remembered places are dropped.
+
 ## History
 
 The Yjs document keeps tombstones of deleted text, so a version needs only a
@@ -588,7 +613,11 @@ symlinks) into a new folder and shares that as a new project with the same setti
   content on both sides is not a clash. The folder helper (pycrdt) can't see item origins,
   so a version created there and lost while no browser held it is not restored.
 - Long divergent offline edits of the same paragraph merge character-wise and may
-  interleave. Plan: highlight concurrently-edited regions after a sync for review.
+  interleave. They are flagged for review (see *Paragraphs changed apart*), not prevented.
+- pycrdt (0.14) places sticky indices wrongly in non-ASCII text made of several pieces (it
+  mixes UTF-8 and UTF-16 offsets), so the Python side reads anchors only in ASCII text and
+  makes them only in a freshly created text (`texloom/anchors.py`). Comments and suggestions
+  it adds to non-ASCII text carry just their quote, and the web app anchors them there.
 - Self-declared display names. Personal links tie edits to a key the owner named, but
   revoking stops writing, not reading, without re-keying.
 - Idle eviction (`--evict-idle-days`) makes the server copy a cache: sequence numbers
