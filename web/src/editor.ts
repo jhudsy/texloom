@@ -2,7 +2,7 @@
 // support), or a preview for images and PDFs.
 import * as Y from 'yjs'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorState, Compartment, RangeSet, StateEffect, StateField } from '@codemirror/state'
+import { EditorState, Compartment, RangeSet, StateEffect, StateField, Text } from '@codemirror/state'
 import { Decoration, gutter, GutterMarker, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { StreamLanguage } from '@codemirror/language'
 import { stex } from '@codemirror/legacy-modes/mode/stex'
@@ -22,7 +22,7 @@ import { lineAuthors } from './history'
 import type { Problem } from './latexlog'
 import { keymap } from '@codemirror/view'
 import { Prec, type Extension } from '@codemirror/state'
-import { setSuggestingFlag, suggestSession, type SuggestSession } from './suggestmode'
+import { suggestMode, suggestSession, type SuggestSession } from './suggestmode'
 import type { ReviewMap } from './review'
 
 export interface EditorPane {
@@ -37,15 +37,12 @@ export interface EditorPane {
   gotoOffset(pos: number): void
   /** What the user is looking at. Lines are the file's; while suggesting, `selection` is the text as
    *  shown (with the user's suggestions) and `fileSelection` what the file itself has there. */
-  context(): { file: string; selection: string; fromLine: number; toLine: number; suggesting: boolean; fileSelection?: string } | null
+  context(): { file: string; selection: string; fromLine: number; toLine: number; line: number; suggesting: boolean; fileSelection?: string } | null
   onContextChange(f: () => void): void
   selection(): { file: string; from: number; to: number; text: string } | null
   reveal(from: number, to: number): void
   refreshSpell(): void
   /** Suggest mode: typing makes suggestions instead of changing the file. */
-  setSuggesting(on: boolean): void
-  /** Save what's been typed while suggesting. */
-  flush(): void
 }
 
 // A line briefly highlighted after jumping to it (from the PDF, say).
@@ -64,9 +61,6 @@ export interface EditorHooks {
   onSync: () => void // show the current line in the PDF
   problems: (file: string) => Problem[] // last compile's problems for a file
   review: (file: string, map?: ReviewMap) => Extension // comment/suggestion highlights
-  onReview: (kind: 'comment' | 'suggestion') => void // ⌘⌥M; right-click
-  onSymbols: () => void // ⌘⌥S
-  onToggleSuggest: () => void // ⌘⌥E
   userName: () => string
   menu: EditorMenuHost // right-click on selected text and LaTeX commands
   addReference: AddReference // from \cite{ completion
@@ -87,7 +81,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
   let mathExtension: Extension | undefined
   const spellExt = () => { const sp = hooks.spell(); return spellcheck(sp.on, sp.lang, isTexFile(current)) }
   let authorsOn = false
-  let suggesting = false
+  let suggesting = suggestMode.on() && writable // what the editor shows now
   let session: SuggestSession | null = null // while suggesting in a text file
 
   // how many words are selected, in the corner of the editor while anything is
@@ -168,7 +162,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     if (yt) {
       // Suggesting, the editor shows its own view of the file (suggestmode.ts) instead of
       // editing the shared text, so collaborators' cursors aren't shown meanwhile.
-      const s = session = suggesting && writable ? suggestSession(r, path, yt, hooks.userName, hooks.onToggleSuggest) : null
+      const s = session = suggesting ? suggestSession(r, path, yt, hooks.userName, () => suggestMode.set(false)) : null
       view = new EditorView({
         parent: el,
         state: EditorState.create({
@@ -195,13 +189,13 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
                 if (!(writable && e.code === 'KeyE' && e.altKey && (e.metaKey || e.ctrlKey))) return false
                 if (e.getModifierState?.('AltGraph')) return false // AltGr+E types € on many keyboards
                 e.preventDefault()
-                hooks.onToggleSuggest()
+                suggestMode.set(!suggestMode.on())
                 return true
               },
             })),
             Prec.high(keymap.of([
-              { key: 'Mod-Alt-m', run: () => { hooks.onReview('comment'); return true } },
-              { key: 'Mod-Alt-s', run: () => { if (writable) hooks.onSymbols(); return writable }, preventDefault: true },
+              { key: 'Mod-Alt-m', run: () => { hooks.menu.review('comment'); return true } },
+              { key: 'Mod-Alt-s', run: () => { if (writable) hooks.menu.symbols(); return writable }, preventDefault: true },
             ])),
             EditorState.readOnly.of(!writable),
             EditorView.editable.of(writable),
@@ -221,38 +215,44 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     }).catch((e) => box.append(h('p', { class: 'err' }, String(e))))
   }
 
-  // While suggesting, the editor's positions are in its own view of the file: everything outside
-  // the editor (comments, search, the assistant, compile errors) uses the shared file's.
-  const lineIn = (text: string, pos: number) => { let n = 1; for (let i = text.indexOf('\n'); i >= 0 && i < pos; i = text.indexOf('\n', i + 1)) n++; return n }
+  // While suggesting, the editor shows its own view of the file: everything outside the editor
+  // (comments, search, the assistant, compile errors) uses the shared file's positions and lines.
+  let sharedText: { of: string; text: Text } | null = null // the shared file as lines, kept while it's the same
+  /** The shared file, and where its positions are in the editor (the same place when not suggesting). */
+  function fileMap(): { text: Text; toView(x: number): number; toShared(v: number, bias?: -1 | 1): number } | null {
+    if (!view) return null
+    if (!session) return { text: view.state.doc, toView: (x) => x, toShared: (v) => v }
+    const shared = session.shared()
+    if (sharedText?.of !== shared) sharedText = { of: shared, text: Text.of(shared.split('\n')) }
+    return { text: sharedText.text, toView: session.toView, toShared: session.toShared }
+  }
+  const lineStart = (text: Text, line: number) => text.line(Math.max(1, Math.min(text.lines, line)))
+
   /** Compile problems are on the file's lines: while suggesting, find them in the view. */
   function sharedToViewLines(problems: Problem[]): Problem[] {
-    if (!session || !view) return problems
-    const shared = session.shared(), doc = view.state.doc
-    const starts = [0]
-    for (let i = shared.indexOf('\n'); i >= 0; i = shared.indexOf('\n', i + 1)) starts.push(i + 1)
-    return problems.map((p) => p.line == null ? p : { ...p, line: doc.lineAt(Math.min(doc.length, session!.toView(starts[Math.min(p.line, starts.length) - 1]))).number })
+    const fm = session && fileMap()
+    if (!fm || !view) return problems
+    const doc = view.state.doc
+    return problems.map((p) => p.line == null ? p : { ...p, line: doc.lineAt(Math.min(doc.length, fm.toView(lineStart(fm.text, p.line).from))).number })
   }
 
   /** The selection in the shared file. */
   function sharedSelection(): { from: number; to: number; text: string } | null {
-    if (!view) return null
+    const fm = fileMap()
+    if (!fm || !view) return null
     const sel = view.state.selection.main
-    if (!session) return { from: sel.from, to: sel.to, text: view.state.doc.sliceString(sel.from, sel.to) }
-    const from = session.toShared(sel.from, -1), to = sel.empty ? from : Math.max(from, session.toShared(sel.to, 1))
-    return { from, to, text: session.shared().slice(from, to) }
+    const from = fm.toShared(sel.from, -1), to = sel.empty ? from : Math.max(from, fm.toShared(sel.to, 1))
+    return { from, to, text: fm.text.sliceString(from, to) }
   }
 
   function context() {
     if (!current) return null
-    const sel = sharedSelection()
-    if (!sel) return { file: current, selection: '', fromLine: 0, toLine: 0, suggesting: false }
-    if (!session) {
-      const doc = view!.state.doc
-      return { file: current, selection: sel.text, fromLine: doc.lineAt(sel.from).number, toLine: doc.lineAt(sel.to).number, suggesting: false }
-    }
-    const shared = session.shared(), main = view!.state.selection.main
-    const shown = view!.state.doc.sliceString(main.from, main.to)
-    return { file: current, selection: shown, fromLine: lineIn(shared, sel.from), toLine: lineIn(shared, sel.to), suggesting: true, ...(shown !== sel.text ? { fileSelection: sel.text } : {}) }
+    const fm = fileMap(), sel = sharedSelection()
+    if (!fm || !sel) return { file: current, selection: '', fromLine: 0, toLine: 0, line: 0, suggesting: false }
+    const main = view!.state.selection.main
+    const shown = session ? view!.state.doc.sliceString(main.from, main.to) : sel.text // as the user sees it
+    return { file: current, selection: shown, fromLine: fm.text.lineAt(sel.from).number, toLine: fm.text.lineAt(sel.to).number,
+      line: fm.text.lineAt(fm.toShared(main.head)).number, suggesting: !!session, ...(shown !== sel.text ? { fileSelection: sel.text } : {}) }
   }
 
   function showAuthors(on: boolean) {
@@ -261,29 +261,22 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     if (view && yt) view.dispatch({ effects: authorsSlot.reconfigure(on && !session ? authorsExtension(yt) : []) })
   }
 
+  /** Go to a line (of the shared file). */
   function goto(line: number, col = 0, flash = false) {
-    if (!view) return
-    const doc = view.state.doc
-    let pos: number
-    if (session) { // a line of the shared file
-      const shared = session.shared()
-      let start = 0
-      for (let n = 1; n < line; n++) { const i = shared.indexOf('\n', start); if (i < 0) break; start = i + 1 }
-      const end = shared.indexOf('\n', start)
-      pos = session.toView(Math.min(end < 0 ? shared.length : end, start + col))
-    } else {
-      const l = doc.line(Math.max(1, Math.min(doc.lines, line)))
-      pos = Math.min(l.to, l.from + col)
-    }
-    const l = doc.lineAt(Math.min(pos, doc.length))
+    const fm = fileMap()
+    if (!view || !fm) return
+    const doc = view.state.doc, target = lineStart(fm.text, line)
+    const pos = Math.min(doc.length, fm.toView(Math.min(target.to, target.from + col)))
+    const l = doc.lineAt(pos)
     view.dispatch({ selection: { anchor: pos }, effects: [EditorView.scrollIntoView(pos, { y: 'center' }), ...(flash ? [setFlash.of(l.from)] : [])] })
     view.focus()
     if (flash) { const v = view; setTimeout(() => { if (view === v) v.dispatch({ effects: setFlash.of(-1) }) }, 1600) }
   }
 
   function gotoOffset(pos: number) {
-    if (!view) return
-    const p = Math.max(0, Math.min(view.state.doc.length, session ? session.toView(pos) : pos))
+    const fm = fileMap()
+    if (!view || !fm) return
+    const p = Math.max(0, Math.min(view.state.doc.length, fm.toView(pos)))
     view.dispatch({ selection: { anchor: p }, effects: EditorView.scrollIntoView(p, { y: 'center' }) })
     view.focus()
   }
@@ -294,31 +287,32 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
   }
 
   function reveal(from: number, to: number) {
-    if (!view) return
-    if (session) { from = session.toView(from); to = session.toView(to) }
+    const fm = fileMap()
+    if (!view || !fm) return
+    from = fm.toView(from); to = fm.toView(to)
     const n = view.state.doc.length
     const a = Math.max(0, Math.min(from, n)), b = Math.max(a, Math.min(to, n))
     view.dispatch({ selection: { anchor: a, head: b }, effects: EditorView.scrollIntoView(a, { y: 'center' }) })
     view.focus()
   }
 
-  function setSuggesting(on: boolean) {
-    on &&= writable
-    setSuggestingFlag(on, hooks.userName)
+  /** Suggest mode went on or off: show the file again, with or without its own view. */
+  suggestMode.watch(() => {
+    const on = suggestMode.on() && writable
     if (on === suggesting) return
     suggesting = on
     const path = current, sel = sharedSelection(), focused = view?.hasFocus
     current = null
     show(path) // with or without its own view of the file
-    if (view && sel) { // keep the cursor where it was in the file
-      const a = session ? session.toView(sel.from) : sel.from, b = session ? session.toView(sel.to) : sel.to
+    const fm = fileMap()
+    if (view && fm && sel) { // keep the cursor where it was in the file
       const n = view.state.doc.length
-      view.dispatch({ selection: { anchor: Math.min(a, n), head: Math.min(b, n) }, scrollIntoView: true })
+      view.dispatch({ selection: { anchor: Math.min(fm.toView(sel.from), n), head: Math.min(fm.toView(sel.to), n) }, scrollIntoView: true })
       if (focused) view.focus()
     }
-  }
+  })
 
   const refreshSpell = () => { if (view) view.dispatch({ effects: [spellSlot.reconfigure(spellExt()), mathSlot.reconfigure(mathExt())] }) }
 
-  return { el, open, onContextChange: (f: () => void) => { contextWatchers.push(f) }, context, selection, reveal, refreshSpell, showAuthors, goto, gotoOffset, setSuggesting, flush: () => session?.flush(), view: () => view, current: () => current, relint: () => { view?.dispatch({ effects: recheck.of(null) }) } }
+  return { el, open, onContextChange: (f: () => void) => { contextWatchers.push(f) }, context, selection, reveal, refreshSpell, showAuthors, goto, gotoOffset, view: () => view, current: () => current, relint: () => { view?.dispatch({ effects: recheck.of(null) }) } }
 }

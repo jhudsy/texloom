@@ -8,8 +8,8 @@ import { aiPrefs, listModels, PRESETS, type ProviderConfig } from './providers'
 import { createSession, explainError, type LlmSession } from './llm'
 import { ASSISTANT, runTool, toolsFor, type Change, type ToolCtx } from './tools'
 import { locale, t, tn } from '../i18n'
-import { flushSuggestions } from '../suggestmode'
-import { refine, wordDiff } from '../worddiff'
+import { commonEnds, refine, wordDiff } from '../worddiff'
+import { diffPiece } from '../review'
 
 const MAX_STEPS = 40 // tool round-trips per request
 const MAX_SAVED_STATE = 4 * 1024 * 1024 // past this, a conversation is kept to read but can't be continued
@@ -58,10 +58,7 @@ function diffView(before: string | null, after: string | null): HTMLElement {
       (after ?? before ?? '').length > MAX ? h('div', { class: 'dl skip' }, t('… and more')) : null)
   }
   const a = before.split('\n'), b = after.split('\n')
-  let p = 0
-  while (p < a.length && p < b.length && a[p] === b[p]) p++
-  let s = 0
-  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++
+  const [p, s] = commonEnds(a, b)
   const C = 2
   const out = h('div', { class: 'diff wdiff' })
   const skip = (n: number) => out.append(h('div', { class: 'dl skip' }, tn(n, '… {{n}} unchanged line', '… {{n}} unchanged lines')))
@@ -74,7 +71,7 @@ function diffView(before: string | null, after: string | null): HTMLElement {
   for (const op of refine(wordDiff(was, will))) {
     if (shown > 20000) { body.append(h('div', { class: 'dl skip' }, t('… and more'))); break }
     shown += op.text.length
-    body.append(op.op === 'eq' ? op.text : h(op.op === 'del' ? 'del' : 'ins', {}, op.text))
+    body.append(diffPiece(op))
   }
   out.append(body)
   if (a.length - to > 0) skip(a.length - to)
@@ -273,7 +270,6 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     if (!cfg.model) return configDialog(t('Choose a model first.'))
     if (cfg.kind === 'anthropic' && !cfg.apiKey) return configDialog(t('Add your Anthropic API key first.'))
     input.value = ''
-    flushSuggestions() // so what was just typed while suggesting is in the Review tab for it to read
     const c = host.editorContext()
     const ctxLines = [`Project: ${r.meta.get('name') || 'untitled'}; main file: ${r.meta.get('main') || 'auto'}; user: ${host.userName()}`]
     if (c?.file) ctxLines.push(`Open file: ${c.file}`)

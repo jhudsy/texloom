@@ -1,6 +1,7 @@
 // Your own tags on projects, kept next to your list of projects (texloom.tags here, and an
 // encrypted entry on the server if the list is synced: listsync.ts). They are never written
 // into a project, so collaborators don't see them.
+import { b64e } from './crypto'
 import { locale } from './i18n'
 import { canon, emptyTags, foldTag, mergeTags, tagColour, type TagColour, type TagDoc } from './listcore'
 
@@ -16,10 +17,7 @@ const write = (doc: TagDoc, quietly = false) => {
 }
 /** Later than `prev` even if this device's clock is behind, so a change always takes effect. */
 const stamp = (prev = 0) => Math.max(Date.now(), prev + 1)
-const newId = () => {
-  const out = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(6))))
-  return out.replace(/\+/g, '-').replace(/\//g, '_')
-}
+const newId = () => b64e(crypto.getRandomValues(new Uint8Array(6))) // 6 bytes: 8 characters, no padding
 const live = (doc: TagDoc): Tag[] => Object.entries(doc.tags).filter(([, x]) => !x.gone).map(([id, x]) => ({ id, name: x.n, colour: tagColour(id, x.c) }))
   .sort((a, b) => a.name.localeCompare(b.name, locale))
 

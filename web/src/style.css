@@ -105,7 +105,7 @@ aside .hint { font-size: 12px; padding: 8px 10px; }
 .binary { padding: 16px; height: 100%; display: flex; flex-direction: column; gap: 8px; }
 
 .right { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.pdfbar { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.pdfbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .pdf { flex: 1; overflow: auto; background: #7d7d7d; padding: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 .pdf canvas { display: block; height: auto !important; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .4); }
 .pdf:not(.zoomed) canvas { max-width: 100%; }
@@ -140,7 +140,6 @@ aside .hint { font-size: 12px; padding: 8px 10px; }
 body.resizing-v { cursor: row-resize; user-select: none; }
 body.resizing-v canvas, body.resizing-v .cm-editor { pointer-events: none; }
 .pdfbar .spacer { flex: 1; }
-.pdfbar { gap: 6px; flex-wrap: wrap; }
 .pdfbar button.on { border-color: var(--accent); }
 /* the PDF's controls wrap onto the next line together, never one by one */
 .pdftools { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
@@ -444,8 +443,8 @@ textarea.review-write { display: block; width: 100%; box-sizing: border-box; mar
 .rtext, .rreply { white-space: pre-wrap; margin: 4px 0; }
 .rreply { padding-left: 10px; border-left: 2px solid var(--line); }
 .rsuggest { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
-.rsuggest del { color: var(--del); background: color-mix(in srgb, var(--del) 12%, transparent); text-decoration-color: var(--del); border-radius: 2px; }
-.rsuggest ins { color: var(--ins); background: color-mix(in srgb, var(--ins) 14%, transparent); text-decoration-color: color-mix(in srgb, var(--ins) 60%, transparent); border-radius: 2px; }
+.rsuggest del, .diff.wdiff del { color: var(--del); background: color-mix(in srgb, var(--del) 12%, transparent); text-decoration-color: var(--del); border-radius: 2px; }
+.rsuggest ins, .diff.wdiff ins { color: var(--ins); background: color-mix(in srgb, var(--ins) 14%, transparent); text-decoration-color: color-mix(in srgb, var(--ins) 60%, transparent); border-radius: 2px; }
 .ractions { display: flex; gap: 4px; margin-top: 4px; align-items: center; }
 .ractions input { flex: 1; min-width: 0; }
 .review .ai-bar { flex-wrap: wrap; }
@@ -524,6 +523,4 @@ aside .tab.symtab { flex-shrink: 0; }
 .recovery-warning { margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 /* the assistant's proposed changes, shown like suggestions */
 .diff.wdiff .wtext { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; padding: 4px 6px; }
-.diff.wdiff del { color: var(--del); background: color-mix(in srgb, var(--del) 12%, transparent); text-decoration-color: var(--del); border-radius: 2px; }
-.diff.wdiff ins { color: var(--ins); background: color-mix(in srgb, var(--ins) 14%, transparent); text-decoration-color: color-mix(in srgb, var(--ins) 60%, transparent); border-radius: 2px; }
 .diff.wdiff > del, .diff.wdiff > ins { display: block; white-space: pre-wrap; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; padding: 4px 6px; }

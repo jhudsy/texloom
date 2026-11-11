@@ -12,10 +12,10 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, showPanel, type Decorat
 import { yRemoteSelectionsTheme } from 'y-codemirror.next'
 import { h } from './dom'
 import { t } from './i18n'
-import { addItem, allItems, ChangeMark, changeTitle, editorMarkup, rangeOf } from './review'
+import { addItem, allItems, ChangeMark, changeTitle, editorMarkup, onFlushTyped, rangeOf } from './review'
 import type { Replica } from './replica'
 import { anchor, compose, edit, loadHunks, normalize, refresh, saveHunks, settle, toShared, toView, type Hunk } from './suggestcore'
-import { refine, wordDiff } from './worddiff'
+import { commonEnds, refine, wordDiff } from './worddiff'
 
 /** Marks changes to the review map that this tab's suggesting made (not news to it). */
 const ORIGIN = { suggestMode: true }
@@ -49,23 +49,45 @@ function claim(project: string, file: string): { me: string; release(): void } {
 }
 const SAVE_AFTER = 800 // ms after typing stops
 
-let on = false
 const sessions = new Set<{ flush(): void }>()
 /** Save what's been typed in every open suggesting editor, before something reads or settles
  *  suggestions (accepting one, the assistant). */
 export function flushSuggestions() { sessions.forEach((x) => x.flush()) }
-/** Whether this tab is suggesting: other ways of changing text (search and replace, adding a
- *  package for a symbol) then suggest too. */
-export const isSuggesting = () => on
+onFlushTyped(flushSuggestions)
+/** Suggest mode for the project open in this page: on or off, remembered per project in this
+ *  browser. The editor and the Review tab watch it; other ways of changing text (search and
+ *  replace, adding a package for a symbol, a reference) suggest too while it's on. */
+export const suggestMode = (() => {
+  let on = false, key = '', allowed = false
+  const watchers = new Set<() => void>()
+  return {
+    /** For the project being opened. `by` names whoever suggests. */
+    start(project: string, writable: boolean, by: () => string) {
+      key = `texloom.suggesting.${project}`
+      allowed = writable
+      suggester = by
+      try { on = writable && localStorage.getItem(key) === '1' } catch { on = false }
+    },
+    on: () => on,
+    set(v: boolean) {
+      v &&= allowed
+      if (v === on) return
+      on = v
+      try { if (on) localStorage.setItem(key, '1'); else localStorage.removeItem(key) } catch {}
+      watchers.forEach((f) => f())
+    },
+    watch(f: () => void) { watchers.add(f); return () => { watchers.delete(f) } },
+  }
+})()
+export const isSuggesting = () => suggestMode.on()
 let suggester = () => ''
-export const setSuggestingFlag = (v: boolean, by?: () => string) => { on = v; if (by) suggester = by }
 
 /** Replace [from, to) of a file, or, while suggesting, suggest it (once: the same suggestion
  *  again, from a second click, is left out). */
 export function changeOrSuggest(r: Replica, file: string, from: number, to: number, text: string) {
   const yt = r.files.get(file)
   if (!yt) return
-  if (!on) { r.doc.transact(() => { if (to > from) yt.delete(from, to - from); if (text) yt.insert(from, text) }); return }
+  if (!suggestMode.on()) { r.doc.transact(() => { if (to > from) yt.delete(from, to - from); if (text) yt.insert(from, text) }); return }
   const quote = yt.toString().slice(from, to)
   const same = allItems(r).some((i) => {
     if (i.kind !== 'suggestion' || i.resolved || i.file !== file || i.quote !== quote || i.text !== text) return false
@@ -77,7 +99,7 @@ export function changeOrSuggest(r: Replica, file: string, from: number, to: numb
 
 /** Open suggestions in `file` whose new text contains `text` (so as not to suggest it twice). */
 export const suggested = (r: Replica, file: string, text: string) =>
-  on && allItems(r).some((i) => i.kind === 'suggestion' && !i.resolved && i.file === file && i.text.includes(text))
+  suggestMode.on() && allItems(r).some((i) => i.kind === 'suggestion' && !i.resolved && i.file === file && i.text.includes(text))
 
 export interface SuggestSession {
   /** The text the editor starts with. */
@@ -122,8 +144,9 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
   let cm: EditorView | null = null
   /** What each suggestion holds as stored, to tell what's been typed since. */
   const saved = new Map<string, string>()
-  const remember = () => { saved.clear(); for (const h of hunks) if (h.id) saved.set(h.id, `${h.conflict ? 1 : 0}${h.text}`) }
-  const unsaved = (h: Hunk) => !!h.id && saved.get(h.id) !== `${h.conflict ? 1 : 0}${h.text}`
+  const sig = (h: Hunk) => `${h.conflict ? 1 : 0}${h.text}`
+  const remember = () => { saved.clear(); for (const h of hunks) if (h.id) saved.set(h.id, sig(h)) }
+  const unsaved = (h: Hunk) => !!h.id && saved.get(h.id) !== sig(h)
   /** Start again from what's stored. */
   function load() {
     const res = loadHunks(r.doc, r.review, yt, file, ME)
@@ -157,11 +180,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
     if (!cm) return
     const next = compose(shared, hunks), now = cm.state.doc.toString()
     if (next === now) { put({}); return } // redraw: suggestions may have new ids
-    let p = 0
-    const n = Math.min(next.length, now.length)
-    while (p < n && next.charCodeAt(p) === now.charCodeAt(p)) p++
-    let q = 0
-    while (q < n - p && next.charCodeAt(next.length - 1 - q) === now.charCodeAt(now.length - 1 - q)) q++
+    const [p, q] = commonEnds(next, now)
     // word by word, so that typing and undo history outside what changed keep their places
     const was = now.slice(p, now.length - q), will = next.slice(p, next.length - q)
     const changes: { from: number; to?: number; insert?: string }[] = []
@@ -178,9 +197,11 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
   }
   /** Dispatch to the editor; if it's in the middle of an update, just after (a few tries at most). */
   let tries = 0
+  let redraw = true // the decorations need drawing again even if the text hasn't changed
   function put(spec: Parameters<EditorView['dispatch']>[0]) {
     const v = cm
     if (!v) return
+    redraw = true
     try { v.dispatch(spec); tries = 0 }
     catch (e) {
       if (++tries > 3) { tries = 0; console.error('suggest mode: could not update the editor', e); return }
@@ -190,8 +211,8 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
 
   /** The shared text changed, or suggestions were accepted, rejected or deleted. */
   function reconcile() {
-    const res = refresh(r.doc, yt, hunks)
     shared = yt.toString()
+    const res = refresh(r.doc, yt, hunks, shared)
     res.gone.forEach((id) => gone.add(id))
     const next: Hunk[] = []
     for (const h of res.hunks) {
@@ -205,7 +226,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
       else if (h.id) gone.add(h.id) // the file now says the same: nothing left to suggest
     }
     hunks = settle(shared, next).hunks
-    anchor(yt, hunks)
+    anchor(yt, hunks, shared)
     if (gone.size || hunks.some((h) => !h.id || unsaved(h))) later() // carried others' changes in, or new
     show()
   }
@@ -213,7 +234,10 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
   const onTransaction = (tr: Y.Transaction) => {
     if (tr.origin === ORIGIN) return
     const text = yt as unknown as Y.AbstractType<Y.YEvent<any>>, review = r.review as unknown as Y.AbstractType<Y.YEvent<any>>
-    if (tr.changed.has(text) || tr.changed.has(review) || tr.changedParentTypes.has(review)) reconcile()
+    if (tr.changed.has(text)) reconcile()
+    // otherwise only a review change matters that settled one of these suggestions (accepted,
+    // rejected or deleted); suggestions elsewhere, and replies, don't
+    else if ((tr.changed.has(review) || tr.changedParentTypes.has(review)) && hunks.some((h) => h.id && !isOpen(h.id))) reconcile()
   }
   r.doc.on('afterTransaction', onTransaction)
   const onHide = () => { if (document.visibilityState === 'hidden') flush() }
@@ -232,7 +256,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
         res.gone.forEach((id) => gone.add(id))
         cur = cur.slice(0, f) + s + cur.slice(to)
       })
-      anchor(yt, hunks)
+      anchor(yt, hunks, shared)
       later()
       if (compose(shared, hunks) === tr.newDoc.toString()) return
       console.error('suggest mode: the view and the suggestions disagree; reloading them')
@@ -270,7 +294,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
     constructor(view: EditorView) { cm = view; this.decorations = decorations() }
     update(u: ViewUpdate) {
       for (const tr of u.transactions) if (tr.docChanged && !tr.annotation(fromShared)) typed(tr)
-      this.decorations = decorations()
+      if (u.docChanged || redraw) { this.decorations = decorations(); redraw = false } // not for scrolling or the cursor
     }
     destroy() { cm = null }
   }, { decorations: (v) => v.decorations })
@@ -280,13 +304,14 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
   const cursors = ViewPlugin.fromClass(class {
     decorations: DecorationSet = Decoration.none
     private sent = ''
+    private moved = false // someone else's cursor moved since the last drawing
     private listener = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }) => {
-      if ([...added, ...updated, ...removed].some((id) => id !== r.awareness.clientID)) put({})
+      if ([...added, ...updated, ...removed].some((id) => id !== r.awareness.clientID)) { this.moved = true; put({}) }
     }
     constructor(view: EditorView) { r.awareness.on('change', this.listener); this.decorations = this.draw(view) }
     update(u: ViewUpdate) {
       if (u.selectionSet || u.focusChanged || u.docChanged) this.publish(u.view)
-      this.decorations = this.draw(u.view)
+      if (u.docChanged || this.moved) { this.decorations = this.draw(u.view); this.moved = false }
     }
     destroy() { r.awareness.off('change', this.listener) }
     private publish(view: EditorView) {
@@ -341,7 +366,6 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
       lock.release()
       sessions.delete(session)
       unwatchMarkup()
-      clearTimeout(timer)
       r.doc.off('afterTransaction', onTransaction)
       document.removeEventListener('visibilitychange', onHide)
       removeEventListener('pagehide', onLeave)

@@ -7,9 +7,8 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
 import type { Replica } from './replica'
 import { h } from './dom'
 import { t, locale } from './i18n'
-import { applyChange } from './suggestcore'
-import { flushSuggestions } from './suggestmode'
-import { refine, wordDiff, type DiffOp } from './worddiff'
+import { applyChange, placeOf } from './suggestcore'
+import { isWordChar, refine, wordDiff, type DiffOp } from './worddiff'
 
 export type Kind = 'comment' | 'suggestion'
 export interface Item {
@@ -19,6 +18,11 @@ export interface Item {
 }
 
 // ---- data ---------------------------------------------------------------------
+/** Saves what's being typed in suggest mode (suggestmode.ts registers it), so that settling or
+ *  listing suggestions sees the latest. */
+let flushTyped = () => {}
+export const onFlushTyped = (f: () => void) => { flushTyped = f }
+
 export function addItem(r: Replica, kind: Kind, file: string, from: number, to: number, text: string, by: string): string | null {
   const yt = r.files.get(file)
   if (!yt || to < from) return null
@@ -47,6 +51,17 @@ export function itemOf(r: Replica, id: string): Item | null {
   }
 }
 
+export function removeItem(r: Replica, id: string) {
+  flushTyped()
+  r.review.delete(id)
+}
+
+/** Every comment and suggestion, including what's just been typed in suggest mode. */
+export function listItems(r: Replica): Item[] {
+  flushTyped()
+  return allItems(r)
+}
+
 export function allItems(r: Replica): Item[] {
   return [...r.review.keys()].map((id) => itemOf(r, id)).filter((x): x is Item => !!x)
 }
@@ -54,14 +69,9 @@ export function allItems(r: Replica): Item[] {
 /** Current [from, to) of an item in its file, or null if its text is gone. */
 export function rangeOf(r: Replica, id: string): { from: number; to: number } | null {
   const m = r.review.get(id)
-  const yt = m && r.files.get(m.get('file'))
-  if (!m || !yt) return null
-  try {
-    const a = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(m.get('start')), r.doc)
-    const b = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(m.get('end')), r.doc)
-    if (!a || !b || a.type !== yt || b.type !== yt) return null
-    return { from: Math.min(a.index, b.index), to: Math.max(a.index, b.index) }
-  } catch { return null }
+  const yt = m instanceof Y.Map ? r.files.get(m.get('file')) : undefined
+  const at = yt && placeOf(r.doc, yt, m!)
+  return at ? { from: at.a, to: at.b } : null
 }
 
 export function reply(r: Replica, id: string, text: string, by: string) {
@@ -71,6 +81,7 @@ export function reply(r: Replica, id: string, text: string, by: string) {
 }
 
 export function setResolved(r: Replica, id: string, resolved: boolean, outcome?: 'accepted' | 'rejected') {
+  flushTyped()
   const m = r.review.get(id)
   if (!m) return
   r.doc.transact(() => { m.set('resolved', resolved); if (outcome) m.set('outcome', outcome); else m.delete('outcome') })
@@ -78,11 +89,12 @@ export function setResolved(r: Replica, id: string, resolved: boolean, outcome?:
 
 /** Apply a suggestion. Returns a message if it couldn't be applied cleanly. */
 export function accept(r: Replica, id: string): string | null {
+  flushTyped()
   const it = itemOf(r, id), rg = rangeOf(r, id)
   const yt = it && r.files.get(it.file)
   if (!it || !yt || !rg) return t('The text this suggestion refers to no longer exists.')
   const current = yt.toString().slice(rg.from, rg.to)
-  if ((current !== it.quote || it.conflict) && !confirm(t('The text has changed since this was suggested.\n\nNow: “{{now}}”\nSuggested replacement: “{{suggested}}”\n\nApply anyway?', { now: current.slice(0, 200), suggested: it.text.slice(0, 200) }))) return 'cancelled'
+  if ((current !== it.quote || it.conflict) && !confirm(t('The text has changed since this was suggested.\n\nNow: “{{now}}”\nSuggested replacement: “{{suggested}}”\n\nApply anyway?', { now: current.slice(0, 200), suggested: it.text.slice(0, 200) }))) return null
   r.doc.transact(() => {
     if (current === it.quote) applyChange(yt, rg.from, it.quote, it.text) // only the words that differ
     else { yt.delete(rg.from, rg.to - rg.from); if (it.text) yt.insert(rg.from, it.text) }
@@ -141,8 +153,7 @@ const decoField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 })
 
-/** Highlights for open comments and suggestions in `file`; clicking one calls onPick(id). */
-/** The text a comment or suggestion is being written about. */
+/** The text a comment is being written about. */
 const pending = new WeakMap<Replica, { file: string; start: Y.RelativePosition; end: Y.RelativePosition }>()
 const pendingWatchers = new Set<() => void>()
 function setPending(r: Replica, p: { file: string; start: Y.RelativePosition; end: Y.RelativePosition } | null) {
@@ -154,14 +165,17 @@ function setPending(r: Replica, p: { file: string; start: Y.RelativePosition; en
  *  it, and which suggestions it draws itself. */
 export interface ReviewMap { toView(x: number): number; skip(id: string): boolean }
 
+/** Highlights for open comments and suggestions in `file`; clicking one calls onPick(id). */
 export function reviewExtension(r: Replica, file: string, onPick: (id: string) => void, map?: ReviewMap): Extension {
   const compute = (view: EditorView) => {
     const len = view.state.doc.length
     const at = (x: number) => Math.min(map ? map.toView(x) : x, len)
-    const shared = r.files.get(file)?.toString() ?? ''
+    let shared: string | undefined // read only if needed
+    const markup = editorMarkup.mode()
     const ranges = []
     for (const i of allItems(r)) {
       if (i.file !== file || i.resolved || map?.skip(i.id)) continue
+      if (i.kind === 'suggestion' && markup === 'none') continue // only in the Review tab
       const rg = rangeOf(r, i.id)
       if (!rg) continue
       const from = at(rg.from), to = at(rg.to)
@@ -169,8 +183,7 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
         if (to > from) ranges.push(Decoration.mark({ class: 'cm-comment', attributes: { 'data-review': i.id, title: `${i.by}: ${i.text.slice(0, 200)}` } }).range(from, to))
         continue
       }
-      if (editorMarkup.mode() === 'none') continue // only in the Review tab
-      if (editorMarkup.mode() === 'simple') { // the text as it is, underlined where a change is suggested
+      if (markup === 'simple') { // the text as it is, underlined where a change is suggested
         const title = changeTitle(i.by, i.quote, i.text)
         if (to > from) ranges.push(Decoration.mark({ class: 'cm-suggest-simple', attributes: { 'data-review': i.id, title } }).range(from, to))
         else ranges.push(Decoration.widget({ widget: new ChangeMark('add', title, i.id), side: 1 }).range(to))
@@ -178,6 +191,7 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
       }
       const del = (a: number, b: number) => { if (b > a) ranges.push(Decoration.mark({ class: 'cm-suggest-del', attributes: { 'data-review': i.id, title: t('{{name}} suggests removing this', { name: i.by }) } }).range(a, b)) }
       const ins = (x: number, text: string) => ranges.push(Decoration.widget({ widget: new InsertWidget(text, i.id, i.by), side: 1 }).range(x))
+      shared ??= r.files.get(file)?.toString() ?? ''
       if (shared.slice(rg.from, rg.to) === i.quote) { // as a diff: only the words (or letters) that change
         let p = rg.from
         for (const op of refine(wordDiff(i.quote, i.text))) {
@@ -223,17 +237,42 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
 }
 
 // ---- panel ------------------------------------------------------------------------
+/** What a comment made with nothing selected is about: the word (or LaTeX command) at `pos`;
+ *  else the text of its line; else, on a blank line, the nearest word. */
+export function nearestText(text: string, pos: number): { from: number; to: number } | null {
+  const inWord = (c: string | undefined) => isWordChar(c) || c === '\\'
+  const wordAt = (x: number) => {
+    let a = x, b = x
+    while (a > 0 && inWord(text[a - 1])) a--
+    while (b < text.length && inWord(text[b])) b++
+    return b > a ? { from: a, to: b } : null
+  }
+  const here = wordAt(pos)
+  if (here) return here
+  const start = text.lastIndexOf('\n', pos - 1) + 1, nl = text.indexOf('\n', pos), end = nl < 0 ? text.length : nl
+  const line = text.slice(start, end)
+  if (line.trim()) return { from: start + (line.length - line.trimStart().length), to: end - (line.length - line.trimEnd().length) }
+  // a blank line: the closest non-blank character, as part of its word if it has one
+  const after = text.slice(pos).search(/\S/), before = text.slice(0, pos).search(/\S\s*$/)
+  const c = after >= 0 && (before < 0 || after <= pos - before) ? pos + after : before
+  if (c < 0) return null
+  return wordAt(c) ?? wordAt(c + 1) ?? { from: c, to: c + 1 }
+}
+
 const CONTEXT = 60 // characters of unchanged text kept on each side of a change, in a card
 
 /** A suggestion as a word diff: removed words struck through, new ones underlined, with long
  *  unchanged stretches shortened. */
+/** One piece of a word diff, as shown in a card or the assistant: removed text as <del>, new as <ins>. */
+export const diffPiece = (op: DiffOp): Node | string =>
+  op.op === 'eq' ? op.text : h(op.op, { title: op.op === 'del' ? t('Removed') : t('Added') }, op.text)
+
 function suggestionDiff(quote: string, text: string): HTMLElement {
   const ops: DiffOp[] = wordDiff(quote, text)
   const out = h('div', { class: 'rsuggest' })
   if (!ops.some((o) => o.op !== 'eq')) { out.append(h('span', { class: 'muted' }, t('(no change)'))); return out }
   ops.forEach((o, i) => {
-    if (o.op === 'del') out.append(h('del', { title: t('Removed') }, o.text))
-    else if (o.op === 'ins') out.append(h('ins', { title: t('Added') }, o.text))
+    if (o.op !== 'eq') out.append(diffPiece(o))
     else {
       const first = i === 0, last = i === ops.length - 1
       const keep = (first || last ? 1 : 2) * CONTEXT
@@ -287,9 +326,14 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     list)
 
   function addComment() {
-    const sel = host.selection()
+    let sel = host.selection()
     if (!sel) return alert(t('Open a text file and select some text first.'))
-    if (sel.from === sel.to) return alert(t('Select the text you want to comment on.'))
+    if (sel.from === sel.to) { // nothing selected: the word at the cursor, or the nearest text
+      const text = r.files.get(sel.file)?.toString() ?? ''
+      const at = nearestText(text, sel.from)
+      if (!at) return alert(t('Select the text you want to comment on.'))
+      sel = { ...sel, ...at, text: text.slice(at.from, at.to) }
+    }
     write(sel)
   }
 
@@ -370,14 +414,16 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
       ...it.replies.map((rp) => h('div', { class: 'rreply' }, h('b', {}, String(rp.by).slice(0, 64)), ` ${rp.text}`, h('span', { class: 'muted small' }, ` · ${when(rp.at)}`))),
       host.writable ? h('div', { class: 'ractions' },
         it.resolved ? h('button', { onclick: () => setResolved(r, it.id, false) }, t('Reopen')) : replyIn,
-        !it.resolved && it.kind === 'suggestion' ? h('button', { class: 'primary', onclick: () => { flushSuggestions(); const m = accept(r, it.id); if (m && m !== 'cancelled') alert(m) } }, t('Accept')) : null,
-        !it.resolved && it.kind === 'suggestion' ? h('button', { onclick: () => { flushSuggestions(); setResolved(r, it.id, true, 'rejected') } }, t('Reject')) : null,
+        !it.resolved && it.kind === 'suggestion' ? h('button', { class: 'primary', onclick: () => { const m = accept(r, it.id); if (m) alert(m) } }, t('Accept')) : null,
+        !it.resolved && it.kind === 'suggestion' ? h('button', { onclick: () => setResolved(r, it.id, true, 'rejected') }, t('Reject')) : null,
         !it.resolved && it.kind === 'comment' ? h('button', { onclick: () => setResolved(r, it.id, true) }, t('Resolve')) : null,
-        h('button', { class: 'icon', title: t('Delete'), 'aria-label': t('Delete'), onclick: () => { if (confirm(t('Delete this for everyone?'))) { flushSuggestions(); r.review.delete(it.id) } } }, '✕')) : null)
+        h('button', { class: 'icon', title: t('Delete'), 'aria-label': t('Delete'), onclick: () => { if (confirm(t('Delete this for everyone?'))) removeItem(r, it.id) } }, '✕')) : null)
   }
 
   function render() {
-    const items = allItems(r).filter((i) => showResolved || !i.resolved).sort((a, b) => a.file.localeCompare(b.file) || (rangeOf(r, a.id)?.from ?? 0) - (rangeOf(r, b.id)?.from ?? 0))
+    const items = allItems(r).filter((i) => showResolved || !i.resolved)
+    const at = new Map(items.map((i) => [i.id, rangeOf(r, i.id)?.from ?? 0])) // each found once, not per comparison
+    items.sort((a, b) => a.file.localeCompare(b.file) || at.get(a.id)! - at.get(b.id)!)
     const typing = document.activeElement instanceof HTMLTextAreaElement && list.contains(document.activeElement) ? document.activeElement : null
     const caret = typing?.selectionStart ?? 0, typingIn = typing?.getAttribute('data-reply')
     list.replaceChildren(...(items.length ? items.map(card)
@@ -391,7 +437,8 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     }
   }
 
-  r.review.observeDeep(() => render())
+  let frame = 0 // many changes at once (a collaborator's save, a reply) draw the list once
+  r.review.observeDeep(() => { frame ||= requestAnimationFrame(() => { frame = 0; render() }) })
   render()
   return { el, addComment, focus }
 }

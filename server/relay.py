@@ -431,7 +431,7 @@ class Store:
                 self.usage[project] += n or 0
         self.total = sum(self.usage.values())
         self.owners: dict[str, str] = dict(self.db.execute("SELECT project, owner FROM projects"))
-        self.deleted: set[str] = {p for (p,) in self.db.execute("SELECT project FROM deleted")}
+        self.deleted: dict[str, float] = dict(self.db.execute("SELECT project, at FROM deleted"))  # project -> when
         self.owner_bytes: dict[str, int] = defaultdict(int)  # checked on every stored edit: kept, not added up
         for project, n in self.usage.items():
             if project in self.owners:
@@ -649,12 +649,6 @@ class Store:
         self._recount(project)
 
     # --- deleted for everyone ---------------------------------------------------------
-    def deleted_at(self, project: str) -> float | None:
-        """When the owner deleted this project for everyone (None if they haven't)."""
-        if project not in self.deleted:
-            return None
-        row = self.db.execute("SELECT at FROM deleted WHERE project=?", (project,)).fetchone()
-        return row[0] if row else None
 
     def delete_project(self, project: str, sig: bytes) -> float:
         """The owner deleted the project for everyone: forget what's stored and keep, for good, the
@@ -664,9 +658,9 @@ class Store:
             self.db.execute("INSERT OR IGNORE INTO deleted(project, at, sig) VALUES (?,?,?)", (project, at, sig))
             for table in ("log", "blob", "gone", "head", "floor", "mode"):
                 self.db.execute(f"DELETE FROM {table} WHERE project=?", (project,))  # noqa: S608 - fixed names
-        self.deleted.add(project)
+        at = self.deleted.setdefault(project, at)  # a second deletion keeps the first one's time
         self._recount(project)
-        return self.deleted_at(project) or at
+        return at
 
     def has_blob(self, project: str, bid: str) -> bool:
         return self.db.execute("SELECT 1 FROM blob WHERE project=? AND id=?", (project, bid)).fetchone() is not None
@@ -860,10 +854,15 @@ class Relay:
             return None
         why = self.denied(project, msg.get("code"))
         if why:
-            await ws.send_json({"t": "err", "code": why, "denied": True, "m": "this server is private"})
-            await ws.close(code=1008, message=b"private server")
+            await self._refuse(ws, why)
             return None
         return msg
+
+    @staticmethod
+    async def _refuse(ws: web.WebSocketResponse, why: str) -> None:
+        """A private server turns this connection's project away, saying why."""
+        await ws.send_json({"t": "err", "code": why, "denied": True, "m": "this server is private"})
+        await ws.close(code=1008, message=b"private server")
 
     def settle(self, conn: Conn) -> None:
         """What this connection sent has been dealt with."""
@@ -976,7 +975,7 @@ class Relay:
         self._next_id += 1
         if request.transport:
             request.transport.set_protocol(Metered(request.transport.get_protocol(), self, conn, request.transport))
-        gone = self.store.deleted_at(project)
+        gone = self.store.deleted.get(project)
         if gone is not None:  # the owner deleted it for everyone: say so, and nothing more
             self.conns.pop(ws, None)
             await ws.send_json({"t": "deleted", "at": int(gone * 1000)})
@@ -1009,8 +1008,7 @@ class Relay:
                     conn.recheck = time.monotonic() + RECHECK
                     why = self.denied(project, conn.code)
                     if why:
-                        await ws.send_json({"t": "err", "code": why, "denied": True, "m": "this server is private"})
-                        await ws.close(code=1008, message=b"private server")
+                        await self._refuse(ws, why)
                         break
                 size = len(raw.data) if len(raw.data) > MiB else 0
                 if size and self.inflight + size > INFLIGHT_MAX:  # the server is busy with big frames

@@ -15,6 +15,16 @@ export const isWordChar = (c: string | undefined): boolean => !!c && WORD_CHAR.t
 
 export const tokens = (s: string): string[] => s.match(TOKEN) ?? []
 
+/** How much `a` and `b` (strings or lists) have in common at the start, and then at the end. */
+export function commonEnds(a: ArrayLike<unknown>, b: ArrayLike<unknown>): [number, number] {
+  const n = Math.min(a.length, b.length)
+  let p = 0
+  while (p < n && a[p] === b[p]) p++
+  let q = 0
+  while (q < n - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++
+  return [p, q]
+}
+
 const MAX_D = 600 // beyond this many differing words, show it as one replacement
 
 /** The shortest edit script between two token lists (Myers), or null if it's too long. */
@@ -58,10 +68,7 @@ function backtrack(trace: Int32Array[], n: number, m: number, dEnd: number): ('e
 export function wordDiff(before: string, after: string): DiffOp[] {
   if (before === after) return before ? [{ op: 'eq', text: before }] : []
   const a = tokens(before), b = tokens(after)
-  let p = 0
-  while (p < a.length && p < b.length && a[p] === b[p]) p++
-  let q = 0
-  while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++
+  const [p, q] = commonEnds(a, b)
   const midA = a.slice(p, a.length - q), midB = b.slice(p, b.length - q)
   const script = myers(midA, midB) ?? [...midA.map(() => 'del' as const), ...midB.map(() => 'ins' as const)]
 
@@ -123,10 +130,7 @@ export function refine(ops: DiffOp[]): DiffOp[] {
     const oneWord = (s: string) => /^[\p{L}\p{M}\p{N}_]+$/u.test(s)
     if (d.op !== 'del' || n?.op !== 'ins' || !oneWord(d.text) || !oneWord(n.text)) { out.push(d); continue }
     const a = [...d.text], b = [...n.text] // by character, not UTF-16 unit
-    let p = 0
-    while (p < a.length && p < b.length && a[p] === b[p]) p++
-    let q = 0
-    while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++
+    const [p, q] = commonEnds(a, b)
     if (p + q < 2 || p + q < Math.min(a.length, b.length) / 2) { out.push(d); continue } // not alike: whole words
     if (p) out.push({ op: 'eq', text: a.slice(0, p).join('') })
     if (a.length - q > p) out.push({ op: 'del', text: a.slice(p, a.length - q).join('') })

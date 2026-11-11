@@ -41,6 +41,7 @@ import { applyTemplate, chooseTemplate, importDialog, TEMPLATES } from './templa
 import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from './navigate'
 import { createReviewPanel, reviewExtension, type ReviewPanel } from './review'
 import './style.css'
+import { suggestMode } from './suggestmode'
 
 const APP = 'TeXLoom'
 const server = location.origin
@@ -202,8 +203,9 @@ async function removeProject(r: Recent, scope: RemoveScope) {
   selected.delete(r.project)
 }
 
-const canOwn = (r: Recent) => { try { return !!Keys.fromFragment('#' + r.fragment)?.owner } catch { return false } }
-const hasServerCopy = (r: Recent) => !(r.atRisk || r.storage === 'relay')
+/** May this browser remove the server's copy, or delete the project for everyone? Not once it's deleted. */
+const canOwn = (r: Recent) => { if (r.deleted) return false; try { return !!Keys.fromFragment('#' + r.fragment)?.owner } catch { return false } }
+const hasServerCopy = (r: Recent) => !(r.atRisk || r.storage === 'relay' || r.deleted)
 
 /** The line above the list: select everything found, and what to do with what's selected. */
 function selectionBar(matching: Recent[], paged: boolean): HTMLElement {
@@ -310,7 +312,7 @@ function projectList(): HTMLElement {
         } }, icon('copy')),
         h('button', { class: 'icon forget', title: t('Remove…'), 'aria-label': t('Remove {{name}}…', { name: label }), onclick: async () => {
           const folder = await savedFolder(r.project).catch(() => undefined)
-          removeDialog({ name: label, code: projectCode(r.project), owner: canOwn(r) && !r.deleted, onServer: hasServerCopy(r) && !r.deleted, folder: folder?.name ?? null },
+          removeDialog({ name: label, code: projectCode(r.project), owner: canOwn(r), onServer: hasServerCopy(r), folder: folder?.name ?? null },
             async (scope) => { await removeProject(r, scope); refreshProjects() })
         } }, icon('close'))),
       h('div', { class: 'details muted' }, details.join(' · ')),
@@ -368,6 +370,7 @@ async function openProject(keys: Keys) {
   const index = new ProjectIndex(r)
   const gotoSource = (file: string, line: number, flash = false) => { layout.showEditor(); tree.open(file); setTimeout(() => editor.goto(line, 0, flash), 0) }
   const output = createOutput(r, writable, () => device, () => me.name, gotoSource, () => tree.current())
+  suggestMode.start(keys.project, writable, () => me.name) // before the editor, which reads it
   const editor = createEditorPane(r, writable, index, {
     onCompile: () => output.compile(),
     onSync: () => syncToPdf(),
@@ -387,29 +390,8 @@ async function openProject(keys: Keys) {
     spell: () => ({ on: device.spell, lang: String(r.meta.get('lang') ?? '') }),
     mathPreview: () => device.mathPreview,
     checks: () => device.checks,
-    onReview: addReview,
-    onSymbols: () => showSymbols(),
-    onToggleSuggest: () => suggestMode.set(!suggestMode.on()),
     userName: () => me.name,
   })
-  // Suggest mode: typing makes suggestions. Remembered per project in this browser.
-  const suggestMode = (() => {
-    const KEY = `texloom.suggesting.${keys.project}`
-    let on = false
-    try { on = writable && localStorage.getItem(KEY) === '1' } catch {}
-    const watchers: (() => void)[] = []
-    return {
-      on: () => on,
-      set(v: boolean) {
-        on = v && writable
-        try { if (on) localStorage.setItem(KEY, '1'); else localStorage.removeItem(KEY) } catch {}
-        editor.setSuggesting(on)
-        watchers.forEach((f) => f())
-      },
-      watch: (f: () => void) => { watchers.push(f) },
-    }
-  })()
-  editor.setSuggesting(suggestMode.on())
   const tree = createFileTree(r, writable, (p) => {
     editor.open(p)
     r.awareness.setLocalStateField('file', p) // so collaborators can jump to where you are
@@ -460,8 +442,7 @@ async function openProject(keys: Keys) {
     layout.reveal('right')
     showInPanel(false)
     showTab('pdf')
-    const line = c.suggesting ? c.toLine : v.state.doc.lineAt(v.state.selection.main.head).number // the file's line, not the suggesting view's
-    if (!output.showInPdf(c.file, line)) alert(t('Compile first: the PDF has no SyncTeX data yet.'))
+    if (!output.showInPdf(c.file, c.line)) alert(t('Compile first: the PDF has no SyncTeX data yet.'))
   }
   output.syncRequest = syncToPdf
   function syncToSource() {

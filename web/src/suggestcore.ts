@@ -10,7 +10,7 @@
 // suggestion reads "is → is very" rather than "insert ' very' here". Hunks never touch: two that
 // would are one.
 import * as Y from 'yjs'
-import { isWordChar, wordDiff } from './worddiff'
+import { commonEnds, isWordChar, wordDiff } from './worddiff'
 
 export interface Hunk {
   id: string | null // the review item it's saved as; null until saved
@@ -69,12 +69,8 @@ const low = (c: number) => c >= 0xdc00 && c <= 0xdfff
  *  words, staying within [min, max) (the neighbouring hunks). Null if it changes nothing. */
 export function normalize(shared: string, a: number, b: number, text: string, id: string | null, min = 0, max = shared.length): Hunk | null {
   const base = shared.slice(a, b)
-  const n = Math.min(base.length, text.length)
-  let p = 0
-  while (p < n && base.charCodeAt(p) === text.charCodeAt(p)) p++
+  let [p, q] = commonEnds(base, text)
   if (p > 0 && high(base.charCodeAt(p - 1))) p-- // don't split a character in two
-  let q = 0
-  while (q < n - p && base.charCodeAt(base.length - 1 - q) === text.charCodeAt(text.length - 1 - q)) q++
   if (q > 0 && low(base.charCodeAt(base.length - q))) q--
   a += p; b -= q; text = text.slice(p, text.length - q)
   if (a === b && !text) return null
@@ -190,8 +186,9 @@ export function anchors(yt: Y.Text, a: number, b: number): { start: Uint8Array; 
 /** Give hunks that have none the anchors for where they are now. Unlike stored anchors, an end
  *  that is a word takes in text typed right against it, so that someone turning "is" into
  *  "isn't" changes the word this suggestion holds (refresh() then decides what to keep). */
-export function anchor(yt: Y.Text, hunks: Hunk[]) {
-  const shared = yt.toString()
+export function anchor(yt: Y.Text, hunks: Hunk[], shared?: string) {
+  if (hunks.every((h) => h.s && h.e)) return
+  shared ??= yt.toString()
   for (const h of hunks) {
     if (h.s && h.e) continue
     const empty = h.a === h.b
@@ -203,8 +200,7 @@ export function anchor(yt: Y.Text, hunks: Hunk[]) {
 /** The hunks after the shared text changed: each moves with its anchors (one whose text has gone
  *  entirely becomes an insertion where it was), and takes in others' changes to the text it
  *  replaces where they don't touch the words it changes; otherwise it's marked as a conflict. */
-export function refresh(doc: Y.Doc, yt: Y.Text, hunks: readonly Hunk[]): { hunks: Hunk[]; gone: string[] } {
-  const shared = yt.toString()
+export function refresh(doc: Y.Doc, yt: Y.Text, hunks: readonly Hunk[], shared = yt.toString()): { hunks: Hunk[]; gone: string[] } {
   const placed: { h: Hunk; a: number; b: number }[] = []
   for (const h of hunks) {
     const s = h.s && Y.createAbsolutePositionFromRelativePosition(h.s, doc)
