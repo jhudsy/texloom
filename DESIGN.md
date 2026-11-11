@@ -207,8 +207,18 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   are merged into `up`s of at most 6 MiB, and a `p2p` payload over 4 MiB (a whole project
   for a peer catching up, a file) goes as encrypted `part`s of 4 MiB that the receiver puts
   together again (at most 32 parts, 4 messages at a time), paced to stay under the rate limit.
-  A single update over 8 MiB, such as a full copy of a project with more text than that,
-  still can't be uploaded: the client says so instead of retrying.
+  Receivers hold at most 128 MiB of unfinished pieces (oldest dropped first), two messages per
+  sender, and drop any that has gone quiet for 60 s: pieces come from anyone with a link, even
+  a read-only one, so they mustn't be able to exhaust a phone's memory. The server never
+  stores or puts together pieces.
+- **Big changes as uploads:** a change over 6 MiB (a full copy of a project with a lot of
+  text) or a snapshot over 12 MiB goes up as an encrypted upload, like a file (≤ 50 MiB,
+  kind `output`), and the log entry is a small reference to it (`\x00texloom-ref\x00` +
+  `{"b": id}`, encrypted like any update, so the server can't tell). Readers fetch it over
+  HTTP when they apply the entry; if it's gone (a snapshot replaced it meanwhile), they catch
+  up from the start once, which brings the snapshot. The server answers an accepted snapshot
+  with `snapped`, and its sender then deletes the uploads of the entries it replaced. In a
+  relay-only project a big change goes to the peers online as a `p2p` update instead.
 - **Per-connection limits:** frame-size caps per message type, a message/byte rate limit,
   at most 5 `hello`s per 10 s, one creation-code check, and a global connection cap.
   Peers that stop reading are disconnected after 20 s rather than stalling broadcasts.

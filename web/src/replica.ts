@@ -17,11 +17,23 @@ const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
 // Keep in sync with server/relay.py: frames are at most 16 MiB (base64 adds a third).
 const MAX_SNAPSHOT = 12 * 1024 * 1024
+const UPDATE_BATCH = 6 * 1024 * 1024 // pending changes are merged up to this much per message
+// A bigger change (a whole project, say) or snapshot goes to the server as an encrypted upload,
+// like a file, and what's sent is a small reference to it: REF + {"b": upload id}. Uploads go as
+// "output", so the writer whose snapshot replaces them may delete them. As in texloom/replica.py.
+const REF = enc0('\x00texloom-ref\x00')
+function enc0(s: string) { return new TextEncoder().encode(s) }
+const isRef = (u: Uint8Array) => u.length > REF.length && REF.every((b, i) => u[i] === b)
+const refTo = (id: string) => { const j = enc0(JSON.stringify({ b: id })), u = new Uint8Array(REF.length + j.length); u.set(REF); u.set(j, REF.length); return u }
 const P2P_BLOB = 50 * 1024 * 1024 // files sent peer to peer (relay-only projects): as big as any synced file
 // A peer-to-peer message bigger than this (a whole project for a peer catching up, a file) goes
 // in pieces: the server takes frames of at most 16 MiB. As in texloom/replica.py.
 const P2P_PIECE = 4 * 1024 * 1024
 const P2P_PARTS = 32, P2P_ASSEMBLING = 4
+// Unfinished messages are held in memory, so anyone with a link could send pieces that never
+// end: at most this much in all (oldest dropped first), two at a time from one sender, and none
+// that has gone quiet for P2P_STALE ms.
+const P2P_HELD = 128 * 1024 * 1024, P2P_PER_SENDER = 2, P2P_STALE = 60_000
 // The server closes a connection sending more than 160 MiB in 10 s: pieces are paced below that.
 const P2P_WINDOW = 10_000, P2P_RATE = 96 * 1024 * 1024
 export const BLOB_ID = /^[0-9a-f]{32}$/
@@ -130,6 +142,10 @@ export class Replica {
   /** The server's log (and its list of revocations) has been applied since connecting. */
   private synced = false
   private inflight = new Map<string, string[]>() // sent id -> outbox ids it covers
+  private refs: Record<number, string> = {} // stored changes and snapshots that are uploads: seq -> upload id
+  private refSent = new Map<string, string>() // sent id -> upload id, until the server stores it
+  private snapRef: { upto: number; ref: string | null } | null = null // the snapshot sent, until the server takes it
+  private resync = 0 // 1: an upload a change refers to couldn't be fetched, so catch up from the start
   private blobWaiters = new Map<string, ((b: Uint8Array) => void)[]>()
   private backoff = 1000
   private closed = false
@@ -147,6 +163,7 @@ export class Replica {
     this.persistence = new IndexeddbPersistence(`texloom-doc-${this.keys.project}`, this.doc)
     await this.persistence.whenSynced
     this.since = (await idbGet<number>(this.db, 'kv', 'since')) ?? 0
+    this.refs = (await idbGet<Record<number, string>>(this.db, 'kv', 'refs')) ?? {}
     // revocations learned earlier, before anything arrives from peers
     this.learnRevoked((await idbGet<{ p: string; s: string }[]>(this.db, 'kv', 'revoked')) ?? [], false)
     this.pending = (await idbKeys(this.db, 'outbox')).length
@@ -254,6 +271,7 @@ export class Replica {
         const lost = m.mode !== 'relay' && (m.head < this.since || (this.since > 0 && this.since <= (m.floor ?? 0)))
         if (lost) { this.since = m.head; this.seen.clear(); idbPut(this.db, 'kv', 'since', this.since) }
         await this.apply(m.entries)
+        if (this.resync === 1) { await this.catchUpAgain(); break }
         this.since = Math.max(this.since, m.head)
         if (lost && this.keys.writable) await this.reseed()
         for (const q of this.seen) if (q <= this.since) this.seen.delete(q)
@@ -272,9 +290,21 @@ export class Replica {
         break
       case 'up':
         await this.apply([m])
+        if (this.resync === 1) { await this.catchUpAgain(); break }
         if (m.q) this.markSeen(m.q)
         break
+      case 'snapped': // the server took our snapshot: what it replaced can go
+        if (this.snapRef && this.snapRef.upto === m.upto) {
+          const { upto, ref } = this.snapRef
+          this.snapRef = null
+          if (ref) this.refs[upto] = ref
+          await this.dropRefs(upto, ref)
+        }
+        break
       case 'ack': {
+        const ref = this.refSent.get(m.id)
+        this.refSent.delete(m.id)
+        if (m.q && ref) { this.refs[m.q] = ref; await idbPut(this.db, 'kv', 'refs', this.refs) }
         if (m.q) this.markSeen(m.q)
         if (m.q && this.refusal) { this.refusal = null; this.onStatus() }
         for (const id of this.inflight.get(m.id) ?? []) await idbDel(this.db, 'outbox', id)
@@ -356,16 +386,38 @@ export class Replica {
       if (!this.keys.verify(e.snap ? `snap:${e.q}:` : 'upd:', data, sig)) {
         console.warn('dropping update with bad signature', e.q); continue
       }
+      let update: Uint8Array
+      try { update = await this.keys.decrypt(data) } catch (err) { console.warn('dropping undecryptable update', e.q, err); continue }
+      if (isRef(update)) {
+        const got = await this.fetchRef(update)
+        if (!got) { console.warn('couldn’t fetch the upload change', e.q, 'refers to'); this.resync ||= 1; continue }
+        this.refs[e.q] = got.id
+        await idbPut(this.db, 'kv', 'refs', this.refs)
+        update = got.content
+      }
       try {
-        Y.applyUpdate(this.doc, await this.keys.decrypt(data), REMOTE)
+        Y.applyUpdate(this.doc, update, REMOTE)
       } catch (err) {
-        console.warn('dropping undecryptable update', e.q, err)
+        console.warn('dropping unreadable update', e.q, err)
       }
     }
   }
 
   private async send(id: string, update: Uint8Array, covers: string[]) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.status !== 'online') return
+    if (update.length > UPDATE_BATCH) {
+      if (this.serverMode === 'relay' || this.storage === 'relay') {
+        // nothing is stored: give it to the people online, in pieces
+        await this.p2p({ k: 'upd', u: b64e(update) })
+        for (const o of covers) await idbDel(this.db, 'outbox', o)
+        this.pending = (await idbKeys(this.db, 'outbox')).length; this.onStatus()
+        return
+      }
+      const ref = await this.asUpload(update)
+      if (!ref) return // not uploaded yet: stays in the outbox, and the status says why
+      this.refSent.set(id, ref)
+      update = refTo(ref)
+    }
     const d = await this.keys.encrypt(update)
     this.inflight.set(id, covers)
     this.ws.send(JSON.stringify({ t: 'up', id, d: b64e(d), s: b64e(this.keys.sign('upd:', d)) }))
@@ -376,14 +428,73 @@ export class Replica {
     const ids = (await idbKeys(this.db, 'outbox')) as string[]
     if (!ids.length) return
     const updates = await Promise.all(ids.map((id) => idbGet<Uint8Array>(this.db, 'outbox', id)))
-    await this.send(crypto.randomUUID(), Y.mergeUpdates(updates), ids)
+    // as few messages as fit the server's limit: one for a big paste or upload could be too big
+    type Batch = { ids: string[]; updates: Uint8Array[]; size: number }
+    const batches: Batch[] = []
+    ids.forEach((id, i) => {
+      const u = updates[i]
+      if (!u) return
+      let b = batches[batches.length - 1]
+      if (!b || b.size + u.length > UPDATE_BATCH) batches.push(b = { ids: [], updates: [], size: 0 })
+      b.ids.push(id); b.updates.push(u); b.size += u.length
+    })
+    for (const b of batches) await this.send(crypto.randomUUID(), b.updates.length > 1 ? Y.mergeUpdates(b.updates) : b.updates[0], b.ids)
+  }
+
+  /** Upload a big change or snapshot like a file; its id, or null if it isn't on the server yet. */
+  private async asUpload(content: Uint8Array): Promise<string | null> {
+    const id = await this.putBlob(content, 'ref')
+    if (await idbGet(this.db, 'pending', id)) return null
+    await idbDel(this.db, 'blobs', id) // the server has it: no need for a copy here
+    return id
+  }
+
+  /** The change a reference points to, from the server (null if it can't be had). */
+  private async fetchRef(ref: Uint8Array): Promise<{ id: string; content: Uint8Array } | null> {
+    let id: unknown
+    try { id = JSON.parse(dec.decode(ref.subarray(REF.length))).b } catch { return null }
+    if (typeof id !== 'string' || !BLOB_ID.test(id)) return null
+    const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`).catch(() => null)
+    if (!r?.ok) return null
+    try {
+      const content = await this.keys.decrypt(new Uint8Array(await r.arrayBuffer()))
+      return (await this.keys.blobId(content)) === id ? { id, content } : null
+    } catch { return null }
+  }
+
+  /** After a snapshot up to `upto`: the uploads of what it replaced aren't needed any more. */
+  private async dropRefs(upto: number, keep: string | null) {
+    for (const [q, id] of Object.entries(this.refs)) {
+      if (Number(q) > upto || id === keep) continue
+      delete this.refs[Number(q)]
+      await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
+        method: 'DELETE', headers: { 'X-Sig': b64e(this.keys.sign(`del:${id}`, new Uint8Array())), 'X-Only-Output': '1' },
+      }).catch(() => null)
+    }
+    await idbPut(this.db, 'kv', 'refs', this.refs)
+  }
+
+  /** A change refers to an upload that's gone (a snapshot replaced it meanwhile): catch up from
+   *  the start, which brings the snapshot instead. Once per session. */
+  private async catchUpAgain() {
+    if (this.resync !== 1) return
+    this.resync = 2
+    this.since = 0; this.seen.clear()
+    await idbPut(this.db, 'kv', 'since', 0)
+    this.ws?.close() // onclose reconnects
   }
 
   private async compact() {
     if (!this.keys.writable || !this.ws || this.serverMode === 'relay') return
-    const d = await this.keys.encrypt(Y.encodeStateAsUpdate(this.doc))
-    if (d.length > MAX_SNAPSHOT) return // too big for the server to take: the log stays as it is
+    const full = Y.encodeStateAsUpdate(this.doc)
+    let d = await this.keys.encrypt(full), ref: string | null = null
     const upto = this.since
+    if (d.length > MAX_SNAPSHOT) { // too big for one message: as an upload
+      ref = await this.asUpload(full)
+      if (!ref || !this.ws) return // not uploaded: the log stays as it is for now
+      d = await this.keys.encrypt(refTo(ref))
+    }
+    this.snapRef = { upto, ref }
     this.ws.send(JSON.stringify({ t: 'snap', upto, d: b64e(d), s: b64e(this.keys.sign(`snap:${upto}:`, d)) }))
   }
 
@@ -445,21 +556,34 @@ export class Replica {
   }
 
   /** Big peer-to-peer messages coming in pieces, by sender and id. */
-  private parts = new Map<string, { n: number; got: Map<number, string>; s?: string }>()
+  private parts = new Map<string, { from: number; n: number; got: Map<number, string>; s?: string; at: number; size: number }>()
 
   private async onPart(from: number, p: any) {
     const { id, i, n, c } = p
     if (typeof id !== 'string' || !Number.isInteger(i) || !Number.isInteger(n) || typeof c !== 'string'
       || i < 0 || i >= n || n > P2P_PARTS || c.length > P2P_PIECE) return
-    const key = `${from}:${id}`
+    const key = `${from}:${id}`, now = Date.now()
+    for (const [k, w] of this.parts) if (now - w.at > P2P_STALE) this.parts.delete(k)
     if (!this.parts.has(key)) {
-      while (this.parts.size >= P2P_ASSEMBLING) this.parts.delete(this.parts.keys().next().value!) // the oldest unfinished one goes
-      this.parts.set(key, { n, got: new Map() })
+      for (;;) { // the oldest goes: this sender's, else anyone's
+        const mine = [...this.parts].filter(([, w]) => w.from === from).map(([k]) => k)
+        if (mine.length >= P2P_PER_SENDER) this.parts.delete(mine[0])
+        else if (this.parts.size >= P2P_ASSEMBLING) this.parts.delete(this.parts.keys().next().value!)
+        else break
+      }
+      this.parts.set(key, { from, n, got: new Map(), at: now, size: 0 })
     }
     const whole = this.parts.get(key)!
-    if (whole.n !== n) return
+    if (whole.n !== n || whole.got.has(i)) return
+    const held = () => [...this.parts.values()].reduce((t, w) => t + w.size, 0)
+    while (held() + c.length > P2P_HELD) {
+      const old = [...this.parts.keys()].find((k) => k !== key) ?? key
+      this.parts.delete(old)
+      if (old === key) return // this one alone is more than may be held
+    }
     whole.got.set(i, c)
-    this.partAt = Date.now()
+    whole.size += c.length
+    whole.at = this.partAt = now
     if (typeof p.s === 'string') whole.s = p.s
     if (whole.got.size === n) {
       this.parts.delete(key)
@@ -634,12 +758,12 @@ export class Replica {
   // ---- blobs ---------------------------------------------------------------
   /** Store file content here and upload it. 'output' marks compiled PDFs, logs and SyncTeX
    *  data: replaced by the next compile, so collaborators may delete them from the server. */
-  async putBlob(plain: Uint8Array, kind: 'file' | 'output' = 'file'): Promise<string> {
+  async putBlob(plain: Uint8Array, kind: 'file' | 'output' | 'ref' = 'file'): Promise<string> {
     const id = await this.keys.blobId(plain)
     const cached = !!(await idbGet(this.db, 'blobs', id))
     if (!cached) await idbPut(this.db, 'blobs', id, plain)
     // a project file is (re)uploaded even if cached, in case the server dropped it as output
-    if (!cached || kind === 'file') await idbPut(this.db, 'pending', id, kind === 'output' ? 'output' : 1)
+    if (!cached || kind === 'file') await idbPut(this.db, 'pending', id, kind === 'file' ? 1 : 'output')
     if (this.status === 'online') await this.uploadPending()
     return id
   }

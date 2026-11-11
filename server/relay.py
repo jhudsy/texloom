@@ -1170,6 +1170,8 @@ class Relay:
                 return  # over a limit: skip compaction; the log stays as it is
             self.store.snapshot(project, upto, data, sig)
             log.info("compacted %s… up to %d", project[:8], upto)
+            # the sender may now delete what the snapshot replaced (changes it kept as uploads)
+            await ws.send_json({"t": "snapped", "upto": upto})
         elif t == "aw":
             conn.aware = True
             await self.broadcast(project, {"t": "aw", "d": field(msg, "d", str), "from": conn.id}, ws)
