@@ -1,0 +1,22 @@
+# Connect to a TeXLoom server the way the desktop app does, on each operating system.
+# Run by hand when someone can't connect: Actions → Connection check → Run workflow.
+name: Connection check
+
+on:
+  workflow_dispatch:
+    inputs:
+      server:
+        description: Server to connect to
+        default: https://app.texloom.org
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run python scripts/conncheck.py ${{ inputs.server }}
