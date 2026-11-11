@@ -13,7 +13,7 @@ a = Analysis(
     [str(root / "packaging" / "app_main.py")],
     pathex=[str(root)],
     datas=[(str(root / "texloom" / "assets"), "texloom/assets")],
-    hiddenimports=["texloom.gitsync", "texloom.mcp", "PySide6.QtNetwork"],
+    hiddenimports=["texloom.gitsync", "texloom.mcp", "truststore", "PySide6.QtNetwork"],
     excludes=["tkinter", "server", "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtSql", "PySide6.QtTest"],
 )
 pyz = PYZ(a.pure)

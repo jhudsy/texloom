@@ -26,7 +26,7 @@ from pathlib import Path
 from . import __version__
 from .crypto import Keys
 from .folder import STATE, FolderSync
-from . import registry
+from . import registry, tls
 from .daemon import CURRENT, FolderProblem, FolderTag, lock_folder
 from .paths import safe_rel
 from .replica import Replica
@@ -158,7 +158,7 @@ async def refuse_if_private(server: str, code: str) -> None:
     import aiohttp
     base = server.rstrip("/")
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as http:
+        async with aiohttp.ClientSession(connector=tls.connector(), timeout=aiohttp.ClientTimeout(total=10)) as http:
             async with http.get(f"{base}/api/info") as r:
                 if not r.ok or not (await r.json()).get("private"):
                     return

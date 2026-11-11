@@ -20,6 +20,7 @@ import aiohttp
 from cryptography.exceptions import InvalidTag
 from pycrdt import Doc, Map, merge_updates
 
+from . import tls
 from .crypto import Keys, b64d, b64e, canonical_pub, revoke_msg, signer
 
 log = logging.getLogger("texloom")
@@ -415,7 +416,7 @@ class Replica:
     async def run(self) -> None:
         ws_url = self.server.replace("http", "ws", 1) + f"/ws/{self.keys.project}"
         backoff = 1
-        async with aiohttp.ClientSession() as http:
+        async with aiohttp.ClientSession(connector=tls.connector()) as http:
             self.http = http
             if self.deleted_at is not None:
                 self.synced.set()
