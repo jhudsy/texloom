@@ -1,7 +1,9 @@
 # Sync-only projects between two computers, end to end (scripts/check_synconly.py), on each
-# operating system: the script simulates Windows and Unix line endings, and the Windows runner adds a
-# real Windows. A few minutes, so it runs only when what it checks may have changed (the desktop
-# app's sync, the server), every night, and on demand (Actions → Sync-only check → Run workflow).
+# operating system: desktop with desktop, and desktop with the web app (headless Chromium typing for
+# real). The script simulates Windows and Unix line endings, and the Windows runner adds a real
+# Windows. No TeX files here, so the web app doesn't compile (⌘S is still checked). A few minutes,
+# so it runs only when what it checks may have changed, every night, and on demand
+# (Actions → Sync-only check → Run workflow).
 name: Sync-only check
 
 on:
@@ -14,6 +16,16 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/sync-only.yml'
+      - 'web/src/replica.ts'
+      - 'web/src/editor.ts'
+      - 'web/src/foldersync.ts'
+      - 'web/src/projectfiles.ts'
+      - 'web/src/output.ts'
+      - 'web/src/compile.ts'
+      - 'web/src/diff.ts'
+      - 'web/src/wholechars.ts'
+      - 'web/src/crypto.ts'
+      - 'web/package-lock.json'
   pull_request:
     paths:
       - 'texloom/**'
@@ -22,6 +34,16 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/sync-only.yml'
+      - 'web/src/replica.ts'
+      - 'web/src/editor.ts'
+      - 'web/src/foldersync.ts'
+      - 'web/src/projectfiles.ts'
+      - 'web/src/output.ts'
+      - 'web/src/compile.ts'
+      - 'web/src/diff.ts'
+      - 'web/src/wholechars.ts'
+      - 'web/src/crypto.ts'
+      - 'web/package-lock.json'
   schedule:
     - cron: '17 3 * * *'  # nightly
   workflow_dispatch:
@@ -36,7 +58,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv run python scripts/check_synconly.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the web app (the server serves it)
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Chromium for the web app's pairings
+        run: uv run --with playwright python -m playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+      - run: uv run --with playwright python scripts/check_synconly.py
         env:
           CHECK_DIR: ${{ runner.temp }}/synconly
       - if: failure()

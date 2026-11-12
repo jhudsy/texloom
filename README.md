@@ -863,7 +863,14 @@ computers, then edits through their folders: every file arriving, edits both way
 a burst of edits, one computer off for a while, pictures, renames and deletions, and that the
 server stored nothing. Each computer plays an operating system for line endings (files saved on
 "windows" end lines with \r\n), and every pairing is run: unix/unix, windows/windows, and
-windows/unix both ways. About a minute and a quarter; `--keep` leaves the folders and logs.
+windows/unix both ways. With Playwright it also runs the web app in headless Chromium, typing for
+real against a Unix and a Windows desktop (`unix/browser`, `windows/browser`); see the script's own
+description. A few minutes; `--keep` leaves the folders and logs:
+
+```bash
+uv run --with playwright python -m playwright install chromium   # once
+uv run --with playwright python scripts/check_synconly.py
+```
 
 The quick checks run on every push (`.github/workflows/checks.yml`). The sync-only check takes a
 few minutes, so it runs when the desktop app's sync or the server changes, every night, and on

@@ -930,6 +930,13 @@ async function openProject(keys: Keys) {
   watchClashes(r, (c) => { clashes.push(c); renderClashes() })
   watchMerges(r, () => me.name) // paragraphs changed by two people apart: a note in Review
   keepLF(r) // line breaks are \n only (files saved on Windows have \r\n): see projectfiles.ts
+  // End-to-end checks (scripts/check_synconly.py) type into the editor for real and read the shared
+  // text back: only on this computer's own addresses, and only when a check turns it on.
+  try {
+    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && localStorage.getItem('texloom.testHooks') === '1') {
+      (window as any).__texloom = { r, view: () => editor.view(), open: (p: string) => { layout.showEditor(); tree.open(p) } }
+    }
+  } catch { /* storage blocked: no hooks */ }
   runGitHub(r, () => me.name) // keep it in step with a GitHub repository, if it's linked to one
   r.meta.observe(renderMoved); renderMoved()
   r.onStatus = () => {
