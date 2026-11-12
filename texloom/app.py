@@ -53,6 +53,28 @@ RELEASES_API = "https://api.github.com/repos/jhudsy/texloom/releases/latest"
 CHANGELOG_URL = "https://texloom.org/changelog.html"
 
 
+def mac_dock(show: bool) -> None:
+    """On a Mac, show or hide TeXLoom in the Dock and ⌘-Tab: while no window is open it runs from
+    its menu-bar icon alone, like other background sync apps. Qt has no call for this, so ask
+    AppKit directly (NSApplication.setActivationPolicy:); any failure leaves the Dock as it is."""
+    try:
+        import ctypes
+        import ctypes.util
+        objc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+        objc.objc_getClass.restype = objc.sel_registerName.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        send = ctypes.cast(objc.objc_msgSend, ctypes.c_void_p).value
+        get = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(send)
+        with_long = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long)(send)
+        with_bool = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool)(send)
+        nsapp = get(objc.objc_getClass(b"NSApplication"), objc.sel_registerName(b"sharedApplication"))
+        with_long(nsapp, objc.sel_registerName(b"setActivationPolicy:"), 0 if show else 1)  # Regular / Accessory
+        if show:  # coming back from the menu bar: be the active app, so the window and its menus come forward
+            with_bool(nsapp, objc.sel_registerName(b"activateIgnoringOtherApps:"), True)
+    except Exception:
+        log.debug("couldn't change the Dock icon", exc_info=True)
+
+
 def version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in re.findall(r"\d+", v)[:3])
 
@@ -2668,6 +2690,30 @@ class App(QtWidgets.QApplication):
         return super().event(e)
 
 
+class DockFollowsWindows(QtCore.QObject):
+    """On a Mac, keep TeXLoom in the Dock and ⌘-Tab only while one of its windows is open."""
+
+    def __init__(self, app: QtWidgets.QApplication) -> None:
+        super().__init__(app)
+        self.shown = True
+        self.timer = QtCore.QTimer(self, singleShot=True, interval=0, timeout=self.check)
+        app.installEventFilter(self)
+        self.timer.start()  # once running: started with --hidden, nothing has opened
+
+    def eventFilter(self, obj: QtCore.QObject, e: QtCore.QEvent) -> bool:
+        if e.type() in (QtCore.QEvent.Show, QtCore.QEvent.Hide) and isinstance(obj, QtWidgets.QWidget) and obj.isWindow():
+            # A window opening comes forward at once; one closing may be followed by another opening.
+            self.check() if e.type() == QtCore.QEvent.Show else self.timer.start()
+        return False
+
+    def check(self) -> None:
+        show = any(w.isVisible() and w.windowType() in (Qt.Window, Qt.Dialog, Qt.Sheet)
+                   for w in QtWidgets.QApplication.topLevelWidgets())
+        if show != self.shown:
+            self.shown = show
+            mac_dock(show)
+
+
 def main(argv: list[str] | None = None) -> None:
     use_tex_on_path()  # opened from the Finder, Dock or Start menu: TeX isn't on PATH otherwise
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -2749,10 +2795,12 @@ def main(argv: list[str] | None = None) -> None:
         tray.show()
         win.tray = tray
 
-    if MAC:  # clicking the Dock icon brings the window back, as in other Mac apps
+    if MAC:  # opening TeXLoom again (Dock, Finder, Spotlight) brings the window back, as in other Mac apps
         started = time.time()
         app.applicationStateChanged.connect(lambda state: state == Qt.ApplicationActive and not win.isVisible()
                                             and time.time() - started > 3 and win.show_window())
+        if tray is not None:  # in the background the menu-bar icon is enough: no Dock icon or place in ⌘-Tab
+            DockFollowsWindows(app)
 
     register_url_scheme()
     engine.start()

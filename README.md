@@ -489,8 +489,8 @@ has **Tags…**, **Make a copy…** (a new project, in a new folder, from this o
   Check for updates…**), which shows **Update to …** in the toolbar and offers the download.
 - **Quit TeXLoom** (menu, ⌘Q / Ctrl+Q, tray) asks first, since folders then stop syncing, and
   offers to keep running in the background instead (Settings can stop it asking).
-- Closing the window keeps TeXLoom syncing in the menu bar or tray (on a Mac, click its Dock icon
-  to bring the window back). On Linux desktops without a tray, closing asks whether to minimise
+- Closing the window keeps TeXLoom syncing in the menu bar or tray. On a Mac it then leaves the
+  Dock and ⌘-Tab; click its menu-bar icon, or open TeXLoom again, to bring the window back. On Linux desktops without a tray, closing asks whether to minimise
   instead, since quitting stops syncing.
 
 The downloads aren't signed with paid certificates yet, so the first time:

@@ -534,7 +534,9 @@ main thread only reads `Daemon.states` and hands work (join, share, restart) to 
   there means text only). On macOS: the toolbar joins the title bar, dialogs that belong to the
   window (`Dialog`) open as sheets, Settings and About move into the app menu through their
   menu roles (every other action is `NoRole`, so Qt doesn't guess from its text), Settings is
-  its own window, and closing the window hides it (the Dock icon brings it back). Windows and
+  its own window, and closing the window hides it. While no window is open the app switches to
+  the accessory activation policy (`mac_dock`), so it leaves the Dock and ⌘-Tab and lives in the
+  menu bar; opening any window brings the Dock icon back. Windows and
   Linux get a Settings button in the toolbar; closing hides the window in the tray, saying so the
   first time, and on a desktop with no tray asks whether to minimise instead of quitting.
 
