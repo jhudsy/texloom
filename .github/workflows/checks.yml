@@ -1,7 +1,6 @@
-# The checks, on every push to main and every pull request: translations, the clients that must
-# agree with each other (project lists, cross-references), the web app's own checks, and
-# sync-only projects between two computers (scripts/check_synconly.py), on each operating system:
-# the script simulates Windows and Unix line endings, and the Windows runner adds a real Windows.
+# The quick checks, on every push to main and every pull request: translations, the clients that
+# must agree with each other (project lists, cross-references) and the web app's own checks. The
+# longer end-to-end check of sync-only projects is in sync-only.yml.
 name: Checks
 
 on:
@@ -35,22 +34,3 @@ jobs:
           npm run check-suggest
           npm run check-xr
           npm run check-chars
-
-  sync-only:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv run python scripts/check_synconly.py
-        env:
-          CHECK_DIR: ${{ runner.temp }}/synconly
-      - if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: synconly-${{ matrix.os }}
-          path: ${{ runner.temp }}/synconly
-          include-hidden-files: true

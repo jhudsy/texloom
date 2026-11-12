@@ -865,8 +865,9 @@ server stored nothing. Each computer plays an operating system for line endings 
 "windows" end lines with \r\n), and every pairing is run: unix/unix, windows/windows, and
 windows/unix both ways. About a minute and a quarter; `--keep` leaves the folders and logs.
 
-All of these run on every push (`.github/workflows/checks.yml`), the sync-only check on Linux,
-macOS and a real Windows too.
+The quick checks run on every push (`.github/workflows/checks.yml`). The sync-only check takes a
+few minutes, so it runs when the desktop app's sync or the server changes, every night, and on
+demand (Actions → Sync-only check), on Linux, macOS and a real Windows (`sync-only.yml`).
 
 To see what a relay can take, `uv run python scripts/loadtest.py all` starts its own throwaway server
 and reports latency, CPU and memory for each scenario. Results depend on the machine.
