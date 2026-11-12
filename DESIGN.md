@@ -293,6 +293,14 @@ relay) as the fallback for symmetric NATs.
   than being overwritten.
 - CRDT → disk: write the merged file. If the file changed on disk since the last
   sync, ingest that change first.
+- Reading a changed file: only once it has stopped changing. A read halfway through a save
+  (some editors empty a file, then write it), or through copying a big file in, would share a
+  cut-off file, and for text its missing end as deleted. Changed files are looked at, then again
+  0.2 s later (2 s for one that became empty or vanished: rarely meant), and any still changing
+  wait for their next change, or a look shortly after. Their date and size are noted before
+  reading (and after writing, from the file written before it goes into place), so a save that
+  lands in between is never taken for what was read and missed. An empty file is never taken
+  for an older copy reappearing, whose repair would write over a save in progress.
 - Line endings: the project's texts break lines with "\n" only. A file saved on Windows ends
   lines with "\r\n"; it comes in as "\n" and is written back with "\r\n" (`c` in known.json,
   judged by the file's first line; for entries from before it was noted, by the file on disk).

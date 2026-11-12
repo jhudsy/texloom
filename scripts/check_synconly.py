@@ -207,6 +207,49 @@ def pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> None:
         sound(a, b)
         step("a burst of edits on both sides ends the same on both")
 
+        # an editor that saves by emptying the file, then writing it (a moment later); and copying a
+        # big file in, a piece at a time: the other computer must never get a cut-off file
+        seen_cut: list[str] = []
+        def watch_b(until: float, big: bytes | None = None) -> None:
+            while time.monotonic() < until:
+                try:
+                    s = b.read("main.tex")
+                    if any(x not in s for x in KEEP_INTACT):
+                        seen_cut.append(f"main.tex with {len(s)} characters")
+                    if big is not None and b.file("photo-big.png").exists():
+                        z = b.file("photo-big.png").stat().st_size
+                        if 0 < z != len(big):
+                            seen_cut.append(f"photo-big.png at {z} of {len(big)} bytes")
+                except (OSError, UnicodeDecodeError):
+                    pass
+                time.sleep(0.02)
+        import threading
+        w = threading.Thread(target=watch_b, args=(time.monotonic() + 6,))
+        w.start()
+        for i in range(5):
+            content = lf(a.read("main.tex")).replace("The middle paragraph", f"% slow save {i}\nThe middle paragraph", 1)
+            with open(a.file("main.tex"), "wb") as f:  # emptied now, written in a moment
+                f.flush()
+                time.sleep(0.15)
+                f.write((content.replace("\n", "\r\n") if a.system == "windows" else content).encode())
+            time.sleep(0.4)
+        w.join()
+        wait("the slow saves reach B", lambda: b.has("main.tex", "% slow save 4"), 30)
+        big = b"\x89PNG\r\n\x1a\n" + rng.randbytes(20_000_000)
+        w = threading.Thread(target=watch_b, args=(time.monotonic() + 15, big))
+        w.start()
+        with open(a.file("photo-big.png"), "wb") as f:
+            for k in range(0, len(big), 2_000_000):
+                f.write(big[k:k + 2_000_000])
+                f.flush()
+                time.sleep(0.1)
+        wait("the big picture reaches B whole", lambda: b.file("photo-big.png").exists() and b.file("photo-big.png").read_bytes() == big, 60)
+        w.join()
+        if seen_cut:
+            raise Failed(f"B got a cut-off file: {seen_cut[:3]}")
+        sound(a, b)
+        step("slow saves and a 20 MB file copied in pieces arrive whole, never cut off")
+
         b.stop()
         a.edit("chapter.tex", "naïvement.", "naïvement. A wrote this while B was off.")
         time.sleep(1)

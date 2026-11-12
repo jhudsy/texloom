@@ -30,6 +30,8 @@ from .confine import OUTSIDE_NOTE, forget_reads, outside_reads, sandboxed
 from .scan import SCANNED, added, allowed, scan
 from .xr import compile_order, external_documents
 from .paths import PROTECTED_DIRS, STATE, UNSAFE_NAMES, WIN_RESERVED, latexmk_command, main_file, safe_rel, tex_env  # noqa: F401
+SETTLE = 0.2  # seconds a changed file must stay unchanged before it is read (see FolderSync._settle)
+SETTLE_DOUBT = 2.0  # the same, for a file that became empty or disappeared (rarely meant; editors can take a while to write it again)
 SOURCES = (".tex", ".bib", ".sty", ".cls", ".bst", ".ltx", ".dtx", ".ins", ".bbx", ".cbx")  # never counted as compile output
 IGNORE_DIRS = {STATE, ".git", ".svn", "node_modules", "__pycache__", ".idea", ".vscode"}
 IGNORE_NAMES = {".DS_Store", "Thumbs.db"}
@@ -316,6 +318,9 @@ class FolderSync:
         self._clean_build = False  # the next compile starts from scratch (requested from a browser)
         self._rewrite = False  # write the project's text to disk after this ingest
         self._lf_done = False  # "\r" taken out of the project's texts (once, at the start)
+        self._unsettled: dict[str, int] = {}  # files found still being written, and how many times in a row
+        self._later_paths: set[str] = set()  # those, to look at again shortly
+        self._later_task: asyncio.Task | None = None
 
     # --- helpers -------------------------------------------------------------
     def rel(self, p: Path) -> str:
@@ -411,6 +416,11 @@ class FolderSync:
         st = st or (self.root / rel).stat()
         self.known[rel] = {"m": st.st_mtime_ns, "z": st.st_size, "h": h,
                            "c": self._windows(rel) if windows is None else windows}
+        seen = self.recent.setdefault(rel, [])
+        if h in seen:
+            seen.remove(h)
+        seen.append(h)
+        del seen[:-30]
 
     def _windows(self, rel: str) -> bool:
         """Whether the file ends lines with \r\n: as remembered, or (noted before 0.4.21) as it is on disk."""
@@ -422,11 +432,6 @@ class FolderSync:
                 return crlf(f.read(65536))
         except OSError:
             return False
-        seen = self.recent.setdefault(rel, [])
-        if h in seen:
-            seen.remove(h)
-        seen.append(h)
-        del seen[:-30]
 
     def _stale(self, rel: str, h: str) -> bool:
         """The file holds a version this folder had earlier, not the latest: a replay."""
@@ -476,10 +481,62 @@ class FolderSync:
         await self.ingest(set(self.disk_files()) | set(self.known))
         self.ingest_dirs()
 
+    def _look(self, rel: str) -> tuple[int, int] | None:
+        try:
+            st = (self.root / rel).stat()
+        except OSError:
+            return None
+        return st.st_size, st.st_mtime_ns
+
+    async def _settle(self, paths: set[str]) -> set[str]:
+        """The changed files among `paths` that are still being written: left for a moment later.
+
+        A file is read only once it has stopped changing: one read halfway through a save, or
+        through copying a big file in, would share a cut-off file (for text, its missing end as
+        deleted, losing collaborators' edits there when the rest arrives). Some editors save by
+        emptying the file and writing it again, or by deleting and recreating it: a file that
+        became empty, or disappeared, is given longer to come back."""
+        cand = [rel for rel in paths if not self.ignored(rel) and safe_rel(rel) is not None and not self._stat_matches(rel)]
+        if not cand:
+            return set()
+        first = {rel: self._look(rel) for rel in cand}
+        doubtful = any((f is None and rel in self.known) or (f is not None and f[0] == 0 and self.known.get(rel, {}).get("z"))
+                       for rel, f in first.items())
+        await asyncio.sleep(SETTLE_DOUBT if doubtful else SETTLE)
+        out = set()
+        for rel in cand:
+            if self._look(rel) == first[rel]:
+                self._unsettled.pop(rel, None)
+                continue
+            n = self._unsettled[rel] = self._unsettled.get(rel, 0) + 1
+            if n <= 20:  # one that never stops changing is taken as it is, after a while
+                out.add(rel)
+        return out
+
+    def _later(self, paths: set[str]) -> None:
+        """Look at these files again shortly (their last change may already have been reported)."""
+        self._later_paths |= paths
+        if self._later_task and not self._later_task.done():
+            return
+
+        async def again():
+            await asyncio.sleep(0.5)
+            todo, self._later_paths = self._later_paths, set()
+            async with self.r.lock:
+                await self.ingest(todo)
+        try:
+            self._later_task = asyncio.get_running_loop().create_task(again())
+        except RuntimeError:
+            pass
+
     async def ingest(self, paths: set[str]) -> None:
         """Push local disk changes for `paths` into the CRDT."""
         if not self.r.can_write:
             return
+        unsettled = await self._settle(paths)
+        if unsettled:
+            paths = paths - unsettled
+            self._later(unsettled)
         changed = False
         ups: set[str] = set()  # files changed here and sent
         moves = self._moves(paths)
@@ -524,17 +581,28 @@ class FolderSync:
                 continue
             if self._stat_matches(rel):
                 continue
-            data = full.read_bytes()
+            # Its date and size from before reading: noted after, they could be those of a save
+            # made meanwhile, which would then pass for this content and never be shared.
+            try:
+                before = full.stat()
+                data = full.read_bytes()
+                moved = self._look(rel) != (before.st_size, before.st_mtime_ns)
+            except OSError:
+                self._later({rel})
+                continue
+            if moved:  # changed while being read: again in a moment
+                self._later({rel})
+                continue
             if len(data) > MAX_FILE:
                 log.warning("skipping %s (>50MB)", rel)
                 continue
             h = sha(data)
             if self.known.get(rel, {}).get("h") == h:
-                self._remember(rel, h, crlf(data))  # touched, not changed
+                self._remember(rel, h, crlf(data), st=before)  # touched, not changed
                 if is_text(rel, data):
                     self.base[rel] = lf(data.decode("utf-8"))
                 continue
-            if is_text(rel, data) and self._stale(rel, h):
+            if data and is_text(rel, data) and self._stale(rel, h):  # (an empty file is an editor halfway through saving, not a replay)
                 # An older version came back (an editor saved or reloaded a stale copy). It
                 # isn't an edit: applying it would undo collaborators' changes. Write the
                 # project's current text back instead.
@@ -571,7 +639,7 @@ class FolderSync:
                         del self.r.files[rel]
                     self.r.bin[rel] = {"h": bid, "size": size}
                 self.r.local_change(setbin)
-            self._remember(rel, h, windows)
+            self._remember(rel, h, windows, st=before)
             log.info("↑ %s", rel)
             changed = True
             ups.add(rel)

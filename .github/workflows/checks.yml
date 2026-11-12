@@ -53,3 +53,4 @@ jobs:
         with:
           name: synconly-${{ matrix.os }}
           path: ${{ runner.temp }}/synconly
+          include-hidden-files: true
