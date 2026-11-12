@@ -405,9 +405,10 @@ class FolderSync:
             return False
         return bool(k) and k["m"] == st.st_mtime_ns and k["z"] == st.st_size
 
-    def _remember(self, rel: str, h: str, windows: bool | None = None) -> None:
-        """Note a file's state on disk; `windows`: it ends lines with \r\n (else as before)."""
-        st = (self.root / rel).stat()
+    def _remember(self, rel: str, h: str, windows: bool | None = None, st: os.stat_result | None = None) -> None:
+        """Note a file's state on disk; `windows`: it ends lines with \r\n (else as before); `st`: its
+        date and size, if known from before it went into place (see _write)."""
+        st = st or (self.root / rel).stat()
         self.known[rel] = {"m": st.st_mtime_ns, "z": st.st_size, "h": h,
                            "c": self._windows(rel) if windows is None else windows}
 
@@ -681,8 +682,12 @@ class FolderSync:
         full.parent.mkdir(parents=True, exist_ok=True)
         tmp = full.with_name(f".{full.name}.texloom-tmp")
         tmp.write_bytes(data)
+        # Date and size of what we wrote, taken before it goes into place: read afterwards, they
+        # could be those of an editor saving at that very moment, and its edit would then look
+        # like our own write and never be shared.
+        st = tmp.stat()
         tmp.replace(full)
-        self._remember(rel, h)
+        self._remember(rel, h, st=st)
         log.info("↓ %s", rel)
         for f in new_lines:
             log.warning("⚠ %s — if you compile this folder with your own LaTeX tools, check it first.", f.describe())

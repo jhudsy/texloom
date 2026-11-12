@@ -92,7 +92,7 @@ class Computer:
 
     @property
     def env(self) -> dict:
-        return {**os.environ, "TEXLOOM_HOME": str(self.home)}
+        return {**os.environ, "TEXLOOM_HOME": str(self.home), "PYTHONIOENCODING": "utf-8"}
 
     def texloom(self, *args: str, timeout: float = 180) -> str:
         p = subprocess.run(PY + [CLI, *args], cwd=ROOT, env=self.env, capture_output=True, text=True, timeout=timeout, check=False)
@@ -243,11 +243,13 @@ def pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> None:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")  # a Windows console's own code page has no ✓
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("pairs", nargs="*", choices=PAIRS, metavar="PAIR", help=f"which to run: {', '.join(PAIRS)} (default: all)")
     ap.add_argument("--keep", action="store_true", help="keep the folders, logs and database afterwards")
     args = ap.parse_args()
-    tmp = Path(tempfile.mkdtemp(prefix="texloom-synconly-"))
+    tmp = Path(os.environ.get("CHECK_DIR") or tempfile.mkdtemp(prefix="texloom-synconly-"))
+    tmp.mkdir(parents=True, exist_ok=True)
     port = free_port()
     url = f"http://127.0.0.1:{port}"
     (tmp / "codes.txt").write_text("CHECK-ONLY-NOT-A-REAL-CODE 1G check\n")  # stores projects only with a code
