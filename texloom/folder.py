@@ -194,7 +194,7 @@ def lf(s: str) -> str:
     """Text with every line ending as "\n". A file saved on Windows ends lines with "\r\n": the
     project keeps "\n" only (editors and merges count a line break as one character), and the
     file is written back with the line endings it had (`crlf`, remembered per file)."""
-    return s.replace("\r\n", "\n").replace("\r", "\n") if "\r" in s else s
+    return s.replace("\r\n", "\n").replace("\r", "") if "\r" in s else s  # a lone "\r": see strip_cr
 
 
 def crlf(data: bytes) -> bool:
@@ -210,8 +210,10 @@ def on_disk(text: str, windows: bool) -> bytes:
 
 
 def strip_cr(yt: Text) -> bool:
-    """Take every "\r" out of a project text, each by itself, so nothing else moves (a lone one
-    becomes "\n"). Call inside a change. True if there were any."""
+    """Take every "\r" out of a project text, each by itself, so nothing else moves. A lone one is
+    taken out too: before 0.4.21, edits in the browser to a file saved on Windows could land off by
+    a character per line and leave "\r"s in mid-word, which Windows editors show as line breaks
+    ("\bottom", "ru", "le" on three lines for \bottomrule). Call inside a change. True if any."""
     s = str(yt)
     if "\r" not in s:
         return False
@@ -219,8 +221,6 @@ def strip_cr(yt: Text) -> bool:
         if s[i] == "\r":
             at = len(s[:i].encode())  # pycrdt counts UTF-8 bytes; "\r" is one
             del yt[at:at + 1]
-            if s[i + 1:i + 2] != "\n":
-                yt.insert(at, "\n")
     return True
 
 

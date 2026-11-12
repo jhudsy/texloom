@@ -42,7 +42,7 @@ export function isText(path: string, data: Uint8Array): string | null {
 /** Text with every line ending as "\n". Files saved on Windows end lines with "\r\n": the project
  *  keeps "\n" only (the editors and merges count a line break as one character), and the desktop
  *  app and the browser's folder sync write a file back with the line endings it had. */
-export const lf = (s: string) => (s.includes('\r') ? s.replace(/\r\n?/g, '\n') : s)
+export const lf = (s: string) => (s.includes('\r') ? s.replace(/\r\n/g, '\n').replace(/\r/g, '') : s)
 
 /** Keep "\r" out of the project's text: take out any already there, any a collaborator's older app
  *  brings in, and any pasted. Each "\r" is deleted by itself, so nothing else (cursors, comments) moves. */
@@ -57,7 +57,7 @@ export function keepLF(r: Replica) {
         const s = yt.toString()
         for (let i = s.length - 1; i >= 0; i--) {
           if (s[i] !== '\r') continue
-          if (s[i + 1] === '\n') yt.delete(i, 1); else { yt.delete(i, 1); yt.insert(i, '\n') } // a lone "\r" (old Mac) is a line break too
+          yt.delete(i, 1) // a lone "\r" too: left in mid-word by edits misplaced before 0.4.21 (Windows editors show it as a line break)
         }
       }
     }, LF)

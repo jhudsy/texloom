@@ -299,8 +299,9 @@ relay) as the fallback for symmetric NATs.
   The browser's folder sync does the same. The editor counts only "\n" as a line break
   (`EditorState.lineSeparator`): by default CodeMirror also takes "\r\n" as one, so its
   positions fell one short of the shared text's per line above and typing landed off, in the
-  middle of words. Any "\r" in a project text (put there by an older app, or pasted) is taken
-  out, each by itself, by the web app as it arrives and by the folder sync when it starts
+  middle of words, leaving lone "\r"s inside words that Windows editors show as line breaks.
+  Any "\r" in a project text (put there by an older app, pasted, or left by that bug; a lone one
+  too, rather than taken for an old Mac line break) is taken out, each by itself, by the web app as it arrives and by the folder sync when it starts
   (`keepLF`, `strip_cr`).
 - Renames on disk: a rename reaches the sync as a deletion and an addition, perhaps in
   different batches. A file gone from disk whose last synced content (by hash) is now in a
