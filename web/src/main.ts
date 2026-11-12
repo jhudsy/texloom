@@ -944,14 +944,24 @@ async function openProject(keys: Keys) {
   // Ready the in-browser engine while the project is open, so the first Compile starts sooner.
   setTimeout(() => { if (device.compile === 'browser') r.snapshotFiles().then(warmUp).catch(() => {}) }, 4000)
 
+  // One button per collaborator, kept while they're here: awareness changes with every move of
+  // their cursor, and a button rebuilt each time would lose the hover before its tooltip shows.
+  const peerButtons = new Map<number, HTMLButtonElement>()
   r.awareness.on('change', () => {
     const others = [...r.awareness.getStates().entries()].filter(([id, s]) => id !== r.doc.clientID && s.user)
-    peers.replaceChildren(...others.map(([id, s]) => {
+    const buttons = others.map(([id, s]) => {
       const name = String(s.user.name).slice(0, 64)
       const where = typeof s.file === 'string' ? ` · ${String(s.file).slice(0, 100)}` : ''
-      return h('button', { class: 'peer', style: `background:${/^#[0-9a-f]{6}$/i.test(s.user.color) ? s.user.color : '#888'}`,
-        title: t('{{name}}{{where}} — click to go to where they are', { name, where }), 'aria-label': t('Go to {{name}}', { name }), onclick: () => jumpTo(id) }, name.slice(0, 2))
-    }))
+      let b = peerButtons.get(id)
+      if (!b) peerButtons.set(id, (b = h('button', { class: 'peer', onclick: () => jumpTo(id) })))
+      b.style.background = /^#[0-9a-f]{6}$/i.test(s.user.color) ? s.user.color : '#888'
+      b.dataset.tip = t('{{name}}{{where}} — click to go to where they are', { name, where }) // shown at once (style.css)
+      b.setAttribute('aria-label', t('Go to {{name}}', { name }))
+      b.textContent = name.slice(0, 2)
+      return b
+    })
+    for (const id of peerButtons.keys()) if (!others.some(([o]) => o === id)) peerButtons.delete(id)
+    if (buttons.length !== peers.children.length || buttons.some((b, i) => peers.children[i] !== b)) peers.replaceChildren(...buttons)
     if (!removing) projects.sawPeople(keys.project, others.map(([, s]) => String(s.user.name)), me.name)
   })
 

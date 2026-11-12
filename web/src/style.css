@@ -70,6 +70,12 @@ header button { white-space: nowrap; flex-shrink: 0; }
 .peers { display: flex; gap: 3px; }
 .peer { width: 24px; height: 24px; border-radius: 50%; color: #fff; font-size: 11px; display: grid; place-items: center; text-transform: uppercase; padding: 0; border: 2px solid transparent; cursor: pointer; }
 .peer:hover, .peer:focus-visible { border-color: var(--fg); }
+.peer { position: relative; }
+.peer[data-tip]:hover::after, .peer[data-tip]:focus-visible::after {
+  content: attr(data-tip); position: absolute; top: calc(100% + 6px); right: -2px; z-index: 50;
+  width: max-content; max-width: 260px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg); font-size: 12px; text-transform: none; text-align: left;
+  white-space: normal; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); pointer-events: none; }
 
 main { flex: 1; display: grid; min-height: 0; }
 aside { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
