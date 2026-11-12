@@ -489,9 +489,16 @@ has **Tags…**, **Make a copy…** (a new project, in a new folder, from this o
   to bring the window back). On Linux desktops without a tray, closing asks whether to minimise
   instead, since quitting stops syncing.
 
-The downloads aren't signed with paid certificates yet. On macOS, the first time,
-right-click the app → **Open** (or System Settings → Privacy & Security → **Open Anyway**);
-on Windows, SmartScreen → **More info** → **Run anyway**. The app is the same helper as
+The downloads aren't signed with paid certificates yet, so the first time:
+- **macOS:** unzip the download and move TeXLoom to Applications. Open it once and close the
+  warning, then go to System Settings → Privacy & Security, scroll down to the message about
+  TeXLoom, click **Open Anyway** and confirm. (On older versions of macOS, right-click the app →
+  **Open** also works.)
+- **Windows:** extract the `.zip` first (right-click → **Extract All**), then run `TeXLoom.exe`
+  in the extracted folder. If Windows says it protected your PC, click **More info** →
+  **Run anyway**.
+
+The app is the same helper as
 below, with a window: it and `texloom start` share the folder list, and only one of them
 syncs a given folder at a time.
 
