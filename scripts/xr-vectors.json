@@ -1,0 +1,92 @@
+[
+ {
+  "what": "a paper and its supplement citing each other: the cycle is cut",
+  "files": {
+   "ijcai/main.tex": "\\documentclass{article}\n\\usepackage{xr}\n\\externaldocument[S-]{supplement}\n\\input{macros}\n\\begin{document}\\ref{S-app}\\end{document}\n",
+   "ijcai/supplement.tex": "\\documentclass{article}\n\\usepackage{xr}\n\\externaldocument[M-]{main}\n\\begin{document}\\ref{M-sec}\\end{document}\n",
+   "ijcai/macros.tex": "\\newcommand{\\x}{x}\n"
+  },
+  "main": "ijcai/main.tex",
+  "order": ["ijcai/supplement.tex"],
+  "externals": {"ijcai/main.tex": [["ijcai/supplement.aux", "ijcai/supplement.tex"]], "ijcai/supplement.tex": [["ijcai/main.aux", "ijcai/main.tex"]]}
+ },
+ {
+  "what": "the same cycle from the supplement's side",
+  "files": {
+   "main.tex": "\\documentclass{article}\n\\externaldocument[S-]{supplement}\n",
+   "supplement.tex": "\\documentclass{article}\n\\externaldocument[M-]{main}\n"
+  },
+  "main": "supplement.tex",
+  "order": ["main.tex"],
+  "externals": {"supplement.tex": [["main.aux", "main.tex"]]}
+ },
+ {
+  "what": "found in a file the document inputs, with a URL argument and spaces",
+  "files": {
+   "paper/main.tex": "\\documentclass{article}\n\\input{setup.tex}\n",
+   "paper/setup.tex": "\\usepackage{xr-hyper}\n\\externaldocument [S-] { appendix }[https://example.org/appendix.pdf]\n",
+   "paper/appendix.tex": "\\documentclass{article}\n"
+  },
+  "main": "paper/main.tex",
+  "order": ["paper/appendix.tex"],
+  "externals": {"paper/main.tex": [["paper/appendix.aux", "paper/appendix.tex"]], "paper/appendix.tex": []}
+ },
+ {
+  "what": "inputs resolve from the compiled document's folder, also in other folders",
+  "files": {
+   "paper/main.tex": "\\documentclass{article}\n\\include{../shared/xr}\n",
+   "shared/xr.tex": "\\externaldocument{../shared/notes}\n\\zexternaldocument{../talk/slides}\n\\externalcitedocument{../talk/slides}\n",
+   "shared/notes.tex": "\\documentclass{article}\n",
+   "talk/slides.tex": "\\documentclass{beamer}\n"
+  },
+  "main": "paper/main.tex",
+  "order": ["shared/notes.tex", "talk/slides.tex"],
+  "externals": {"paper/main.tex": [["shared/notes.aux", "shared/notes.tex"], ["talk/slides.aux", "talk/slides.tex"]]}
+ },
+ {
+  "what": "a chain is compiled from its far end",
+  "files": {
+   "a.tex": "\\documentclass{article}\\externaldocument{b}",
+   "b.tex": "\\documentclass{article}\\externaldocument{c}",
+   "c.tex": "\\documentclass{article}"
+  },
+  "main": "a.tex",
+  "order": ["c.tex", "b.tex"],
+  "externals": {"a.tex": [["b.aux", "b.tex"]], "b.tex": [["c.aux", "c.tex"]], "c.tex": []}
+ },
+ {
+  "what": "a longer cycle is cut where it closes",
+  "files": {
+   "a.tex": "\\documentclass{article}\\externaldocument{b}",
+   "b.tex": "\\documentclass{article}\\externaldocument{c}",
+   "c.tex": "\\documentclass{article}\\externaldocument{a}"
+  },
+  "main": "a.tex",
+  "order": ["c.tex", "b.tex"],
+  "externals": {"c.tex": [["a.aux", "a.tex"]]}
+ },
+ {
+  "what": "a diamond compiles the shared document once",
+  "files": {
+   "a.tex": "\\documentclass{article}\\externaldocument{b}\\externaldocument{c}",
+   "b.tex": "\\documentclass{article}\\externaldocument{d}",
+   "c.tex": "\\documentclass{article}\\externaldocument{d}",
+   "d.tex": "\\documentclass{article}"
+  },
+  "main": "a.tex",
+  "order": ["d.tex", "b.tex", "c.tex"],
+  "externals": {}
+ },
+ {
+  "what": "ignored: comments, itself, missing files, files that aren't documents, paths leaving the project",
+  "files": {
+   "main.tex": "\\documentclass{article}\n% \\externaldocument{old}\n\\externaldocument{main}\n\\externaldocument{gone}\n\\externaldocument{part}\n\\externaldocument{../outside}\n\\externaldocument{/abs/doc}\n100\\% \\externaldocument{also}\n",
+   "old.tex": "\\documentclass{article}\n",
+   "part.tex": "\\section{A part}\n% \\documentclass{article}\n",
+   "also.tex": "\\documentclass{article}\n"
+  },
+  "main": "main.tex",
+  "order": ["also.tex"],
+  "externals": {"main.tex": [["also.aux", "also.tex"]]}
+ }
+]

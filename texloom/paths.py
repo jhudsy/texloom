@@ -64,6 +64,22 @@ def main_file(files: object, meta: object) -> str | None:
 
 ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}
 
+# Each TeX, BibTeX and biber run appends what it read (its .fls or .blg, after a PWD line) to
+# <name>.fls-reads / <name>.blg-reads: TeX rewrites its .fls on every pass, so a document could read
+# a file on one pass and not the last. confine.outside_reads() checks them after the compile.
+# With an output folder, latexmk runs BibTeX from inside it ("bibtex fudge"), where a bibliography
+# named relative to the document (\bibliography{../refs}) isn't found: it runs from the document's
+# folder instead (-bibfudge-), and then writes its .bbl and .blg through the path .texloom/build,
+# which paranoid openout refuses (a dot folder). BibTeX writes no other files, so it alone may.
+RECORD = (
+    "use Cwd; sub texloom_run { my ($ext, $base, @cmd) = @_; "
+    "local $ENV{openout_any} = q(a) if $cmd[0] eq q(bibtex); my $r = system(@cmd); "
+    "if (open(my $in, q(<), qq($base.$ext)) and open(my $out, q(>>), qq($base.$ext-reads))) "
+    "{ print $out q(PWD ), getcwd(), qq(\\n), <$in>; close $out } return $r } "
+    + " ".join(f"${p} = q(internal texloom_run {ext} %Y%R {p} %O %S);"
+               for p, ext in (("pdflatex", "fls"), ("xelatex", "fls"), ("lualatex", "fls"), ("bibtex", "blg"), ("biber", "blg")))
+)
+
 
 def latexmk_command(engine: object, bib: object, main_name: str, *extra: str) -> list[str]:
     """latexmk for a document collaborators wrote: no rc files (latexmkrc is Perl), no shell
@@ -71,7 +87,7 @@ def latexmk_command(engine: object, bib: object, main_name: str, *extra: str) ->
     flag = ENGINE_FLAGS.get(str(engine), "-pdf")
     shell = [] if any(a in ("-shell-escape", "-no-shell-escape", "-shell-restricted") for a in extra) else ["-no-shell-escape"]
     return ["latexmk", "-norc", flag, "-interaction=nonstopmode", "-file-line-error", *shell,
-            *(["-bibtex-"] if bib == "none" else []), *extra, f"./{main_name}"]
+            "-recorder", "-bibfudge-", "-e", RECORD, *(["-bibtex-"] if bib == "none" else []), *extra, f"./{main_name}"]
 
 
 def use_tex_on_path() -> None:
@@ -101,5 +117,6 @@ def use_tex_on_path() -> None:
 
 
 def tex_env(**more: str) -> dict[str, str]:
-    """TeX may only read and write inside the project (paranoid openin/openout)."""
+    """TeX may only write inside the project (paranoid openout). Paranoid openin only refuses
+    dot files: reading elsewhere is stopped by texloom/confine.py."""
     return {**os.environ, "openin_any": "p", "openout_any": "p", **more}

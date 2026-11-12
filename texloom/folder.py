@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import shutil
 import time
 from pathlib import Path
@@ -25,7 +26,9 @@ from .replica import BLOB_RE, Replica
 
 log = logging.getLogger("texloom")
 
+from .confine import OUTSIDE_NOTE, forget_reads, outside_reads, sandboxed
 from .scan import SCANNED, added, allowed, scan
+from .xr import compile_order, external_documents
 from .paths import PROTECTED_DIRS, STATE, UNSAFE_NAMES, WIN_RESERVED, latexmk_command, main_file, safe_rel, tex_env  # noqa: F401
 SOURCES = (".tex", ".bib", ".sty", ".cls", ".bst", ".ltx", ".dtx", ".ins", ".bbx", ".cbx")  # never counted as compile output
 IGNORE_DIRS = {STATE, ".git", ".svn", "node_modules", "__pycache__", ".idea", ".vscode"}
@@ -743,8 +746,8 @@ class FolderSync:
         engine = str(self.opts.get("engine") or self.r.meta.get("engine", "pdflatex"))
         extra = list(self.opts["latexmk_args"])
         # Collaborators write the document, so by default TeX may not run programs
-        # (-no-shell-escape), may not read or write outside the project (openin/openout
-        # "paranoid"), and latexmk ignores rc files (-norc; latexmkrc is Perl). An rc you
+        # (-no-shell-escape), may not write outside the project (openout "paranoid") or read
+        # outside it (texloom/confine.py), and latexmk ignores rc files (-norc; latexmkrc is Perl). An rc you
         # trust can be named in .texloom/config.json as "latexmk_rc".
         shell, note = self.shell_mode()
         extra.append(shell)
@@ -759,8 +762,13 @@ class FolderSync:
         main_path = self.target(main)
         if main_path is None or not main_path.is_file():
             return
+        notes = [note] if note else []
+        confine = self.opts.get("confine", True)
+        forget_reads(build)
+        notes += await self._compile_externals(main, engine, build, extra, confine)
+        cmd = latexmk_command(engine, self.r.meta.get("bib"), main_path.name, "-synctex=1", f"-outdir={build}", *extra)
         proc = await asyncio.create_subprocess_exec(
-            *latexmk_command(engine, self.r.meta.get("bib"), main_path.name, "-synctex=1", f"-outdir={build}", *extra),
+            *(sandboxed(cmd, self.root, build) if confine else cmd),
             cwd=main_path.parent, env=tex_env(TEXMFOUTPUT=str(build)),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         )
@@ -774,8 +782,15 @@ class FolderSync:
         logf = build / f"{stem}.log"
         ok = proc.returncode == 0 and pdf.exists()
         log_text = logf.read_bytes() if logf.exists() else out
-        if note:  # collaborators see why minted & co. didn't run
-            log_text = f"texloom: {note}\n\n".encode() + log_text
+        if notes:  # collaborators see why minted & co. didn't run, or labels are missing
+            log_text = "".join(f"texloom: {n}\n" for n in notes).encode() + b"\n" + log_text
+        outside = outside_reads(self.root, build) if confine else []
+        if outside:  # the PDF, log, .aux and .bbl may hold what was read: share and keep none of it
+            log.warning("compiling %s read files outside the project, so nothing from it is shared or kept:\n  %s",
+                        main, "\n  ".join(outside[:20]))
+            shutil.rmtree(build, ignore_errors=True)
+            build.mkdir(parents=True, exist_ok=True)
+            ok, log_text = False, OUTSIDE_NOTE.encode()
         log.info("compiled %s in %.1fs: %s", main, time.time() - t0, "ok" if ok else "errors")
         out_pdf = self.target(main[:-4] + ".pdf")
         if pdf.exists() and out_pdf is not None:
@@ -805,6 +820,44 @@ class FolderSync:
                 old = prev.get(k)
                 if old and old not in new and old not in files:
                     await self.r.drop_output(old)
+
+    async def _compile_externals(self, main: str, engine: str, build: Path, extra: list[str], confine: bool) -> list[str]:
+        """Compile the documents `main` takes labels from (\\externaldocument) first, each in
+        its own folder under `build`, and copy each .aux to where the compile that reads it
+        looks first: its output folder. In a cycle (a paper and its supplement citing each
+        other), the document that closes it gets the other's .aux from its last compile, so
+        repeated compiles settle. Returns notes for the log."""
+        files = {p: str(t) for p, t in self.r.files.items() if self.target(p) is not None}
+        order = compile_order(files, main)
+        if not order:
+            return []
+        out = {doc: build / "xr" / Path(doc).with_suffix("") for doc in order} | {main: build}
+        built = {doc: out[doc] / f"{Path(doc).stem}.aux" for doc in [*order, main]}
+        notes = []
+        for doc in [*order, main]:
+            out[doc].mkdir(parents=True, exist_ok=True)
+            for aux, tex in external_documents(files, doc):
+                rel = posixpath.relpath(aux, posixpath.dirname(doc) or ".")
+                if built[tex].is_file() and not rel.startswith("../"):  # TeX may not read "../" here anyway
+                    (out[doc] / rel).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(built[tex], out[doc] / rel)
+            path = self.target(doc)
+            if doc == main or path is None or not path.is_file():
+                continue
+            cmd = latexmk_command(engine, self.r.meta.get("bib"), path.name, f"-outdir={out[doc]}", *extra)
+            proc = await asyncio.create_subprocess_exec(
+                *(sandboxed(cmd, self.root, out[doc]) if confine else cmd),
+                cwd=path.parent, env=tex_env(TEXMFOUTPUT=str(out[doc])),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                await proc.wait()
+            except asyncio.CancelledError:
+                proc.kill()
+                raise
+            if proc.returncode != 0:
+                notes.append(f"{doc}, which {main} takes labels from (\\externaldocument), has errors: compile it on its own to see them.")
+        return notes
 
     def shell_mode(self) -> tuple[str, str]:
         """The latexmk shell-escape flag for this compile, and a note for the log.

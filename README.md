@@ -556,13 +556,24 @@ Per-folder options are in `<dir>/.texloom/config.json`, which only you can read.
 never shared:
 
 ```json
-{ "compile": false, "engine": null, "latexmk_args": [], "shell_escape": false, "latexmk_rc": null, "label": "", "create_code": "" }
+{ "compile": false, "engine": null, "latexmk_args": [], "shell_escape": false, "confine": true, "latexmk_rc": null, "label": "", "create_code": "" }
 ```
 
 Collaborators write the document, so compiling is locked down by default:
 - **No running programs:** TeX may not run programs (`-no-shell-escape`).
-- **No access outside the project:** TeX may not read or write files there (TeX's
-  "paranoid" file access).
+- **No writing outside the project:** TeX's "paranoid" file access.
+- **No reading outside the project:** a compile may read only the project, TeX's own files
+  and fonts, and not the project's `.texloom` folder (which holds its keys). TeX's paranoid
+  mode doesn't ensure this (TeX Live 2026 reads `\input{../../notes}`, absolute paths and
+  dot files; LuaLaTeX can read anything), so two more layers do:
+  - **A sandbox** hides home folders and mounted volumes, except those places: macOS's
+    `sandbox-exec`, or on Linux `bwrap` (bubblewrap) when it is installed and allowed to
+    run. Windows has none.
+  - **A check, everywhere:** each TeX, BibTeX and biber run records what it read. If a
+    compile read anything else, its PDF and log aren't shared with collaborators (they
+    could contain what was read) and its working files are deleted.
+
+  `"confine": false` turns both off, for projects whose collaborators you trust.
 - **No rc files:** latexmk ignores rc files (`-norc`), because a `latexmkrc` is Perl.
   Name one you trust with `latexmk_rc`.
 - **Unsafe files aren't written:** neither the helper nor the browser's folder sync

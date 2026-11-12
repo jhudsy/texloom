@@ -54,6 +54,8 @@ DEFAULT_CONFIG = {
     "git": False,              # true, or {"interval": 60, "quiet": 120, "push": true}: see `run --git`
     "shell_escape": False,     # false, "restricted" (TeX Live's safe programs only) or true (minted etc.;
                                # lines that run programs must be approved with `texloom allow`)
+    "confine": True,           # compiles may read only the project, TeX's files and fonts (false: anything
+                               # you can read, for projects whose collaborators you trust)
     "label": "",               # how your compiles are labelled for others
     "create_code": "",         # creation code, if the server requires one for new projects
 }
@@ -94,6 +96,7 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
     import platform
     opts = {"engine": cfg["engine"], "latexmk_args": cfg["latexmk_args"],
             "shell_escape": cfg["shell_escape"] or shell_escape,
+            "confine": cfg["confine"] is not False,
             "label": cfg["label"] or f"latexmk on {platform.node().split('.')[0]}"}
     fs = FolderSync(d, replica, compile_ or cfg["compile"], opts)
     from .listsync import my_name

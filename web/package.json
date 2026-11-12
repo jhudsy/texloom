@@ -10,7 +10,8 @@
     "check-listsync": "node scripts/check-listsync.mjs",
     "check-versions": "node scripts/check-versions.mjs",
     "download-tex": "texlyre-busytex download-assets ../tex-assets",
-    "check-suggest": "node scripts/check-suggest.mjs"
+    "check-suggest": "node scripts/check-suggest.mjs",
+    "check-xr": "node scripts/check-xr.mjs"
   },
   "keywords": [],
   "author": "",

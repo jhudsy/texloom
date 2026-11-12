@@ -4,6 +4,7 @@
 // are downloaded once and shared by every project.
 import type { BusyTexRunner } from 'texlyre-busytex'
 import { stripComments } from './texscan'
+import { compileOrder, externalDocuments } from './xr'
 
 const BASE = '/core/busytex'
 let runner: Promise<BusyTexRunner> | null = null
@@ -171,6 +172,25 @@ export async function warmUp(files: Map<string, string | Uint8Array>) {
   } catch { /* the first Compile tries again and says what went wrong */ }
 }
 
+/** The .aux of each document compiled first for another's \externaldocument, kept while what it
+ *  was compiled from is unchanged, so editing the main document doesn't compile the others again. */
+const auxCache = new Map<string, { key: string; aux: Uint8Array }>()
+
+/** What `doc`'s .aux depends on: every file but `main` (another document can't \input it, as it
+ *  has its own \documentclass, and isn't given main's .aux: that cycle is cut), and the settings. */
+async function auxKey(files: Map<string, string | Uint8Array>, main: string, doc: string, settings: string): Promise<string> {
+  const enc = new TextEncoder(), parts: Uint8Array[] = [enc.encode(`${doc}\0${settings}\0`)]
+  for (const [path, v] of [...files].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    if (path === main) continue
+    const bytes = typeof v === 'string' ? enc.encode(v) : v
+    parts.push(enc.encode(`${path}\0${bytes.length}\0`), bytes)
+  }
+  const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+  let at = 0
+  for (const p of parts) { all.set(p, at); at += p.length }
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', all))].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
 export class CompileStopped extends Error {}
 type Job = { stopped: boolean; inEngine: boolean; stop: (e: Error) => void }
 let job: Job | null = null
@@ -226,14 +246,34 @@ async function compiling(
       bibtex = bib === 'bibtex'
     }
     const makeindex = /\\makeindex\b/.test(all)
-    const res = await r.compile(
-      [...files].map(([path, content]) => ({ path, content })),
-      main, bibtex, biber, makeindex, true, 'silent',
-      DRIVERS[(opts.engine ?? 'pdflatex') as keyof typeof DRIVERS] ?? DRIVERS.pdflatex,
-      null, (await texliveEndpoint()) ?? undefined,
-    )
+    const driver = DRIVERS[(opts.engine ?? 'pdflatex') as keyof typeof DRIVERS] ?? DRIVERS.pdflatex
+    const remote = (await texliveEndpoint()) ?? undefined
+    const texts = new Map([...files].filter((e): e is [string, string] => typeof e[1] === 'string'))
+    // Documents this one takes labels from (\externaldocument) first, each with the .aux files it reads.
+    const auxes = new Map<string, Uint8Array>()
+    const input = (doc: string) => {
+      const out = new Map(files)
+      for (const { aux, tex } of externalDocuments(texts, doc)) { const a = auxes.get(tex); if (a) out.set(aux, a) }
+      return [...out].map(([path, content]) => ({ path, content }))
+    }
+    const notes: string[] = []
+    for (const doc of compileOrder(texts, main)) {
+      const key = await auxKey(files, main, doc, `${driver} ${bibtex} ${biber}`)
+      let aux = auxCache.get(doc)?.key === key ? auxCache.get(doc)!.aux : null
+      if (!aux) {
+        const res = await r.compile(input(doc), doc, bibtex, biber, makeindex, true, 'silent', driver, null, remote)
+        if (mine.stopped) throw new CompileStopped()
+        const out = (await r.readProjectFiles()).find((f) => f.path === doc.replace(/\.tex$/i, '.aux'))
+        aux = out ? (typeof out.content === 'string' ? new TextEncoder().encode(out.content) : out.content) : null
+        if (aux && res.success) auxCache.set(doc, { key, aux })
+        if (!res.success) notes.push(`texloom: ${doc}, which ${main} takes labels from (\\externaldocument), has errors: compile it on its own to see them.`)
+      }
+      if (aux) auxes.set(doc, aux)
+    }
+    const res = await r.compile(input(main), main, bibtex, biber, makeindex, true, 'silent', driver, null, remote)
     let log = res.log ?? ''
     if (!res.success) log = await withTexLog(r, main, log)
+    if (notes.length) log = `${notes.join('\n')}\n\n${log}`
     return { pdf: res.success && res.pdf ? res.pdf : null, log, synctex: res.synctex ?? null }
   } finally {
     if (progressCb === onProgress) progressCb = undefined // a stopped compile may end after a new one began

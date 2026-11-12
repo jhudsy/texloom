@@ -247,7 +247,20 @@ The resolved path must stay inside the project folder (no writing through symlin
 - **Blob ids** must be 32 hex characters, and blobs from the server are checked against
   their HMAC id.
 - **latexmk** runs with `-norc`, `-no-shell-escape` (unless opted in locally) and
-  `openin_any=p`/`openout_any=p`; the main file is passed as `./name`.
+  `openin_any=p`/`openout_any=p`; the main file is passed as `./name`. Paranoid openin
+  doesn't keep reads in the project (on TeX Live 2026 it lets `../`, absolute paths and dot
+  files through, and Lua's `io.open` reads anything), so `texloom/confine.py` adds a sandbox
+  where there is one (`sandbox-exec` on macOS, `bwrap` on Linux; home folders and volumes
+  hidden but for the project, TeX's folders, fonts and fontconfig; the project's `.texloom`
+  hidden but for the build folder) and, everywhere, a check: latexmk's `$pdflatex`,
+  `$bibtex`, … go through a Perl hook that appends each run's `.fls`/`.blg` to
+  `<name>.fls-reads`/`.blg-reads` (TeX rewrites its `.fls` every pass, so a document could
+  read a file on the first pass only). A compile that read outside those places publishes
+  only a note, and its build folder is deleted. Local `"confine": false` turns both off.
+  BibTeX runs from the
+  document's folder (`-bibfudge-`, so `\bibliography{../refs}` is found) with `openout_any=a`
+  for it alone, since paranoid mode refuses its .bbl/.blg in `.texloom/build` (a dot folder)
+  and it writes no other files.
 - **Lines that run programs** (`texloom/scan.py`, `programRequests` in `texscan.ts`):
   `\write18`, `\ShellEscape`, `\input|`, Lua `os.execute`/`io.popen`, packages such as
   minted or pythontex, TikZ externalisation ("shell"), and arara directives or editor
@@ -337,6 +350,18 @@ related-work section"`. Edits appear live in collaborators' browsers.
    changes in the folder during or just after a compile counts as generated (sources such as
    .tex and .bib never do): a chain of more than three compiles started that way stops, and
    changes from elsewhere to generated files only don't start one.
+
+**Documents that take labels from each other** (`\externaldocument` from xr, xr-hyper or
+zref-xr; xcite's `\externalcitedocument`) need the other document's .aux, which only its own
+compile writes. Before the main document, a compile builds each document it names
+(`web/src/xr.ts`, `texloom/xr.py`, checked against the same cases in
+`scripts/xr-vectors.json`), farthest first, and gives each compile the .aux files it reads.
+Two documents citing each other (a paper and its supplement) form a cycle, cut where it
+closes: the document that would close it isn't compiled again. In the browser its .aux is
+simply missing there (labels of the other document are unaffected), and each .aux is kept in
+memory until a file other than the main one changes. Natively each one is compiled in
+`.texloom/build/xr/<path>/`, and the document closing a cycle gets the main document's .aux
+from its last compile, so repeated compiles settle. The MCP `compile` builds them in place.
 
 Either way the PDF goes into the `out` map, so other peers just view it.
 

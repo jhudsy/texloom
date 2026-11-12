@@ -29,10 +29,12 @@ from pycrdt import Array, Assoc, Map, Text
 
 from . import __version__
 from .anchors import index_in
+from .confine import outside_reads, sandboxed
 from .crypto import Keys, b64e
 from .folder import apply_text
 from .paths import latexmk_command, main_file, safe_rel, tex_env
 from .replica import Replica
+from .xr import compile_order
 
 log = logging.getLogger("texloom")
 
@@ -347,8 +349,23 @@ class Project:
             mp = (root / main).resolve()
             if not mp.is_relative_to(root.resolve()) or not mp.is_file():
                 return f"The main file {main!r} isn't usable."
+            # documents main takes labels from (\externaldocument) first: their .aux lands where xr reads it
+            texts = {p: str(self.r.files[p]) for p in self.r.files.keys() if safe_rel(p)}
+            failed = []
+            for doc in compile_order(texts, main):
+                dp = root / doc
+                proc = await asyncio.create_subprocess_exec(
+                    *sandboxed(latexmk_command(self.r.meta.get("engine"), self.r.meta.get("bib"), dp.name), root, root),
+                    cwd=dp.parent, env=tex_env(), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                try:
+                    await asyncio.wait_for(proc.wait(), 300)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                if proc.returncode != 0:
+                    failed.append(doc)
             proc = await asyncio.create_subprocess_exec(
-                *latexmk_command(self.r.meta.get("engine"), self.r.meta.get("bib"), mp.name),
+                *sandboxed(latexmk_command(self.r.meta.get("engine"), self.r.meta.get("bib"), mp.name), root, root),
                 cwd=mp.parent, env=tex_env(),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
             try:
@@ -356,11 +373,16 @@ class Project:
             except asyncio.TimeoutError:
                 proc.kill()
                 return "Compile timed out after 5 minutes."
+            if outside_reads(root, root):  # the log could carry what was read
+                return ("The compile read files outside the project, so its log isn't shown (it could contain them). "
+                        "Documents may only use the project's files, TeX's and fonts.")
             logf = mp.with_suffix(".log")
             text = logf.read_text("utf-8", "replace") if logf.exists() else out.decode("utf-8", "replace")
             ok = proc.returncode == 0 and mp.with_suffix(".pdf").exists()
             pages = re.search(r"Output written on .*?\((\d+) pages?", text)
             gone = f"\n\nNot available, so compiled without: {', '.join(missing)}." if missing else ""
+            if failed:
+                gone += f"\n\nHas errors, so labels taken from it with \\externaldocument may be missing: {', '.join(failed)}."
             return (f"{'Compiled OK' if ok else 'Compile failed'}{f' ({pages.group(1)} pages)' if pages else ''}.{gone}\n\n"
                     + summarize_log(text))
 
