@@ -12,6 +12,8 @@ const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycach
 // Build output and editor droppings: never synced. Same list as IGNORE_* in texloom/folder.py.
 export const BUILD = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex\.gz|synctex|bbl|blg|bcf|run\.xml|nav|snm|vrb|idx|ilg|ind|xdv|dvi|swp|swx|tmp)$|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$/i
 const MAX = 50 * 1024 * 1024
+const SETTLE = 200, SETTLE_DOUBT = 2000 // ms a changed file must stay unchanged before it's read; for one that became empty or went
+const sameBytes = (a: Uint8Array | null, b: Uint8Array) => !!a && a.length === b.length && a.every((x, i) => x === b[i])
 
 type Known = Record<string, { h: string; m: number; z: number; c?: boolean }> // c: the file on disk ends lines with \r\n
 
@@ -100,6 +102,26 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     seen.push(h); recent.set(p, seen.slice(-30))
   }
   const stale = (p: string, h: string) => (recent.get(p) ?? []).slice(0, -1).includes(h)
+  // A changed file is read only once it has stopped changing: a read halfway through a save (some
+  // editors empty a file, then write it) or through copying a big file in would share a cut-off
+  // file, for text its missing end as deleted. Same rules as _settle in texloom/folder.py.
+  const seen = new Map<string, { m: number; z: number; at: number }>() // changes noticed, not yet read
+  const missing = new Map<string, number>() // known files gone from the folder: since when
+  const unread = new Set<string>() // written here, then changed by someone else: read before writing again
+  let soon: ReturnType<typeof setTimeout> | undefined
+  const lookAgain = (ms: number) => { clearTimeout(soon); soon = setTimeout(() => round('in'), ms) }
+  const settled = (p: string, f: File): boolean => {
+    const was = seen.get(p), now = Date.now()
+    const wait = f.size === 0 && (known[p]?.z ?? 0) > 0 ? SETTLE_DOUBT : SETTLE // emptied: rarely meant
+    if (!was || was.m !== f.lastModified || was.z !== f.size) { seen.set(p, { m: f.lastModified, z: f.size, at: now }); lookAgain(wait + 50); return false }
+    if (now - was.at < wait) { lookAgain(wait - (now - was.at) + 50); return false }
+    seen.delete(p)
+    return true
+  }
+  /** A file's bytes, or null if it changed while being read (the browser refuses then): look again shortly. */
+  const bytes = async (f: File): Promise<Uint8Array | null> => {
+    try { return new Uint8Array(await f.arrayBuffer()) } catch { lookAgain(SETTLE + 50); return null }
+  }
   const save = () => Promise.all([kv(KEY, known), kv(DKEY, [...knownDirs])]).catch(() => {})
   const sync: FolderSync = { name: root.name, stop, status: () => last, onChange: null, onPrograms: null }
   const note = (s: string) => { last = s; sync.onChange?.() }
@@ -110,6 +132,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     for (const [p, yt] of r.files) {
       if (!cleanPath(p) || BUILD.test(p)) continue
       want.add(p)
+      if (unread.has(p)) continue // an editor's save is there: it's read first
       const text = yt.toString(), data = new TextEncoder().encode(known[p]?.c ? text.replace(/\r?\n/g, '\r\n') : text)
       const h = await sha(data)
       base.set(p, text) // what disk holds, or will
@@ -121,6 +144,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     for (const [p, b] of r.bin) {
       if (!cleanPath(p) || BUILD.test(p) || !b?.h) continue
       want.add(p)
+      if (unread.has(p)) continue
       if (known[p]?.h === b.h) continue
       try { if (await put(p, await r.getBlob(b.h), b.h)) n++ } catch { /* not fetched yet: next round */ }
     }
@@ -167,8 +191,11 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     const w = await fh.createWritable()
     await w.write(data as BufferSource); await w.close()
     const f = await fh.getFile()
-    known[p] = { h, m: f.lastModified, z: f.size, c: crlf(data) }
-    remember(p, h)
+    // An editor saving just now would be taken for this write, and its save never shared: what's
+    // there is checked first (up to 1 MB; bigger files by size).
+    const back = f.size === data.length && (data.length > 1 << 20 || sameBytes(await bytes(f), data))
+    if (back) { known[p] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(p, h) }
+    else { unread.add(p); lookAgain(SETTLE + 50) }
     return true
   }
 
@@ -202,8 +229,9 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
         if (!gone.length) break
         if (cleanPath(p) !== p || known[p] || r.files.has(p) || r.bin.has(p) || p === ownPdf) continue
         const f = await fh.getFile()
-        if (!sizes.has(f.size)) continue
-        const data = new Uint8Array(await f.arrayBuffer())
+        if (!sizes.has(f.size) || !settled(p, f)) continue
+        const data = await bytes(f)
+        if (!data) continue
         const text = isText(p, data)
         const h = text !== null ? await sha(data) : await r.keys.blobId(data)
         const same = gone.filter((g) => known[g].h === h)
@@ -212,7 +240,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
         gone.splice(gone.indexOf(from), 1)
         movePath(r, from, p)
         if (base.has(from)) { base.set(p, base.get(from)!); base.delete(from) }
-        delete known[from]
+        delete known[from]; missing.delete(from)
         known[p] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(p, h); n++
         if (text !== null && r.files.get(p)?.toString() !== text) rewrite = true // collaborators changed it since
       }
@@ -222,13 +250,16 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       if (!path || path === ownPdf) continue
       const f = await fh.getFile()
       const k = known[path]
-      if (k && k.m === f.lastModified && k.z === f.size) continue
+      if (k && k.m === f.lastModified && k.z === f.size) { seen.delete(path); continue }
       if (f.size > MAX) continue
-      const data = new Uint8Array(await f.arrayBuffer())
+      if (!settled(path, f)) continue
+      const data = await bytes(f)
+      if (!data) continue
+      unread.delete(path)
       const text = isText(path, data)
       const h = text !== null ? await sha(data) : await r.keys.blobId(data)
       if (k?.h === h) { known[path] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; if (text !== null) base.set(path, text); continue }
-      if (text !== null && stale(path, h)) {
+      if (text !== null && data.length && stale(path, h)) { // (an empty file is an editor halfway through saving)
         // an older version came back: not an edit (it would undo collaborators' changes)
         console.warn(`${path}: an older version reappeared in the folder; keeping the project's text`)
         delete known[path]; rewrite = true
@@ -249,9 +280,13 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       known[path] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(path, h); n++
     }
     for (const p of Object.keys(known)) {
-      if (disk.has(p)) continue
+      if (disk.has(p)) { missing.delete(p); continue }
+      // gone for a moment while an editor saves (some delete and write again): not deleted yet
+      const since = missing.get(p) ?? Date.now()
+      missing.set(p, since)
+      if (Date.now() - since < SETTLE_DOUBT) { lookAgain(SETTLE_DOUBT - (Date.now() - since) + 50); continue }
       r.doc.transact(() => { r.files.delete(p); r.bin.delete(p) }) // deleted on disk
-      delete known[p]; n++
+      delete known[p]; missing.delete(p); n++
     }
     if (n) { await save(); note(tn(n, '↑ {{n}} file · {{time}}', '↑ {{n}} files · {{time}}', { time: new Date().toLocaleTimeString(locale) })) }
     if (rewrite) { rewrite = false; await writeOut() }
@@ -282,7 +317,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
   const poll = setInterval(() => { if (document.visibilityState === 'visible') round('in') }, 2000)
   function stop() {
     stopped = true
-    clearInterval(poll); clearTimeout(outTimer)
+    clearInterval(poll); clearTimeout(outTimer); clearTimeout(soon)
     r.files.unobserveDeep(onDoc as any); r.bin.unobserve(onDoc as any); r.dirs.unobserve(onDoc as any)
   }
   await round('both')

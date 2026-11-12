@@ -300,7 +300,12 @@ relay) as the fallback for symmetric NATs.
   wait for their next change, or a look shortly after. Their date and size are noted before
   reading (and after writing, from the file written before it goes into place), so a save that
   lands in between is never taken for what was read and missed. An empty file is never taken
-  for an older copy reappearing, whose repair would write over a save in progress.
+  for an older copy reappearing, whose repair would write over a save in progress. The browser's
+  folder sync (foldersync.ts), which polls every 2 s, does the same: a change is read once a later
+  look finds the same date and size (0.2 s on; 2 s for an emptied file), a file gone from the
+  folder is deleted only after 2 s, a file changing while read (NotReadableError) is looked at
+  again rather than counting towards stopping the sync, and after writing a file is read back:
+  if an editor saved meanwhile, it is read before anything is written there again.
 - Line endings: the project's texts break lines with "\n" only. A file saved on Windows ends
   lines with "\r\n"; it comes in as "\n" and is written back with "\r\n" (`c` in known.json,
   judged by the file's first line; for entries from before it was noted, by the file on disk).
