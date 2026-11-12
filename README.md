@@ -856,6 +856,17 @@ npm run check-versions  # saved versions: every one opens exactly, and storing t
 npm run check-suggest   # suggest mode: random typing and collaborators' edits keep the view and suggestions in step
 ```
 
+Sync-only projects end to end: `uv run python scripts/check_synconly.py` starts its own throwaway
+server (which keeps nothing without a creation code) and two copies of `texloom run`, as two
+computers, then edits through their folders: every file arriving, edits both ways and at once,
+a burst of edits, one computer off for a while, pictures, renames and deletions, and that the
+server stored nothing. Each computer plays an operating system for line endings (files saved on
+"windows" end lines with \r\n), and every pairing is run: unix/unix, windows/windows, and
+windows/unix both ways. About a minute and a quarter; `--keep` leaves the folders and logs.
+
+All of these run on every push (`.github/workflows/checks.yml`), the sync-only check on Linux,
+macOS and a real Windows too.
+
 To see what a relay can take, `uv run python scripts/loadtest.py all` starts its own throwaway server
 and reports latency, CPU and memory for each scenario. Results depend on the machine.
 
