@@ -250,6 +250,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Close window': 'Cerrar la ventana',
     'Share…': 'Compartir…',
     'Show activity': 'Mostrar la actividad',
+    'Hide activity': 'Ocultar la actividad',
     'TeXLoom help': 'Ayuda de TeXLoom',
     'About TeXLoom': 'Acerca de TeXLoom',
     'Add project': 'Añadir proyecto',

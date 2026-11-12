@@ -337,6 +337,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Close window': 'Fermer la fenêtre',
     'Share…': 'Partager…',
     'Show activity': 'Afficher l’activité',
+    'Hide activity': 'Masquer l’activité',
     'TeXLoom help': 'Aide de TeXLoom',
     'About TeXLoom': 'À propos de TeXLoom',
     'Add project': 'Ajouter un projet',

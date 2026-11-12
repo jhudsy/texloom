@@ -53,10 +53,9 @@ RELEASES_API = "https://api.github.com/repos/jhudsy/texloom/releases/latest"
 CHANGELOG_URL = "https://texloom.org/changelog.html"
 
 
-def mac_dock(show: bool) -> None:
-    """On a Mac, show or hide TeXLoom in the Dock and ⌘-Tab: while no window is open it runs from
-    its menu-bar icon alone, like other background sync apps. Qt has no call for this, so ask
-    AppKit directly (NSApplication.setActivationPolicy:); any failure leaves the Dock as it is."""
+def nsapp(selector: bytes, arg: int = 0) -> None:
+    """Send NSApp (the Mac's application object) one message taking an integer, BOOL or nil, for
+    the few things Qt has no call for. Any failure is logged and otherwise ignored."""
     try:
         import ctypes
         import ctypes.util
@@ -65,14 +64,21 @@ def mac_dock(show: bool) -> None:
         objc.objc_getClass.argtypes = objc.sel_registerName.argtypes = [ctypes.c_char_p]
         send = ctypes.cast(objc.objc_msgSend, ctypes.c_void_p).value
         get = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(send)
-        with_long = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long)(send)
-        with_bool = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool)(send)
-        nsapp = get(objc.objc_getClass(b"NSApplication"), objc.sel_registerName(b"sharedApplication"))
-        with_long(nsapp, objc.sel_registerName(b"setActivationPolicy:"), 0 if show else 1)  # Regular / Accessory
-        if show:  # coming back from the menu bar: be the active app, so the window and its menus come forward
-            with_bool(nsapp, objc.sel_registerName(b"activateIgnoringOtherApps:"), True)
+        call = ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long)(send)
+        call(get(objc.objc_getClass(b"NSApplication"), objc.sel_registerName(b"sharedApplication")),
+             objc.sel_registerName(selector), arg)
     except Exception:
-        log.debug("couldn't change the Dock icon", exc_info=True)
+        log.debug("NSApp %s failed", selector, exc_info=True)
+
+
+def mac_dock(show: bool) -> None:
+    """On a Mac, show or hide TeXLoom in the Dock and ⌘-Tab: while no window is open it runs from
+    its menu-bar icon alone, like other background sync apps (the Accessory activation policy)."""
+    nsapp(b"setActivationPolicy:", 0 if show else 1)  # Regular / Accessory
+    if show:  # coming back from the menu bar: be the active app, so the window and its menus come forward
+        nsapp(b"activateIgnoringOtherApps:", 1)
+    else:  # and stop being the active app, so opening TeXLoom again (Finder, Spotlight) activates it and shows the window
+        nsapp(b"hide:")
 
 
 def version_tuple(v: str) -> tuple[int, ...]:
@@ -107,6 +113,22 @@ class Dialog(QtWidgets.QDialog):
         super().__init__(parent)
         if MAC and isinstance(parent, QtWidgets.QMainWindow):
             self.setWindowModality(Qt.WindowModal)
+
+
+def chevron(w: QtWidgets.QWidget, down: bool) -> QtGui.QIcon:
+    """A disclosure chevron (› or ⌄) in the widget's text colour: the ▸ and ▾ characters are tiny
+    in most fonts, and Qt's own arrows differ from system to system."""
+    size, ratio = 16, max(2.0, w.devicePixelRatioF())
+    pm = QtGui.QPixmap(int(size * ratio), int(size * ratio))
+    pm.setDevicePixelRatio(ratio)
+    pm.fill(Qt.transparent)
+    p = QtGui.QPainter(pm)
+    p.setRenderHint(QtGui.QPainter.Antialiasing)
+    p.setPen(QtGui.QPen(w.palette().color(QtGui.QPalette.WindowText), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    pts = [(3, 5.5), (8, 10.5), (13, 5.5)] if down else [(5.5, 3), (10.5, 8), (5.5, 13)]
+    p.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(x, y) for x, y in pts]))
+    p.end()
+    return QtGui.QIcon(pm)
 
 
 def grey_note(text: str) -> QtWidgets.QLabel:
@@ -1703,6 +1725,7 @@ class Window(QtWidgets.QMainWindow):
         self.update_timer.start(24 * 3600 * 1000)
         QtCore.QTimer.singleShot(15_000, lambda: app_pref("check_updates", True) and self.check_updates())
         self.refresh()
+        self.list.setFocus()  # not the search field, which would open with a focus ring and a blinking cursor
 
     # -- actions, toolbar and menus
     def action(self, text: str, slot, icon: str = "", keys=None, role=QtGui.QAction.NoRole) -> QtGui.QAction:
@@ -1760,11 +1783,15 @@ class Window(QtWidgets.QMainWindow):
         tb.setFloatable(False)
         tb.setContextMenuPolicy(Qt.PreventContextMenu)  # no menu offering to hide it
         tb.setToolButtonStyle(Qt.ToolButtonTextUnderIcon if MAC else Qt.ToolButtonTextBesideIcon)
+        if MAC:  # the size of the symbols in other Mac apps' toolbars
+            tb.setIconSize(QtCore.QSize(20, 20))
         add = QtGui.QAction(theme_icon("ListAdd"), _("Add project"), self)
         add.setMenu(self.add_menu)
         add.setToolTip(_("Make a new project from a folder, or join one with a link"))
         tb.addAction(add)
-        tb.widgetForAction(add).setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        add_btn = tb.widgetForAction(add)
+        add_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        add_btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0; }")  # the menu says what it holds
         tb.addAction(self.a_pause)
         tb.addAction(self.a_update)  # only while a newer version is out
         spacer = QtWidgets.QWidget()
@@ -1908,18 +1935,22 @@ class Window(QtWidgets.QMainWindow):
         self.scanning = False
         w = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(w)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(8, 8, 0, 8)
         row = QtWidgets.QHBoxLayout()
+        row.setSpacing(4)
         self.find = QtWidgets.QLineEdit()
         self.find.setPlaceholderText(_("Search by name or tag…"))
         self.find.setClearButtonEnabled(True)
         self.find.textChanged.connect(lambda _text: self.refresh())
         self.view_btn = QtWidgets.QToolButton()
         self.view_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self.view_btn.setStyleSheet("QToolButton::menu-indicator { image: none; }")
+        self.view_btn.setStyleSheet("QToolButton { border: none; border-radius: 4px; padding: 0 6px; }"
+                                    "QToolButton:hover, QToolButton:pressed { background: palette(midlight); }"
+                                    "QToolButton::menu-indicator { image: none; }")
         self.view_menu = QtWidgets.QMenu(self.view_btn)
         self.view_menu.aboutToShow.connect(self.fill_view_menu)
         self.view_btn.setMenu(self.view_menu)
+        self.view_btn.setFixedHeight(self.find.sizeHint().height())
         row.addWidget(self.find, 1)
         row.addWidget(self.view_btn)
         lay.addLayout(row)
@@ -2204,7 +2235,7 @@ class Window(QtWidgets.QMainWindow):
         btns = QtWidgets.QHBoxLayout()
         self.buttons = []
         for act in (self.a_open, self.a_web, self.a_share):
-            b = QtWidgets.QPushButton(act.icon(), act.text())
+            b = QtWidgets.QPushButton(act.text())
             b.clicked.connect(act.trigger)
             btns.addWidget(b)
             self.buttons.append(b)
@@ -2259,7 +2290,11 @@ class Window(QtWidgets.QMainWindow):
         lay.addSpacing(10)
 
         self.act_btn = QtWidgets.QToolButton()
-        self.act_btn.setStyleSheet("QToolButton { border: none; font-weight: bold; padding: 0; }")
+        self.act_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.act_btn.setAutoRaise(True)
+        self.act_btn.setCursor(Qt.PointingHandCursor)
+        self.act_btn.setFont(self.section("").font())
+        self.act_btn.setStyleSheet("QToolButton { border: none; padding: 0; background: transparent; }")
         self.act_btn.clicked.connect(self.a_activity.toggle)
         lay.addWidget(self.act_btn)
         self.log = QtWidgets.QPlainTextEdit()
@@ -2274,7 +2309,10 @@ class Window(QtWidgets.QMainWindow):
 
     def show_activity(self, on: bool) -> None:
         set_app_pref("show_activity", on)
-        self.act_btn.setText(("▾ " if on else "▸ ") + _("Activity"))
+        self.act_btn.setText(_("Activity"))
+        self.act_btn.setIcon(chevron(self.act_btn, down=on))
+        self.act_btn.setIconSize(QtCore.QSize(*[self.act_btn.fontMetrics().height()] * 2))
+        self.act_btn.setToolTip(_("Hide activity") if on else _("Show activity"))
         self.log.setVisible(on)
 
     def folders(self) -> list[Path]:
@@ -2569,9 +2607,13 @@ class Window(QtWidgets.QMainWindow):
         self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
         self.raise_()
         self.activateWindow()
+        if MAC:  # asked for from the menu-bar icon or a second launch: come in front of the app in use
+            nsapp(b"activateIgnoringOtherApps:", 1)
 
     def changeEvent(self, e: QtCore.QEvent) -> None:
         super().changeEvent(e)
+        if e.type() == QtCore.QEvent.PaletteChange and hasattr(self, "act_btn"):
+            self.show_activity(self.a_activity.isChecked())
         if e.type() == QtCore.QEvent.ActivationChange and self.isActiveWindow() and time.time() - self.list_at > 60:
             self.keep_list_updated(force=True)
 
@@ -2730,6 +2772,12 @@ def main(argv: list[str] | None = None) -> None:
     sock = QLocalSocket()
     sock.connectToServer(SOCKET)
     if sock.waitForConnected(300):
+        if sys.platform == "win32":  # Windows lets only the app just started take the foreground: pass that on
+            try:
+                import ctypes
+                ctypes.windll.user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
+            except Exception:
+                pass
         sock.write(("\n".join(urls) or "show").encode())
         sock.waitForBytesWritten(1000)
         sock.disconnectFromServer()
