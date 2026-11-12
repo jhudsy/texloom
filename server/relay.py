@@ -889,6 +889,7 @@ class Budget:
 class Relay:
     def __init__(self, store: Store, limits: Limits | None = None, codes: CodeBook | None = None, lists: bool = True,
                  private: bool = False):
+        self.codes_url = ""  # where people learn how to get a creation code (/api/info)
         self.store = store
         self.private = private  # only projects created with a valid creation code may use this server
         self.lists = Lists(store.db) if lists else None
@@ -1425,6 +1426,7 @@ class Relay:
             "projectMaxBytes": self.limits.project_max,
             "projectLists": self.lists is not None,
             "texlive": self.texlive.info() if self.texlive else None,
+            **({"codesUrl": self.codes_url} if self.codes_url else {}),
         })
 
     # --- encrypted project lists (see lists.py) -----------------------------------------
@@ -1536,8 +1538,10 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
              limits: Limits | None = None, codes: CodeBook | None = None, arxiv: bool = True,
              admin_token: str = "", evict_days: float = 0, texlive: Path | None = None,
              texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None,
-             purge_days: float | None = None, lists: bool = True, private: bool = False) -> web.Application:
+             purge_days: float | None = None, lists: bool = True, private: bool = False,
+             codes_url: str = "") -> web.Application:
     relay = Relay(Store(db), limits, codes, lists, private)
+    relay.codes_url = codes_url
     if texlive:  # TeX Live files on demand for the in-browser engine
         from .texlive import TexLive
         tl = TexLive(texlive, texlive_max, (limits or Limits()).min_free, texlive_mirrors)
@@ -1630,6 +1634,9 @@ def main() -> None:
     p.add_argument("--private", action="store_true", default=os.environ.get("TEXLOOM_PRIVATE", "") not in ("", "0"),
                    help="only projects created with a valid creation code may use this server, even without "
                         "storage; people with such a project's link need nothing else (needs --codes-file)")
+    p.add_argument("--codes-url", default=os.environ.get("TEXLOOM_CODES_URL", ""), metavar="URL",
+                   help="a web page saying how to get a creation code for this server; the apps link to it where "
+                        "they ask for a code (or TEXLOOM_CODES_URL; default: none, and they say to ask whoever runs it)")
     p.add_argument("--no-project-lists", action="store_true",
                    help="don't store people's encrypted project lists (the sync link and passkey features)")
     p.add_argument("--no-arxiv", action="store_true", help="disable importing arXiv sources through this server")
@@ -1717,7 +1724,9 @@ def main() -> None:
     log.info("limits: total %s, keep %s free, %s per project; %s",
              fmt_size(limits.max_bytes), fmt_size(limits.min_free), fmt_size(limits.project_max),
              f"allowances from {', '.join(map(str, a.codes_file))}" if codes.path else "no codes file: every project may be stored")
-    web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv,
+    if a.codes_url and not re.match(r"https?://", a.codes_url, re.I):
+        p.error("--codes-url must be an http:// or https:// address")
+    web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv, codes_url=a.codes_url,
                         admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
                         texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
                         purge_days=a.purge_expired_after, lists=not a.no_project_lists, private=a.private), host=a.host, port=a.port)

@@ -7,11 +7,9 @@ const es: Catalog = {
   'Code accepted. Its storage allowance is {{total}} MB, of which {{used}} MB is used.': 'Código aceptado. Su espacio de almacenamiento es de {{total}} MB, de los que se han usado {{used}} MB.',
   'That code isn’t valid on this server.': 'Ese código no es válido en este servidor.',
   'Couldn’t reach the server; try again when online.': 'No se pudo conectar con el servidor; vuelve a intentarlo cuando tengas conexión.',
-  'This server stores new projects only for people with a creation code from its owner. You only need it once per browser; opening and editing projects shared with you never needs one.': 'Este servidor solo guarda proyectos nuevos a quienes tienen un código de creación de su propietario. Solo lo necesitas una vez por navegador; para abrir y editar proyectos compartidos contigo nunca hace falta.',
   'Code': 'Código',
   'Cancel': 'Cancelar',
   'Save code': 'Guardar código',
-  'This server keeps an encrypted copy of new projects only for people with a creation code.': 'Este servidor solo guarda una copia cifrada de los proyectos nuevos a quienes tienen un código de creación.',
   'I have a code': 'Tengo un código',
   'The server keeps an encrypted copy, so collaborators get your changes even when you’re offline, and the link always restores the project.': 'El servidor guarda una copia cifrada, así que los colaboradores reciben tus cambios aunque no tengas conexión, y el enlace siempre restaura el proyecto.',
   'Continue without a server copy': 'Continuar sin copia en el servidor',
@@ -33,6 +31,9 @@ const es: Catalog = {
   'Not syncing: this server is private, and this project needs a creation code from its owner.': 'Sin sincronizar: este servidor es privado y este proyecto necesita un código de creación de su propietario.',
   'Your copy here is safe and you can keep working, but nobody else gets your changes.': 'Tu copia aquí está a salvo y puedes seguir trabajando, pero nadie más recibe tus cambios.',
   "Create project": "Crear un proyecto",
+  'A creation code lets this server keep an encrypted copy of projects you create, so co-authors can catch up while you’re offline. You don’t need one to open or edit projects shared with you; without one, a new project is sync-only.': 'Un código de creación permite que este servidor guarde una copia cifrada de los proyectos que creas, para que tus coautores puedan ponerse al día mientras estás desconectado. No lo necesitas para abrir o editar proyectos compartidos contigo; sin él, un proyecto nuevo solo se sincroniza directamente.',
+  'A creation code lets this server keep an encrypted copy of projects you create.': 'Un código de creación permite que este servidor guarde una copia cifrada de los proyectos que creas.',
+  'Where to get one': 'Dónde conseguir uno',
 }
 
 export default es

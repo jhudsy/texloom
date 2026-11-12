@@ -7,11 +7,9 @@ const de: Catalog = {
   'Code accepted. Its storage allowance is {{total}} MB, of which {{used}} MB is used.': 'Code akzeptiert. Sein Speicherkontingent beträgt {{total}} MB, davon sind {{used}} MB belegt.',
   'That code isn’t valid on this server.': 'Dieser Code ist auf diesem Server nicht gültig.',
   'Couldn’t reach the server; try again when online.': 'Server nicht erreichbar; versuchen Sie es erneut, wenn Sie online sind.',
-  'This server stores new projects only for people with a creation code from its owner. You only need it once per browser; opening and editing projects shared with you never needs one.': 'Dieser Server speichert neue Projekte nur für Personen mit einem Erstellungscode vom Betreiber. Sie benötigen ihn nur einmal pro Browser; zum Öffnen und Bearbeiten mit Ihnen geteilter Projekte ist er nie nötig.',
   'Code': 'Code',
   'Cancel': 'Abbrechen',
   'Save code': 'Code speichern',
-  'This server keeps an encrypted copy of new projects only for people with a creation code.': 'Dieser Server speichert eine verschlüsselte Kopie neuer Projekte nur für Personen mit einem Erstellungscode.',
   'I have a code': 'Ich habe einen Code',
   'The server keeps an encrypted copy, so collaborators get your changes even when you’re offline, and the link always restores the project.': 'Der Server speichert eine verschlüsselte Kopie. So erhalten Mitwirkende Ihre Änderungen auch, wenn Sie offline sind, und der Link stellt das Projekt immer wieder her.',
   'Continue without a server copy': 'Ohne Serverkopie fortfahren',
@@ -33,6 +31,9 @@ const de: Catalog = {
   'Not syncing: this server is private, and this project needs a creation code from its owner.': 'Keine Synchronisation: Dieser Server ist privat, und dieses Projekt benötigt einen Erstellungscode vom Betreiber.',
   'Your copy here is safe and you can keep working, but nobody else gets your changes.': 'Ihre Kopie hier ist sicher und Sie können weiterarbeiten, aber niemand sonst erhält Ihre Änderungen.',
   "Create project": "Projekt erstellen",
+  'A creation code lets this server keep an encrypted copy of projects you create, so co-authors can catch up while you’re offline. You don’t need one to open or edit projects shared with you; without one, a new project is sync-only.': 'Ein Erstellungscode lässt diesen Server eine verschlüsselte Kopie der Projekte aufbewahren, die Sie erstellen, damit Mitautorinnen und Mitautoren aufholen können, während Sie offline sind. Zum Öffnen oder Bearbeiten von Projekten, die mit Ihnen geteilt wurden, brauchen Sie keinen; ohne Code wird ein neues Projekt nur direkt synchronisiert.',
+  'A creation code lets this server keep an encrypted copy of projects you create.': 'Ein Erstellungscode lässt diesen Server eine verschlüsselte Kopie der Projekte aufbewahren, die Sie erstellen.',
+  'Where to get one': 'Wo man einen bekommt',
 }
 
 export default de

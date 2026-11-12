@@ -7,8 +7,16 @@ import { t } from './i18n'
 const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent)
 export const SAFARI_NOTE = isSafari ? ' ' + t('Safari may also delete a site’s data after about 7 days without a visit.') : ''
 
-export async function serverInfo(): Promise<{ creation: 'open' | 'code'; projectMaxBytes: number; projectLists?: boolean; private?: boolean } | null> {
+export async function serverInfo(): Promise<{ creation: 'open' | 'code'; projectMaxBytes: number; projectLists?: boolean; private?: boolean; codesUrl?: string } | null> {
   try { const r = await fetch('/api/info'); return r.ok ? await r.json() : null } catch { return null }
+}
+
+/** Where codes come from: whoever runs the server, with its page about them if it has one.
+ *  Never a fixed address: each server says for itself. */
+export function codeSource(info: { codesUrl?: string } | null): HTMLElement {
+  const url = typeof info?.codesUrl === 'string' && /^https?:\/\//i.test(info.codesUrl) ? info.codesUrl : null
+  return h('span', { class: 'muted small' }, t('Codes come from whoever runs this server.'),
+    ...(url ? [' ', h('a', { href: url, target: '_blank', rel: 'noopener' }, t('Where to get one'))] : []))
 }
 
 const PRIVATE_INTRO = () => t('This server is private: new projects need a creation code from its owner. You only need it once per browser; opening projects shared with you never needs one.')
@@ -41,9 +49,12 @@ export function askCode(intro?: string): Promise<boolean> {
       else msg.textContent = r ? t('That code isn’t valid on this server.') : t('Couldn’t reach the server; try again when online.')
     }
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') check() })
+    const source = h('p', {}, codeSource(null))
+    serverInfo().then((info) => source.replaceChildren(codeSource(info)))
     const dlg = dialog('settings',
       h('h3', {}, t('Creation code')),
-      h('p', { class: 'muted' }, intro ?? t('This server stores new projects only for people with a creation code from its owner. You only need it once per browser; opening and editing projects shared with you never needs one.')),
+      h('p', { class: 'muted' }, intro ?? t('A creation code lets this server keep an encrypted copy of projects you create, so co-authors can catch up while you’re offline. You don’t need one to open or edit projects shared with you; without one, a new project is sync-only.')),
+      source,
       h('label', { class: 'field' }, t('Code'), input),
       msg,
       h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Cancel')), h('button', { class: 'primary', onclick: check }, t('Save code'))),
@@ -62,7 +73,7 @@ export async function chooseNewProject(): Promise<'server' | 'relay' | null> {
     let choice: 'server' | 'relay' | null = null
     const dlg = dialog('settings',
       h('h3', {}, t('Create project')),
-      h('p', {}, t('This server keeps an encrypted copy of new projects only for people with a creation code.')),
+      h('p', {}, t('A creation code lets this server keep an encrypted copy of projects you create.'), ' ', codeSource(info)),
       h('div', { class: 'radios' },
         h('button', { class: 'radio choice', onclick: async () => { if (await askCode()) { choice = 'server'; dlg.close() } } },
           h('span', {}, h('b', {}, t('I have a code')), h('small', { class: 'muted' }, t('The server keeps an encrypted copy, so collaborators get your changes even when you’re offline, and the link always restores the project.')))),

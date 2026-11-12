@@ -361,6 +361,10 @@ K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
   relay-only; renewing the code later stores them again on their next sync.
   `--purge-code CODE` does the same at once for one expired or deleted code.
   (`TEXLOOM_PURGE_EXPIRED_AFTER` sets it too, e.g. from a systemd drop-in.)
+- `--codes-url URL` (or `TEXLOOM_CODES_URL`) names a web page saying how to get a code for
+  this server. Where the web and desktop apps ask for a code, they say codes come from whoever
+  runs the server and link to that page; without it, they only say the first part. Each server
+  gives its own (in `/api/info`), so the apps never point at one in particular.
 - Several codes files can be combined: repeat `--codes-file`, or list extra files in
   `TEXLOOM_CODES_FILES` (separated by `:`), for example one kept by hand and one kept by a
   sales service. The first file that sets `default` decides it; `--add-code` writes to the

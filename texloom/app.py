@@ -33,7 +33,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from . import __version__, autostart, listsync, registry, tags
-from .cli import DEFAULT_CONFIG, clone_project, code_ok, load, load_config, new_project, peek, run, update_config
+from .cli import DEFAULT_CONFIG, clone_project, code_ok, load, load_config, new_project, peek, run, server_info, update_config
 from .crypto import Keys
 from .daemon import CURRENT, FOLDER, Daemon, FolderProblem, FolderTag
 from .folder import copy_project_files
@@ -697,6 +697,56 @@ class JoinDialog(Dialog):
         self.accept()
 
 
+class CodeSource(QtWidgets.QLabel):
+    """Where creation codes come from: whoever runs the server, with its page about them if it
+    says it has one. Never a fixed address: each server speaks for itself."""
+
+    def __init__(self, engine: Engine, server: str = "") -> None:
+        super().__init__(_("Codes come from whoever runs this server."))
+        self.engine, self.server = engine, ""
+        self.setWordWrap(True)
+        self.setOpenExternalLinks(True)
+        self.setTextFormat(Qt.RichText)
+        self.show_for(server)
+
+    def show_for(self, server: str) -> None:
+        server = server.strip().rstrip("/")
+        if server == self.server:
+            return
+        self.server = server
+        self.setText(html.escape(_("Codes come from whoever runs this server.")))
+        if re.match(r"https?://", server, re.I):
+            self.engine.submit(server_info(server), lambda info, _err, asked=server: self.got(asked, info or {}))
+
+    def got(self, server: str, info: dict) -> None:
+        url = info.get("codesUrl")
+        if server != self.server or not isinstance(url, str) or not re.match(r"https?://", url, re.I):
+            return
+        self.setText(f'{html.escape(_("Codes come from whoever runs this server."))} '
+                     f'<a href="{html.escape(url, quote=True)}">{html.escape(_("Where to get one"))}</a>')
+
+
+def ask_code(parent, engine: Engine, server: str, title: str, text: str, code: str = "") -> str | None:
+    """Ask for a creation code, saying where codes come from. None if cancelled."""
+    dlg = QtWidgets.QDialog(parent)
+    dlg.setWindowTitle(title)
+    dlg.setMinimumWidth(480)
+    lay = QtWidgets.QVBoxLayout(dlg)
+    intro = QtWidgets.QLabel(text)
+    intro.setWordWrap(True)
+    lay.addWidget(intro)
+    lay.addWidget(CodeSource(engine, server))
+    box = QtWidgets.QLineEdit(code)
+    box.setPlaceholderText(_("Creation code"))
+    lay.addWidget(box)
+    bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+    bb.accepted.connect(dlg.accept)
+    bb.rejected.connect(dlg.reject)
+    lay.addWidget(bb)
+    box.setFocus()
+    return box.text() if dlg.exec() == QtWidgets.QDialog.Accepted else None
+
+
 class ShareFolderDialog(Dialog):
     """Share an existing folder as a new project (`texloom new`)."""
 
@@ -734,6 +784,9 @@ class ShareFolderDialog(Dialog):
         hint.setProperty("class", "hint")
         hint.setEnabled(False)  # greyed, as a note
         lay.addRow("", hint)
+        self.code_source = CodeSource(engine, self.server.text())
+        self.server.editingFinished.connect(lambda: self.code_source.show_for(self.server.text()))
+        lay.addRow("", self.code_source)
         self.msg = QtWidgets.QLabel("")
         self.msg.setWordWrap(True)
         lay.addRow(self.msg)
@@ -1125,6 +1178,10 @@ class CopyFolderDialog(Dialog):
         self.code = QtWidgets.QLineEdit(str(load_config(src).get("create_code") or ""))
         self.code.setPlaceholderText(_("only if the server asks for one"))
         lay.addRow(_("Creation code"), self.code)
+        try:
+            lay.addRow("", CodeSource(engine, load(src)[1]))
+        except (OSError, ValueError, KeyError):  # a folder that has gone: the copy fails later, saying why
+            pass
         self.msg = QtWidgets.QLabel("")
         self.msg.setWordWrap(True)
         lay.addRow(self.msg)
@@ -1990,14 +2047,12 @@ class Window(QtWidgets.QMainWindow):
         if not d or r is None:
             return
         server = r.server
-        code, ok = QtWidgets.QInputDialog.getText(
-            self, _("Keep a copy on the server"),
-            _("The server keeps an encrypted copy of a project only with a creation code from its owner. "
-              "With one, your other computers and collaborators get changes even when you're not online "
-              "together, and the project opens anywhere in the browser.") + "\n\n" + _("Creation code:"),
-            QtWidgets.QLineEdit.Normal, listsync.code_for(server))
-        code = code.strip()
-        if not ok or not code:
+        code = ask_code(self, self.engine, server, _("Keep a copy on the server"),
+                        _("The server keeps an encrypted copy of a project only with a creation code. "
+                          "With one, your other computers and collaborators get changes even when you're not online "
+                          "together, and the project opens anywhere in the browser."), listsync.code_for(server))
+        code = (code or "").strip()
+        if not code:
             return
 
         def checked(good, err) -> None:

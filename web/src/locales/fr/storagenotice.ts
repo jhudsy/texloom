@@ -11,15 +11,11 @@ const fr: Catalog = {
     'Code accepté. Son quota de stockage est de {{total}} Mo, dont {{used}} Mo utilisés.',
   'That code isn’t valid on this server.': 'Ce code n’est pas valide sur ce serveur.',
   'Couldn’t reach the server; try again when online.': 'Impossible de joindre le serveur ; réessayez une fois en ligne.',
-  'This server stores new projects only for people with a creation code from its owner. You only need it once per browser; opening and editing projects shared with you never needs one.':
-    'Ce serveur ne stocke les nouveaux projets que pour les personnes ayant un code de création fourni par son propriétaire. Il ne vous est demandé qu’une fois par navigateur ; ouvrir et modifier les projets partagés avec vous n’en nécessite jamais.',
   'Code': 'Code',
   'Cancel': 'Annuler',
   'Save code': 'Enregistrer le code',
 
   // new project
-  'This server keeps an encrypted copy of new projects only for people with a creation code.':
-    'Ce serveur ne garde une copie chiffrée des nouveaux projets que pour les personnes ayant un code de création.',
   'I have a code': 'J’ai un code',
   'The server keeps an encrypted copy, so collaborators get your changes even when you’re offline, and the link always restores the project.':
     'Le serveur garde une copie chiffrée : les collaborateurs reçoivent vos modifications même quand vous êtes hors ligne, et le lien permet toujours de restaurer le projet.',
@@ -56,6 +52,9 @@ const fr: Catalog = {
   'Your copy here is safe and you can keep working, but nobody else gets your changes.':
     'Votre copie locale est intacte et vous pouvez continuer à travailler, mais personne d’autre ne reçoit vos modifications.',
   "Create project": "Créer un projet",
+  'A creation code lets this server keep an encrypted copy of projects you create, so co-authors can catch up while you’re offline. You don’t need one to open or edit projects shared with you; without one, a new project is sync-only.': 'Un code de création permet à ce serveur de garder une copie chiffrée des projets que vous créez, pour que vos coauteurs puissent rattraper leur retard pendant que vous êtes hors ligne. Vous n’en avez pas besoin pour ouvrir ou modifier les projets partagés avec vous ; sans code, un nouveau projet est synchronisé uniquement entre appareils.',
+  'A creation code lets this server keep an encrypted copy of projects you create.': 'Un code de création permet à ce serveur de garder une copie chiffrée des projets que vous créez.',
+  'Where to get one': 'Où en obtenir un',
 }
 
 export default fr

@@ -184,6 +184,18 @@ async def refuse_if_private(server: str, code: str) -> dict:
     raise FolderProblem(f"{base} is a private server: a new project needs a valid creation code from its owner")
 
 
+async def server_info(server: str) -> dict:
+    """What the server says about itself (/api/info), or {} if it can't be asked."""
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession(connector=tls.connector(), timeout=aiohttp.ClientTimeout(total=10)) as http:
+            async with http.get(f"{server.rstrip('/')}/api/info") as r:
+                info = (await r.json()) if r.ok else {}
+                return info if isinstance(info, dict) else {}
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+        return {}
+
+
 async def code_ok(server: str, code: str) -> bool:
     """Whether the server takes this creation code."""
     import aiohttp

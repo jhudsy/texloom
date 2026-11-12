@@ -7,11 +7,9 @@ const zh: Catalog = {
   'Code accepted. Its storage allowance is {{total}} MB, of which {{used}} MB is used.': '创建码有效。其存储配额为 {{total}} MB，已使用 {{used}} MB。',
   'That code isn’t valid on this server.': '此创建码在此服务器上无效。',
   'Couldn’t reach the server; try again when online.': '无法连接服务器；请在联网后重试。',
-  'This server stores new projects only for people with a creation code from its owner. You only need it once per browser; opening and editing projects shared with you never needs one.': '此服务器只为持有其所有者提供的创建码的用户保存新项目。每个浏览器只需输入一次；打开和编辑别人共享给你的项目无需创建码。',
   'Code': '代码',
   'Cancel': '取消',
   'Save code': '保存创建码',
-  'This server keeps an encrypted copy of new projects only for people with a creation code.': '此服务器只为持有创建码的用户保留新项目的加密副本。',
   'I have a code': '我有创建码',
   'The server keeps an encrypted copy, so collaborators get your changes even when you’re offline, and the link always restores the project.': '服务器保留加密副本，因此即使你离线，协作者也能收到更改，链接也始终可以恢复项目。',
   'Continue without a server copy': '不在服务器上保留副本，继续',
@@ -33,6 +31,9 @@ const zh: Catalog = {
   'Not syncing: this server is private, and this project needs a creation code from its owner.': '未同步：此服务器为私有服务器，此项目需要其所有者提供的创建码。',
   'Your copy here is safe and you can keep working, but nobody else gets your changes.': '你在此处的副本是安全的，可以继续工作，但其他人收不到你的更改。',
   "Create project": "创建项目",
+  'A creation code lets this server keep an encrypted copy of projects you create, so co-authors can catch up while you’re offline. You don’t need one to open or edit projects shared with you; without one, a new project is sync-only.': '创建码让此服务器为您创建的项目保留一份加密副本，这样在您离线时，合著者也能获取最新内容。打开或编辑他人与您共享的项目不需要创建码；没有创建码时，新项目只会直接同步。',
+  'A creation code lets this server keep an encrypted copy of projects you create.': '创建码让此服务器为您创建的项目保留一份加密副本。',
+  'Where to get one': '在哪里获取',
 }
 
 export default zh

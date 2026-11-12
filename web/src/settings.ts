@@ -9,6 +9,13 @@ import { editorMarkup, type Markup } from './review'
 import { zoteroSection } from './zoteroui'
 import { githubSection } from './githubui'
 
+/** "Codes come from whoever runs this server", with the server's own page about them once known. */
+function codeSourceSlot(): HTMLElement {
+  const slot = h('span', {})
+  import('./storagenotice').then(async ({ codeSource, serverInfo }) => slot.replaceChildren(codeSource(await serverInfo())))
+  return slot
+}
+
 export type CompileWhere = 'browser' | 'local' | 'none'
 export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boolean; setup: boolean; spell: boolean; mathPreview: boolean; checks: boolean }
 
@@ -210,9 +217,9 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
           storageBox.replaceChildren(storageRadios())
           codeRow?.remove()
         } }, t('Enter creation code…')),
-        h('span', { class: 'muted small' }, t('Codes come from whoever runs this server.'))) : h('div', { class: 'row' },
+        codeSourceSlot()) : h('div', { class: 'row' },
         h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, t('Creation code…')),
-        h('span', { class: 'muted small' }, t('Needed only to store new projects on servers that ask for one.'))),
+        h('span', { class: 'muted small' }, t('Needed only to store new projects on servers that ask for one.'), ' ', codeSourceSlot())),
       h('h4', {}, t('Keep a copy in a folder on this computer')),
       chooseFolder ? h('div', {},
         h('p', { class: 'muted small' }, t('This browser can sync a folder itself while this tab is open: nothing to install. Changes go both ways; files changed on both sides take the folder’s version (it stays in History).')),
