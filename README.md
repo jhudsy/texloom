@@ -854,6 +854,7 @@ python scripts/check_listsync.py
 cd web && npm run check-listsync
 npm run check-versions  # saved versions: every one opens exactly, and storing them stays small
 npm run check-suggest   # suggest mode: random typing and collaborators' edits keep the view and suggestions in step
+npm run check-chars     # edits never cut an emoji (or any character outside the BMP) in two
 ```
 
 Sync-only projects end to end: `uv run python scripts/check_synconly.py` starts its own throwaway

@@ -7,6 +7,7 @@ import { Decoration, gutter, GutterMarker, ViewPlugin, type DecorationSet, type 
 import { StreamLanguage } from '@codemirror/language'
 import { stex } from '@codemirror/legacy-modes/mode/stex'
 import { yCollab } from 'y-codemirror.next'
+import { wholeCharactersFilter } from './wholechars'
 import { oneDark } from '@codemirror/theme-one-dark'
 import type { Replica } from './replica'
 import { h, saveFile } from './dom'
@@ -172,6 +173,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             // file saved on Windows) as one break: its positions then fall one short of the shared
             // text's for every line above, and typing landed that far off, in the middle of words.
             EditorState.lineSeparator.of('\n'),
+            wholeCharactersFilter, // never half an emoji (wholechars.ts)
             basicSetup,
             StreamLanguage.define(stex),
             EditorView.lineWrapping,

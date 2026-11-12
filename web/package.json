@@ -11,7 +11,8 @@
     "check-versions": "node scripts/check-versions.mjs",
     "download-tex": "texlyre-busytex download-assets ../tex-assets",
     "check-suggest": "node scripts/check-suggest.mjs",
-    "check-xr": "node scripts/check-xr.mjs"
+    "check-xr": "node scripts/check-xr.mjs",
+    "check-chars": "node scripts/check-chars.mjs"
   },
   "keywords": [],
   "author": "",

@@ -60,6 +60,9 @@ export function diffStats(ops: Op[]) {
   return { added: ops.filter((o) => o.type === 'add').length, removed: ops.filter((o) => o.type === 'del').length }
 }
 
+export const isHigh = (c: number) => c >= 0xd800 && c <= 0xdbff
+export const isLow = (c: number) => c >= 0xdc00 && c <= 0xdfff
+
 /** Replace a Y.Text's content with `next` using one small edit (common prefix/suffix kept),
  *  so collaborators' cursors and concurrent edits elsewhere are preserved. */
 export function setText(yt: Y.Text, next: string) {
@@ -70,6 +73,10 @@ export function setText(yt: Y.Text, next: string) {
   while (p < n && old[p] === next[p]) p++
   let s = 0
   while (s < n - p && old[old.length - 1 - s] === next[next.length - 1 - s]) s++
+  // Never between the two halves of a character outside the BMP (an emoji, say): 😀 → 😁 share their
+  // first half, and an edit of just the second leaves halves Yjs turns into "\ufffd" for everyone.
+  if (p > 0 && isHigh(old.charCodeAt(p - 1))) p--
+  if (s > 0 && isLow(old.charCodeAt(old.length - s))) s--
   if (old.length - s - p > 0) yt.delete(p, old.length - s - p)
   if (next.length - s - p > 0) yt.insert(p, next.slice(p, next.length - s))
 }

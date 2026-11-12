@@ -303,6 +303,13 @@ relay) as the fallback for symmetric NATs.
   Any "\r" in a project text (put there by an older app, pasted, or left by that bug; a lone one
   too, rather than taken for an old Mac line break) is taken out, each by itself, by the web app as it arrives and by the folder sync when it starts
   (`keepLF`, `strip_cr`).
+- Whole characters: a character outside the BMP (an emoji, Unicode maths such as 𝒜) is two
+  UTF-16 units in the web app. An edit between them leaves half a character: Yjs turns both
+  halves into "\ufffd" for everyone, and the desktop's copy (whole characters only) differs.
+  Typing never does this, but position-based edits could: `setText` (restoring from History,
+  importing over a file) kept common ends by unit, so 😀 → 😁 or 𝒜 → 𝒞, which share their first
+  half, became "��". It now keeps whole characters, and an editor filter (`wholechars.ts`)
+  widens any other change that would cut one. `npm run check-chars` checks both.
 - Renames on disk: a rename reaches the sync as a deletion and an addition, perhaps in
   different batches. A file gone from disk whose last synced content (by hash) is now in a
   file the project doesn't have yet has moved there, and moves as renaming in the web app

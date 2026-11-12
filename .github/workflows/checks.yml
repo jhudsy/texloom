@@ -34,6 +34,7 @@ jobs:
           npm run check-versions
           npm run check-suggest
           npm run check-xr
+          npm run check-chars
 
   sync-only:
     strategy:
