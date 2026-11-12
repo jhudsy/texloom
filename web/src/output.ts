@@ -72,6 +72,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   } }, t('Compile')) as HTMLButtonElement
   let stopRunning: (() => void) | null = null
   let again: { fromScratch: boolean; file?: string } | null = null // asked to compile while one ran
+  let starting = false // a compile is past the check below but not yet marked as running (it awaits first)
   const next = () => { if (again) { const a = again; again = null; setTimeout(() => compile(true, a.fromScratch, a.file)) } }
   /** While something is compiling, the Compile button stops it. */
   const setRunning = (stop: (() => void) | null, label = t('Stop'), title = t('Stop this compile')) => {
@@ -192,7 +193,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     if (d.compile === 'none') return interactive ? fail((t) => t('Compiling is turned off on this device (⚙ Settings → Compiling).')) : null
     const main = target(interactive ? file : undefined)
     if (!main) return fail((t) => t('No .tex file with \\documentclass found.'))
-    if (stopRunning) { // one at a time: asked again meanwhile, it compiles once more when this one ends, with the text as it is then
+    if (stopRunning || starting) { // one at a time: asked again meanwhile, it compiles once more when this one ends, with the text as it is then
       if (!interactive) return fail((t) => t('A compile is already running; try again in a moment.'))
       again = { fromScratch: again?.fromScratch || fromScratch, file }
       info.textContent = t('Compiling again when this compile finishes…')
@@ -202,7 +203,10 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       if (file && file !== mainFile(r)) return fail((t) => t('Your texloom helper compiles only the main file. Use “Set as main file”, or compile in this browser (⚙ Settings → Compiling).'))
       return compileLocally(fail, fromScratch)
     }
-    if (!(await browserCompileAvailable())) {
+    starting = true
+    let available: boolean
+    try { available = await browserCompileAvailable() } finally { starting = false }
+    if (!available) {
       return fail((t) => t('In-browser compilation is not installed on this server.\n\nChoose “With my own TeX installation” in ⚙ Settings → Compiling, and tick “Compile with my own TeX” for this project’s folder in the TeXLoom app.'))
     }
     let stopped = false // before the engine has the job, stopping is noted here

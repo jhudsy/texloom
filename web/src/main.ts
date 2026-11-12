@@ -820,6 +820,7 @@ async function openProject(keys: Keys) {
       return
     }
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
+      if (e.defaultPrevented) return // the editor's own ⌘S already compiled: a second compile at once used to hang the first
       e.preventDefault()
       output.compile()
     }

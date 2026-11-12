@@ -209,6 +209,11 @@ export function stopBrowserCompile() {
 
 type CompileResult = { pdf: Uint8Array | null; log: string; synctex: Uint8Array | null }
 
+// The engine handles one call at a time: each one replaces its worker's message handler, so a
+// second call while one runs takes the first's result and leaves it waiting until busytex gives
+// up (3 minutes). Calls are queued here, whatever asks for them.
+let engineQueue: Promise<unknown> = Promise.resolve()
+
 export function compileInBrowser(
   files: Map<string, string | Uint8Array>,
   main: string,
@@ -216,9 +221,15 @@ export function compileInBrowser(
   onProgress?: (p: Progress) => void,
 ): Promise<CompileResult> {
   const mine: Job = { stopped: false, inEngine: false, stop: () => {} }
-  job = mine
   const stopped = new Promise<never>((_, reject) => { mine.stop = reject })
-  return Promise.race([compiling(mine, files, main, opts, onProgress), stopped]).finally(() => { if (job === mine) job = null })
+  const run = engineQueue.then(() => {
+    if (mine.stopped) throw new CompileStopped()
+    job = mine
+    return compiling(mine, files, main, opts, onProgress)
+  })
+  const done = Promise.race([run, stopped]).finally(() => { if (job === mine) job = null })
+  engineQueue = done.catch(() => {}) // stopped, it ends here at once (its engine is ended too: see stopBrowserCompile)
+  return done
 }
 
 async function compiling(
