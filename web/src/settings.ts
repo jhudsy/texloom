@@ -3,6 +3,7 @@ import { DOWNLOAD_APP, openInApp, sourceNote } from './openinapp'
 import type { Replica, StorageMode, SyncMode } from './replica'
 import { engineCached, clearEngineCache } from './compile'
 import { h, dialog } from './dom'
+import { myName } from './myname'
 import { detectMain } from './projectfiles'
 import { t, LANGUAGES, langPref, setLangPref, type Lang } from './i18n'
 import { editorMarkup, type Markup } from './review'
@@ -22,8 +23,8 @@ export type Device = { sync: SyncMode; compile: CompileWhere; autoCompile: boole
 const DEFAULTS: Device = { sync: 'live', compile: 'browser', autoCompile: false, setup: false, spell: true, mathPreview: true, checks: true }
 
 export const prefs = {
-  get name(): string { return localStorage.getItem('texloom.name') || '' },
-  set name(v: string) { localStorage.setItem('texloom.name', v) },
+  get name(): string { return myName.get() },
+  set name(v: string) { if (v !== myName.get()) myName.set(v) },
   device(project: string): Device {
     try {
       const global = JSON.parse(localStorage.getItem('texloom.device') || '{}')

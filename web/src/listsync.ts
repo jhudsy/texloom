@@ -12,6 +12,7 @@ import { b64d, b64e } from './crypto'
 import { canon, emptyList, emptySettings, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeSettings, mergeTags, passwordSecret, tidyTags, type ListDoc, type SettingsDoc, type TagDoc } from './listcore'
 import { projects } from './projects'
 import { creationCode } from './replica'
+import { myName, NAME_CHANGED } from './myname'
 import { zoteroAccount } from './zotero'
 import { githubAccount } from './github'
 import { tags } from './tags'
@@ -86,10 +87,11 @@ async function exchangeTags(secret: Uint8Array, list: ListDoc): Promise<boolean>
 // ---- settings: the creation code follows the list -----------------------------------------
 const settingsKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 'texloom list settings'))
 
-/** Settings that follow the list: this browser's creation code and Zotero and GitHub accounts, each with when
+/** Settings that follow the list: this browser's creation code, your name, and Zotero and GitHub accounts, each with when
  *  it was set (one from before that was recorded counts as older than any that was). */
 const SETTINGS: Record<string, { get(): string; at(): number; set(v: string, at: number): void }> = {
   code: { get: () => creationCode.get(), at: () => creationCode.at(), set: (v, at) => creationCode.set(v, at) },
+  name: { get: () => myName.get(), at: () => myName.at(), set: (v, at) => myName.set(v, at, true) },
   zotero: {
     get: () => { const a = zoteroAccount.get(); return a ? JSON.stringify(a) : '' },
     at: () => zoteroAccount.at(),
@@ -194,6 +196,7 @@ export function startListSync(onChange: () => void) {
   changed = onChange
   projects.onChange(schedule)
   tags.onChange(schedule)
+  window.addEventListener(NAME_CHANGED, schedule)
   syncQuietly()
   window.addEventListener('focus', () => { if (Date.now() - lastAttempt > 60_000) syncQuietly() })
   window.addEventListener('online', syncQuietly)

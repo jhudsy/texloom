@@ -593,6 +593,10 @@ class JoinDialog(Dialog):
         self.already.hide()
         lay.addWidget(self.already)
         self.existing: Path | None = None
+        lay.addWidget(QtWidgets.QLabel(_("Your name:")))
+        self.me = NameBox()
+        self.accepted.connect(self.me.save)
+        lay.addWidget(self.me)
         lay.addWidget(QtWidgets.QLabel(_("Folder on this computer:")))
         frow = QtWidgets.QHBoxLayout()
         self.folder = QtWidgets.QLineEdit("")
@@ -697,6 +701,24 @@ class JoinDialog(Dialog):
         self.accept()
 
 
+class NameBox(QtWidgets.QLineEdit):
+    """Your name, shown to collaborators next to what you write. Kept for every project, and with
+    a project list it follows you to your other computers and browsers."""
+
+    def __init__(self) -> None:
+        super().__init__(listsync.my_name()[0])
+        self.setPlaceholderText(_("Shown to collaborators"))
+        self.setMaxLength(64)
+
+    def save(self) -> bool:
+        """Remember it if it changed. True if it did."""
+        name = self.text().strip()
+        if name == listsync.my_name()[0]:
+            return False
+        listsync.remember_name(name)
+        return True
+
+
 class CodeSource(QtWidgets.QLabel):
     """Where creation codes come from: whoever runs the server, with its page about them if it
     says it has one. Never a fixed address: each server speaks for itself."""
@@ -787,6 +809,9 @@ class ShareFolderDialog(Dialog):
         self.code_source = CodeSource(engine, self.server.text())
         self.server.editingFinished.connect(lambda: self.code_source.show_for(self.server.text()))
         lay.addRow("", self.code_source)
+        self.me = NameBox()
+        self.accepted.connect(self.me.save)
+        lay.addRow(_("Your name"), self.me)
         self.msg = QtWidgets.QLabel("")
         self.msg.setWordWrap(True)
         lay.addRow(self.msg)
@@ -1544,6 +1569,10 @@ class SettingsDialog(QtWidgets.QDialog):
         lay = QtWidgets.QFormLayout(self)
         lay.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)  # macOS keeps fields narrow otherwise
         lay.setRowWrapPolicy(QtWidgets.QFormLayout.WrapLongRows)
+        self.me = NameBox()
+        self.me.editingFinished.connect(self.name_changed)
+        lay.addRow(_("Your name"), self.me)
+        lay.addRow("", grey_note(_("Shown to collaborators next to what you write, in every project. With a project list, it follows you to your other computers and browsers.")))
         self.login = QtWidgets.QCheckBox(_("Start TeXLoom when I log in, so folders keep syncing"))
         self.login.setChecked(autostart.status() != "off")
         self.login.toggled.connect(self.set_autostart)
@@ -1585,6 +1614,10 @@ class SettingsDialog(QtWidgets.QDialog):
     def showEvent(self, e) -> None:
         self.list_state.setText(_("In use on this computer") if listsync.saved_link() else _("Not set up"))
         super().showEvent(e)
+
+    def name_changed(self) -> None:
+        if self.me.save() and listsync.saved_link():
+            self.window_.keep_list_updated(force=True)  # so your other devices get it soon
 
     def set_language(self, _i: int) -> None:
         set_lang_pref(self.lang.currentData())

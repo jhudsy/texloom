@@ -366,6 +366,30 @@ def save_link(link: str | None) -> None:
         json.dump({"link": link}, f)
 
 
+def _name_file() -> Path:
+    return registry.config_dir() / "name.json"
+
+
+def my_name() -> tuple[str, int]:
+    """The name shown to collaborators, and when it was set (milliseconds; 0 if never). With a
+    project list, the latest one set anywhere, in a browser or here, follows the list."""
+    try:
+        d = json.loads(_name_file().read_text())
+        if isinstance(d, dict) and isinstance(d.get("v"), str) and isinstance(d.get("at"), int):
+            return d["v"], d["at"]
+    except (OSError, ValueError):
+        pass
+    return "", 0
+
+
+def remember_name(name: str, at: int | None = None) -> None:
+    p = _name_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"v": name.strip()[:64], "at": int(time.time() * 1000) if at is None else at}, f)
+
+
 def _codes_file() -> Path:
     return registry.config_dir() / "creation-codes.json"
 
@@ -486,14 +510,17 @@ def _sync_my_tags(key: ListKey, server: str, doc: dict, code: str | None) -> Non
 
 
 def _sync_my_settings(key: ListKey, server: str, code: str | None) -> None:
-    """The creation code follows the list: this computer's latest one goes on it, and a later one
-    entered elsewhere (say in the web app) comes back here."""
+    """The creation code and your name follow the list: this computer's latest ones go on it, and
+    later ones set elsewhere (say in the web app) come back here."""
     saved = _saved_codes().get(server.rstrip("/"))
     local = empty_settings()
     if isinstance(saved, dict) and isinstance(saved.get("v"), str) and isinstance(saved.get("at"), int):
         local["s"]["code"] = {"v": saved["v"], "at": saved["at"]}
     elif known := _known_code(server):
         local["s"]["code"] = {"v": known, "at": 1}  # from before codes were dated: older than any that is
+    name, name_at = my_name()
+    if name_at:
+        local["s"]["name"] = {"v": name, "at": name_at}
     try:
         merged = sync_settings(key, server, local, code or code_for(server) or None)
     except ListError as e:
@@ -502,3 +529,6 @@ def _sync_my_settings(key: ListKey, server: str, code: str | None) -> None:
     got = merged["s"].get("code")
     if got and got != local["s"].get("code") and isinstance(got.get("v"), str) and isinstance(got.get("at"), int):
         remember_code(server, got["v"], got["at"])
+    got = merged["s"].get("name")
+    if got and got != local["s"].get("name") and isinstance(got.get("v"), str) and isinstance(got.get("at"), int):
+        remember_name(got["v"], got["at"])

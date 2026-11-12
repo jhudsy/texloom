@@ -157,6 +157,20 @@ async function withTexLog(r: BusyTexRunner, main: string, log: string): Promise<
   }
 }
 
+/** Get the engine ready while a project is open, so the first Compile starts sooner. Not where it
+ *  would cost a surprise: a browser asking to save data, a first download (about 125 MB) on a slow
+ *  connection, or a phone, where memory and data are tighter. */
+export async function warmUp(files: Map<string, string | Uint8Array>) {
+  try {
+    const net = (navigator as any).connection as { saveData?: boolean; effectiveType?: string } | undefined
+    if (net?.saveData) return
+    if (matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 768) return
+    if (!(await browserCompileAvailable())) return
+    if (/(^|-)[23]g$/.test(net?.effectiveType ?? '') && !(await engineCached())) return
+    await getRunner(await levelFor(files))
+  } catch { /* the first Compile tries again and says what went wrong */ }
+}
+
 export class CompileStopped extends Error {}
 type Job = { stopped: boolean; inEngine: boolean; stop: (e: Error) => void }
 let job: Job | null = null

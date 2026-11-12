@@ -1,4 +1,5 @@
 // TeXLoom web app entry: the start page and the project view, wired from modules.
+import { warmUp } from './compile'
 import * as Y from 'yjs'
 import { Keys } from './crypto'
 import { Replica } from './replica'
@@ -940,6 +941,8 @@ async function openProject(keys: Keys) {
   renderStatus()
   r.meta.observe(() => renderStatus()) // storage mode can change from Settings or a collaborator
   applyDevice(device)
+  // Ready the in-browser engine while the project is open, so the first Compile starts sooner.
+  setTimeout(() => { if (device.compile === 'browser') r.snapshotFiles().then(warmUp).catch(() => {}) }, 4000)
 
   r.awareness.on('change', () => {
     const others = [...r.awareness.getStates().entries()].filter(([id, s]) => id !== r.doc.clientID && s.user)
