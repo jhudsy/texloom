@@ -293,6 +293,15 @@ relay) as the fallback for symmetric NATs.
   than being overwritten.
 - CRDT → disk: write the merged file. If the file changed on disk since the last
   sync, ingest that change first.
+- Line endings: the project's texts break lines with "\n" only. A file saved on Windows ends
+  lines with "\r\n"; it comes in as "\n" and is written back with "\r\n" (`c` in known.json,
+  judged by the file's first line; for entries from before it was noted, by the file on disk).
+  The browser's folder sync does the same. The editor counts only "\n" as a line break
+  (`EditorState.lineSeparator`): by default CodeMirror also takes "\r\n" as one, so its
+  positions fell one short of the shared text's per line above and typing landed off, in the
+  middle of words. Any "\r" in a project text (put there by an older app, or pasted) is taken
+  out, each by itself, by the web app as it arrives and by the folder sync when it starts
+  (`keepLF`, `strip_cr`).
 - Renames on disk: a rename reaches the sync as a deletion and an addition, perhaps in
   different batches. A file gone from disk whose last synced content (by hash) is now in a
   file the project doesn't have yet has moved there, and moves as renaming in the web app

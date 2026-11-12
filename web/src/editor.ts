@@ -168,6 +168,10 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
         state: EditorState.create({
           doc: s ? s.initial : yt.toString(),
           extensions: [
+            // Only "\n" breaks lines, as in the shared text. By default CodeMirror also takes "\r\n" (a
+            // file saved on Windows) as one break: its positions then fall one short of the shared
+            // text's for every line above, and typing landed that far off, in the middle of words.
+            EditorState.lineSeparator.of('\n'),
             basicSetup,
             StreamLanguage.define(stex),
             EditorView.lineWrapping,

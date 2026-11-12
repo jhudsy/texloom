@@ -52,6 +52,8 @@ const zh: Catalog = {
   "{{name}} couldn’t compile: {{why}}": "{{name}} 无法编译：{{why}}",
   "No computer answered. In the TeXLoom app, tick “Compile with my own TeX” for this project’s folder (or run texloom run <folder> --compile), or compile in this browser instead (⚙ Settings → Compiling).": "没有电脑响应。请在 TeXLoom 应用中为此项目的文件夹勾选“使用我自己的 TeX 编译”（或运行 texloom run <folder> --compile），或改为在此浏览器中编译（⚙ 设置 → 编译）。",
   "Your computer didn’t finish compiling within 60 seconds. It may still be working: the PDF appears here when it’s done.": "你的电脑在 60 秒内没有完成编译。它可能仍在处理：完成后 PDF 会显示在这里。",
+  "Compiling again when this compile finishes…": "本次编译完成后将再次编译…",
+  "Gathering the project’s files…": "正在收集项目文件…",
 }
 
 export default zh

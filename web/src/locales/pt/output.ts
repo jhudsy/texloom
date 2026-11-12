@@ -52,6 +52,8 @@ const pt: Catalog = {
   "{{name}} couldn’t compile: {{why}}": "{{name}} não conseguiu compilar: {{why}}",
   "No computer answered. In the TeXLoom app, tick “Compile with my own TeX” for this project’s folder (or run texloom run <folder> --compile), or compile in this browser instead (⚙ Settings → Compiling).": "Nenhum computador respondeu. No aplicativo TeXLoom, marque “Compilar com meu próprio TeX” para a pasta deste projeto (ou execute texloom run <folder> --compile), ou compile neste navegador (⚙ Configurações → Compilação).",
   "Your computer didn’t finish compiling within 60 seconds. It may still be working: the PDF appears here when it’s done.": "Seu computador não terminou de compilar em 60 segundos. Talvez ainda esteja trabalhando: o PDF aparece aqui quando terminar.",
+  "Compiling again when this compile finishes…": "Vai compilar de novo quando esta compilação terminar…",
+  "Gathering the project’s files…": "A reunir os ficheiros do projeto…",
 }
 
 export default pt

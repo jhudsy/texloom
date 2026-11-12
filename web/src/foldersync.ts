@@ -13,7 +13,13 @@ const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycach
 export const BUILD = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex\.gz|synctex|bbl|blg|bcf|run\.xml|nav|snm|vrb|idx|ilg|ind|xdv|dvi|swp|swx|tmp)$|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$/i
 const MAX = 50 * 1024 * 1024
 
-type Known = Record<string, { h: string; m: number; z: number }>
+type Known = Record<string, { h: string; m: number; z: number; c?: boolean }> // c: the file on disk ends lines with \r\n
+
+/** Whether text ends its lines with \r\n (saved on Windows): kept that way on disk, though the project has \n. */
+function crlf(d: Uint8Array): boolean {
+  const i = d.indexOf(10)
+  return i > 0 && d[i - 1] === 13
+}
 type Dir = FileSystemDirectoryHandle
 
 export const folderSyncSupported = () => 'showDirectoryPicker' in window
@@ -104,7 +110,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     for (const [p, yt] of r.files) {
       if (!cleanPath(p) || BUILD.test(p)) continue
       want.add(p)
-      const text = yt.toString(), data = new TextEncoder().encode(text)
+      const text = yt.toString(), data = new TextEncoder().encode(known[p]?.c ? text.replace(/\r?\n/g, '\r\n') : text)
       const h = await sha(data)
       base.set(p, text) // what disk holds, or will
       if (known[p]?.h === h) continue
@@ -161,7 +167,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     const w = await fh.createWritable()
     await w.write(data as BufferSource); await w.close()
     const f = await fh.getFile()
-    known[p] = { h, m: f.lastModified, z: f.size }
+    known[p] = { h, m: f.lastModified, z: f.size, c: crlf(data) }
     remember(p, h)
     return true
   }
@@ -207,7 +213,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
         movePath(r, from, p)
         if (base.has(from)) { base.set(p, base.get(from)!); base.delete(from) }
         delete known[from]
-        known[p] = { h, m: f.lastModified, z: f.size }; remember(p, h); n++
+        known[p] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(p, h); n++
         if (text !== null && r.files.get(p)?.toString() !== text) rewrite = true // collaborators changed it since
       }
     }
@@ -221,7 +227,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       const data = new Uint8Array(await f.arrayBuffer())
       const text = isText(path, data)
       const h = text !== null ? await sha(data) : await r.keys.blobId(data)
-      if (k?.h === h) { known[path] = { h, m: f.lastModified, z: f.size }; if (text !== null) base.set(path, text); continue }
+      if (k?.h === h) { known[path] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; if (text !== null) base.set(path, text); continue }
       if (text !== null && stale(path, h)) {
         // an older version came back: not an edit (it would undo collaborators' changes)
         console.warn(`${path}: an older version reappeared in the folder; keeping the project's text`)
@@ -240,7 +246,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
           if (merged !== text) rewrite = true // the file lacks collaborators' changes
         })
       } else { const id = await r.putBlob(data); r.doc.transact(() => putBinary(r, path, id, data.length)) }
-      known[path] = { h, m: f.lastModified, z: f.size }; remember(path, h); n++
+      known[path] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(path, h); n++
     }
     for (const p of Object.keys(known)) {
       if (disk.has(p)) continue

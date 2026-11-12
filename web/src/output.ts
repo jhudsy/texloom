@@ -68,9 +68,11 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const logBtn = h('button', { title: t('Show/hide the compile log'), onclick: () => setLogOpen(!!logBox.hidden) }, t('Log'))
   const dlBtn = h('button', { class: 'iconbtn', title: t('Download the PDF'), 'aria-label': t('Download the PDF'), disabled: true, onclick: () => lastPdf && saveFile(`${pdfName ?? fileBase(r)}.pdf`, lastPdf, 'application/pdf') }, icon('download'))
   const compileBtn = h('button', { class: 'primary', title: t('Compile (⌘S / Ctrl+S)'), onclick: (e: Event) => {
-    if (stopRunning) { e.stopImmediatePropagation(); stopRunning() } else compile() // stopping shouldn't change what's on show
+    if (stopRunning) { e.stopImmediatePropagation(); again = null; stopRunning() } else compile() // stopping shouldn't change what's on show
   } }, t('Compile')) as HTMLButtonElement
   let stopRunning: (() => void) | null = null
+  let again: { fromScratch: boolean; file?: string } | null = null // asked to compile while one ran
+  const next = () => { if (again) { const a = again; again = null; setTimeout(() => compile(true, a.fromScratch, a.file)) } }
   /** While something is compiling, the Compile button stops it. */
   const setRunning = (stop: (() => void) | null, label = t('Stop'), title = t('Stop this compile')) => {
     stopRunning = stop
@@ -190,7 +192,12 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     if (d.compile === 'none') return interactive ? fail((t) => t('Compiling is turned off on this device (⚙ Settings → Compiling).')) : null
     const main = target(interactive ? file : undefined)
     if (!main) return fail((t) => t('No .tex file with \\documentclass found.'))
-    if (stopRunning) return fail((t) => t('A compile is already running; try again in a moment.'))
+    if (stopRunning) { // one at a time: asked again meanwhile, it compiles once more when this one ends, with the text as it is then
+      if (!interactive) return fail((t) => t('A compile is already running; try again in a moment.'))
+      again = { fromScratch: again?.fromScratch || fromScratch, file }
+      info.textContent = t('Compiling again when this compile finishes…')
+      return null
+    }
     if (d.compile === 'local') {
       if (file && file !== mainFile(r)) return fail((t) => t('Your texloom helper compiles only the main file. Use “Set as main file”, or compile in this browser (⚙ Settings → Compiling).'))
       return compileLocally(fail, fromScratch)
@@ -198,11 +205,14 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     if (!(await browserCompileAvailable())) {
       return fail((t) => t('In-browser compilation is not installed on this server.\n\nChoose “With my own TeX installation” in ⚙ Settings → Compiling, and tick “Compile with my own TeX” for this project’s folder in the TeXLoom app.'))
     }
-    setRunning(stopBrowserCompile)
-    showProgress({ phase: 'download', percent: 0 })
+    let stopped = false // before the engine has the job, stopping is noted here
+    setRunning(() => { stopped = true; stopBrowserCompile() })
+    showProgress({ phase: 'compile' }, t('Gathering the project’s files…'))
     try {
       const t0 = performance.now()
       const files = await r.snapshotFiles()
+      if (stopped) throw new CompileStopped()
+      showProgress({ phase: 'download', percent: 0 })
       const res = await compileInBrowser(files, main,
         { engine: r.meta.get('engine') || defaultEngine(files), bib: r.meta.get('bib') || 'auto' }, (p) => showProgress(p))
       const secs = ((performance.now() - t0) / 1000).toFixed(1)
@@ -224,6 +234,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     } finally {
       showProgress(null)
       setRunning(null)
+      next()
     }
   }
 
@@ -248,6 +259,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     } finally {
       showProgress(null)
       setRunning(null)
+      next()
     }
     const o = r.out.get('latest')
     if (!o || o.at === before) return fail((t) => t('Your computer didn’t finish compiling within 60 seconds. It may still be working: the PDF appears here when it’s done.'))

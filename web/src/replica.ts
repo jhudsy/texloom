@@ -888,7 +888,10 @@ export class Replica {
   async snapshotFiles(): Promise<Map<string, string | Uint8Array>> {
     const out = new Map<string, string | Uint8Array>()
     this.files.forEach((t, p) => out.set(p, t.toString()))
-    for (const [p, b] of this.bin.entries()) out.set(p, await this.getBlob(b.h))
+    // all at once: one that has to be asked of other computers can take up to 20 seconds
+    const bins = [...this.bin.entries()]
+    const got = await Promise.all(bins.map(([, b]) => this.getBlob(b.h)))
+    bins.forEach(([p], i) => out.set(p, got[i]))
     return out
   }
 }

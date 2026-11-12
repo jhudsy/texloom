@@ -12,7 +12,7 @@ import { askCode, chooseNewProject, riskBanner, SAFARI_NOTE } from './storagenot
 import { $, dialog, h, saveFile, askText } from './dom'
 import { icon } from './icons'
 import { t, tn, tNodes, locale } from './i18n'
-import { fileBase, mainFile, projectZip } from './projectfiles'
+import { fileBase, keepLF, mainFile, projectZip } from './projectfiles'
 import { createFileTree } from './filetree'
 import { missingKeysDialog, projectFromAddress } from './addressbar'
 import { menuItems, openContextMenu, type MenuItem } from './contextmenu'
@@ -928,6 +928,7 @@ async function openProject(keys: Keys) {
   r.onDeleted = () => { if (!removing) location.reload() } // reopen read-only, with the notice
   watchClashes(r, (c) => { clashes.push(c); renderClashes() })
   watchMerges(r, () => me.name) // paragraphs changed by two people apart: a note in Review
+  keepLF(r) // line breaks are \n only (files saved on Windows have \r\n): see projectfiles.ts
   runGitHub(r, () => me.name) // keep it in step with a GitHub repository, if it's linked to one
   r.meta.observe(renderMoved); renderMoved()
   r.onStatus = () => {

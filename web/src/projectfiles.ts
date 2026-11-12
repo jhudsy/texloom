@@ -36,7 +36,39 @@ export function cleanPath(input: string): string | null {
 export function isText(path: string, data: Uint8Array): string | null {
   if (data.length > 4 * 1024 * 1024 || data.subarray(0, 8192).includes(0)) return null
   if (/\.(png|jpe?g|gif|pdf|eps|webp|zip|gz|ttf|otf|woff2?|bmp|tiff?)$/i.test(path)) return null
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(data) } catch { return null }
+  try { return lf(new TextDecoder('utf-8', { fatal: true }).decode(data)) } catch { return null }
+}
+
+/** Text with every line ending as "\n". Files saved on Windows end lines with "\r\n": the project
+ *  keeps "\n" only (the editors and merges count a line break as one character), and the desktop
+ *  app and the browser's folder sync write a file back with the line endings it had. */
+export const lf = (s: string) => (s.includes('\r') ? s.replace(/\r\n?/g, '\n') : s)
+
+/** Keep "\r" out of the project's text: take out any already there, any a collaborator's older app
+ *  brings in, and any pasted. Each "\r" is deleted by itself, so nothing else (cursors, comments) moves. */
+const LF = Symbol('texloom-lf')
+export function keepLF(r: Replica) {
+  if (!r.keys.writable) return
+  const strip = (texts: Iterable<Y.Text>) => {
+    const todo = [...texts].filter((yt) => yt.toString().includes('\r'))
+    if (!todo.length || r.deletedAt) return
+    r.doc.transact(() => {
+      for (const yt of todo) {
+        const s = yt.toString()
+        for (let i = s.length - 1; i >= 0; i--) {
+          if (s[i] !== '\r') continue
+          if (s[i + 1] === '\n') yt.delete(i, 1); else { yt.delete(i, 1); yt.insert(i, '\n') } // a lone "\r" (old Mac) is a line break too
+        }
+      }
+    }, LF)
+  }
+  strip(r.files.values())
+  r.files.observeDeep((events, tx) => {
+    if (tx.origin === LF || !(r.isRemote(tx.origin) || r.isLocal(tx.origin))) return
+    const changed = new Set<Y.Text>()
+    for (const ev of events) if (ev.target instanceof Y.Text) changed.add(ev.target); else for (const k of (ev as Y.YMapEvent<Y.Text>).keysChanged ?? []) { const t = r.files.get(k); if (t) changed.add(t) }
+    if (changed.size) setTimeout(() => strip(changed)) // after this change: its observers are still running
+  })
 }
 
 /** The document to compile when none is chosen: main.tex, else a file with \documentclass,

@@ -190,6 +190,40 @@ def merge3(base: str, theirs: str, ours: str) -> str:
     return "".join(out)
 
 
+def lf(s: str) -> str:
+    """Text with every line ending as "\n". A file saved on Windows ends lines with "\r\n": the
+    project keeps "\n" only (editors and merges count a line break as one character), and the
+    file is written back with the line endings it had (`crlf`, remembered per file)."""
+    return s.replace("\r\n", "\n").replace("\r", "\n") if "\r" in s else s
+
+
+def crlf(data: bytes) -> bool:
+    """Whether a file's lines end with \r\n (judged by its first line)."""
+    i = data.find(b"\n")
+    return i > 0 and data[i - 1:i] == b"\r"
+
+
+def on_disk(text: str, windows: bool) -> bytes:
+    """A project text as its file holds it: \r\n line endings if it had them."""
+    text = lf(text)
+    return (text.replace("\n", "\r\n") if windows else text).encode("utf-8")
+
+
+def strip_cr(yt: Text) -> bool:
+    """Take every "\r" out of a project text, each by itself, so nothing else moves (a lone one
+    becomes "\n"). Call inside a change. True if there were any."""
+    s = str(yt)
+    if "\r" not in s:
+        return False
+    for i in range(len(s) - 1, -1, -1):
+        if s[i] == "\r":
+            at = len(s[:i].encode())  # pycrdt counts UTF-8 bytes; "\r" is one
+            del yt[at:at + 1]
+            if s[i + 1:i + 2] != "\n":
+                yt.insert(at, "\n")
+    return True
+
+
 def apply_text(ytext: Text, old: str, new: str) -> None:
     """Apply a diff to a Y.Text. pycrdt indexes text by UTF-8 bytes."""
     for start, end, repl in reversed(text_ops(old, new)):  # back-to-front keeps offsets valid
@@ -281,6 +315,7 @@ class FolderSync:
         self._again = False  # compile again once it finishes
         self._clean_build = False  # the next compile starts from scratch (requested from a browser)
         self._rewrite = False  # write the project's text to disk after this ingest
+        self._lf_done = False  # "\r" taken out of the project's texts (once, at the start)
 
     # --- helpers -------------------------------------------------------------
     def rel(self, p: Path) -> str:
@@ -370,9 +405,22 @@ class FolderSync:
             return False
         return bool(k) and k["m"] == st.st_mtime_ns and k["z"] == st.st_size
 
-    def _remember(self, rel: str, h: str) -> None:
+    def _remember(self, rel: str, h: str, windows: bool | None = None) -> None:
+        """Note a file's state on disk; `windows`: it ends lines with \r\n (else as before)."""
         st = (self.root / rel).stat()
-        self.known[rel] = {"m": st.st_mtime_ns, "z": st.st_size, "h": h}
+        self.known[rel] = {"m": st.st_mtime_ns, "z": st.st_size, "h": h,
+                           "c": self._windows(rel) if windows is None else windows}
+
+    def _windows(self, rel: str) -> bool:
+        """Whether the file ends lines with \r\n: as remembered, or (noted before 0.4.21) as it is on disk."""
+        k = self.known.get(rel, {})
+        if "c" in k:
+            return bool(k["c"])
+        try:
+            with open(self.root / rel, "rb") as f:
+                return crlf(f.read(65536))
+        except OSError:
+            return False
         seen = self.recent.setdefault(rel, [])
         if h in seen:
             seen.remove(h)
@@ -420,6 +468,10 @@ class FolderSync:
 
     # --- disk -> CRDT ----------------------------------------------------------
     async def ingest_all(self) -> None:
+        if not self._lf_done and self.r.can_write and self.r.deleted_at is None:
+            self._lf_done = True  # "\r" a copy of the app from before 0.4.21 put into the project
+            if any("\r" in str(t) for t in self.r.files.values()):
+                self.r.local_change(lambda: [strip_cr(t) for t in self.r.files.values()])
         await self.ingest(set(self.disk_files()) | set(self.known))
         self.ingest_dirs()
 
@@ -438,12 +490,11 @@ class FolderSync:
                     move_file(self.r, review, old, new)
             self.r.local_change(move_all)
             for new, (old, h) in moves.items():
-                del self.known[old]
-                self._remember(new, h)
+                self._remember(new, h, self.known.pop(old).get("c", False))
                 if old in self.base:
                     self.base[new] = self.base.pop(old)
                 yt = self.r.files.get(new)
-                if yt is not None and sha(str(yt).encode()) != h:
+                if yt is not None and sha(on_disk(str(yt), self._windows(new))) != h:
                     self._rewrite = True  # collaborators changed it since it was last synced
                 log.info("%s → %s", old, new)
                 ups.add(new)
@@ -478,9 +529,9 @@ class FolderSync:
                 continue
             h = sha(data)
             if self.known.get(rel, {}).get("h") == h:
-                self._remember(rel, h)  # touched, not changed
+                self._remember(rel, h, crlf(data))  # touched, not changed
                 if is_text(rel, data):
-                    self.base[rel] = data.decode("utf-8")
+                    self.base[rel] = lf(data.decode("utf-8"))
                 continue
             if is_text(rel, data) and self._stale(rel, h):
                 # An older version came back (an editor saved or reloaded a stale copy). It
@@ -490,8 +541,9 @@ class FolderSync:
                 self.known.pop(rel, None)
                 self._rewrite = True
                 continue
+            windows = None
             if is_text(rel, data):
-                new = data.decode("utf-8")
+                new, windows = lf(data.decode("utf-8")), crlf(data)
                 def edit(rel=rel, new=new):
                     if rel in self.r.bin:
                         del self.r.bin[rel]
@@ -500,6 +552,7 @@ class FolderSync:
                         self.r.files[rel] = Text(new)
                         self.base[rel] = new
                         return
+                    strip_cr(yt)  # a "\r" from an older copy of the app
                     cur, base = str(yt), self.base.get(rel)
                     # only what changed on disk since it was last synced, on top of what
                     # collaborators changed meanwhile (without a base: the file as it is)
@@ -517,7 +570,7 @@ class FolderSync:
                         del self.r.files[rel]
                     self.r.bin[rel] = {"h": bid, "size": size}
                 self.r.local_change(setbin)
-            self._remember(rel, h)
+            self._remember(rel, h, windows)
             log.info("↑ %s", rel)
             changed = True
             ups.add(rel)
@@ -551,10 +604,10 @@ class FolderSync:
             if self.ignored(rel) or self.target(rel) is None:
                 continue
             wanted.add(rel)
-            text = str(yt)
-            data = text.encode("utf-8")
+            text = lf(str(yt))
+            data = on_disk(text, self._windows(rel))
             h = sha(data)
-            self.base[rel] = text  # what disk will hold (or holds already)
+            self.base[rel] = text  # what disk will hold (or holds already), as the project has it
             if self.known.get(rel, {}).get("h") == h and (self.root / rel).exists():
                 continue
             attempt(lambda rel=rel, data=data, h=h: self._write(rel, data, h) or True, rel)
