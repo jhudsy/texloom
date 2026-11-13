@@ -906,7 +906,7 @@ To add a language (`it`, say):
 
 ## Status
 
-Early prototype. Not yet built: direct browser-to-browser WebRTC (changes always pass through a relay).
+Early prototype. What's planned or considered next, with links to the issues, is in [ROADMAP.md](ROADMAP.md).
 
 ## License
 
