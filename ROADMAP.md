@@ -41,6 +41,10 @@ Decided to wait; each says when to revisit it.
   `.bib` into a synced folder works today; if people ask.
 - **[Server files in object storage](https://github.com/jhudsy/texloom/issues/9)** (S3, R2): when the
   server's disk gets tight.
+- **[A fault-tolerant, then load-balanced relay](https://github.com/jhudsy/texloom/issues/12)**: first
+  a warm standby (the database streamed with Litestream, a second server ready to take over), later
+  several servers at once (each project's changes numbered by one writer, live changes shared between
+  servers). When downtime starts to matter, or one server gets busy; object storage comes first.
 - **[One-click desktop updates](https://github.com/jhudsy/texloom/issues/10)**: once the apps are
   signed.
 - **[Direct browser-to-browser sync (WebRTC)](https://github.com/jhudsy/texloom/issues/11)**: small
