@@ -12,6 +12,9 @@
 //    merge3Strict finds no clash it agrees with merge3.
 // 5. Line endings (src/lineends.ts): lf leaves no "\r" and is idempotent; keepLF strips every "\r"
 //    from a shared text and nothing else.
+// 6. Maths (src/mathpreview.ts): a lone $ typed anywhere never changes what counts as maths in the
+//    other paragraphs, and its own paragraph has none until the closing $ is there (it used to pair
+//    with the next formula's opening $ and turn the rest of the file inside out); plus examples.
 //
 // With --same <cases.json> <answers.json>, writes the web app's results for cases scripts/check_props.py made, to
 // check the two implementations of the "same rules" agree.
@@ -33,6 +36,8 @@ const load = async (entry) => {
 const { editorText } = await load('src/editortext.ts')
 const { applyText, setText, merge3, merge3Strict } = await load('src/diff.ts')
 const { lf, keepLF } = await load('src/lineends.ts')
+globalThis.localStorage ??= { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+const { mathSpans } = await load('src/mathpreview.ts')
 
 if (process.argv[2] === '--same') { // cases from scripts/check_props.py: the web app's answers
   const cases = JSON.parse(readFileSync(process.argv[3], 'utf8'))
@@ -125,7 +130,35 @@ const checks = [
     keepLF({ keys: { writable: true }, deletedAt: null, files, doc, isRemote: () => false, isLocal: () => true })
     return texts.every((s, i) => files.get(`f${i}.tex`).toString() === s.replace(/\r/g, ''))
   })],
+  ['a lone $ changes no other paragraph\'s maths, and its own has none', fc.property(
+    fc.array(fc.array(fc.constantFrom('text ', '$x$ ', '$a+b$ ', '\\$5 ', '$$y$$ ', '\\(z\\) ', 'word\n'), { maxLength: 8 }).map((a) => a.join('')), { minLength: 1, maxLength: 5 }),
+    fc.nat(), fc.nat(), (paras, which, at) => {
+      const k = which % paras.length, p = paras[k], i = at % (p.length + 1)
+      if (i > 0 && p[i - 1] === '\\') return true // that would be \$, not a lone $
+      if (p[i - 1] === '$' || p[i] === '$') return true // that would make $$
+      const before = paras.join('\n\n')
+      const offK = paras.slice(0, k).reduce((n, x) => n + x.length + 2, 0)
+      if (mathSpans(before).some((m) => m.from < offK + i && offK + i < m.to)) return true // inside a formula: part of it, not a lone $
+      const after = paras.map((x, j) => (j === k ? x.slice(0, i) + '$' + x.slice(i) : x)).join('\n\n')
+      const off = paras.slice(0, k).reduce((n, x) => n + x.length + 2, 0)
+      const inOthers = (text, shift) => mathSpans(text).filter((m) => m.to <= off || m.from >= off + p.length + shift).map((m) => text.slice(m.from, m.to) + '@' + (m.from >= off ? m.from - shift : m.from))
+      const own = mathSpans(after).filter((m) => m.from >= off && m.to <= off + p.length + 1 && !m.tex.startsWith('$') && after[m.from] === '$' && after[m.from + 1] !== '$')
+      return JSON.stringify(inOthers(before, 0)) === JSON.stringify(inOthers(after, 1)) && own.length === 0
+    })],
 ]
+const examples = [
+  ['Text $a$ more $b$.', ['$a$', '$b$']],
+  ['Text $ stray, then $a$ and $b$ here.', []],
+  ['Para one with a stray $ dollar.\n\nPara two: $x$ and $y$.', ['$x$', '$y$']],
+  ['\\$5 and $x$', ['$x$']],
+  ['$$x$$ and a stray $ then \\(y\\)', ['$$x$$', '\\(y\\)']],
+  ['$a\nb$ across a line', ['$a\nb$']],
+  ['$a\n\nb$', []],
+]
+for (const [text, want] of examples) {
+  const got = mathSpans(text).map((m) => text.slice(m.from, m.to))
+  if (JSON.stringify(got) !== JSON.stringify(want)) { console.error(`props: maths in ${JSON.stringify(text)}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); process.exit(1) }
+}
 
 const bad = []
 for (const [name, prop] of checks) {

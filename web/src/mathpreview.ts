@@ -13,6 +13,8 @@ export interface MathSpan { from: number; to: number; tex: string; display: bool
 const ENVS = 'equation|align|gather|multline|eqnarray|math|displaymath|flalign|alignat'
 const MAX_DOC = 2 * 1024 * 1024
 const MAX_TEX = 8000
+const PARAGRAPH = /\n[ \t]*\n/ // a blank line ends a paragraph
+const DOLLAR = /(?<!\\)\$/g
 
 const blank = (t: string, rs: [number, number][]) => {
   let out = '', at = 0
@@ -34,9 +36,21 @@ export function mathSpans(text: string): MathSpan[] {
     out.push({ from: a, to: b, tex: text.slice(a + 2, b - 2), display: open !== '\\(' })
   }
   t = blank(t, delimited)
-  for (const m of t.matchAll(INLINE_MATH)) {
-    const a = m.index!, b = a + m[0].length
-    if (b - a > 2) out.push({ from: a, to: b, tex: text.slice(a + 1, b - 1), display: false })
+  // $…$ is paired within a paragraph, as in TeX (it can't run past a blank line). A paragraph with an
+  // odd number of $ is being typed (a $ whose closing one isn't there yet): pairing it would match
+  // that $ with the next formula's opening one and turn the rest inside out, so none of its $…$
+  // counts until it's even again.
+  for (let at = 0; at <= t.length;) {
+    const brk = PARAGRAPH.exec(t.slice(at)), end = brk ? at + brk.index : t.length
+    const para = t.slice(at, end)
+    if ((para.match(DOLLAR) ?? []).length % 2 === 0) {
+      for (const m of para.matchAll(INLINE_MATH)) {
+        const a = at + m.index!, b = a + m[0].length
+        if (b - a > 2) out.push({ from: a, to: b, tex: text.slice(a + 1, b - 1), display: false })
+      }
+    }
+    if (!brk) break
+    at = end + brk[0].length
   }
   return out.sort((x, y) => x.from - y.from)
 }
