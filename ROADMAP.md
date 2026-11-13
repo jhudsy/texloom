@@ -26,13 +26,15 @@ that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitat
 6. **[Quicker relay restarts](https://github.com/jhudsy/texloom/issues/17)**: close connections at
    shutdown (a restart with 1,000 connected took 36 s to exit) and a larger listen backlog. A few
    hours.
+7. **[An option not to keep Assistant conversations](https://github.com/jhudsy/texloom/issues/19)**,
+   for shared computers or sensitive drafts; deleting them already works. Half a day.
 
 ## Testing
 
-7. **[Deterministic simulation tests for the folder sync](https://github.com/jhudsy/texloom/issues/7)**:
+8. **[Deterministic simulation tests for the folder sync](https://github.com/jhudsy/texloom/issues/7)**:
    a simulated filesystem and clock, so timing bugs fail every time. 2–3 days; before the folder
    sync next changes significantly.
-8. **[TLA+ model of the GitHub lease](https://github.com/jhudsy/texloom/issues/8)**, and later the
+9. **[TLA+ model of the GitHub lease](https://github.com/jhudsy/texloom/issues/8)**, and later the
    server protocol. 2–3 days each; once several people use GitHub sync.
 
 What's checked already: README → Checks, and DESIGN.md → Guarding text handling.
