@@ -129,6 +129,13 @@ number it has seen. On reconnect it sends `hello`, applies what it missed, then
 flushes the outbox. Yjs updates are idempotent and commutative, so order and
 duplicates don't matter.
 
+**Restarts:** when the server stops it refuses new connections and closes every open one at
+once with 1001 ("going away"), waiting up to 5 s for them and then up to 10 s for other requests
+(an upload, say), so a restart takes seconds and clients start reconnecting straight away; peers
+aren't told each other has `left`, since everyone is going. It listens with a backlog of 2,048, so
+the burst of reconnections that follows isn't refused. Clients reconnect with backoff (first after
+1–2 s, doubling up to 30 s) and resume from their last sequence number, so nothing is lost.
+
 **Compaction:** when the log grows past N entries, any writer uploads an encrypted
 full-state snapshot; the server drops the entries it replaces. (The server can't
 compact by itself: it can't read the data.)

@@ -59,7 +59,7 @@ from collections.abc import Container
 from dataclasses import dataclass
 from pathlib import Path
 
-from aiohttp import WSMsgType, web
+from aiohttp import WSCloseCode, WSMsgType, web
 
 from texloom.crypto import canonical_pub, revoke_msg, signer
 
@@ -83,6 +83,9 @@ FRAME_LIMITS = {"hello": 4 * KiB, "aw": 64 * KiB, "mode": 4 * KiB, "delete": 4 *
 RATE_WINDOW, RATE_MSGS, RATE_BYTES = 10.0, 600, 160 * MiB  # per connection
 HELLOS_PER_WINDOW = 5  # a log reply can be large: don't let one connection ask for it in a loop
 MAX_CONNECTIONS = 2000
+LISTEN_BACKLOG = 2048  # connections waiting to be accepted: everyone reconnects at once after a restart
+CLOSE_WAIT = 5.0  # seconds to let connections close cleanly when the server stops
+SHUTDOWN_WAIT = 10.0  # then seconds to let other requests (an upload, say) finish
 PURGE_PAUSE = 0.01  # seconds between deleted projects: lets live editing through
 # Stored files of an evicted, relay-only or deleted project are erased a batch at a time, between
 # other work: SQLite reads every page of a row to free it, which for hundreds of MB on a cold disk
@@ -902,6 +905,7 @@ class Relay:
         self.inflight = 0  # bytes of large frames being handled right now
         self.catchup = Budget(CATCHUP_MEMORY)
         self.held = 0  # bytes held for connections, see Metered
+        self.stopping = False
 
     # --- private servers -----------------------------------------------------------
     def denied(self, project: str, code: object, claim: bool = True) -> str | None:
@@ -1099,7 +1103,22 @@ class Relay:
         if peers:
             await asyncio.gather(*(self.send(ws, text) for ws in peers))
 
+    async def close_all(self, _app: web.Application | None = None) -> None:
+        """When the server stops, close every connection at once ("going away"), so clients start
+        reconnecting straight away and the process exits in seconds rather than waiting on each."""
+        self.stopping = True
+        if not self.conns:
+            return
+        log.info("closing %d connections", len(self.conns))
+        closing = [asyncio.ensure_future(ws.close(code=WSCloseCode.GOING_AWAY, message=b"server restarting"))
+                   for ws in list(self.conns)]
+        _done, late = await asyncio.wait(closing, timeout=CLOSE_WAIT)
+        for f in late:  # a client that doesn't answer: the shutdown that follows drops it
+            f.cancel()
+
     async def ws_handler(self, request: web.Request) -> web.WebSocketResponse:
+        if self.stopping:
+            raise web.HTTPServiceUnavailable(text="server restarting")
         project = request.match_info["project"]
         if not PROJECT_RE.match(project):
             raise web.HTTPBadRequest(text="bad project id")
@@ -1175,7 +1194,7 @@ class Relay:
             if not room:
                 self.rooms.pop(project, None)
             log.info("leave %s…", project[:8])
-            if conn.aware:  # this also covers a crash or a lost connection, where a client can't say goodbye
+            if conn.aware and not self.stopping:  # this also covers a crash or a lost connection, where a client can't say goodbye
                 await self.broadcast(project, {"t": "left", "from": conn.id})
         return ws
 
@@ -1573,6 +1592,7 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
             yield
             task.cancel()
         app.cleanup_ctx.append(maintenance)
+    app.on_shutdown.append(relay.close_all)
     app.router.add_get("/ws/{project}", relay.ws_handler)
     app.router.add_put("/blob/{project}/{id}", relay.put_blob)
     app.router.add_get("/blob/{project}/{id}", relay.get_blob)
@@ -1729,7 +1749,8 @@ def main() -> None:
     web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv, codes_url=a.codes_url,
                         admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
                         texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
-                        purge_days=a.purge_expired_after, lists=not a.no_project_lists, private=a.private), host=a.host, port=a.port)
+                        purge_days=a.purge_expired_after, lists=not a.no_project_lists, private=a.private), host=a.host, port=a.port,
+                backlog=LISTEN_BACKLOG, shutdown_timeout=SHUTDOWN_WAIT)
 
 
 if __name__ == "__main__":
