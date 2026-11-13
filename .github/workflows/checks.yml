@@ -1,5 +1,6 @@
 # The quick checks, on every push to main and every pull request: translations, the clients that
-# must agree with each other (project lists, cross-references) and the web app's own checks. The
+# must agree with each other (project lists, cross-references, merging), the web app's own checks,
+# property checks with random texts and edits, and that positions in texts can't be mixed up. The
 # longer end-to-end check of sync-only projects is in sync-only.yml.
 name: Checks
 
@@ -23,6 +24,8 @@ jobs:
       - run: uv run python scripts/check_i18n.py
       - run: uv run python scripts/check_listsync.py
       - run: uv run python scripts/check_xr.py
+      - name: Positions can't be mixed up (textpos, mypy)
+        run: uv run --with mypy python scripts/check_textpos.py
       - name: Web app
         working-directory: web
         run: |
@@ -34,3 +37,6 @@ jobs:
           npm run check-suggest
           npm run check-xr
           npm run check-chars
+          npm run check-props
+      - name: Property checks of the desktop's text handling, and the same rules as the web app
+        run: uv run --with hypothesis python scripts/check_props.py

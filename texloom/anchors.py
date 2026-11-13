@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from pycrdt import Assoc, StickyIndex, Text
 
+from .textpos import U16
+
 
 def _varuint(n: int) -> bytes:
     out = bytearray()
@@ -65,12 +67,7 @@ def anchor_id(raw: bytes) -> tuple[int, int] | None:
     return client, clock
 
 
-def u16(s: str, i: int) -> int:
-    """Python string index -> UTF-16 offset (what Yjs counts in)."""
-    return len(s[:i].encode("utf-16-le")) // 2
-
-
-def index_in(text: Text, s: str, raw: bytes) -> int | None:
+def index_in(text: Text, s: str, raw: bytes) -> U16 | None:
     """Where an anchor is in `text` (whose content is `s`), as a UTF-16 offset; None if that can't
     be told reliably (non-ASCII text, or a damaged anchor)."""
     if not s.isascii() or not raw:
@@ -81,7 +78,7 @@ def index_in(text: Text, s: str, raw: bytes) -> int | None:
         raise
     except BaseException:  # noqa: BLE001 - pycrdt panics on some anchors (a PanicException isn't an Exception)
         return None
-    return k if 0 <= k <= len(s) else None
+    return U16(k) if 0 <= k <= len(s) else None
 
 
 def assoc_of(raw: bytes) -> int:
@@ -89,7 +86,7 @@ def assoc_of(raw: bytes) -> int:
     return -1 if raw and raw[-1] == 0x41 else 0
 
 
-def fresh_anchor(text: Text, n16: int, index: int, assoc: int) -> bytes | None:
+def fresh_anchor(text: Text, n16: U16, index: U16, assoc: int) -> bytes | None:
     """An anchor at UTF-16 offset `index` in `text`, which must be one piece just made from a
     string of n16 UTF-16 units (character i has clock first + i). None if the text is empty."""
     if n16 == 0:

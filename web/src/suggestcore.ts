@@ -9,6 +9,7 @@
 // Hunks are kept to whole words, and a pure insertion takes in the word next to it, so a
 // suggestion reads "is → is very" rather than "insert ' very' here". Hunks never touch: two that
 // would are one.
+import { sharedPos, viewPos, type SharedPos, type ViewPos } from './positions'
 import * as Y from 'yjs'
 import { commonEnds, isWordChar, wordDiff } from './worddiff'
 
@@ -37,29 +38,29 @@ export function compose(shared: string, hunks: readonly Hunk[]): string {
 }
 
 /** Where shared position `x` is in the view. Inside a hunk's replaced text it's the hunk's start. */
-export function toView(hunks: readonly Hunk[], x: number): number {
+export function toView(hunks: readonly Hunk[], x: SharedPos): ViewPos {
   let d = 0
   for (const h of hunks) {
-    if (x <= h.a) return x + d
-    if (x < h.b) return h.a + d
+    if (x <= h.a) return viewPos(x + d)
+    if (x < h.b) return viewPos(h.a + d)
     d += h.text.length - (h.b - h.a)
   }
-  return x + d
+  return viewPos(x + d)
 }
 
 /** Where view position `v` is in the shared text. Inside a hunk's new text, or where a deletion
  *  was, its start (bias < 0) or end. */
-export function toShared(hunks: readonly Hunk[], v: number, bias: -1 | 1 = -1): number {
+export function toShared(hunks: readonly Hunk[], v: ViewPos, bias: -1 | 1 = -1): SharedPos {
   let d = 0
   for (const h of hunks) {
     const vs = h.a + d, ve = vs + h.text.length
-    if (v < vs) return v - d
-    if (v === vs && ve > vs) return h.a
-    if (v < ve || v === vs) return bias < 0 ? h.a : h.b
-    if (v === ve) return h.b
+    if (v < vs) return sharedPos(v - d)
+    if (v === vs && ve > vs) return sharedPos(h.a)
+    if (v < ve || v === vs) return sharedPos(bias < 0 ? h.a : h.b)
+    if (v === ve) return sharedPos(h.b)
     d += h.text.length - (h.b - h.a)
   }
-  return v - d
+  return sharedPos(v - d)
 }
 
 const high = (c: number) => c >= 0xd800 && c <= 0xdbff
@@ -110,7 +111,7 @@ export function edit(shared: string, hunks: readonly Hunk[], view: string, f: nu
   const sp = spans(hunks)
   const touched = hunks.map((_, i) => i).filter((i) => sp[i].ve >= f && sp[i].vs <= t)
   const rs = Math.min(f, ...touched.map((i) => sp[i].vs)), re = Math.max(t, ...touched.map((i) => sp[i].ve))
-  const sa = toShared(hunks, rs, -1), sb = toShared(hunks, re, 1)
+  const sa = toShared(hunks, viewPos(rs), -1), sb = toShared(hunks, viewPos(re), 1) // rs, re: in the view
   const region = view.slice(rs, f) + s + view.slice(t, re)
   const ids = touched.map((i) => hunks[i].id).filter((x): x is string => !!x)
   const rest = hunks.filter((_, i) => !touched.includes(i))

@@ -12,7 +12,8 @@
     "download-tex": "texlyre-busytex download-assets ../tex-assets",
     "check-suggest": "node scripts/check-suggest.mjs",
     "check-xr": "node scripts/check-xr.mjs",
-    "check-chars": "node scripts/check-chars.mjs"
+    "check-chars": "node scripts/check-chars.mjs",
+    "check-props": "node scripts/check-props.mjs"
   },
   "keywords": [],
   "author": "",
@@ -43,6 +44,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "fast-check": "^4.10.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.6"
   },

@@ -855,6 +855,9 @@ cd web && npm run check-listsync
 npm run check-versions  # saved versions: every one opens exactly, and storing them stays small
 npm run check-suggest   # suggest mode: random typing and collaborators' edits keep the view and suggestions in step
 npm run check-chars     # edits never cut an emoji (or any character outside the BMP) in two
+npm run check-props     # random texts and edits (Windows line endings, emoji): the editor and the shared text stay identical, merges and line endings behave
+cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for the desktop, and its merge agrees with the web app's
+uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
 ```
 
 Sync-only projects end to end: `uv run python scripts/check_synconly.py` starts its own throwaway

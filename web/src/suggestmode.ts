@@ -6,6 +6,7 @@
 // stops, where collaborators, the Review tab, the assistant and the MCP tools see ordinary
 // suggestions. Edits from others to the shared text, and suggestions others accept, reject or
 // delete, come back into the view.
+import { sharedPos, viewPos, type SharedPos, type ViewPos } from './positions'
 import * as Y from 'yjs'
 import { Annotation, Transaction, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, showPanel, type DecorationSet, type ViewUpdate } from '@codemirror/view'
@@ -152,8 +153,8 @@ export interface SuggestSession {
   /** The text the editor starts with. */
   initial: string
   extension: Extension
-  toView(x: number): number
-  toShared(v: number, bias?: -1 | 1): number
+  toView(x: SharedPos): ViewPos
+  toShared(v: ViewPos, bias?: -1 | 1): SharedPos
   shared(): string
   /** Is this review item one of this view's own suggestions (drawn here, not by the review highlights)? */
   mine(id: string): boolean
@@ -366,7 +367,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
     destroy() { r.awareness.off('change', this.listener) }
     private publish(view: EditorView) {
       const sel = view.hasFocus ? view.state.selection.main : null
-      const at = (v: number) => Y.createRelativePositionFromTypeIndex(yt, toShared(hunks, v, -1))
+      const at = (v: number) => Y.createRelativePositionFromTypeIndex(yt, toShared(hunks, viewPos(v), -1)) // the editor's selection
       const cursor = sel ? { anchor: at(sel.anchor), head: at(sel.head) } : null
       const key = JSON.stringify(cursor)
       if (key === this.sent) return
@@ -380,7 +381,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
         const where = (j: unknown) => {
           try {
             const a = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(j), r.doc)
-            return a && a.type === yt ? Math.min(len, toView(hunks, a.index)) : null
+            return a && a.type === yt ? Math.min(len, toView(hunks, sharedPos(a.index))) : null // a Yjs position
           } catch { return null }
         }
         const a = where(st.cursor.anchor), b = where(st.cursor.head)

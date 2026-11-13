@@ -12,7 +12,8 @@ import { askCode, chooseNewProject, riskBanner, SAFARI_NOTE } from './storagenot
 import { $, dialog, h, saveFile, askText } from './dom'
 import { icon } from './icons'
 import { t, tn, tNodes, locale } from './i18n'
-import { fileBase, keepLF, mainFile, projectZip } from './projectfiles'
+import { fileBase, mainFile, projectZip } from './projectfiles'
+import { keepLF } from './lineends'
 import { createFileTree } from './filetree'
 import { missingKeysDialog, projectFromAddress } from './addressbar'
 import { menuItems, openContextMenu, type MenuItem } from './contextmenu'
@@ -39,6 +40,8 @@ import { autoSave, createHistoryPanel } from './history'
 import { referenceDialog } from './references'
 import { watchClashes, type Clash } from './clashes'
 import { watchMerges } from './merges'
+import { checking, wellFormed } from './invariants'
+import { sharedPos, type SharedPos } from './positions'
 import { githubAccountBox, runGitHub } from './githubui'
 import { shareDialog } from './sharing'
 import { folderFiles, folderPermission, folderSyncSupported, pickFolder, rememberFolder, savedFolder, startFolderSync, type FolderSync } from './foldersync'
@@ -495,7 +498,7 @@ async function openProject(keys: Keys) {
     if (head) {
       try {
         const abs = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(head), r.doc)
-        if (abs && abs.type === r.files.get(file)) { setTimeout(() => editor.gotoOffset(abs.index), 0); return }
+        if (abs && abs.type === r.files.get(file)) { setTimeout(() => editor.gotoOffset(sharedPos(abs.index)), 0); return } // a Yjs position
       } catch {}
     }
   }
@@ -560,7 +563,7 @@ async function openProject(keys: Keys) {
   }
   let reviewPanel: ReviewPanel | null = null
   const review = () => reviewPanel
-  const revealAt = (file: string, from: number, to: number) => { layout.showEditor(); tree.open(file); setTimeout(() => editor.reveal(from, to), 0) }
+  const revealAt = (file: string, from: SharedPos, to: SharedPos) => { layout.showEditor(); tree.open(file); setTimeout(() => editor.reveal(from, to), 0) }
   const openReview = () => { layout.reveal('right'); showTab('review') }
   const makers: Partial<Record<Tab, () => HTMLElement>> = {
     ai: () => createAssistantPanel({
@@ -929,12 +932,16 @@ async function openProject(keys: Keys) {
   r.onDeleted = () => { if (!removing) location.reload() } // reopen read-only, with the notice
   watchClashes(r, (c) => { clashes.push(c); renderClashes() })
   watchMerges(r, () => me.name) // paragraphs changed by two people apart: a note in Review
-  keepLF(r) // line breaks are \n only (files saved on Windows have \r\n): see projectfiles.ts
+  keepLF(r) // line breaks are \n only (files saved on Windows have \r\n): see lineends.ts
   // End-to-end checks (scripts/check_synconly.py) type into the editor for real and read the shared
   // text back: only on this computer's own addresses, and only when a check turns it on.
   try {
     if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && localStorage.getItem('texloom.testHooks') === '1') {
       (window as any).__texloom = { r, view: () => editor.view(), open: (p: string) => { layout.showEditor(); tree.open(p) } }
+    }
+    if (checking()) { // every shared text stays well formed once changes settle (invariants.ts)
+      let t: ReturnType<typeof setTimeout> | undefined
+      r.files.observeDeep(() => { clearTimeout(t); t = setTimeout(() => r.files.forEach((yt, p) => wellFormed(`the shared ${p}`, yt.toString())), 200) })
     }
   } catch { /* storage blocked: no hooks */ }
   runGitHub(r, () => me.name) // keep it in step with a GitHub repository, if it's linked to one

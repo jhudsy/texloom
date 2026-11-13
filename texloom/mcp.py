@@ -34,6 +34,7 @@ from .crypto import Keys, b64e
 from .folder import apply_text
 from .paths import latexmk_command, main_file, safe_rel, tex_env
 from .replica import Replica
+from .textpos import Char, char_of_u16, u16_of
 from .xr import compile_order
 
 log = logging.getLogger("texloom")
@@ -56,11 +57,6 @@ def awareness_update(client: int, clock: int, state: dict | None) -> bytes:
     """A y-protocols awareness update for one client (state None = gone)."""
     s = json.dumps(state, separators=(",", ":")).encode()
     return _varuint(1) + _varuint(client) + _varuint(clock) + _varuint(len(s)) + s
-
-
-def u16(s: str, i: int) -> int:
-    """Python string index -> UTF-16 offset (what Yjs and sticky indices use)."""
-    return len(s[:i].encode("utf-16-le")) // 2
 
 
 
@@ -125,16 +121,16 @@ class Project:
 
     @staticmethod
     def _sticky(yt: Text, s: str, i: int, before: bool):
-        if before and i > 0:
-            return yt.sticky_index(u16(s, i), Assoc.BEFORE)
-        return yt.sticky_index(u16(s, i), Assoc.AFTER)
+        at = u16_of(s, Char(i))
+        return yt.sticky_index(at, Assoc.BEFORE if before and i > 0 else Assoc.AFTER)
 
-    def _anchored(self, path: str, s: str, start) -> int | None:
+    def _anchored(self, path: str, s: str, start) -> Char | None:
         """Where a comment or suggestion starts now (a Python index into `s`), from its stored
         anchor; None when that can't be told reliably (non-ASCII text: then use the quote)."""
         if not isinstance(start, (bytes, bytearray)) or path not in self.r.files:
             return None
-        return index_in(self.r.files[path], s, bytes(start))  # ASCII: UTF-16 offsets are string indices
+        at = index_in(self.r.files[path], s, bytes(start))
+        return None if at is None else char_of_u16(s, at)
 
     # --- helpers -------------------------------------------------------------------
     def text(self, path: str) -> str:
@@ -295,7 +291,8 @@ class Project:
             status = ("accepted" if m.get("outcome") == "accepted" else "rejected" if m.get("outcome") == "rejected" else "resolved") if m.get("resolved") else "open"
             body = suggestion_text(quote, str(m.get("text", ""))) if kind == "suggestion" else f"on “{quote[:200]}”: {m.get('text')}"
             replies = m.get("replies")
-            rep = [f"    ↳ {x.get('by')}: {x.get('text')}" for x in (replies.to_py() if isinstance(replies, Array) else []) if isinstance(x, dict)]
+            listed = (replies.to_py() or []) if isinstance(replies, Array) else []
+            rep = [f"    ↳ {x.get('by')}: {x.get('text')}" for x in listed if isinstance(x, dict)]
             rows.append("\n".join([f"[{iid}] {kind} by {m.get('by')} at {where} ({status}): {body}", *rep]))
         return "\n\n".join(rows) or "No open comments or suggestions."
 
@@ -492,7 +489,7 @@ class Server:
         try:
             if method == "initialize":
                 want = params.get("protocolVersion")
-                result = {
+                result: object = {
                     "protocolVersion": want if want in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "texloom", "version": __version__},

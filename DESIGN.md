@@ -696,6 +696,39 @@ can read a project can copy it. A copy of a project with no server copy has none
 app copies a folder's project files (not `.texloom`, tools' folders, LaTeX's working files or
 symlinks) into a new folder and shares that as a new project with the same settings.
 
+## Guarding text handling
+
+The bugs behind scrambled text were at boundaries: two parts counting positions differently. Three
+kinds of check guard against that kind of bug coming back.
+
+- **Positions are typed.** In the desktop app a Python string index, a UTF-8 byte offset (pycrdt's
+  edits and change events) and a UTF-16 offset (Yjs, the editor, anchors) are distinct types
+  (`texloom/textpos.py`: Char, Byte, U16), every edit of a project text by position goes through
+  that module, and `scripts/check_textpos.py` checks both (mypy on the modules that handle
+  positions; nothing else editing texts by position). In the web app, a position in the shared text
+  and one in what the editor shows (they differ while suggesting) are distinct types
+  (`web/src/positions.ts`: SharedPos, ViewPos), so the compiler rejects using one for the other.
+- **Properties, with random texts.** `web/scripts/check-props.mjs` (fast-check) and
+  `scripts/check_props.py` (Hypothesis) try hundreds of random texts and edits, including
+  Windows line endings, lone "\r", emoji and other line-like characters, against what must always
+  hold: the editor (with exactly its text settings, `editortext.ts`) and the shared text stay
+  identical with y-codemirror's copying mirrored both ways; edits never leave half a character;
+  applying a diff gives exactly its target; merges follow their laws; line endings round-trip; a
+  remembered range follows its text. The desktop's merge uses the web app's line diff (Myers) and
+  lines split at "\n" only, and the two are compared on the same random cases.
+- **Invariants, in test builds.** With `texloom.testHooks` set on localhost (web) or
+  `TEXLOOM_CHECKS=1` (desktop), the apps check themselves as they run: the editor shows exactly
+  the shared text once things settle; shared texts have no "\r" and no half characters; a file
+  the folder sync takes as in step holds the project's text with its own line endings. A broken
+  one is recorded (`window.__texloomBroken`, "INVARIANT BROKEN" in the log), and the end-to-end
+  check fails on it, naming the first thing that went wrong.
+
+Each was checked against the code from before its fix: the properties and the invariant both find
+the "\r\n" bug from 0.4.21 at once. Writing them found more: `applyText` dropped a newline added
+at the very end of a file; the desktop and the web app merged differently around lone "\r", form
+feeds and Unicode line separators, and from their different line diffs (once keeping a change made
+on both sides twice); and a remembered range slipped when the text just before it was replaced.
+
 ## Known limitations / open questions
 
 - Deleting a project for everyone stops it on its server only. Anyone with a copy can still read

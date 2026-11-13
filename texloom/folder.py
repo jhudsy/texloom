@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import posixpath
 import shutil
 import time
@@ -21,7 +22,10 @@ from pathlib import Path
 from pycrdt import Map, Text
 from watchfiles import awatch
 
-from .anchors import assoc_of, fresh_anchor, index_in, u16
+from . import textpos
+from .anchors import assoc_of, fresh_anchor, index_in
+from .textpos import U16, Char, length_u16, u16_of
+from .invariants import broken, checking, first_difference, well_formed
 from .replica import BLOB_RE, Replica
 
 log = logging.getLogger("texloom")
@@ -104,7 +108,14 @@ def is_text(path: str, data: bytes) -> bool:
         return False
 
 
-def text_ops(old: str, new: str) -> list[tuple[int, int, str]]:
+def lines_of(s: str) -> list[str]:
+    """A text's lines, each with its "\n" (the last may have none). Only "\n" ends a line, as in the
+    web app (linesOf in web/src/diff.ts) and editors: str.splitlines also breaks at a lone "\r",
+    form feeds and Unicode line separators, and merged differently from the web app there."""
+    return [x for x in re.split(r"(?<=\n)", s) if x]
+
+
+def text_ops(old: str, new: str) -> list[tuple[Char, Char, str]]:
     """Small, local edits turning old into new: (char_start, char_end, replacement).
 
     Diffs by lines first, then refines each changed block by characters. Fine-grained
@@ -113,12 +124,12 @@ def text_ops(old: str, new: str) -> list[tuple[int, int, str]]:
     """
     if old == new:
         return []
-    o_lines = old.splitlines(keepends=True)
-    n_lines = new.splitlines(keepends=True)
+    o_lines = lines_of(old)
+    n_lines = lines_of(new)
     o_off = [0]
     for line in o_lines:
         o_off.append(o_off[-1] + len(line))
-    ops: list[tuple[int, int, str]] = []
+    ops: list[tuple[Char, Char, str]] = []
     sm = difflib.SequenceMatcher(a=o_lines, b=n_lines, autojunk=False)
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
@@ -126,12 +137,12 @@ def text_ops(old: str, new: str) -> list[tuple[int, int, str]]:
         start, end = o_off[i1], o_off[i2]
         o_blk, n_blk = old[start:end], "".join(n_lines[j1:j2])
         if tag != "replace" or len(o_blk) * len(n_blk) > 4_000_000:
-            ops.append((start, end, n_blk))
+            ops.append((Char(start), Char(end), n_blk))
             continue
         cm = difflib.SequenceMatcher(a=o_blk, b=n_blk, autojunk=False)
         for t2, a1, a2, b1, b2 in cm.get_opcodes():
             if t2 != "equal":
-                ops.append((start + a1, start + a2, n_blk[b1:b2]))
+                ops.append((Char(start + a1), Char(start + a2), n_blk[b1:b2]))
     return ops
 
 
@@ -143,53 +154,136 @@ def merge3(base: str, theirs: str, ours: str) -> str:
     collaborator typing). Applying only our changes keeps theirs; making the project equal
     to the file would undo them. Where both changed the same lines, ours wins; text both
     inserted at the same place is kept twice only if it differs.
+
+    The same rules, and the same line diff, as merge3 in web/src/diff.ts, so both merge alike
+    (scripts/check_props.py compares them).
     """
     if ours == base or theirs == ours:
         return theirs
     if theirs == base:
         return ours
-    b, t, o = (x.splitlines(keepends=True) for x in (base, theirs, ours))
-    ops_t = difflib.SequenceMatcher(a=b, b=t, autojunk=False).get_opcodes()
-    ops_o = difflib.SequenceMatcher(a=b, b=o, autojunk=False).get_opcodes()
+    b, t, o = (lines_of(x) for x in (base, theirs, ours))
+    ht, ho = _hunks(b, t), _hunks(b, o)
 
-    def at(ops, i: int, end: bool) -> int:
-        """Where a region starting (or ending) at base line i starts (ends) in the other text;
-        i is never strictly inside one of that text's changes."""
-        for tag, i1, i2, j1, j2 in (reversed(ops) if end else ops):
-            if tag != "equal" and (i2 == i if end else i1 == i):
+    def at(hs: list[tuple[int, int, int, int]], i: int, end: bool) -> int:
+        """Base line i (never inside one of these changes) in the other text."""
+        shift = 0
+        for i1, i2, j1, j2 in hs:
+            if (i2 if end else i1) == i:
                 return j2 if end else j1
-        for tag, i1, i2, j1, _j2 in ops:
-            if tag == "equal" and i1 <= i <= i2:
-                return j1 + (i - i1)
-        return ops[-1][4] if ops else 0  # the end of the other text
+            if i2 <= i:
+                shift = j2 - i2
+        return i + shift
 
-    hunks = sorted([(i1, i2, "t") for tag, i1, i2, _j1, _j2 in ops_t if tag != "equal"]
-                   + [(i1, i2, "o") for tag, i1, i2, _j1, _j2 in ops_o if tag != "equal"])
+    every = sorted([(h[0], h[1], "t") for h in ht] + [(h[0], h[1], "o") for h in ho])
     out: list[str] = []
-    pos = 0
-    k = 0
-    while k < len(hunks):
-        s, e, sides = hunks[k][0], hunks[k][1], {hunks[k][2]}
+    pos = k = 0
+    while k < len(every):
+        s, e, sides = every[k][0], every[k][1], {every[k][2]}
         k += 1
         # changes overlap if they share lines, or are insertions at the same place
-        while k < len(hunks) and (hunks[k][0] < e or hunks[k][0] == hunks[k][1] == s == e):
-            e = max(e, hunks[k][1])
-            sides.add(hunks[k][2])
+        while k < len(every) and (every[k][0] < e or every[k][0] == every[k][1] == s == e):
+            e = max(e, every[k][1])
+            sides.add(every[k][2])
             k += 1
         out += b[pos:s]
-        mine = o[at(ops_o, s, False):at(ops_o, e, True)]
-        other = t[at(ops_t, s, False):at(ops_t, e, True)]
-        if sides == {"o"}:
-            out += mine
-        elif sides == {"t"}:
-            out += other
-        elif s == e and mine != other:  # both inserted here: keep both
-            out += other + mine
-        else:  # both changed these lines: the file's version
-            out += mine
+        mine = "".join(o[at(ho, s, False):at(ho, e, True)])
+        other = "".join(t[at(ht, s, False):at(ht, e, True)])
+        out.append(mine if sides == {"o"} else other if sides == {"t"} else other + mine if s == e and mine != other else mine)
         pos = e
     out += b[pos:]
     return "".join(out)
+
+
+def _hunks(a: list[str], b: list[str]) -> list[tuple[int, int, int, int]]:
+    """Changed line ranges from a to b: (i1, i2, j1, j2), lines [i1, i2) of a became [j1, j2) of b."""
+    out: list[tuple[int, int, int, int]] = []
+    cur: list[int] | None = None
+    i = j = 0
+    for op, ai, bj in _diff_lines(a, b):
+        if op == "eq":
+            if cur:
+                out.append((cur[0], cur[1], cur[2], cur[3]))
+                cur = None
+            i, j = ai + 1, bj + 1
+            continue
+        if cur is None:
+            cur = [i, i, j, j]
+        if op == "del":
+            cur[1] = i = ai + 1
+        else:
+            cur[3] = j = bj + 1
+    if cur:
+        out.append((cur[0], cur[1], cur[2], cur[3]))
+    return out
+
+
+def _diff_lines(a: list[str], b: list[str]) -> list[tuple[str, int, int]]:
+    """Line diff, Myers' O(ND), as diffLineArrays in web/src/diff.ts: ("eq" | "del" | "add", line in a, line in b)."""
+    p = 0
+    while p < len(a) and p < len(b) and a[p] == b[p]:
+        p += 1
+    s = 0
+    while s < len(a) - p and s < len(b) - p and a[len(a) - 1 - s] == b[len(b) - 1 - s]:
+        s += 1
+    ops = [("eq", i, i) for i in range(p)]
+    ops += [(op, x + p, y + p) for op, x, y in _myers(a[p:len(a) - s], b[p:len(b) - s])]
+    ops += [("eq", len(a) - s + i, len(b) - s + i) for i in range(s)]
+    return ops
+
+
+def _myers(a: list[str], b: list[str]) -> list[tuple[str, int, int]]:
+    n, m = len(a), len(b)
+    mx = n + m
+    if not n:
+        return [("add", 0, j) for j in range(m)]
+    if not m:
+        return [("del", i, 0) for i in range(n)]
+    every = [("del", i, 0) for i in range(n)] + [("add", n, j) for j in range(m)]
+    if n * m > 25_000_000:  # pathological sizes: replace the whole middle
+        return every
+    v = [0] * (2 * mx + 2)
+    trace: list[list[int]] = []
+    for d in range(mx + 1):
+        if (d + 1) * len(v) > 16_000_000:  # the trace grows by a copy of v per step
+            return every
+        trace.append(v[:])
+        for k in range(-d, d + 1, 2):
+            x = v[mx + k + 1] if k == -d or (k != d and v[mx + k - 1] < v[mx + k + 1]) else v[mx + k - 1] + 1
+            y = x - k
+            while x < n and y < m and a[x] == b[y]:
+                x += 1
+                y += 1
+            v[mx + k] = x
+            if x >= n and y >= m:
+                return _backtrack(trace, a, b, mx, d)
+    return []
+
+
+def _backtrack(trace: list[list[int]], a: list[str], b: list[str], mx: int, d_end: int) -> list[tuple[str, int, int]]:
+    ops: list[tuple[str, int, int]] = []
+    x, y = len(a), len(b)
+    for d in range(d_end, 0, -1):
+        v, k = trace[d], x - y
+        prev_k = k + 1 if k == -d or (k != d and v[mx + k - 1] < v[mx + k + 1]) else k - 1
+        prev_x = v[mx + prev_k]
+        prev_y = prev_x - prev_k
+        while x > prev_x and y > prev_y:
+            x -= 1
+            y -= 1
+            ops.append(("eq", x, y))
+        if x == prev_x:
+            y -= 1
+            ops.append(("add", x, y))
+        else:
+            x -= 1
+            ops.append(("del", x, y))
+    while x > 0 and y > 0:
+        x -= 1
+        y -= 1
+        ops.append(("eq", x, y))
+    ops.reverse()
+    return ops
 
 
 def lf(s: str) -> str:
@@ -219,22 +313,16 @@ def strip_cr(yt: Text) -> bool:
     s = str(yt)
     if "\r" not in s:
         return False
-    for i in range(len(s) - 1, -1, -1):
+    for i in range(len(s) - 1, -1, -1):  # back to front: what's before stays where it was
         if s[i] == "\r":
-            at = len(s[:i].encode())  # pycrdt counts UTF-8 bytes; "\r" is one
-            del yt[at:at + 1]
+            textpos.delete(yt, s, Char(i), Char(i + 1))
     return True
 
 
 def apply_text(ytext: Text, old: str, new: str) -> None:
-    """Apply a diff to a Y.Text. pycrdt indexes text by UTF-8 bytes."""
-    for start, end, repl in reversed(text_ops(old, new)):  # back-to-front keeps offsets valid
-        b_start = len(old[:start].encode())
-        b_end = b_start + len(old[start:end].encode())
-        if b_end > b_start:
-            del ytext[b_start:b_end]
-        if repl:
-            ytext.insert(b_start, repl)
+    """Turn `ytext`, whose content is `old`, into `new` with small, local edits."""
+    for start, end, repl in reversed(text_ops(old, new)):  # back to front: what's before stays where it was
+        textpos.replace(ytext, old, start, end, repl)
 
 
 def move_file(r: Replica, review: Map, a: str, b: str) -> None:
@@ -248,26 +336,27 @@ def move_file(r: Replica, review: Map, a: str, b: str) -> None:
     yt = r.files.get(a)
     if yt is not None:
         s = str(yt)
-        spots = {}
+        spots: dict[str, tuple[list[U16], list[int]]] = {}
         for iid, m in review.items():
             if not isinstance(m, Map) or m.get("file") != a:
                 continue
-            ends = [m.get("start"), m.get("end")]
-            if all(isinstance(x, (bytes, bytearray)) and x for x in ends):
-                at = [index_in(yt, s, bytes(x)) for x in ends]
-                if None in at and isinstance(q := m.get("quote"), str) and q and s.count(q) == 1:
-                    i = s.index(q)
-                    at = [u16(s, i), u16(s, i + len(q))]
-                if None not in at:
+            ends = [x for x in (m.get("start"), m.get("end")) if isinstance(x, (bytes, bytearray)) and x]
+            if len(ends) == 2:
+                found = [index_in(yt, s, bytes(x)) for x in ends]
+                at = [x for x in found if x is not None]
+                if len(at) < 2 and isinstance(q := m.get("quote"), str) and q and s.count(q) == 1:
+                    i = Char(s.index(q))
+                    at = [u16_of(s, i), u16_of(s, Char(i + len(q)))]
+                if len(at) == 2:
                     spots[iid] = (at, [assoc_of(bytes(x)) for x in ends])
         r.files[b] = Text(s)
-        moved, n16 = r.files[b], u16(s, len(s))
+        moved, n16 = r.files[b], length_u16(s)
         for iid, m in review.items():
             if not isinstance(m, Map) or m.get("file") != a:
                 continue
             if iid in spots:
-                (i, j), (ai, aj) = spots[iid]
-                start, end = fresh_anchor(moved, n16, i, ai), fresh_anchor(moved, n16, j, aj)
+                (ui, uj), (ai, aj) = spots[iid]
+                start, end = fresh_anchor(moved, n16, ui, ai), fresh_anchor(moved, n16, uj, aj)
                 if start and end:
                     m["start"], m["end"] = start, end
             m["file"] = b
@@ -408,7 +497,7 @@ class FolderSync:
             st = (self.root / rel).stat()
         except FileNotFoundError:
             return False
-        return bool(k) and k["m"] == st.st_mtime_ns and k["z"] == st.st_size
+        return k is not None and k["m"] == st.st_mtime_ns and k["z"] == st.st_size
 
     def _remember(self, rel: str, h: str, windows: bool | None = None, st: os.stat_result | None = None) -> None:
         """Note a file's state on disk; `windows`: it ends lines with \r\n (else as before); `st`: its
@@ -420,7 +509,7 @@ class FolderSync:
         if h in seen:
             seen.remove(h)
         seen.append(h)
-        del seen[:-30]
+        del seen[:-30]  # not a text
 
     def _windows(self, rel: str) -> bool:
         """Whether the file ends lines with \r\n: as remembered, or (noted before 0.4.21) as it is on disk."""
@@ -477,7 +566,10 @@ class FolderSync:
         if not self._lf_done and self.r.can_write and self.r.deleted_at is None:
             self._lf_done = True  # "\r" a copy of the app from before 0.4.21 put into the project
             if any("\r" in str(t) for t in self.r.files.values()):
-                self.r.local_change(lambda: [strip_cr(t) for t in self.r.files.values()])
+                def strip_all() -> None:
+                    for t in self.r.files.values():
+                        strip_cr(t)
+                self.r.local_change(strip_all)
         await self.ingest(set(self.disk_files()) | set(self.known))
         self.ingest_dirs()
 
@@ -663,11 +755,12 @@ class FolderSync:
         def attempt(fn, rel):  # one bad entry (name clash, permissions) mustn't stop the rest
             nonlocal changed
             try:
-                if fn():
-                    changed = True
-                    downs.add(rel)
+                fn()
             except OSError as e:
                 log.warning("could not write %s: %s", rel, e)
+            else:
+                changed = True
+                downs.add(rel)
 
         for rel, yt in list(self.r.files.items()):
             if self.ignored(rel) or self.target(rel) is None:
@@ -679,7 +772,7 @@ class FolderSync:
             self.base[rel] = text  # what disk will hold (or holds already), as the project has it
             if self.known.get(rel, {}).get("h") == h and (self.root / rel).exists():
                 continue
-            attempt(lambda rel=rel, data=data, h=h: self._write(rel, data, h) or True, rel)
+            attempt(lambda rel=rel, data=data, h=h: self._write(rel, data, h), rel)
         for rel, info in list(self.r.bin.items()):
             if self.ignored(rel) or self.target(rel) is None:
                 continue
@@ -692,7 +785,7 @@ class FolderSync:
                 continue
             cached = self.r.dir / "blobs" / bid
             if cached.exists():
-                attempt(lambda rel=rel, cached=cached, bid=bid: self._write(rel, cached.read_bytes(), bid) or True, rel)
+                attempt(lambda rel=rel, cached=cached, bid=bid: self._write(rel, cached.read_bytes(), bid), rel)
             elif bid not in self._fetching:
                 # Fetch in the background: in relay mode the answer comes from a peer
                 # over the same connection that is delivering this update.
@@ -702,25 +795,53 @@ class FolderSync:
         for d in dirs:  # explicit (possibly empty) folders
             full = self.target(d)
             if full is not None and not full.exists():
-                attempt(lambda full=full: full.mkdir(parents=True, exist_ok=True) or True, d)
+                attempt(lambda full=full: full.mkdir(parents=True, exist_ok=True), d)
             self.known_dirs.add(d)
         for d in sorted(self.known_dirs - dirs, key=len, reverse=True):  # folders deleted remotely
             full = self.target(d)
             if full is not None and full.is_dir() and not any(full.iterdir()):
-                attempt(lambda full=full: full.rmdir() or True, d)
+                attempt(lambda full=full: full.rmdir(), d)
             self.known_dirs.discard(d)
             changed = True
         for rel in list(self.known):
             if rel not in wanted:  # deleted remotely
                 full = self.target(rel)
                 if full is not None:
-                    attempt(lambda full=full: full.unlink(missing_ok=True) or self._prune(full.parent) or True, rel)
+                    attempt(lambda full=full: self._remove(full), rel)
                 del self.known[rel]
                 log.info("✗ %s", rel)
                 changed = True
         if changed:
             self.save_known()
             self.schedule_compile(delay=4, files=downs)  # edits from elsewhere arrive keystroke by keystroke
+        if checking():
+            self._check_in_step()
+
+    def _check_in_step(self) -> None:
+        """Test builds (invariants.py): every text file the sync takes as in step with the project
+        (its noted hash is what's on disk now) holds the project's text, with its own line endings;
+        and the project's texts are well formed."""
+        for rel, yt in list(self.r.files.items()):
+            text = str(yt)
+            well_formed(f"the project's {rel}", text)
+            k, full = self.known.get(rel), self.target(rel)
+            if not k or full is None or self.ignored(rel):
+                continue
+            try:
+                data = full.read_bytes()
+            except OSError:
+                continue
+            if sha(data) != k.get("h"):
+                continue  # changed on disk since: the next ingest takes it
+            if lf(data.decode("utf-8", "replace")) != text:
+                broken(f"{rel} is noted as in step, but differs from the project", first_difference(lf(data.decode("utf-8", "replace")), text))
+            if b"\n" in data and bool(k.get("c")) != crlf(data):
+                broken(f"{rel}: the line endings noted for it aren't the file's", f"noted \\r\\n: {bool(k.get('c'))}")
+
+    def _remove(self, full: Path) -> None:
+        """Delete a file, and the folders that leaves empty."""
+        full.unlink(missing_ok=True)
+        self._prune(full.parent)
 
     def _prune(self, d: Path) -> None:
         """Remove now-empty folders left behind by deletions (never the project root)."""

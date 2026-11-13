@@ -7,7 +7,7 @@ import { Decoration, gutter, GutterMarker, ViewPlugin, type DecorationSet, type 
 import { StreamLanguage } from '@codemirror/language'
 import { stex } from '@codemirror/legacy-modes/mode/stex'
 import { yCollab } from 'y-codemirror.next'
-import { wholeCharactersFilter } from './wholechars'
+import { editorText } from './editortext'
 import { oneDark } from '@codemirror/theme-one-dark'
 import type { Replica } from './replica'
 import { h, saveFile } from './dom'
@@ -25,6 +25,8 @@ import { keymap } from '@codemirror/view'
 import { Prec, type Extension } from '@codemirror/state'
 import { suggestMode, suggestSession, type SuggestSession } from './suggestmode'
 import type { ReviewMap } from './review'
+import { broken, checking, firstDifference, wellFormed } from './invariants'
+import { sharedPos, viewPos, type SharedPos, type ViewPos } from './positions'
 
 export interface EditorPane {
   el: HTMLElement
@@ -35,13 +37,14 @@ export interface EditorPane {
   view(): EditorView | null
   current(): string | null
   relint(): void
-  gotoOffset(pos: number): void
+  /** Positions are in the shared file (as comments, search results and the assistant give them). */
+  gotoOffset: (pos: SharedPos) => void
   /** What the user is looking at. Lines are the file's; while suggesting, `selection` is the text as
    *  shown (with the user's suggestions) and `fileSelection` what the file itself has there. */
   context(): { file: string; selection: string; fromLine: number; toLine: number; line: number; suggesting: boolean; fileSelection?: string } | null
   onContextChange(f: () => void): void
-  selection(): { file: string; from: number; to: number; text: string } | null
-  reveal(from: number, to: number): void
+  selection(): { file: string; from: SharedPos; to: SharedPos; text: string } | null
+  reveal: (from: SharedPos, to: SharedPos) => void
   refreshSpell(): void
   /** Suggest mode: typing makes suggestions instead of changing the file. */
 }
@@ -68,6 +71,17 @@ export interface EditorHooks {
   spell: () => { on: boolean; lang: string }
   mathPreview: () => boolean
   checks: () => boolean
+}
+
+let checkTimer: ReturnType<typeof setTimeout> | undefined
+function checkSoon(view: EditorView, yt: Y.Text, path: string) {
+  clearTimeout(checkTimer)
+  checkTimer = setTimeout(() => {
+    if (view.composing || !view.dom.isConnected) return
+    const shown = view.state.doc.toString(), shared = yt.toString()
+    if (shown !== shared) broken(`the editor and the shared text of ${path} differ`, firstDifference(shown, shared))
+    wellFormed(`the editor's ${path}`, shown)
+  }, 50)
 }
 
 export function createEditorPane(r: Replica, writable: boolean, index: ProjectIndex, hooks: EditorHooks): EditorPane {
@@ -169,11 +183,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
         state: EditorState.create({
           doc: s ? s.initial : yt.toString(),
           extensions: [
-            // Only "\n" breaks lines, as in the shared text. By default CodeMirror also takes "\r\n" (a
-            // file saved on Windows) as one break: its positions then fall one short of the shared
-            // text's for every line above, and typing landed that far off, in the middle of words.
-            EditorState.lineSeparator.of('\n'),
-            wholeCharactersFilter, // never half an emoji (wholechars.ts)
+            editorText, // line breaks as in the shared text; never half an emoji (editortext.ts)
             basicSetup,
             StreamLanguage.define(stex),
             EditorView.lineWrapping,
@@ -188,6 +198,9 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
             hooks.review(path, s ? { toView: s.toView, skip: s.mine } : undefined),
             flashField,
             EditorView.updateListener.of((u) => { if (u.selectionSet || u.docChanged) { showSelectionCount(u.view); contextChanged() } }),
+            // test builds: once things settle, the editor shows exactly the shared text (it didn't for
+            // files saved on Windows before 0.4.21), and both are well formed (invariants.ts)
+            checking() && !s ? EditorView.updateListener.of((u) => { if (u.docChanged) checkSoon(u.view, yt, path) }) : [],
             // ⌘⌥E / Ctrl+Alt+E: suggest mode on or off. By the physical key, since keyboards report
             // Alt with letters differently on each system (on a Mac, ⌥E is a dead key)
             Prec.highest(EditorView.domEventHandlers({
@@ -225,9 +238,11 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
   // (comments, search, the assistant, compile errors) uses the shared file's positions and lines.
   let sharedText: { of: string; text: Text } | null = null // the shared file as lines, kept while it's the same
   /** The shared file, and where its positions are in the editor (the same place when not suggesting). */
-  function fileMap(): { text: Text; toView(x: number): number; toShared(v: number, bias?: -1 | 1): number } | null {
+  /** The shared file's text, and how its positions map to the editor's (they're the same text
+   *  unless suggesting: the invariant checked in test builds, which broke for "\r\n" before 0.4.21). */
+  function fileMap(): { text: Text; toView: (x: SharedPos) => ViewPos; toShared: (v: ViewPos, bias?: -1 | 1) => SharedPos } | null {
     if (!view) return null
-    if (!session) return { text: view.state.doc, toView: (x) => x, toShared: (v) => v }
+    if (!session) return { text: view.state.doc, toView: (x) => viewPos(x), toShared: (v) => sharedPos(v) }
     const shared = session.shared()
     if (sharedText?.of !== shared) sharedText = { of: shared, text: Text.of(shared.split('\n')) }
     return { text: sharedText.text, toView: session.toView, toShared: session.toShared }
@@ -239,15 +254,15 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     const fm = session && fileMap()
     if (!fm || !view) return problems
     const doc = view.state.doc
-    return problems.map((p) => p.line == null ? p : { ...p, line: doc.lineAt(Math.min(doc.length, fm.toView(lineStart(fm.text, p.line).from))).number })
+    return problems.map((p) => p.line == null ? p : { ...p, line: doc.lineAt(Math.min(doc.length, fm.toView(sharedPos(lineStart(fm.text, p.line).from)))).number })
   }
 
   /** The selection in the shared file. */
-  function sharedSelection(): { from: number; to: number; text: string } | null {
+  function sharedSelection(): { from: SharedPos; to: SharedPos; text: string } | null {
     const fm = fileMap()
     if (!fm || !view) return null
     const sel = view.state.selection.main
-    const from = fm.toShared(sel.from, -1), to = sel.empty ? from : Math.max(from, fm.toShared(sel.to, 1))
+    const from = fm.toShared(viewPos(sel.from), -1), to = sel.empty ? from : sharedPos(Math.max(from, fm.toShared(viewPos(sel.to), 1)))
     return { from, to, text: fm.text.sliceString(from, to) }
   }
 
@@ -258,7 +273,7 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     const main = view!.state.selection.main
     const shown = session ? view!.state.doc.sliceString(main.from, main.to) : sel.text // as the user sees it
     return { file: current, selection: shown, fromLine: fm.text.lineAt(sel.from).number, toLine: fm.text.lineAt(sel.to).number,
-      line: fm.text.lineAt(fm.toShared(main.head)).number, suggesting: !!session, ...(shown !== sel.text ? { fileSelection: sel.text } : {}) }
+      line: fm.text.lineAt(fm.toShared(viewPos(main.head))).number, suggesting: !!session, ...(shown !== sel.text ? { fileSelection: sel.text } : {}) }
   }
 
   function showAuthors(on: boolean) {
@@ -272,14 +287,14 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     const fm = fileMap()
     if (!view || !fm) return
     const doc = view.state.doc, target = lineStart(fm.text, line)
-    const pos = Math.min(doc.length, fm.toView(Math.min(target.to, target.from + col)))
+    const pos = Math.min(doc.length, fm.toView(sharedPos(Math.min(target.to, target.from + col))))
     const l = doc.lineAt(pos)
     view.dispatch({ selection: { anchor: pos }, effects: [EditorView.scrollIntoView(pos, { y: 'center' }), ...(flash ? [setFlash.of(l.from)] : [])] })
     view.focus()
     if (flash) { const v = view; setTimeout(() => { if (view === v) v.dispatch({ effects: setFlash.of(-1) }) }, 1600) }
   }
 
-  function gotoOffset(pos: number) {
+  function gotoOffset(pos: SharedPos) {
     const fm = fileMap()
     if (!view || !fm) return
     const p = Math.max(0, Math.min(view.state.doc.length, fm.toView(pos)))
@@ -292,12 +307,12 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
     return sel && current ? { file: current, ...sel } : null
   }
 
-  function reveal(from: number, to: number) {
+  function reveal(from: SharedPos, to: SharedPos) {
     const fm = fileMap()
     if (!view || !fm) return
-    from = fm.toView(from); to = fm.toView(to)
+    const vf = fm.toView(from), vt = fm.toView(to)
     const n = view.state.doc.length
-    const a = Math.max(0, Math.min(from, n)), b = Math.max(a, Math.min(to, n))
+    const a = Math.max(0, Math.min(vf, n)), b = Math.max(a, Math.min(vt, n))
     view.dispatch({ selection: { anchor: a, head: b }, effects: EditorView.scrollIntoView(a, { y: 'center' }) })
     view.focus()
   }

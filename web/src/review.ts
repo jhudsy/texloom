@@ -1,6 +1,7 @@
 // Comments and suggested changes, anchored to text with Yjs relative positions so they
 // stay attached while people edit around them. A suggestion changes nothing until
 // someone accepts it.
+import { sharedPos, type SharedPos, type ViewPos } from './positions'
 import * as Y from 'yjs'
 import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view'
@@ -76,11 +77,11 @@ export function allItems(r: Replica): Item[] {
 }
 
 /** Current [from, to) of an item in its file, or null if its text is gone. */
-export function rangeOf(r: Replica, id: string): { from: number; to: number } | null {
+export function rangeOf(r: Replica, id: string): { from: SharedPos; to: SharedPos } | null {
   const m = r.review.get(id)
   const yt = m instanceof Y.Map ? r.files.get(m.get('file')) : undefined
   const at = yt && placeOf(r.doc, yt, m!)
-  return at ? { from: at.a, to: at.b } : null
+  return at ? { from: sharedPos(at.a), to: sharedPos(at.b) } : null
 }
 
 export function reply(r: Replica, id: string, text: string, by: string) {
@@ -172,13 +173,13 @@ function setPending(r: Replica, p: { file: string; start: Y.RelativePosition; en
 
 /** While suggesting, the editor shows its own view of the file: where shared positions are in
  *  it, and which suggestions it draws itself. */
-export interface ReviewMap { toView(x: number): number; skip(id: string): boolean }
+export interface ReviewMap { toView(x: SharedPos): ViewPos; skip(id: string): boolean }
 
 /** Highlights for open comments and suggestions in `file`; clicking one calls onPick(id). */
 export function reviewExtension(r: Replica, file: string, onPick: (id: string) => void, map?: ReviewMap): Extension {
   const compute = (view: EditorView) => {
     const len = view.state.doc.length
-    const at = (x: number) => Math.min(map ? map.toView(x) : x, len)
+    const at = (x: SharedPos) => Math.min(map ? map.toView(x) : x, len) // where the editor shows it
     let shared: string | undefined // read only if needed
     const markup = editorMarkup.mode()
     const ranges = []
@@ -203,11 +204,11 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
       const ins = (x: number, text: string) => ranges.push(Decoration.widget({ widget: new InsertWidget(text, i.id, i.by), side: 1 }).range(x))
       shared ??= r.files.get(file)?.toString() ?? ''
       if (shared.slice(rg.from, rg.to) === i.quote) { // as a diff: only the words (or letters) that change
-        let p = rg.from
+        let p: number = rg.from // in the shared text
         for (const op of refine(wordDiff(i.quote, i.text))) {
           if (op.op === 'eq') p += op.text.length
-          else if (op.op === 'del') { del(at(p), at(p + op.text.length)); p += op.text.length }
-          else ins(at(p), op.text)
+          else if (op.op === 'del') { del(at(sharedPos(p)), at(sharedPos(p + op.text.length))); p += op.text.length }
+          else ins(at(sharedPos(p)), op.text)
         }
         if (i.quote === i.text) ins(to, '') // nothing would change: still something to click
       } else { // the text has changed since: the whole of it, and the whole replacement
@@ -218,7 +219,8 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
     const p = pending.get(r)
     if (p?.file === file) {
       const a = Y.createAbsolutePositionFromRelativePosition(p.start, r.doc), b = Y.createAbsolutePositionFromRelativePosition(p.end, r.doc)
-      if (a && b && at(b.index) > at(a.index)) ranges.push(Decoration.mark({ class: 'cm-review-pending' }).range(at(a.index), at(b.index)))
+      const pa = a && at(sharedPos(a.index)), pb = b && at(sharedPos(b.index)) // Yjs positions, shown in the view
+      if (pa != null && pb != null && pb > pa) ranges.push(Decoration.mark({ class: 'cm-review-pending' }).range(pa, pb))
     }
     view.dispatch({ effects: setDecos.of(Decoration.set(ranges, true)) })
   }
@@ -302,7 +304,7 @@ export interface ReviewHost {
   suggesting: { on(): boolean; set(on: boolean): void; watch(f: () => void): void }
   userName: () => string
   selection: () => { file: string; from: number; to: number; text: string } | null
-  reveal: (file: string, from: number, to: number) => void
+  reveal: (file: string, from: SharedPos, to: SharedPos) => void
 }
 
 export interface ReviewPanel { el: HTMLElement; addComment(): void; focus(id: string): void }
@@ -372,7 +374,7 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     })
     const show = () => {
       const a = Y.createAbsolutePositionFromRelativePosition(start, r.doc), b = Y.createAbsolutePositionFromRelativePosition(end, r.doc)
-      if (a && b && a.type === yt) host.reveal(sel.file, a.index, b.index)
+      if (a && b && a.type === yt) host.reveal(sel.file, sharedPos(a.index), sharedPos(b.index)) // Yjs positions
     }
     const quote = sel.text.length > 400 ? `${sel.text.slice(0, 400)}…` : sel.text
     composer.replaceChildren(

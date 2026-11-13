@@ -27,6 +27,7 @@ from pathlib import Path
 from pycrdt import Array, Map, Text
 
 from .replica import Replica
+from .textpos import Byte, Char, byte_of, char_of_byte
 
 log = logging.getLogger("texloom")
 
@@ -37,24 +38,29 @@ MAX_PLACES = 200  # per file before nearby places are merged into one
 LONG = 3000  # characters: a "paragraph" longer than this is narrowed to the lines changed
 
 
-def changed_ranges(delta: list[dict]) -> list[tuple[int, int]]:
+def changed_ranges(delta: list[dict]) -> list[tuple[Byte, Byte]]:
     """Byte ranges a text delta changed, in the text as it is after it: empty where text went."""
-    out, i = [], 0
+    out: list[tuple[Byte, Byte]] = []
+    i = 0
     for op in delta:
         if "retain" in op:
             i += op["retain"]
         elif "insert" in op:
             n = len(op["insert"].encode()) if isinstance(op["insert"], str) else 1
-            out.append((i, i + n))
+            out.append((Byte(i), Byte(i + n)))
             i += n
         elif "delete" in op:
-            out.append((i, i))
+            out.append((Byte(i), Byte(i)))
     return out
 
 
-def shift(pos: int, delta: list[dict], start: bool) -> int:
+def shift(pos: Byte, delta: list[dict], start: bool) -> Byte:
     """Where byte offset `pos` is after `delta`. Text inserted exactly at a range's start goes
     before it, at its end after it: neither becomes part of the range."""
+    return Byte(_shift(pos, delta, start))
+
+
+def _shift(pos: int, delta: list[dict], start: bool) -> int:
     old = new = 0
     for op in delta:
         if "retain" in op:
@@ -69,13 +75,13 @@ def shift(pos: int, delta: list[dict], start: bool) -> int:
             new += len(op["insert"].encode()) if isinstance(op["insert"], str) else 1
         elif "delete" in op:
             k = op["delete"]
-            if pos <= old + k:
+            if pos < old + k:  # inside what went: where it was
                 return new
-            old += k
+            old += k  # just after it: an insertion reported after the deletion still goes before a start
     return new + pos - old
 
 
-def paragraph_at(text: str, a: int, b: int) -> tuple[int, int]:
+def paragraph_at(text: str, a: Char, b: Char) -> tuple[Char, Char]:
     """The paragraph around characters [a, b): between blank lines, or the lines if very long."""
     import re
     pa, pb = 0, len(text)
@@ -89,15 +95,7 @@ def paragraph_at(text: str, a: int, b: int) -> tuple[int, int]:
         pa = text.rfind("\n", 0, a) + 1
         nl = text.find("\n", b)
         pb = len(text) if nl < 0 else nl
-    return pa, pb
-
-
-def _chars(s: str, b: int) -> int:
-    return len(s.encode()[:b].decode("utf-8", errors="ignore"))
-
-
-def _bytes(s: str, c: int) -> int:
-    return len(s[:c].encode())
+    return Char(pa), Char(pb)
 
 
 def _state(doc) -> dict[int, int]:
@@ -135,7 +133,7 @@ class MergeWatch:
         self.r, self.name = r, name
         self.file = state / "apart.json"
         self.places: dict[str, list[list[float]]] = {}  # file -> [[start, end, made at]] (bytes)
-        self.found: dict[str, list[list[int]]] = {}  # file -> [[start, end]]: paragraphs to note (bytes)
+        self.found: dict[str, list[list[Byte]]] = {}  # file -> [[start, end]]: paragraphs to note
         self.writers: set[int] = set()  # clients whose changes arrived while notes were pending
         self.last_remote = 0.0
         self.exchanged_since = 0.0
@@ -188,9 +186,10 @@ class MergeWatch:
                 continue
             path = ev.path[0]
             delta = ev.delta
-            for ps in (self.places.get(path, []), self.found.get(path, [])):  # keep positions current
-                for p in ps:
-                    p[0], p[1] = shift(int(p[0]), delta, True), shift(int(p[1]), delta, False)
+            for p in self.places.get(path, []):  # keep positions current
+                p[0], p[1] = shift(Byte(int(p[0])), delta, True), shift(Byte(int(p[1])), delta, False)
+            for q in self.found.get(path, []):
+                q[0], q[1] = shift(q[0], delta, True), shift(q[1], delta, False)
             if self.places.get(path):
                 self.dirty = True
             ranges = changed_ranges(delta)
@@ -210,8 +209,8 @@ class MergeWatch:
                     continue
                 s = str(t)
                 for a, b in ranges:
-                    ca, cb = paragraph_at(s, _chars(s, a), _chars(s, b))
-                    pa, pb = _bytes(s, ca), _bytes(s, cb)
+                    ca, cb = paragraph_at(s, char_of_byte(s, a), char_of_byte(s, b))
+                    pa, pb = byte_of(s, ca), byte_of(s, cb)
                     if any(x <= pb and y >= pa for x, y in spans):
                         self.found.setdefault(path, []).append([pa, pb])
 
@@ -238,9 +237,9 @@ class MergeWatch:
             if not isinstance(t, Text):
                 continue
             s = str(t)
-            spans: list[list[int]] = []
+            spans: list[list[Char]] = []
             for a, b in sorted(found):
-                ca, cb = paragraph_at(s, _chars(s, a), _chars(s, b))  # the paragraph as it reads now
+                ca, cb = paragraph_at(s, char_of_byte(s, a), char_of_byte(s, b))  # the paragraph as it reads now
                 if spans and ca < spans[-1][1]:
                     spans[-1][1] = max(spans[-1][1], cb)
                 else:

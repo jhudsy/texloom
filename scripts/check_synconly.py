@@ -104,7 +104,7 @@ class Computer:
 
     @property
     def env(self) -> dict:
-        return {**os.environ, "TEXLOOM_HOME": str(self.home), "PYTHONIOENCODING": "utf-8"}
+        return {**os.environ, "TEXLOOM_HOME": str(self.home), "PYTHONIOENCODING": "utf-8", "TEXLOOM_CHECKS": "1"}
 
     def texloom(self, *args: str, timeout: float = 180) -> str:
         p = subprocess.run(PY + [CLI, *args], cwd=ROOT, env=self.env, capture_output=True, text=True, timeout=timeout, check=False)
@@ -129,6 +129,12 @@ class Computer:
     def file(self, rel: str) -> Path:
         return self.dir / rel
 
+    def broken(self) -> list[str]:
+        try:
+            return [line.split("INVARIANT BROKEN: ", 1)[1] for line in self.log.read_text(errors="replace").splitlines() if "INVARIANT BROKEN: " in line]
+        except OSError:
+            return []
+
     def read(self, rel: str) -> str:
         return self.file(rel).read_bytes().decode("utf-8")
 
@@ -152,8 +158,17 @@ def same(a: Computer, b: Computer, rel: str) -> bool:
     return a.file(rel).exists() and b.file(rel).exists() and lf(a.read(rel)) == lf(b.read(rel))
 
 
+def invariants(*cs) -> None:
+    """No computer has found one of its own invariants broken (texloom/invariants.py, web/src/invariants.ts)."""
+    for c in cs:
+        found = c.broken()
+        if found:
+            raise Failed(f"{c.name} found an invariant broken: {found[0]}" + (f" (and {len(found) - 1} more)" if len(found) > 1 else ""))
+
+
 def sound(*cs: Computer) -> None:
-    """Nothing scrambled, and line endings as each computer's system would have them."""
+    """Nothing scrambled, line endings as each computer's system would have them, no invariant broken."""
+    invariants(*cs)
     for c in cs:
         if c.file("main.tex").exists():
             s = c.read("main.tex")
@@ -386,6 +401,9 @@ class Browser:
         self.page.evaluate("""t => { const dt = new DataTransfer(); dt.setData('text/plain', t);
             document.querySelector('.cm-content').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })) }""", text)
 
+    def broken(self) -> list[str]:
+        return self.page.evaluate("() => [...(window.__texloomBroken ?? [])]") if self.page else []
+
     def in_step(self, rel: str) -> bool:
         """The editor shows exactly the shared text (they drifted apart with \\r\\n before 0.4.21)."""
         return self.editor() == self.text(rel)
@@ -426,6 +444,7 @@ def browser_pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> No
         if "\r" in (b.text("main.tex") or ""):
             raise Failed("the shared text has \\r (the editor counts line breaks differently from it: typing lands off)")
         sound(a)
+        invariants(b)
         step("typing in the browser lands exactly where it was typed on the desktop")
 
         a.edit("main.tex", "The last paragraph.", "The last paragraph, saved on the desktop.")
@@ -438,6 +457,7 @@ def browser_pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> No
              and "Browser, at once." in a.read("main.tex"))
         wait("the editor is in step", lambda: b.in_step("main.tex"), 15)
         sound(a)
+        invariants(b)
         step("the desktop's saves reach the editor, and edits made at once both arrive")
 
         lines = [f"% turn {i}" for i in range(16)]
@@ -452,6 +472,7 @@ def browser_pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> No
                 a.edit("main.tex", "The middle paragraph", f"{line}\nThe middle paragraph")
         wait("the turns end the same on both", lambda: lf(a.read("main.tex")) == b.text("main.tex") and all(x in a.read("main.tex") for x in lines), 60)
         sound(a)
+        invariants(b)
         step("taking turns, browser and desktop, ends the same on both")
 
         # a storm of real keypresses in a file of its own: typing, Backspace, Enter, arrows, emoji
@@ -474,6 +495,7 @@ def browser_pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> No
         if "\r" in shared or lone_halves(shared):
             raise Failed(f"the shared text has \\r or half characters after the storm: {shared[-200:]!r}")
         sound(a)
+        invariants(b)
         step("300 random keypresses and a Windows paste: desktop, editor and shared text identical")
 
         # ⌘S / Ctrl+S: one compile at a time, however often it's pressed
@@ -516,12 +538,16 @@ def browser_pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> No
                 raise Failed(f"⌘S: one compile attempt expected, got {len(alerts)}: {alerts}")
             step("⌘S compiles once per press (not compiling here: tex-assets/ isn't set up, or CHECK_NO_TEX)")
 
+        invariants(a, b)
         db = sqlite3.connect(server_db)
         stored = [db.execute(f"SELECT COUNT(*) FROM {t} WHERE project=?", (project,)).fetchone()[0] for t in ("log", "blob")]
         db.close()
         if stored != [0, 0]:
             raise Failed(f"the server kept something: {stored[0]} changes, {stored[1]} files")
         step("the server kept nothing of the project (sync-only)")
+    except Failed as e:  # what the computers found first is usually the cause
+        found = [f"{c.name}: {x}" for c in (a, b) for x in (c.broken() if c is a or b.page else [])]
+        raise Failed(str(e) + ("\n    invariants broken before that:\n      " + "\n      ".join(found[:5]) if found else "")) from None
     finally:
         b.stop()
         a.stop()

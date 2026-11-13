@@ -1,5 +1,6 @@
 // Finding your way around a project: search and replace across all files, the
 // document outline (following \input/\include from the main file), and word count.
+import { sharedPos, type SharedPos } from './positions'
 import type { Replica } from './replica'
 import { h } from './dom'
 import { mainFile } from './projectfiles'
@@ -8,7 +9,8 @@ import { texCountDialog } from './texcount'
 import { changeOrSuggest, changeOrSuggestAll, isSuggesting } from './suggestmode'
 import { COMMENT, envClose, envOpen, INLINE_MATH, MATH_OPEN, mathClose, spans } from './texscan'
 
-export type Reveal = (file: string, from: number, to: number) => void
+/** Show [from, to) of a file: positions in the shared text (search and the outline read it). */
+export type Reveal = (file: string, from: SharedPos, to: SharedPos) => void
 
 // ---------------------------------------------------------------------------
 // Word count and outline
@@ -137,7 +139,7 @@ export function createOutlinePanel(r: Replica, reveal: Reveal, selectionWords: (
     const min = Math.min(...o.headings.map((x) => x.level))
     list.replaceChildren(...(o.headings.length ? o.headings.map((x) => h('li', {
       style: `padding-left: ${8 + (x.level - min) * 12}px`, class: `lvl${x.level - min}`, title: `${x.file}:${x.line}`,
-      onclick: () => reveal(x.file, x.offset, x.offset),
+      onclick: () => reveal(x.file, sharedPos(x.offset), sharedPos(x.offset)),
     }, h('span', { class: 'otitle' }, x.title), h('span', { class: 'muted small' }, x.total.toLocaleString(locale))))
       : [h('li', { class: 'muted small' }, t('No sections yet. \\section{…}, \\chapter{…} etc. appear here.'))]))
   }
@@ -207,7 +209,7 @@ export function createSearchPanel(r: Replica, writable: boolean, reveal: Reveal)
     let last = ''
     for (const x of hits) {
       if (x.file !== last) { rows.push(h('li', { class: 'rfile' }, x.file)); last = x.file }
-      rows.push(h('li', { class: 'hit', title: `${x.file}:${x.line}`, onclick: () => reveal(x.file, x.from, x.to) },
+      rows.push(h('li', { class: 'hit', title: `${x.file}:${x.line}`, onclick: () => reveal(x.file, sharedPos(x.from), sharedPos(x.to)) },
         h('span', { class: 'ln muted' }, String(x.line)), h('span', { class: 'ctx' }, x.before, h('mark', {}, x.match), x.after),
         writable ? h('button', { class: 'icon', title: t('Replace this one'), onclick: (e: Event) => { e.stopPropagation(); replaceOne(x) } }, '↺') : null))
     }
@@ -240,7 +242,7 @@ export function createSearchPanel(r: Replica, writable: boolean, reveal: Reveal)
   }
 
   q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 200) })
-  q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && hits[0]) reveal(hits[0].file, hits[0].from, hits[0].to) })
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && hits[0]) reveal(hits[0].file, sharedPos(hits[0].from), sharedPos(hits[0].to)) })
   r.files.observeDeep(() => { if (q.value && el.offsetParent) { clearTimeout(timer); timer = setTimeout(run, 400) } })
   return { el, focus: (seed?: string) => { if (seed) { q.value = seed; run() } q.focus(); q.select() } }
 }
