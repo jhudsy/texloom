@@ -869,12 +869,27 @@ async function openProject(keys: Keys) {
 
   // ---- status / presence ----
   let lastRisk: boolean | null = null
+  // "syncing" only when changes are held up: some are waiting and none has been confirmed for a
+  // while. Typing sends a change a keystroke, each confirmed in a moment: showing every one made the
+  // status flicker between "saved" and "syncing" all the time.
+  const SLOW = 2000 // ms without a confirmation before waiting changes are shown
+  let lastPending = 0, progressAt = Date.now(), slowTimer: ReturnType<typeof setTimeout> | undefined
+  const heldUp = () => {
+    if (!r.pending || r.pending < lastPending || (lastPending === 0 && r.pending > 0)) progressAt = Date.now() // confirmed, or newly waiting
+    lastPending = r.pending
+    clearTimeout(slowTimer)
+    if (!r.pending) return false
+    const wait = SLOW - (Date.now() - progressAt)
+    if (wait > 0) { slowTimer = setTimeout(() => renderStatus(), wait + 20); return false }
+    return true
+  }
   const renderStatus = () => {
     status.className = `status ${r.status}`
     const unsent = r.pending ? ` · ${tn(r.pending, '{{n}} unsent', '{{n}} unsent')}` : ''
     const relay = r.storage === 'relay' ? ` · ${tn(r.peers, 'relay-only, {{n}} peer online', 'relay-only, {{n}} peers online')}` : ''
+    const slow = heldUp()
     status.textContent =
-      r.status === 'online' ? (r.pending ? t('syncing {{n}}…', { n: r.pending }) : t('saved')) + relay
+      r.status === 'online' ? (slow ? t('syncing {{n}}…', { n: r.pending }) : t('saved')) + relay
       : r.status === 'connecting' ? t('connecting…')
       : r.status === 'paused' ? t('manual sync') + unsent
       : t('offline{{unsent}} (changes kept locally)', { unsent })
