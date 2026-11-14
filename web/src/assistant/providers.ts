@@ -15,6 +15,8 @@ export interface ProviderConfig {
   effort: Effort // Anthropic only
   models: string[] // suggestions for the model picker
   help?: string
+  /** The model's context window in tokens, when the person sets it; otherwise it's asked of the provider. */
+  contextWindow?: number
 }
 
 export const PRESETS: Record<string, ProviderConfig> = {

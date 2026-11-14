@@ -10,6 +10,7 @@ const pt: Catalog = {
   'retrying: the model produced malformed tool input': 'tentando novamente: o modelo gerou uma entrada de ferramenta inválida',
   'The model declined this request ({{category}}).': 'O modelo recusou esta solicitação ({{category}}).',
   'The model declined this request.': 'O modelo recusou esta solicitação.',
+  'The model declined to summarise the conversation.': 'O modelo se recusou a resumir a conversa.',
   'The response was cut off mid tool call (max_tokens).': 'A resposta foi interrompida no meio de uma chamada de ferramenta (max_tokens).',
   '{{provider}} returned HTTP {{status}}: {{body}}': '{{provider}} retornou HTTP {{status}}: {{body}}',
   'The response was cut off mid tool call.': 'A resposta foi interrompida no meio de uma chamada de ferramenta.',

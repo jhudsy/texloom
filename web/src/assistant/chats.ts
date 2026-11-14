@@ -6,6 +6,7 @@ export type Entry =
   | { k: 'tool'; text: string; ok: boolean; err?: string }
   | { k: 'change'; text: string; ok: boolean }
   | { k: 'note'; cls: string; text: string }
+  | { k: 'summary'; text: string } // what the assistant works from in place of earlier messages
 
 export interface ChatMeta { id: string; project: string; title: string; provider: string; model: string; at: number }
 export interface ChatBody { id: string; entries: Entry[]; state: unknown }

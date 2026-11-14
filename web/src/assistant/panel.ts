@@ -5,7 +5,7 @@ import * as Y from 'yjs'
 import type { Replica } from '../replica'
 import { dialog, h } from '../dom'
 import { aiPrefs, listModels, PRESETS, type ProviderConfig } from './providers'
-import { createSession, explainError, type LlmSession } from './llm'
+import { createSession, explainError, tokensIn, type LlmSession, type TurnEvents, type TurnResult } from './llm'
 import { ASSISTANT, runTool, toolsFor, type Change, type ToolCtx } from './tools'
 import { locale, t, tn } from '../i18n'
 import { commonEnds, refine, wordDiff } from '../worddiff'
@@ -13,6 +13,25 @@ import { diffPiece } from '../review'
 
 const MAX_STEPS = 40 // tool round-trips per request
 const MAX_SAVED_STATE = 4 * 1024 * 1024 // past this, a conversation is kept to read but can't be continued
+
+// ---- compaction: a long conversation is summarised before it outgrows the model's context ----
+const COMPACT_AT = 0.7 // of the room, before a new message
+const SHRINK_AT = 0.9 // of the room, between the steps of one request
+const MAX_ROOM = 200_000 // however large the model's context, compact by here: each request resends it all
+const RESULT_IN_SUMMARY = 1500 // characters of each tool result the summary sees
+const RESULT_SHRUNK = 2000 // characters left of an older tool result in a request that is running out of room
+const SUMMARY_SYSTEM = 'You summarise a conversation between a person and a LaTeX writing assistant that edits their project through tools, so that the assistant can carry on from your summary alone. Write plain text, no preamble.'
+const SUMMARY_PROMPT = `Summarise the conversation below for the assistant to continue from. Keep:
+- what the person wants, their preferences and any instructions they gave, in their own words where it matters;
+- decisions made, and what was changed in which files (paths, sections, labels), and what was tried and didn't work;
+- facts about the project learned along the way (structure, main file, packages, bibliography, errors seen);
+- what is still to do, and any question waiting for an answer.
+Leave out file contents (they can be read again), pleasantries, and anything superseded. Be as short as you can while keeping all of that; at most about 1,500 words.
+
+`
+const TOO_LONG = /prompt is too long|context.{0,20}(length|window|limit|size)|maximum context|too many tokens|exceeds? (the )?(available )?context|n_ctx|input is too long|reduce the length|token limit/i
+/** The model's context, in tokens, per provider and model: asked once. */
+const contextOf = new Map<string, number | null>()
 const EFFORTS: [value: string, label: string][] = [['low', t('low')], ['medium', t('medium')], ['high', t('high')], ['xhigh', t('xhigh')], ['max', t('max')]]
 
 const SYSTEM = `You are a LaTeX writing assistant built into texloom, a collaborative LaTeX editor. You work directly on the user's project through tools; other people may be editing the same files at the same time, so their text can change between your reads and edits.
@@ -154,7 +173,82 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       case 'tool': return h('div', { class: `ai-tool ${e.ok ? 'ok' : 'err'}` }, e.text, e.err ? h('span', { class: 'muted' }, ` — ${e.err}`) : '')
       case 'change': return h('div', { class: `ai-tool ${e.ok ? 'ok' : 'err'}` }, `${e.ok ? '✓' : '✗'} ${e.text}`)
       case 'note': return h('div', { class: `ai-${e.cls}` }, e.text)
+      case 'summary': return summaryEl(e.text)
     }
+  }
+
+  function summaryEl(text: string): HTMLElement {
+    return h('details', { class: 'ai-think ai-summary' },
+      h('summary', {}, t('Earlier messages summarised to make room')),
+      h('p', { class: 'muted small' }, t('The assistant now works from this summary instead of the messages above it, which stay here for you to read.')),
+      h('pre', {}, text))
+  }
+
+  // ---- compaction ----
+  /** How many tokens a request may use: the model's context (set in ⚙, else asked of the provider, else
+   *  a guess), and at most MAX_ROOM. */
+  async function roomFor(s: LlmSession): Promise<number> {
+    if (cfg.contextWindow) return Math.min(cfg.contextWindow, MAX_ROOM)
+    const key = `${cfg.kind}|${cfg.baseUrl}|${cfg.model}`
+    // asked until the provider can say (a local model may not be loaded before the first request)
+    if (!contextOf.get(key)) contextOf.set(key, await s.contextWindow().catch(() => null))
+    const known = contextOf.get(key)
+    return Math.min(known ?? (cfg.kind === 'anthropic' ? 200_000 : /^https:/.test(cfg.baseUrl) ? 128_000 : 32_768), MAX_ROOM)
+  }
+
+  const warned = new WeakSet<LlmSession>()
+  function warnIfCramped(s: LlmSession, room: number) {
+    if (warned.has(s) || s.floor() < room / 2) return
+    warned.add(s)
+    hint(t('This model has room for about {{room}} tokens, and the assistant’s own instructions take about {{floor}} of them, which leaves little for the conversation. Load the model with a larger context (16,000 tokens or more), and if it isn’t found automatically, enter it in ⚙.',
+      { room: room.toLocaleString(locale), floor: s.floor().toLocaleString(locale) }), 'warn')
+  }
+
+  /** Summarise the history before `keepFrom` and replace it with the summary. False if there was nothing to summarise. */
+  async function summarise(s: LlmSession, keepFrom: number, room: number, signal: AbortSignal): Promise<boolean> {
+    if (keepFrom <= 0) return false
+    // it stands in for what came before the message being sent, so it goes just above that message
+    const pending = h('div', { class: 'ai-tool pending' }, t('Summarising earlier messages to make room…'))
+    const above = [...log.querySelectorAll('.ai-user')].pop()
+    if (above) above.before(pending)
+    else log.append(pending)
+    try {
+      // the summary request must fit too: past that, the middle of the transcript is left out
+      const text = s.transcript(0, keepFrom, RESULT_IN_SUMMARY)
+      const limit = Math.max(20_000, Math.floor((room - tokensIn(SUMMARY_PROMPT.length) - 4000) * 0.6) * 3)
+      const summary = await s.ask(SUMMARY_SYSTEM, SUMMARY_PROMPT + (text.length > limit ? text.slice(0, limit * 0.3) + '\n\n[… part of the conversation left out …]\n\n' + text.slice(text.length - limit * 0.7) : text), signal)
+      if (!summary) throw new Error(t('The model returned an empty summary.'))
+      s.replaceBefore(keepFrom, summary)
+      if (chat) {
+        const at = chat.entries.map((e) => e.k).lastIndexOf('user')
+        chat.entries.splice(at < 0 ? chat.entries.length : at, 0, { k: 'summary', text: summary })
+      }
+      pending.replaceWith(summaryEl(summary))
+      return true
+    } catch (e) {
+      pending.remove()
+      throw e
+    }
+  }
+
+  /** Before a new message: summarise if the conversation has grown past COMPACT_AT of the room. The last
+   *  exchange stays word for word when it is small. */
+  async function compactBefore(s: LlmSession, next: string, room: number, signal: AbortSignal) {
+    if (!s.length || s.used() + tokensIn(next.length) <= COMPACT_AT * room) return
+    const starts = s.turnStarts()
+    const last = starts[starts.length - 1] ?? s.length
+    const lastSize = tokensIn(s.transcript(last, s.length, Infinity).length)
+    await summarise(s, last > 0 && lastSize < room * 0.15 ? last : s.length, room, signal)
+  }
+
+  /** In the middle of a request: make room by cutting older tool results of this request, then by
+   *  summarising what came before it. False if nothing could be done. */
+  async function makeRoom(s: LlmSession, room: number, signal: AbortSignal): Promise<boolean> {
+    const starts = s.turnStarts()
+    const current = starts[starts.length - 1] ?? 0
+    const shrunk = s.shrinkResults(current, RESULT_SHRUNK)
+    if (shrunk && s.used() <= SHRINK_AT * room) return true
+    return (await summarise(s, current, room, signal)) || shrunk
   }
 
   async function openChat(meta: ChatMeta) {
@@ -309,7 +403,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
 
     const tools = toolsFor(host.writable)
     session ??= createSession(cfg, tools, SYSTEM)
-    session.addUser(message)
+    const s = session
     abort = new AbortController()
     sendBtn.textContent = t('Stop')
     historyBtn.disabled = true
@@ -323,12 +417,18 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       compile: host.compile, lastLog: host.lastLog, agentName: `Assistant (for ${host.userName()})`.slice(0, 64),
     }
     try {
+      const room = await roomFor(s)
+      warnIfCramped(s, room)
+      await compactBefore(s, message, room, abort.signal)
+      s.addUser(message)
+      let retried = false // after making room once for a request that was too long
       for (let step = 0; step < MAX_STEPS; step++) {
+        if (step > 0 && s.used() > SHRINK_AT * room) await makeRoom(s, room, abort.signal)
         let textEl: HTMLElement | null = null
         let textBuf = ''
         let thinkEl: HTMLElement | null = null
         let toolEl: HTMLElement | null = null
-        const res = await session.turn({
+        const events: TurnEvents = {
           text: (d) => {
             if (!textEl) { textEl = h('div', { class: 'ai-text' }); turnEl.append(textEl) }
             textBuf += d
@@ -345,7 +445,17 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
           toolStart: (name) => {
             if (!toolEl) { toolEl = h('div', { class: 'ai-tool pending' }, `${name}…`); turnEl.append(toolEl) }
           },
-        }, abort.signal)
+        }
+        let res: TurnResult
+        try {
+          res = await s.turn(events, abort.signal)
+        } catch (e) {
+          // too long for the model after all (an estimate can be off): make room once and try again
+          if (retried || abort.signal.aborted || !TOO_LONG.test(String((e as Error)?.message ?? e)) || !(await makeRoom(s, room, abort.signal))) throw e
+          retried = true
+          step--
+          continue
+        }
         if (textEl) (textEl as HTMLElement).innerHTML = md(textBuf)
         if (thinkEl) chat?.entries.push({ k: 'think', text: (thinkEl as HTMLElement).textContent ?? '' })
         if (textBuf) chat?.entries.push({ k: 'text', text: textBuf })
@@ -370,14 +480,16 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
           chat?.entries.push({ k: 'tool', text: label, ok: !out.isError, err: problem })
           results.push({ id: call.id, ...out })
         }
-        session.addToolResults(results)
+        s.addToolResults(results)
         persist(false)
         if (abort.signal.aborted) break
         if (step === MAX_STEPS - 1) hint(t('Stopped after {{n}} steps.', { n: MAX_STEPS }), 'warn')
       }
     } catch (e) {
       if (!abort.signal.aborted) {
-        hint(explainError(e, cfg), 'err')
+        hint(TOO_LONG.test(String((e as Error)?.message ?? e))
+          ? t('This conversation no longer fits in the model’s context, even with earlier messages summarised. Start a new conversation, or load the model with a larger context.')
+          : explainError(e, cfg), 'err')
         session = null // provider history may be inconsistent after a failure
       }
     } finally {
@@ -427,6 +539,17 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     const model = h('input', { value: c.model, list: 'ai-models-dlg' }) as HTMLInputElement
     const dl = h('datalist', { id: 'ai-models-dlg' }, ...c.models.map((m) => h('option', { value: m })))
     const effort = h('select', {}, ...EFFORTS.map(([e, label]) => h('option', { value: e, ...(e === c.effort ? { selected: true } : {}) }, label))) as HTMLSelectElement
+    const contextIn = h('input', { type: 'number', min: 1024, step: 1024, value: c.contextWindow ?? '', placeholder: t('automatic'),
+      title: t('How many tokens the model can take in at once. Long conversations are summarised before they reach it.') }) as HTMLInputElement
+    const found = h('span', { class: 'muted small' })
+    const detect = () => {
+      found.textContent = ''
+      if (!c.model) return
+      createSession({ ...c, baseUrl: base.value.trim(), apiKey: key.value.trim(), model: model.value.trim() }, [], '').contextWindow()
+        .then((n) => { found.textContent = n ? t('Found: {{n}} tokens', { n: n.toLocaleString(locale) }) : t('Not found: enter it if you know it') })
+        .catch(() => {})
+    }
+    detect()
     const load = h('button', {
       onclick: async () => {
         status.textContent = t('Loading…')
@@ -448,6 +571,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
         h('span', {}, t('API key')), key,
         h('span', {}, t('Model')), h('div', { class: 'row' }, model, dl, c.kind === 'openai' ? load : ''),
         ...(c.kind === 'anthropic' ? [h('span', {}, t('Effort')), effort] : []),
+        h('span', {}, t('Context window')), h('div', { class: 'row' }, contextIn, found),
       ),
       status,
       h('p', {}, connectButton()),
@@ -456,7 +580,9 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
         h('button', { onclick: () => dlg.close() }, t('Cancel')),
         h('button', {
           class: 'primary', onclick: () => {
-            aiPrefs.save(providerId, { baseUrl: base.value.trim(), apiKey: key.value.trim(), model: model.value.trim(), effort: effort.value as any })
+            aiPrefs.save(providerId, { baseUrl: base.value.trim(), apiKey: key.value.trim(), model: model.value.trim(), effort: effort.value as any,
+              contextWindow: Math.round(Number(contextIn.value)) >= 1024 ? Math.round(Number(contextIn.value)) : undefined })
+            contextOf.clear() // a model reloaded with another context is asked again
             cfg = aiPrefs.get(providerId)
             refreshModels()
             newChat(true)

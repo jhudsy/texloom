@@ -446,6 +446,22 @@ A chat panel (`web/src/assistant/`) that acts on the project like another collab
   (Apply / Reject). Assistant transactions use their own Yjs origin, tracked by a
   `Y.UndoManager`; each request is one undo step ("Undo these changes"). Its edits
   sync to collaborators like any local edit.
+- **Compaction** (`compactBefore`, `makeRoom` and `summarise` in `panel.ts`; the session methods in `llm.ts`).
+  The room is the model's context (⚙, else Anthropic's Models API, LM Studio's loaded context,
+  Ollama's `/api/ps` or `num_ctx` (4,096 by default), OpenRouter's model list, else a guess), at most 200,000
+  tokens. Use is the provider's own count for the last request (`usage`; OpenAI-compatible servers are asked
+  with `stream_options.include_usage`, dropped for a server that refuses it) plus characters / 3 for what's
+  been added since, or characters / 3 for everything.
+  - Before a message, past 70% of the room: the history is turned into a plain-text transcript (tool results
+    cut to 1,500 characters; the middle left out if the transcript itself wouldn't fit), the model is asked
+    for a summary without tools, and the history before the last exchange (kept word for word if small) is
+    replaced by it, prefixed to the first kept user message as `<summary>`.
+  - Between the steps of one request, past 90%: older tool results of this request are cut to 2,000
+    characters, then the history before it is summarised. A request rejected as too long (matched on the
+    error text) gets the same treatment and one retry.
+  - Any edit to the history drops every Claude thinking block, since a block is valid only after the exact
+    history it came from (removing all of them is allowed). The summary is shown, and saved, as its own entry
+    in the conversation; what's saved for continuing is the compacted history.
 - **Context:** the system prompt is static, so it caches. Each user message starts with
   a `<context>` block: project, main file, open file and current selection.
 - **Keys** live in `localStorage` only; they never enter the Yjs document or pass

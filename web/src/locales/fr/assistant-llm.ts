@@ -10,6 +10,7 @@ const fr: Catalog = {
   'retrying: the model produced malformed tool input': 'nouvelle tentative : le modèle d’IA a produit des arguments d’outil mal formés',
   'The model declined this request ({{category}}).': 'Le modèle d’IA a refusé cette demande ({{category}}).',
   'The model declined this request.': 'Le modèle d’IA a refusé cette demande.',
+  'The model declined to summarise the conversation.': 'Le modèle d’IA a refusé de résumer la conversation.',
   'The response was cut off mid tool call (max_tokens).': 'La réponse a été coupée au milieu d’un appel d’outil (max_tokens).',
   '{{provider}} returned HTTP {{status}}: {{body}}': '{{provider}} a répondu HTTP {{status}} : {{body}}',
   'The response was cut off mid tool call.': 'La réponse a été coupée au milieu d’un appel d’outil.',

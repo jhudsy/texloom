@@ -10,6 +10,7 @@ const zh: Catalog = {
   'retrying: the model produced malformed tool input': '正在重试：模型生成了格式错误的工具输入',
   'The model declined this request ({{category}}).': '模型拒绝了此请求（{{category}}）。',
   'The model declined this request.': '模型拒绝了此请求。',
+  'The model declined to summarise the conversation.': '模型拒绝总结这段对话。',
   'The response was cut off mid tool call (max_tokens).': '响应在工具调用中途被截断（max_tokens）。',
   '{{provider}} returned HTTP {{status}}: {{body}}': '{{provider}} 返回 HTTP {{status}}：{{body}}',
   'The response was cut off mid tool call.': '响应在工具调用中途被截断。',

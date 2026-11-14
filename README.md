@@ -745,6 +745,15 @@ model they used) or delete, and they're removed if you remove the project from t
 computer, say), untick **Keep past conversations in this browser** there; it offers to delete those already kept, for this
 project or every project.
 
+Each request sends the whole conversation, so a long one would eventually outgrow what the model can take in at
+once (its *context*). Before that happens, at 70% of the context (or of 200,000 tokens, if that's less), the
+assistant asks the model to summarise the earlier messages and carries on from the summary: "Earlier messages
+summarised to make room" shows what it kept, and the messages themselves stay on screen. If a request is too long
+anyway, it makes room the same way and tries once more. The context size comes from Anthropic, LM Studio (as the
+model is loaded), Ollama or OpenRouter; you can also enter it under ⚙ **Context window**. Local models are often
+loaded with a small context: 16,000 tokens or more leaves room to work, since the assistant's own instructions take
+a few thousand. A model that thinks before answering can take a few minutes over a summary.
+
 **Connect an AI tool via MCP…** in the tab shows how to connect a tool you already use through
 [MCP](#agents-mcp) instead, such as Claude Code. It runs under your own account with that tool, so it
 needs no API key here.
