@@ -13,6 +13,7 @@ on:
       - 'texloom/**'
       - 'server/**'
       - 'scripts/check_synconly.py'
+      - 'scripts/refuse_writes/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/sync-only.yml'
@@ -31,6 +32,7 @@ on:
       - 'texloom/**'
       - 'server/**'
       - 'scripts/check_synconly.py'
+      - 'scripts/refuse_writes/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/sync-only.yml'
@@ -73,9 +75,17 @@ jobs:
       - run: uv run --with playwright python scripts/check_synconly.py
         env:
           CHECK_DIR: ${{ runner.temp }}/synconly
+      - name: Desktop pairings with 30% of file writes refused (as on Windows when a file is open elsewhere)
+        if: runner.os == 'Linux'
+        run: uv run python scripts/check_synconly.py unix/unix windows/unix
+        env:
+          CHECK_DIR: ${{ runner.temp }}/synconly-refused
+          CHECK_REFUSE_WRITES: '0.3'
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: synconly-${{ matrix.os }}
-          path: ${{ runner.temp }}/synconly
+          path: |
+            ${{ runner.temp }}/synconly
+            ${{ runner.temp }}/synconly-refused
           include-hidden-files: true

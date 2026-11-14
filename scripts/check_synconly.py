@@ -21,6 +21,9 @@ up (CHECK_NO_TEX=1 to skip that); either way one ⌘S must start exactly one com
   uv run python scripts/check_synconly.py windows/unix                # just these (no Playwright needed)
   uv run --with playwright python scripts/check_synconly.py --keep    # leave the folders and logs
   uv run --with playwright python -m playwright install chromium      # once, for the browser pairings
+  CHECK_REFUSE_WRITES=0.3 uv run python scripts/check_synconly.py unix/unix windows/unix
+      # 30% of the desktop's file writes refused, as on Windows when another program has the file
+      # open (scripts/refuse_writes): the sync must try them again and still end in step
 
 Checked for the desktop pairings: the project is made sync-only and the server stores nothing of
 it; the joining computer gets every file (text, a picture, a file over 8 MB); edits go both ways;
@@ -104,7 +107,10 @@ class Computer:
 
     @property
     def env(self) -> dict:
-        return {**os.environ, "TEXLOOM_HOME": str(self.home), "PYTHONIOENCODING": "utf-8", "TEXLOOM_CHECKS": "1"}
+        env = {**os.environ, "TEXLOOM_HOME": str(self.home), "PYTHONIOENCODING": "utf-8", "TEXLOOM_CHECKS": "1"}
+        if env.get("CHECK_REFUSE_WRITES"):
+            env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(ROOT / "scripts" / "refuse_writes"), env.get("PYTHONPATH")]))
+        return env
 
     def texloom(self, *args: str, timeout: float = 180) -> str:
         p = subprocess.run(PY + [CLI, *args], cwd=ROOT, env=self.env, capture_output=True, text=True, timeout=timeout, check=False)

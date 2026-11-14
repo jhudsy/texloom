@@ -885,7 +885,9 @@ server stored nothing. Each computer plays an operating system for line endings 
 "windows" end lines with \r\n), and every pairing is run: unix/unix, windows/windows, and
 windows/unix both ways. With Playwright it also runs the web app in headless Chromium, typing for
 real against a Unix and a Windows desktop (`unix/browser`, `windows/browser`); see the script's own
-description. A few minutes; `--keep` leaves the folders and logs:
+description. With `CHECK_REFUSE_WRITES=0.3`, 30% of the desktops' file writes are refused, as on
+Windows when another program has a file open, and everything must still end in step (CI runs
+this on Linux too). A few minutes; `--keep` leaves the folders and logs:
 
 ```bash
 uv run --with playwright python -m playwright install chromium   # once

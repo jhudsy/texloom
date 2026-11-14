@@ -36,6 +36,24 @@ from .xr import compile_order, external_documents
 from .paths import PROTECTED_DIRS, STATE, UNSAFE_NAMES, WIN_RESERVED, latexmk_command, main_file, safe_rel, tex_env  # noqa: F401
 SETTLE = 0.2  # seconds a changed file must stay unchanged before it is read (see FolderSync._settle)
 SETTLE_DOUBT = 2.0  # the same, for a file that became empty or disappeared (rarely meant; editors can take a while to write it again)
+SETTLE_BIG = 1.0  # the same, for a big file (BIG bytes or more): copying one in can pause for a moment
+BIG = 1_000_000
+WRITE_RETRY = (0.5, 60.0)  # a file that couldn't be written is tried again after this long, doubling up to the second
+
+
+def pending(task: asyncio.Task | None) -> bool:
+    """A task that is yet to run its course, and isn't the one asking (a retry that schedules the
+    next one, from inside itself, must not take itself as already scheduled)."""
+    return task is not None and not task.done() and task is not asyncio.current_task()
+
+
+def settle_for(size: int, times: int) -> float:
+    """How long a file must stay unchanged before it is read, given its size and how many times in
+    a row it was found still changing: each time doubles the wait, up to SETTLE_DOUBT. Same rule
+    as settleFor in web/src/foldersync.ts."""
+    return min(SETTLE_DOUBT, max(SETTLE * 2 ** times, SETTLE_BIG if size >= BIG else 0.0))
+
+
 SOURCES = (".tex", ".bib", ".sty", ".cls", ".bst", ".ltx", ".dtx", ".ins", ".bbx", ".cbx")  # never counted as compile output
 IGNORE_DIRS = {STATE, ".git", ".svn", "node_modules", "__pycache__", ".idea", ".vscode"}
 IGNORE_NAMES = {".DS_Store", "Thumbs.db"}
@@ -410,6 +428,9 @@ class FolderSync:
         self._unsettled: dict[str, int] = {}  # files found still being written, and how many times in a row
         self._later_paths: set[str] = set()  # those, to look at again shortly
         self._later_task: asyncio.Task | None = None
+        self._unwritten: set[str] = set()  # files the last write_out couldn't write (on Windows, open elsewhere)
+        self._retry_task: asyncio.Task | None = None
+        self._retry_wait = WRITE_RETRY[0]
 
     # --- helpers -------------------------------------------------------------
     def rel(self, p: Path) -> str:
@@ -587,14 +608,17 @@ class FolderSync:
         through copying a big file in, would share a cut-off file (for text, its missing end as
         deleted, losing collaborators' edits there when the rest arrives). Some editors save by
         emptying the file and writing it again, or by deleting and recreating it: a file that
-        became empty, or disappeared, is given longer to come back."""
+        became empty, or disappeared, is given longer to come back. A big file, or one found
+        still changing, must stay unchanged for longer (`settle_for`): copying one in can pause
+        for a moment, on a slow or busy disk for more than SETTLE."""
         cand = [rel for rel in paths if not self.ignored(rel) and safe_rel(rel) is not None and not self._stat_matches(rel)]
         if not cand:
             return set()
         first = {rel: self._look(rel) for rel in cand}
         doubtful = any((f is None and rel in self.known) or (f is not None and f[0] == 0 and self.known.get(rel, {}).get("z"))
                        for rel, f in first.items())
-        await asyncio.sleep(SETTLE_DOUBT if doubtful else SETTLE)
+        await asyncio.sleep(SETTLE_DOUBT if doubtful else
+                            max(settle_for(f[0] if f else 0, self._unsettled.get(rel, 0)) for rel, f in first.items()))
         out = set()
         for rel in cand:
             if self._look(rel) == first[rel]:
@@ -608,7 +632,7 @@ class FolderSync:
     def _later(self, paths: set[str]) -> None:
         """Look at these files again shortly (their last change may already have been reported)."""
         self._later_paths |= paths
-        if self._later_task and not self._later_task.done():
+        if pending(self._later_task):
             return
 
         async def again():
@@ -757,10 +781,15 @@ class FolderSync:
             try:
                 fn()
             except OSError as e:
-                log.warning("could not write %s: %s", rel, e)
+                if rel not in self._unwritten:
+                    log.warning("could not write %s: %s", rel, e)
+                self._unwritten.add(rel)
             else:
                 changed = True
                 downs.add(rel)
+                self._unwritten.discard(rel)
+
+        unwritten_before = set(self._unwritten)
 
         for rel, yt in list(self.r.files.items()):
             if self.ignored(rel) or self.target(rel) is None:
@@ -814,8 +843,33 @@ class FolderSync:
         if changed:
             self.save_known()
             self.schedule_compile(delay=4, files=downs)  # edits from elsewhere arrive keystroke by keystroke
+        self._unwritten &= wanted | dirs
+        if unwritten_before - self._unwritten:
+            log.info("written now: %s", ", ".join(sorted(unwritten_before - self._unwritten)))
+        if self._unwritten:
+            self._retry_writes()
+        else:
+            self._retry_wait = WRITE_RETRY[0]
         if checking():
             self._check_in_step()
+
+    def _retry_writes(self) -> None:
+        """Try the files that couldn't be written again shortly: on Windows, a file another program
+        has open (an antivirus scan, an indexer, an editor) can't be replaced, and until it is the
+        folder would hold an old copy. Local edits are taken in first, as before any remote change."""
+        if pending(self._retry_task):
+            return
+        wait, self._retry_wait = self._retry_wait, min(self._retry_wait * 2, WRITE_RETRY[1])
+
+        async def again():
+            await asyncio.sleep(wait)
+            async with self.r.lock:
+                await self.ingest_all()
+                await self.write_out()
+        try:
+            self._retry_task = asyncio.get_running_loop().create_task(again())
+        except RuntimeError:
+            pass
 
     def _check_in_step(self) -> None:
         """Test builds (invariants.py): every text file the sync takes as in step with the project
@@ -825,8 +879,8 @@ class FolderSync:
             text = str(yt)
             well_formed(f"the project's {rel}", text)
             k, full = self.known.get(rel), self.target(rel)
-            if not k or full is None or self.ignored(rel):
-                continue
+            if not k or full is None or self.ignored(rel) or rel in self._unwritten:
+                continue  # (one that couldn't be written holds an older copy until it's tried again)
             try:
                 data = full.read_bytes()
             except OSError:
@@ -875,7 +929,11 @@ class FolderSync:
         # could be those of an editor saving at that very moment, and its edit would then look
         # like our own write and never be shared.
         st = tmp.stat()
-        tmp.replace(full)
+        try:
+            tmp.replace(full)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
         self._remember(rel, h, st=st)
         log.info("↓ %s", rel)
         for f in new_lines:

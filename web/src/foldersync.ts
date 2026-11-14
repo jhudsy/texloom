@@ -12,7 +12,7 @@ const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycach
 // Build output and editor droppings: never synced. Same list as IGNORE_* in texloom/folder.py.
 export const BUILD = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex\.gz|synctex|bbl|blg|bcf|run\.xml|nav|snm|vrb|idx|ilg|ind|xdv|dvi|swp|swx|tmp)$|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$/i
 const MAX = 50 * 1024 * 1024
-const SETTLE = 200, SETTLE_DOUBT = 2000 // ms a changed file must stay unchanged before it's read; for one that became empty or went
+const SETTLE = 200, SETTLE_DOUBT = 2000, SETTLE_BIG = 1000, BIG = 1_000_000 // ms a changed file must stay unchanged before it's read; for one that became empty or went missing; for a big one (settleFor below)
 const sameBytes = (a: Uint8Array | null, b: Uint8Array) => !!a && a.length === b.length && a.every((x, i) => x === b[i])
 
 type Known = Record<string, { h: string; m: number; z: number; c?: boolean }> // c: the file on disk ends lines with \r\n
@@ -105,15 +105,21 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
   // A changed file is read only once it has stopped changing: a read halfway through a save (some
   // editors empty a file, then write it) or through copying a big file in would share a cut-off
   // file, for text its missing end as deleted. Same rules as _settle in texloom/folder.py.
-  const seen = new Map<string, { m: number; z: number; at: number }>() // changes noticed, not yet read
+  // A big file, or one found still changing, must stay unchanged for longer: copying one in can
+  // pause for a moment, on a slow or busy disk for more than SETTLE. Each time a file is found still
+  // changing doubles the wait, up to SETTLE_DOUBT (settle_for in texloom/folder.py).
+  const settleFor = (size: number, times: number) => Math.min(SETTLE_DOUBT, Math.max(SETTLE * 2 ** times, size >= BIG ? SETTLE_BIG : 0))
+  const seen = new Map<string, { m: number; z: number; at: number; n: number }>() // changes noticed, not yet read; n: times in a row
   const missing = new Map<string, number>() // known files gone from the folder: since when
   const unread = new Set<string>() // written here, then changed by someone else: read before writing again
   let soon: ReturnType<typeof setTimeout> | undefined
   const lookAgain = (ms: number) => { clearTimeout(soon); soon = setTimeout(() => round('in'), ms) }
   const settled = (p: string, f: File): boolean => {
     const was = seen.get(p), now = Date.now()
-    const wait = f.size === 0 && (known[p]?.z ?? 0) > 0 ? SETTLE_DOUBT : SETTLE // emptied: rarely meant
-    if (!was || was.m !== f.lastModified || was.z !== f.size) { seen.set(p, { m: f.lastModified, z: f.size, at: now }); lookAgain(wait + 50); return false }
+    const changed = !was || was.m !== f.lastModified || was.z !== f.size
+    const n = !was ? 0 : changed ? was.n + 1 : was.n
+    const wait = f.size === 0 && (known[p]?.z ?? 0) > 0 ? SETTLE_DOUBT : settleFor(f.size, n) // emptied: rarely meant
+    if (changed) { seen.set(p, { m: f.lastModified, z: f.size, at: now, n }); lookAgain(wait + 50); return false }
     if (now - was.at < wait) { lookAgain(wait - (now - was.at) + 50); return false }
     seen.delete(p)
     return true

@@ -299,17 +299,23 @@ relay) as the fallback for symmetric NATs.
   minimal inserts/deletes. Concurrent edits from browsers therefore merge rather
   than being overwritten.
 - CRDT → disk: write the merged file. If the file changed on disk since the last
-  sync, ingest that change first.
+  sync, ingest that change first. A file that can't be written is tried again after 0.5 s,
+  doubling up to a minute, local edits taken in first as before any remote change: on Windows a
+  file another program has open (an antivirus scan, an indexer, an editor) can't be replaced,
+  and the folder kept an old copy until the next change arrived.
 - Reading a changed file: only once it has stopped changing. A read halfway through a save
   (some editors empty a file, then write it), or through copying a big file in, would share a
   cut-off file, and for text its missing end as deleted. Changed files are looked at, then again
-  0.2 s later (2 s for one that became empty or vanished: rarely meant), and any still changing
-  wait for their next change, or a look shortly after. Their date and size are noted before
+  0.2 s later (1 s for a file of 1 MB or more, whose copying can pause for a moment; 2 s for one
+  that became empty or vanished: rarely meant), and any still changing wait for their next
+  change, or a look shortly after. Each time a file is found still changing, the wait doubles,
+  up to 2 s (`settle_for`): on a slow or busy disk, copying in a 20 MB file paused for more than
+  0.2 s and a cut-off copy was shared. Their date and size are noted before
   reading (and after writing, from the file written before it goes into place), so a save that
   lands in between is never taken for what was read and missed. An empty file is never taken
   for an older copy reappearing, whose repair would write over a save in progress. The browser's
   folder sync (foldersync.ts), which polls every 2 s, does the same: a change is read once a later
-  look finds the same date and size (0.2 s on; 2 s for an emptied file), a file gone from the
+  look finds the same date and size (the same waits, `settleFor`), a file gone from the
   folder is deleted only after 2 s, a file changing while read (NotReadableError) is looked at
   again rather than counting towards stopping the sync, and after writing a file is read back:
   if an editor saved meanwhile, it is read before anything is written there again.
