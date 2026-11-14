@@ -136,7 +136,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   // ---- past conversations ----
   /** Only a finished turn leaves a history the provider will accept, so `finished` is what allows continuing later. */
   function persist(finished: boolean) {
-    if (!chat) return
+    if (!chat || !aiPrefs.keepChats) return
     let state: unknown = null
     if (finished && session) {
       const json = JSON.stringify(session.save())
@@ -188,10 +188,27 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
         render()
       },
     }, t('Delete all conversations'))
+    // Whether to keep them at all: some people won't want conversations left on a shared computer.
+    const ask = h('div', { class: 'row keep-ask', hidden: true })
+    const keep = h('input', {
+      type: 'checkbox', checked: aiPrefs.keepChats,
+      onchange: async () => {
+        aiPrefs.keepChats = keep.checked
+        ask.hidden = true
+        if (keep.checked || !await chats.count().catch(() => 0)) return render()
+        const forgetThen = (how: () => Promise<void>) => async () => { await how().catch((e) => console.error(e)); ask.hidden = true; render() }
+        ask.replaceChildren(h('span', {}, t('Delete the conversations already kept?')),
+          h('button', { onclick: forgetThen(() => chats.forgetProject(project)) }, t('This project’s')),
+          h('button', { onclick: forgetThen(() => chats.forgetAll()) }, t('Every project’s')),
+          h('button', { onclick: () => { ask.hidden = true } }, t('Keep them')))
+        ask.hidden = false
+        render()
+      },
+    }) as HTMLInputElement
     async function render() {
       const all = await chats.list(project).catch(() => [] as ChatMeta[])
       clearAll.hidden = !all.length
-      if (!all.length) { items.replaceChildren(h('li', { class: 'muted small' }, t('No past conversations yet.'))); return }
+      if (!all.length) { items.replaceChildren(h('li', { class: 'muted small' }, aiPrefs.keepChats ? t('No past conversations yet.') : t('Conversations aren’t being kept.'))); return }
       items.replaceChildren(...all.map((m) => h('li', { class: 'chatrow' },
         h('button', { class: 'chatopen', onclick: () => { dlg.close(); openChat(m) } },
           h('span', { class: 'chattitle' }, m.title),
@@ -201,6 +218,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     const dlg = dialog('settings',
       h('h3', {}, t('Past conversations')),
       h('p', { class: 'muted small' }, t('Saved only in this browser, for this project. They can quote your documents.')),
+      h('label', { class: 'check' }, keep, t('Keep past conversations in this browser')),
+      ask,
       items,
       h('div', { class: 'row end' }, clearAll, h('button', { class: 'primary', autofocus: true, onclick: () => dlg.close() }, t('Close'))),
     )

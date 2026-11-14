@@ -70,6 +70,20 @@ export const chats = {
     await done(tx)
   },
 
+  /** How many are kept, in every project. */
+  async count(): Promise<number> {
+    const db = await open()
+    return result(db.transaction('meta').objectStore('meta').count())
+  },
+
+  async forgetAll() {
+    const db = await open()
+    const tx = db.transaction(['meta', 'body'], 'readwrite')
+    tx.objectStore('meta').clear()
+    tx.objectStore('body').clear()
+    await done(tx)
+  },
+
   async forgetProject(project: string) {
     const db = await open()
     const ids = await result(db.transaction('meta').objectStore('meta').index('project').getAllKeys(project))

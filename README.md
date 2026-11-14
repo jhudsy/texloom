@@ -741,7 +741,9 @@ Providers (pick one in the tab; settings via ⚙):
   site, set `OLLAMA_ORIGINS`. Use a model with tool calling (for example a Qwen 3.x model).
 
 Conversations are saved in your browser, per project: **Past conversations** lists them to read, continue (on the provider and
-model they used) or delete, and they're removed if you remove the project from this browser.
+model they used) or delete, and they're removed if you remove the project from this browser. To keep none at all (on a shared
+computer, say), untick **Keep past conversations in this browser** there; it offers to delete those already kept, for this
+project or every project.
 
 **Connect an AI tool via MCP…** in the tab shows how to connect a tool you already use through
 [MCP](#agents-mcp) instead, such as Claude Code. It runs under your own account with that tool, so it

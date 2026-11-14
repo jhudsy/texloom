@@ -57,6 +57,8 @@ export const aiPrefs: {
   get(id?: string): ProviderConfig
   save(id: string, cfg: Partial<ProviderConfig>): void
   reviewEdits: boolean
+  /** Keep past conversations in this browser (on unless turned off here). */
+  keepChats: boolean
 } = {
   get activeId(): string { return load().active in PRESETS ? load().active : 'anthropic' },
   set activeId(id: string) { const s = load(); s.active = id; localStorage.setItem(KEY, JSON.stringify(s)) },
@@ -71,6 +73,8 @@ export const aiPrefs: {
   },
   get reviewEdits(): boolean { return localStorage.getItem('texloom.ai.review') !== 'off' },
   set reviewEdits(v: boolean) { localStorage.setItem('texloom.ai.review', v ? 'on' : 'off') },
+  get keepChats(): boolean { try { return localStorage.getItem('texloom.ai.keep') !== 'off' } catch { return true } },
+  set keepChats(v: boolean) { try { localStorage.setItem('texloom.ai.keep', v ? 'on' : 'off') } catch {} },
 }
 
 /** List models from an OpenAI-compatible /models endpoint. */

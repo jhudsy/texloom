@@ -319,6 +319,9 @@ details { margin-top: 12px; }
 .ctx { font-size: 11px; }
 .small { font-size: 12px; }
 .check.small { margin: 0; gap: 4px; }
+.keep-ask { flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 10px; margin: 0 0 10px; border-radius: 6px; background: var(--panel); }
+.keep-ask > span { flex: 1 1 100%; }
+.keep-ask[hidden] { display: none; }
 button.danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 50%, var(--line)); }
 button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent); }
 .recent li { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; row-gap: 3px; }
