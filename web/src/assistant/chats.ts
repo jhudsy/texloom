@@ -9,7 +9,8 @@ export type Entry =
   | { k: 'summary'; text: string } // what the assistant works from in place of earlier messages
 
 export interface ChatMeta { id: string; project: string; title: string; provider: string; model: string; at: number }
-export interface ChatBody { id: string; entries: Entry[]; state: unknown }
+/** `sys` fingerprints the instructions the conversation ran with (see `fingerprint` in panel.ts). */
+export interface ChatBody { id: string; entries: Entry[]; state: unknown; sys?: string }
 
 const DB = 'texloom-assistant', MAX_PER_PROJECT = 50
 

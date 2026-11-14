@@ -462,6 +462,12 @@ A chat panel (`web/src/assistant/`) that acts on the project like another collab
   - Any edit to the history drops every Claude thinking block, since a block is valid only after the exact
     history it came from (removing all of them is allowed). The summary is shown, and saved, as its own entry
     in the conversation; what's saved for continuing is the compacted history.
+- **The person's instructions** (⚙, `texloom.ai.instructions`, up to 4,000 characters) are appended to the system
+  prompt in an `<instructions_from_the_person>` block, below the assistant's rules, which win if they conflict.
+  The system prompt is fixed for a conversation (saving settings starts a new one), so it still caches. A saved
+  conversation records a fingerprint of the prompt it ran with; continuing it under a different one (new
+  instructions, or a new version) drops Claude's thinking blocks, which are valid only with the prompt they were
+  made under. **What the assistant is sent…** shows the prompt, the tools and the next context block.
 - **Context:** the system prompt is static, so it caches. Each user message starts with
   a `<context>` block: project, main file, open file and current selection.
 - **Keys** live in `localStorage` only; they never enter the Yjs document or pass

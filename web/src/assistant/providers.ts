@@ -61,6 +61,8 @@ export const aiPrefs: {
   reviewEdits: boolean
   /** Keep past conversations in this browser (on unless turned off here). */
   keepChats: boolean
+  /** The person's own standing instructions, sent to every model with the assistant's. */
+  instructions: string
 } = {
   get activeId(): string { return load().active in PRESETS ? load().active : 'anthropic' },
   set activeId(id: string) { const s = load(); s.active = id; localStorage.setItem(KEY, JSON.stringify(s)) },
@@ -77,6 +79,8 @@ export const aiPrefs: {
   set reviewEdits(v: boolean) { localStorage.setItem('texloom.ai.review', v ? 'on' : 'off') },
   get keepChats(): boolean { try { return localStorage.getItem('texloom.ai.keep') !== 'off' } catch { return true } },
   set keepChats(v: boolean) { try { localStorage.setItem('texloom.ai.keep', v ? 'on' : 'off') } catch {} },
+  get instructions(): string { try { return localStorage.getItem('texloom.ai.instructions') ?? '' } catch { return '' } },
+  set instructions(v: string) { try { if (v.trim()) localStorage.setItem('texloom.ai.instructions', v); else localStorage.removeItem('texloom.ai.instructions') } catch {} },
 }
 
 /** List models from an OpenAI-compatible /models endpoint. */

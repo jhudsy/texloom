@@ -39,6 +39,10 @@ export interface LlmSession {
   shrinkResults(from: number, max: number): boolean
   /** One reply to one prompt, without tools or history (for the summary). */
   ask(system: string, prompt: string, signal: AbortSignal): Promise<string>
+  /** Drop Claude's thinking blocks, which are valid only with the instructions they were made under. */
+  forgetThinking(): void
+  /** The instructions this session sends. */
+  readonly system: string
   /** The model's context window in tokens, if the provider can tell (now: it may not know until the model is loaded). */
   contextWindow(): Promise<number | null>
 }
@@ -96,7 +100,7 @@ class AnthropicSession implements LlmSession {
   private sizeAtLast = 0 // the history's size (characters) when it was sent
   private pending = '' // a summary waiting for the next message, when nothing after it was kept
 
-  constructor(private cfg: ProviderConfig, tools: ToolDef[], private system: string, private messages: Anthropic.Beta.BetaMessageParam[]) {
+  constructor(private cfg: ProviderConfig, tools: ToolDef[], readonly system: string, private messages: Anthropic.Beta.BetaMessageParam[]) {
     this.client = new Anthropic({
       apiKey: cfg.apiKey,
       baseURL: cfg.baseUrl,
@@ -133,6 +137,7 @@ class AnthropicSession implements LlmSession {
   }
 
   /** Thinking blocks are valid only after the exact history they came from: after an edit, none can stay. */
+  forgetThinking() { this.dropThinking() }
   private dropThinking() {
     for (const m of this.messages) {
       if (m.role !== 'assistant' || typeof m.content === 'string') continue
@@ -269,7 +274,7 @@ class OpenAISession implements LlmSession {
   private sizeAtLast = 0
   private pending = ''
 
-  constructor(private cfg: ProviderConfig, tools: ToolDef[], private system: string, history: OaiMessage[]) {
+  constructor(private cfg: ProviderConfig, tools: ToolDef[], readonly system: string, history: OaiMessage[]) {
     this.messages = history.filter((m) => m.role !== 'system')
     this.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: jsonSchema(t) } }))
   }
@@ -298,6 +303,8 @@ class OpenAISession implements LlmSession {
     }
     return out.join('\n\n')
   }
+
+  forgetThinking() {} // reasoning isn't kept in this format
 
   replaceBefore(keepFrom: number, summary: string) {
     this.messages = this.messages.slice(keepFrom)

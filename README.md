@@ -745,6 +745,12 @@ model they used) or delete, and they're removed if you remove the project from t
 computer, say), untick **Keep past conversations in this browser** there; it offers to delete those already kept, for this
 project or every project.
 
+**Your instructions**, in ⚙, are standing instructions of your own ("write in British English", "use `\cref`"):
+they're sent with the assistant's own on every request, to every model and provider, and are never summarised away.
+They're kept only in your browser. **What the assistant is sent…** next to them shows everything sent besides the
+conversation itself: the assistant's instructions with yours, the tools it can use, the context block in front of
+each message, and roughly how many tokens they and the current conversation take.
+
 Each request sends the whole conversation, so a long one would eventually outgrow what the model can take in at
 once (its *context*). Before that happens, at 70% of the context (or of 200,000 tokens, if that's less), the
 assistant asks the model to summarise the earlier messages and carries on from the summary: "Earlier messages

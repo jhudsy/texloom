@@ -6,7 +6,7 @@ import type { Replica } from '../replica'
 import { dialog, h } from '../dom'
 import { aiPrefs, listModels, PRESETS, type ProviderConfig } from './providers'
 import { createSession, explainError, tokensIn, type LlmSession, type TurnEvents, type TurnResult } from './llm'
-import { ASSISTANT, runTool, toolsFor, type Change, type ToolCtx } from './tools'
+import { ASSISTANT, jsonSchema, runTool, toolsFor, type Change, type ToolCtx } from './tools'
 import { locale, t, tn } from '../i18n'
 import { commonEnds, refine, wordDiff } from '../worddiff'
 import { diffPiece } from '../review'
@@ -29,6 +29,18 @@ const SUMMARY_PROMPT = `Summarise the conversation below for the assistant to co
 Leave out file contents (they can be read again), pleasantries, and anything superseded. Be as short as you can while keeping all of that; at most about 1,500 words.
 
 `
+const MAX_INSTRUCTIONS = 4000 // characters of the person's own instructions
+/** The assistant's instructions, followed by the person's own if they've written any. */
+function systemPrompt(): string {
+  const mine = aiPrefs.instructions.trim().slice(0, MAX_INSTRUCTIONS)
+  return mine ? `${SYSTEM}\n\n<instructions_from_the_person>\nThe person using you has given these standing instructions. Follow them, unless they conflict with the rules above.\n${mine.replace(/<(\/?)instructions_from_the_person/gi, '‹$1instructions_from_the_person')}\n</instructions_from_the_person>` : SYSTEM
+}
+/** A short fingerprint of the instructions a conversation ran with (FNV-1a), to notice when they change. */
+function fingerprint(text: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193)
+  return `${text.length}:${(h >>> 0).toString(16)}`
+}
 const TOO_LONG = /prompt is too long|context.{0,20}(length|window|limit|size)|maximum context|too many tokens|exceeds? (the )?(available )?context|n_ctx|input is too long|reduce the length|token limit/i
 /** The model's context, in tokens, per provider and model: asked once. */
 const contextOf = new Map<string, number | null>()
@@ -162,7 +174,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       if (json.length <= MAX_SAVED_STATE) state = JSON.parse(json)
     }
     chat.meta = { ...chat.meta, provider: providerId, model: cfg.model, at: Date.now() }
-    chats.save(chat.meta, { id: chat.meta.id, entries: [...chat.entries], state }).catch((e) => console.error(e))
+    chats.save(chat.meta, { id: chat.meta.id, entries: [...chat.entries], state, sys: session ? fingerprint(session.system) : undefined }).catch((e) => console.error(e))
   }
 
   function entryEl(e: Entry): HTMLElement {
@@ -264,7 +276,9 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     }
     lastUndoBtn = null
     chat = { meta, entries: body.entries }
-    session = body.state && meta.provider in PRESETS ? createSession(cfg, toolsFor(host.writable), SYSTEM, body.state) : null
+    session = body.state && meta.provider in PRESETS ? createSession(cfg, toolsFor(host.writable), systemPrompt(), body.state) : null
+    // Claude's thinking blocks are tied to the instructions they were made under (which change with your own, or a new version)
+    if (session && body.sys !== fingerprint(session.system)) session.forgetThinking()
     log.replaceChildren(...body.entries.map(entryEl))
     if (!session) hint(t('This conversation can be read here, but the assistant can’t pick it up again. If you send a message, it starts without the earlier history.'), 'note', false)
     log.scrollTop = log.scrollHeight
@@ -376,13 +390,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     })
   }
 
-  // ---- the agent loop ----
-  async function send() {
-    const text = input.value.trim()
-    if (!text) return
-    if (!cfg.model) return configDialog(t('Choose a model first.'))
-    if (cfg.kind === 'anthropic' && !cfg.apiKey) return configDialog(t('Add your Anthropic API key first.'))
-    input.value = ''
+  /** What goes in front of each message: where the person is in the project. */
+  function contextBlock(): string {
     const c = host.editorContext()
     const ctxLines = [`Project: ${r.meta.get('name') || 'untitled'}; main file: ${r.meta.get('main') || 'auto'}; user: ${host.userName()}`]
     if (c?.file) ctxLines.push(`Open file: ${c.file}`)
@@ -391,7 +400,44 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     if (c?.fileSelection !== undefined) ctxLines.push(`That selection includes the user's own suggestions. In the file itself it reads:\n${c.fileSelection.slice(0, 8000)}`)
     // what's inside comes from the project, which collaborators write: it mustn't end the block
     const inert = (s: string) => s.replace(/<(\/?)(context)/gi, '‹$1$2')
-    const message = `<context>\n${inert(ctxLines.join('\n'))}\n</context>\n\n${text}`
+    return `<context>\n${inert(ctxLines.join('\n'))}\n</context>`
+  }
+
+  /** Everything the assistant is sent besides the conversation, to read (and copy). */
+  async function sentDialog() {
+    const tools = toolsFor(host.writable)
+    const system = systemPrompt()
+    const toolText = tools.map((d) => `${d.name}(${Object.keys((jsonSchema(d) as any).properties ?? {}).join(', ')})\n${d.description}`).join('\n\n')
+    const fixed = tokensIn(system.length + JSON.stringify(tools.map((d) => ({ name: d.name, description: d.description, parameters: jsonSchema(d) }))).length)
+    const usage = h('p', { class: 'muted small' }, t('About {{n}} tokens before any conversation.', { n: fixed.toLocaleString(locale) }))
+    const copy = (text: string) => h('button', { class: 'small', onclick: (e: any) => navigator.clipboard.writeText(text).then(() => { e.target.textContent = t('Copied') }, () => {}) }, t('Copy'))
+    const dlg = dialog('settings sent',
+      h('h3', {}, t('What the assistant is sent')),
+      h('p', { class: 'muted' }, t('Every request sends these instructions and the tool descriptions, then the whole conversation so far. Each of your messages starts with the context block below.')),
+      usage,
+      h('div', { class: 'row' }, h('h4', {}, t('Instructions')), h('span', { class: 'spacer' }), copy(system)),
+      h('pre', { class: 'sent-text' }, system),
+      h('div', { class: 'row' }, h('h4', {}, t('Tools')), h('span', { class: 'spacer' }), copy(toolText)),
+      h('pre', { class: 'sent-text' }, toolText),
+      h('h4', {}, t('Context block (as it would be for your next message)')),
+      h('pre', { class: 'sent-text' }, contextBlock()),
+      h('div', { class: 'row end' }, h('button', { class: 'primary', autofocus: true, onclick: () => dlg.close() }, t('Close'))),
+    )
+    if (session) {
+      const room = await roomFor(session).catch(() => null)
+      if (room) usage.textContent += ' ' + t('Each request in this conversation, instructions included: about {{used}} of {{room}}; it is summarised past {{at}}.',
+        { used: session.used().toLocaleString(locale), room: room.toLocaleString(locale), at: Math.round(COMPACT_AT * room).toLocaleString(locale) })
+    }
+  }
+
+  // ---- the agent loop ----
+  async function send() {
+    const text = input.value.trim()
+    if (!text) return
+    if (!cfg.model) return configDialog(t('Choose a model first.'))
+    if (cfg.kind === 'anthropic' && !cfg.apiKey) return configDialog(t('Add your Anthropic API key first.'))
+    input.value = ''
+    const message = `${contextBlock()}\n\n${text}`
 
     chat ??= { meta: { id: crypto.randomUUID(), project: r.keys.project, title: text.replace(/\s+/g, ' ').slice(0, 80), provider: providerId, model: cfg.model, at: Date.now() }, entries: [] }
     chat.entries.push({ k: 'user', text })
@@ -402,7 +448,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     log.scrollTop = log.scrollHeight
 
     const tools = toolsFor(host.writable)
-    session ??= createSession(cfg, tools, SYSTEM)
+    session ??= createSession(cfg, tools, systemPrompt())
     const s = session
     abort = new AbortController()
     sendBtn.textContent = t('Stop')
@@ -541,6 +587,9 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     const effort = h('select', {}, ...EFFORTS.map(([e, label]) => h('option', { value: e, ...(e === c.effort ? { selected: true } : {}) }, label))) as HTMLSelectElement
     const contextIn = h('input', { type: 'number', min: 1024, step: 1024, value: c.contextWindow ?? '', placeholder: t('automatic'),
       title: t('How many tokens the model can take in at once. Long conversations are summarised before they reach it.') }) as HTMLInputElement
+    const mine = h('textarea', { rows: 4, maxlength: MAX_INSTRUCTIONS, class: 'my-instructions',
+      placeholder: t('For example: write in British English; use \\cref for cross-references; keep explanations short.') }) as HTMLTextAreaElement
+    mine.value = aiPrefs.instructions
     const found = h('span', { class: 'muted small' })
     const detect = () => {
       found.textContent = ''
@@ -574,6 +623,9 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
         h('span', {}, t('Context window')), h('div', { class: 'row' }, contextIn, found),
       ),
       status,
+      h('label', { class: 'block' }, h('span', {}, t('Your instructions')), mine),
+      h('p', { class: 'muted small' }, t('Sent with every request, to every model and provider, and kept when a long conversation is summarised. Stored only in this browser. Saving starts a new conversation.'),
+        ' ', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); sentDialog() } }, t('What the assistant is sent…'))),
       h('p', {}, connectButton()),
       h('p', { class: 'muted small' }, t('Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to the endpoint above.')),
       h('div', { class: 'row end' },
@@ -583,6 +635,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
             aiPrefs.save(providerId, { baseUrl: base.value.trim(), apiKey: key.value.trim(), model: model.value.trim(), effort: effort.value as any,
               contextWindow: Math.round(Number(contextIn.value)) >= 1024 ? Math.round(Number(contextIn.value)) : undefined })
             contextOf.clear() // a model reloaded with another context is asked again
+            aiPrefs.instructions = mine.value.slice(0, MAX_INSTRUCTIONS)
             cfg = aiPrefs.get(providerId)
             refreshModels()
             newChat(true)

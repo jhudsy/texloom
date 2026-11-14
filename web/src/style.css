@@ -319,6 +319,11 @@ details { margin-top: 12px; }
 .ctx { font-size: 11px; }
 .small { font-size: 12px; }
 .check.small { margin: 0; gap: 4px; }
+dialog.dlg.sent { width: min(820px, 94vw); }
+.sent-text { max-height: 32vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 4px 0 12px; }
+dialog.dlg.sent h4 { margin: 8px 0 0; }
+label.block { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.my-instructions { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
 .keep-ask { flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 10px; margin: 0 0 10px; border-radius: 6px; background: var(--panel); }
 .keep-ask > span { flex: 1 1 100%; }
 .keep-ask[hidden] { display: none; }
