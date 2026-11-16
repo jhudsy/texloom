@@ -48,6 +48,7 @@ const de: Catalog = {
   'Done. This is the project at its new keys: use Share to send collaborators new links.': 'Fertig. Dies ist das Projekt mit den neuen Schlüsseln: Senden Sie Mitwirkenden über „Teilen“ neue Links.',
   'Moving failed part-way: {{error}}. The new copy may exist already; reopen this project to check, and try again.': 'Umstellung unterwegs fehlgeschlagen: {{error}}. Die neue Kopie kann bereits existieren; öffnen Sie dieses Projekt neu, um das zu prüfen, und versuchen Sie es erneut.',
   'Moving failed: {{error}}. Nothing was retired; the project is unchanged.': 'Umstellung fehlgeschlagen: {{error}}. Nichts wurde stillgelegt; das Projekt ist unverändert.',
+  'Show your owner link': 'Ihren Eigentümer-Link anzeigen',
 }
 
 export default de

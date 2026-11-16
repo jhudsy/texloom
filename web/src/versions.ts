@@ -13,6 +13,24 @@ type Saved = Pick<Replica, 'doc' | 'versions' | 'versionChain'>
 type Deletions = ReturnType<typeof Y.createDeleteSet>
 
 const MAX_AUTO = 300
+const HOUR = 3600_000, DAY = 24 * HOUR
+/** At most one automatic version per project in this long, whoever's editing. */
+export const AUTO_GAP = 15 * 60_000
+
+/** The automatic versions to unlist, thinned out with age: all from the last day, the newest in
+ *  each hour for a week, the newest each day before that, and never more than MAX_AUTO. */
+export function thinned(autos: Version[], now: number): Set<Version> {
+  const drop = new Set<Version>(), seen = new Set<string>()
+  for (const v of [...autos].sort((a, b) => b.at - a.at)) {
+    const age = now - v.at
+    if (age < DAY) continue
+    const slot = age < 7 * DAY ? `h${Math.floor(v.at / HOUR)}` : `d${Math.floor(v.at / DAY)}`
+    if (seen.has(slot)) drop.add(v); else seen.add(slot)
+  }
+  const kept = autos.filter((v) => !drop.has(v)).sort((a, b) => a.at - b.at)
+  for (const v of kept.slice(0, Math.max(0, kept.length - MAX_AUTO))) drop.add(v)
+  return drop
+}
 const FULL_EVERY = 64 // every so many links, one holds the whole snapshot, so rebuilding one stays bounded
 
 /** The deletions in `now` that aren't in `had`. Both sorted and merged, as Yjs makes them. */
@@ -107,11 +125,10 @@ export function saveVersion(r: Saved, by: string, label?: string, auto = false) 
   r.doc.transact(() => {
     r.versionChain.push([link])
     r.versions.push([{ at: Date.now(), by, ...(label ? { label } : {}), ...(auto ? { auto: true } : {}), link: link.id }])
-    // keep the newest automatic versions; named ones (also named later) are kept forever
-    const prunable = (v: any) => v?.auto && !versionLabel(r, v)
-    let excess = r.versions.toArray().filter(prunable).length - MAX_AUTO
-    for (let i = 0; i < r.versions.length && excess > 0;) {
-      if (prunable(r.versions.get(i))) { r.versions.delete(i, 1); excess-- } else i++
+    // automatic versions thin out with age; named ones (also named later) are kept forever
+    const drop = thinned(r.versions.toArray().filter((v: any) => v?.auto && !versionLabel(r, v)), Date.now())
+    for (let i = r.versions.length - 1; i >= 0 && drop.size; i--) {
+      if (drop.delete(r.versions.get(i))) r.versions.delete(i, 1)
     }
   })
 }

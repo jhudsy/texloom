@@ -48,6 +48,7 @@ const zh: Catalog = {
   'Done. This is the project at its new keys: use Share to send collaborators new links.': '完成。这是使用新密钥的项目：请使用“共享”向协作者发送新链接。',
   'Moving failed part-way: {{error}}. The new copy may exist already; reopen this project to check, and try again.': '迁移中途失败：{{error}}。新副本可能已存在；请重新打开此项目查看，然后重试。',
   'Moving failed: {{error}}. Nothing was retired; the project is unchanged.': '迁移失败：{{error}}。未停用任何内容；项目未更改。',
+  'Show your owner link': '显示您的所有者链接',
 }
 
 export default zh

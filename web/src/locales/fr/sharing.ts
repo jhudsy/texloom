@@ -75,6 +75,7 @@ const fr: Catalog = {
     'Le déplacement a échoué en cours de route : {{error}}. La nouvelle copie existe peut-être déjà ; rouvrez ce projet pour vérifier, puis réessayez.',
   'Moving failed: {{error}}. Nothing was retired; the project is unchanged.':
     'Le déplacement a échoué : {{error}}. Rien n’a été retiré ; le projet est inchangé.',
+  'Show your owner link': 'Afficher votre lien de propriétaire',
 }
 
 export default fr

@@ -6,12 +6,14 @@ import { h, askText } from './dom'
 import { diffLines, diffStats, type Op } from './diff'
 import { putText } from './projectfiles'
 import { t, tn, locale } from './i18n'
-import { docAt, nameVersion, observeNames, saveVersion, versionLabel, type Version } from './versions'
+import { AUTO_GAP, docAt, nameVersion, observeNames, saveVersion, versionLabel, type Version } from './versions'
 
 const AUTO_IDLE = 2 * 60_000 // auto-save after this long without local edits
 
-/** Save an automatic version after a pause in local editing, and when leaving the page. Only
- *  this person's changes to files and folders count: saving a version changes the document too. */
+/** Save an automatic version after a pause in local editing, and when leaving the page, but at
+ *  most one per AUTO_GAP for the project: with several people editing, each used to save their own
+ *  on every pause and the list filled up. Only this person's changes to files and folders count
+ *  (saving a version changes the document too); a version anyone saves after them covers them. */
 export function autoSave(r: Replica, by: () => string) {
   if (!r.keys.writable) return
   let dirty = false, last = 0
@@ -19,7 +21,9 @@ export function autoSave(r: Replica, by: () => string) {
   r.files.observeDeep((_events, tx) => changed(tx))
   r.bin.observe((_event, tx) => changed(tx))
   r.dirs.observe((_event, tx) => changed(tx))
-  const flush = () => { if (dirty) { dirty = false; saveVersion(r, by(), undefined, true) } }
+  const newest = () => Math.max(0, ...r.versions.toArray().map((v) => Number(v?.at) || 0))
+  r.versions.observe(() => { if (newest() >= last) dirty = false }) // someone saved one since: it has these changes
+  const flush = () => { if (dirty && Date.now() - newest() >= AUTO_GAP) { dirty = false; saveVersion(r, by(), undefined, true) } }
   setInterval(() => { if (dirty && Date.now() - last > AUTO_IDLE) flush() }, 30_000)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush() })
 }
@@ -71,6 +75,8 @@ export interface HistoryHost {
 }
 
 const when = (at: number) => new Date(at).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
+const whenDay = (at: number) => new Date(at).toLocaleDateString(locale, { dateStyle: 'medium' })
+const dayOf = (at: number) => new Date(at).toDateString()
 
 // what happened to a file since a version (the key is also its CSS class)
 const STATUS: Record<string, string> = {
@@ -84,6 +90,7 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
   const authorsChk = h('input', { type: 'checkbox', 'aria-label': t('Show who wrote each line'), onchange: (e: any) => host.showAuthors(e.target.checked) })
   let selected: Version | null = null
   let filter: 'all' | 'named' = 'all'
+  const open = new Set<string>() // days whose automatic versions are shown one by one
 
   const filterSel = h('select', { 'aria-label': t('Which versions'), onchange: (e: any) => { filter = e.target.value; render() } },
     h('option', { value: 'all' }, t('All versions')), h('option', { value: 'named' }, t('Named only')))
@@ -107,12 +114,27 @@ export function createHistoryPanel(host: HistoryHost): HTMLElement {
         all.length ? t('No named versions yet.') : t('No versions yet. Versions are saved automatically a couple of minutes after you stop editing; use “Save version…” to name one.')))
       return
     }
-    list.replaceChildren(...shown.map((v) => { const label = versionLabel(r, v); return h('li', {
-      class: `${v === selected ? 'active' : ''} ${label ? 'named' : ''}`,
+    const row = (v: Version, inGroup = false) => { const label = versionLabel(r, v); return h('li', {
+      class: `${v === selected ? 'active' : ''} ${label ? 'named' : ''} ${inGroup ? 'grouped' : ''}`,
       onclick: () => { selected = v; render(); showVersion(v) },
     },
       h('div', { class: 'vlabel' }, label ? `★ ${label}` : t('Auto-saved')),
-      h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`)) }))
+      h('div', { class: 'muted small' }, `${when(v.at)} · ${v.by}`)) }
+    // named versions one by one; automatic ones between them folded by day
+    const rows: HTMLElement[] = []
+    for (let i = 0; i < shown.length;) {
+      const v = shown[i]
+      if (versionLabel(r, v)) { rows.push(row(v)); i++; continue }
+      const day = dayOf(v.at), run: Version[] = []
+      while (i < shown.length && !versionLabel(r, shown[i]) && dayOf(shown[i].at) === day) run.push(shown[i++])
+      if (run.length === 1) { rows.push(row(run[0])); continue }
+      const key = `${day}:${run[0].at}`, unfolded = open.has(key) || run.includes(selected!)
+      rows.push(h('li', { class: 'vgroup', 'aria-expanded': String(unfolded), onclick: () => { if (unfolded) open.delete(key); else open.add(key); render() } },
+        h('div', { class: 'vlabel' }, `${unfolded ? '▾' : '▸'} ${tn(run.length, '{{n}} auto-saved version', '{{n}} auto-saved versions')}`),
+        h('div', { class: 'muted small' }, `${whenDay(run[0].at)} · ${[...new Set(run.map((x) => x.by))].join(', ')}`)))
+      if (unfolded) rows.push(...run.map((x) => row(x, true)))
+    }
+    list.replaceChildren(...rows)
   }
 
   function showVersion(v: Version) {

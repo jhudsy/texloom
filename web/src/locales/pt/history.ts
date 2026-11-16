@@ -32,6 +32,7 @@ const pt: Catalog = {
   'Restore every file to this version? Files added since are removed. Everything stays in history.': 'Restaurar todos os arquivos para esta versão? Os arquivos adicionados depois serão removidos. Tudo continua no histórico.',
   'Restored version from {{when}}': 'Versão de {{when}} restaurada',
   '… {{n}} unchanged lines': ['… {{n}} linha sem alteração', '… {{n}} linhas sem alteração'],
+  '{{n}} auto-saved versions': ['{{n}} versão guardada automaticamente', '{{n}} versões guardadas automaticamente'],
 }
 
 export default pt

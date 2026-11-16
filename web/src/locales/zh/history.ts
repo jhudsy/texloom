@@ -32,6 +32,7 @@ const zh: Catalog = {
   'Restore every file to this version? Files added since are removed. Everything stays in history.': '将所有文件恢复到此版本？此后添加的文件将被移除。所有内容都保留在历史记录中。',
   'Restored version from {{when}}': '已恢复 {{when}} 的版本',
   '… {{n}} unchanged lines': { other: '… {{n}} 行未更改' },
+  '{{n}} auto-saved versions': { other: '{{n}} 个自动保存的版本' },
 }
 
 export default zh

@@ -410,6 +410,8 @@ dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: cen
 .versions li:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
 .versions li.active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .versions li.named .vlabel { font-weight: 600; }
+.versions li.grouped { padding-left: 24px; }
+.versions li.vgroup .vlabel { color: var(--muted); }
 .versions .vlabel { font-size: 13px; }
 .version-detail { overflow: auto; padding: 8px 10px; min-height: 0; }
 .vhead { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 6px; }

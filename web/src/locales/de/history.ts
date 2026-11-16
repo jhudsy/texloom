@@ -32,6 +32,7 @@ const de: Catalog = {
   'Restore every file to this version? Files added since are removed. Everything stays in history.': 'Alle Dateien auf diese Version zurücksetzen? Seitdem hinzugefügte Dateien werden entfernt. Alles bleibt im Verlauf.',
   'Restored version from {{when}}': 'Version von {{when}} wiederhergestellt',
   '… {{n}} unchanged lines': ['… {{n}} unveränderte Zeile', '… {{n}} unveränderte Zeilen'],
+  '{{n}} auto-saved versions': ['{{n}} automatisch gespeicherte Version', '{{n}} automatisch gespeicherte Versionen'],
 }
 
 export default de

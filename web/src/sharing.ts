@@ -121,9 +121,12 @@ export function shareDialog(r: Replica, server: string, me: string) {
     }
   }
 
-  const ownerPart = keys.owner ? [
+  // The owner's own link comes last and folded: shown first, it was the one copied and sent round,
+  // giving everyone full access (and the power to revoke others) instead of a link of their own.
+  const ownerLink = keys.owner ? h('details', { class: 'owner-link' }, h('summary', {}, t('Show your owner link')),
     h('label', {}, t('Your owner link — full access, including creating and revoking personal links. Keep it to yourself.')),
-    copyRow(keys.link(server, true)),
+    copyRow(keys.link(server, true))) : null
+  const ownerPart = keys.owner ? [
     h('h4', {}, t('Personal edit links')),
     h('p', { class: 'muted small' }, t('Give each collaborator their own edit link, so you can later revoke one person without affecting the others. Their edits are signed with their own key. For a group, one link named after the group works too (revoking it cuts off the whole group). Links you create are kept on this device, to copy or email again.')),
     h('div', { class: 'row' }, nameIn, h('button', { class: 'primary', onclick: create }, t('Create link'))),
@@ -139,6 +142,7 @@ export function shareDialog(r: Replica, server: string, me: string) {
     h('h3', {}, t('Share this project')),
     ...ownerPart,
     h('h4', {}, t('Read-only link')), copyRow(keys.link(server, false), invitation(r, keys.link(server, false), 'read', me)),
+    ownerLink,
     h('p', { class: 'muted small' }, t('“Email…” opens your own email app. The link travels in that email (not through this server), so anyone who can read the email can open the project.')),
     h('p', { class: 'muted small' }, t('Keys stay in the part after “#”, which is never sent to the server.') +
       (keys.owner ? ' ' + t('To shut someone out completely, revoke their link and move the project to new keys.') : '')),

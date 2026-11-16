@@ -8,10 +8,26 @@ import * as Y from 'yjs'
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const out = path.join(web, 'node_modules/.cache/check-versions')
 await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/versions.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'versions.mjs' } } } })
-const { saveVersion, docAt, nextLink, versionLabel, nameVersion } = await import(pathToFileURL(path.join(out, 'versions.mjs')).href)
+const { saveVersion, docAt, nextLink, versionLabel, nameVersion, thinned } = await import(pathToFileURL(path.join(out, 'versions.mjs')).href)
 
 const bad = []
 const check = (what, ok) => { if (!ok) bad.push(what) }
+
+{ // automatic versions thin out with age: all from the last day, the newest per hour for a week, per day before
+  const H = 3600_000, D = 24 * H, now = Date.UTC(2026, 10, 16, 12)
+  const autos = []
+  for (let at = now - 40 * D; at <= now; at += 15 * 60_000) autos.push({ at, by: 'x', auto: true, link: String(at) }) // as often as autoSave saves
+  const drop = thinned(autos, now), kept = autos.filter((v) => !drop.has(v))
+  check('thin: everything from the last day kept', autos.filter((v) => now - v.at < D).every((v) => !drop.has(v)))
+  const per = (vs, size) => { const m = new Map(); for (const v of vs) m.set(Math.floor(v.at / size), (m.get(Math.floor(v.at / size)) ?? 0) + 1); return m }
+  check('thin: one per hour within the week', [...per(kept.filter((v) => now - v.at >= D && now - v.at < 7 * D), H).values()].every((n) => n === 1))
+  check('thin: one per day before that', [...per(kept.filter((v) => now - v.at >= 7 * D), D).values()].every((n) => n === 1))
+  const week = autos.filter((v) => now - v.at >= D && now - v.at < 7 * D), newestIn = new Map()
+  for (const v of week) newestIn.set(Math.floor(v.at / H), Math.max(v.at, newestIn.get(Math.floor(v.at / H)) ?? 0))
+  check('thin: the newest in each hour is the one kept', week.every((v) => drop.has(v) === (v.at !== newestIn.get(Math.floor(v.at / H)))))
+  check('thin: at most 300', kept.length <= 300)
+  check('thin: weeks of saving every quarter hour keep about a day, a week of hours and a day each before', Math.abs(kept.length - (96 + 6 * 24 + 33)) <= 3)
+}
 const replica = () => {
   const doc = new Y.Doc({ gc: false })
   return { doc, versions: doc.getArray('versions'), versionChain: doc.getArray('versionChain') }
