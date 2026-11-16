@@ -318,6 +318,12 @@ if "zone=texloom_blob:" not in site:
     site = site[:at] + "limit_conn_zone $binary_remote_addr zone=texloom_blob:10m;\n" + site[at:]
     site = site.replace("    location /blob/ {\n", "    location /blob/ {\n        limit_conn texloom_blob 20;\n", 1)
     open(path, "w").write(site)
+# the page's policy: connections to other servers' projects (wss:, and ws: on this computer for testing)
+old_csp = "connect-src 'self' https: http://localhost:* http://127.0.0.1:*;"
+if old_csp in site:
+    site = site.replace(old_csp, "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*;")
+    open(path, "w").write(site)
+    print("    nginx: page policy allows other servers' websockets")
 anchor = "    location /api/ {"
 missing = "".join(b for k, b in blocks.items() if k not in site)
 if missing and anchor in site:
