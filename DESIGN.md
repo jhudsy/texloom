@@ -783,6 +783,23 @@ kinds of check guard against that kind of bug coming back.
   one is recorded (`window.__texloomBroken`, "INVARIANT BROKEN" in the log), and the end-to-end
   check fails on it, naming the first thing that went wrong.
 
+- **The folder sync, step by step.** `scripts/check_folder_model.py` (Hypothesis) and
+  `web/scripts/check-folder-model.mjs` (fast-check) run the real folder sync, on two computers with
+  a collaborator, through random sequences of what can happen: an editor saving, typing into the
+  project, changes delivered between any two, sync rounds and time passing, writes refused, an
+  older copy coming back, the app quitting and the file saved meanwhile. The file is in parts, each
+  written by one person, so what each part must hold is known exactly: after every step, each
+  editor's part on disk is what it saved and typed parts are kept; at the end everything agrees.
+  Timers, and in the browser the clock, folder and storage, belong to the test, so a failure
+  replays exactly, shrunk to the shortest sequence. The rule behind most of what they found:
+  *base* is what the file holds (set only once a write succeeds, kept across restarts), and a file
+  changed since the sync last saw it is read before anything is written over it. Besides a
+  write refused and then saved over (found by hand first), they found: the last-synced texts lost on
+  restart, so a save made while the app or page was closed undid changes the file never got; an undo
+  saved in the editor taken for a stale copy and reverted; a Windows file losing its line endings
+  when a stale copy came back; and, in the browser, a save made in the last couple of seconds
+  overwritten by changes arriving from others.
+
 Each was checked against the code from before its fix: the properties and the invariant both find
 the "\r\n" bug from 0.4.21 at once. Writing them found more: `applyText` dropped a newline added
 at the very end of a file; the desktop and the web app merged differently around lone "\r", form

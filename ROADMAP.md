@@ -17,19 +17,18 @@ that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitat
    server can't read projects.
 3. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
-4. **[One project list across servers](https://github.com/jhudsy/texloom/issues/13)**: a list that holds
-   your projects on any server, with a creation code for each, and a choice of server for a new
-   project. 4–6 days; today the list holds only its own server's projects.
+4. **[One project list across servers](https://github.com/jhudsy/texloom/issues/13)**: the rest of it.
+   Since 0.4.25 the list holds projects on any server and both apps open them there; still to do: a
+   creation code per server following the list, choosing the server for a new project, and the
+   desktop list showing each project's server. 2–3 days.
 
 ## Testing
 
-5. **[Deterministic simulation tests for the folder sync](https://github.com/jhudsy/texloom/issues/7)**:
-   a simulated filesystem and clock, so timing bugs fail every time. 2–3 days; before the folder
-   sync next changes significantly.
-6. **[TLA+ model of the GitHub lease](https://github.com/jhudsy/texloom/issues/8)**, and later the
+5. **[TLA+ model of the GitHub lease](https://github.com/jhudsy/texloom/issues/8)**, and later the
    server protocol. 2–3 days each; once several people use GitHub sync.
 
-What's checked already: README → Checks, and DESIGN.md → Guarding text handling.
+What's checked already: README → Checks, and DESIGN.md → Guarding text handling (including the
+folder sync's model-based checks, [#7](https://github.com/jhudsy/texloom/issues/7), done).
 
 ## Parked
 

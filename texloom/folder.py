@@ -17,6 +17,7 @@ import re
 import posixpath
 import shutil
 import time
+import zlib
 from pathlib import Path
 
 from pycrdt import Map, Text
@@ -113,6 +114,9 @@ MAX_FILE = 50 * 1024 * 1024
 
 def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
+
+
+BASE_NAME = re.compile(r"[0-9a-f]{64}")  # a text file's noted hash (sha above): names its kept base
 
 
 def is_text(path: str, data: bytes) -> bool:
@@ -404,10 +408,25 @@ class FolderSync:
         # is a replay (an editor saving or reloading a stale copy), not an edit.
         self.base: dict[str, str] = {}
         self.recent: dict[str, list[str]] = {}
+        # whether the newest of those was written here by the sync (from others' changes), not a
+        # save read from the folder: only then can an older version be a stale copy coming back
+        self._wrote_last: dict[str, bool] = {}
         self._compile_task: asyncio.Task | None = None
         self._known_file = self.root / STATE / "known.json"
         if self._known_file.exists():
             self.known = json.loads(self._known_file.read_text())
+        # Each text file's last-synced text, kept on disk by the hash noted for the file: a merge
+        # after a restart needs it. Without it, a save made while the app wasn't running replaced
+        # the project's text outright, undoing changes the file never got (a write refused, or the
+        # app quitting before writing).
+        self._bases_dir = self.root / STATE / "bases"
+        for rel, k in self.known.items():
+            h = k.get("h") if isinstance(k, dict) else None
+            if isinstance(h, str) and BASE_NAME.fullmatch(h) and (p := self._bases_dir / h).is_file():
+                try:
+                    self.base[rel] = zlib.decompress(p.read_bytes()).decode("utf-8")
+                except (OSError, ValueError, zlib.error):
+                    pass
         # folders mirrored between disk and the project's `dirs` (so empty folders and
         # folder deletions sync too, not only files)
         self._known_dirs_file = self.root / STATE / "known_dirs.json"
@@ -475,6 +494,30 @@ class FolderSync:
     def save_known(self) -> None:
         self._known_file.write_text(json.dumps(self.known))
         self._known_dirs_file.write_text(json.dumps(sorted(self.known_dirs)))
+        self._save_bases()
+
+    def _save_bases(self) -> None:
+        """Keep each text file's last-synced text (see __init__), named by the file's noted hash
+        (the two always go together: base is what the file holds), and drop the ones no longer noted."""
+        keep: set[str] = set()
+        try:
+            for rel, text in list(self.base.items()):
+                h = self.known.get(rel, {}).get("h")
+                if not isinstance(h, str) or not BASE_NAME.fullmatch(h):
+                    continue
+                keep.add(h)
+                p = self._bases_dir / h
+                if not p.exists():
+                    self._bases_dir.mkdir(exist_ok=True)
+                    tmp = self._bases_dir / f"{h}.part"
+                    tmp.write_bytes(zlib.compress(text.encode("utf-8"), 1))
+                    os.replace(tmp, p)
+            if self._bases_dir.is_dir():
+                for p in self._bases_dir.iterdir():
+                    if p.name not in keep:
+                        p.unlink(missing_ok=True)
+        except OSError as e:
+            log.debug("couldn't keep the synced texts: %s", e)
 
     def disk_dirs(self) -> set[str]:
         out = set()
@@ -513,6 +556,15 @@ class FolderSync:
         self.save_known()
         return True
 
+    def _unread(self, rel: str) -> bool:
+        """The file changed on disk since the sync last saw it (a save still being written, or not
+        read yet): it's read first, and written once its changes are in. Writing over it would lose
+        that save."""
+        if not (self.root / rel).exists() or self._stat_matches(rel):
+            return False
+        self._later({rel})
+        return True
+
     def _stat_matches(self, rel: str) -> bool:
         k = self.known.get(rel)
         try:
@@ -521,9 +573,13 @@ class FolderSync:
             return False
         return k is not None and k["m"] == st.st_mtime_ns and k["z"] == st.st_size
 
-    def _remember(self, rel: str, h: str, windows: bool | None = None, st: os.stat_result | None = None) -> None:
+    def _remember(self, rel: str, h: str, windows: bool | None = None, st: os.stat_result | None = None,
+                  wrote: bool | None = None) -> None:
         """Note a file's state on disk; `windows`: it ends lines with \r\n (else as before); `st`: its
-        date and size, if known from before it went into place (see _write)."""
+        date and size, if known from before it went into place (see _write); `wrote`: this version
+        was written by the sync (True) or saved in the folder (False); None: as before."""
+        if wrote is not None:
+            self._wrote_last[rel] = wrote
         st = st or (self.root / rel).stat()
         self.known[rel] = {"m": st.st_mtime_ns, "z": st.st_size, "h": h,
                            "c": self._windows(rel) if windows is None else windows}
@@ -545,8 +601,10 @@ class FolderSync:
             return False
 
     def _stale(self, rel: str, h: str) -> bool:
-        """The file holds a version this folder had earlier, not the latest: a replay."""
-        return h in self.recent.get(rel, [])[:-1]
+        """The file holds a version this folder had earlier, not the latest: a replay. Only when the
+        latest was written by the sync: an editor that hasn't reloaded it may save what it had. When
+        the latest was saved here, going back to an older text is that editor's own undo, an edit."""
+        return self._wrote_last.get(rel, False) and h in self.recent.get(rel, [])[:-1]
 
     def _moves(self, paths: set[str]) -> dict[str, tuple[str, str]]:
         """Files renamed or moved on disk: new path -> (old path, hash). A rename reaches us as a
@@ -724,7 +782,8 @@ class FolderSync:
                 # isn't an edit: applying it would undo collaborators' changes. Write the
                 # project's current text back instead.
                 log.warning("%s: an older version reappeared on disk (another program wrote it); keeping the project's text", rel)
-                self.known.pop(rel, None)
+                if rel in self.known:  # written again below; its line endings stay as noted, not the copy's
+                    self.known[rel] = {**self.known[rel], "h": "", "m": before.st_mtime_ns, "z": before.st_size}
                 self._rewrite = True
                 continue
             windows = None
@@ -756,7 +815,7 @@ class FolderSync:
                         del self.r.files[rel]
                     self.r.bin[rel] = {"h": bid, "size": size}
                 self.r.local_change(setbin)
-            self._remember(rel, h, windows, st=before)
+            self._remember(rel, h, windows, st=before, wrote=False)
             log.info("↑ %s", rel)
             changed = True
             ups.add(rel)
@@ -802,6 +861,8 @@ class FolderSync:
             if self.known.get(rel, {}).get("h") == h and (self.root / rel).exists():
                 self.base[rel] = text  # what disk holds, as the project has it
                 continue
+            if self._unread(rel):
+                continue
 
             def put(rel=rel, data=data, h=h, text=text):
                 self._write(rel, data, h)
@@ -820,6 +881,8 @@ class FolderSync:
                 continue
             wanted.add(rel)
             if self.known.get(rel, {}).get("h") == bid and (self.root / rel).exists():
+                continue
+            if self._unread(rel):
                 continue
             cached = self.r.dir / "blobs" / bid
             if cached.exists():
@@ -950,7 +1013,7 @@ class FolderSync:
         except OSError:
             tmp.unlink(missing_ok=True)
             raise
-        self._remember(rel, h, st=st)
+        self._remember(rel, h, st=st, wrote=True)
         log.info("↓ %s", rel)
         for f in new_lines:
             log.warning("⚠ %s — if you compile this folder with your own LaTeX tools, check it first.", f.describe())

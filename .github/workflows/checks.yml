@@ -38,5 +38,8 @@ jobs:
           npm run check-xr
           npm run check-chars
           npm run check-props
+          npm run check-folder-model
       - name: Property checks of the desktop's text handling, and the same rules as the web app
         run: uv run --with hypothesis python scripts/check_props.py
+      - name: Model-based check of the desktop's folder sync (two computers and a collaborator, random steps)
+        run: uv run --with hypothesis python scripts/check_folder_model.py

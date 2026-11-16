@@ -883,6 +883,8 @@ npm run check-chars     # edits never cut an emoji (or any character outside the
 npm run check-props     # random texts and edits (Windows line endings, emoji): the editor and the shared text stay identical, merges and line endings behave
 cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for the desktop, and its merge agrees with the web app's
 uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
+uv run --with hypothesis python scripts/check_folder_model.py     # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
+(cd web && npm run check-folder-model)                           # the same for the browser's folder sync, on a fake clock and folder
 ```
 
 Sync-only projects end to end: `uv run python scripts/check_synconly.py` starts its own throwaway

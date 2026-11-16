@@ -13,7 +13,8 @@
     "check-suggest": "node scripts/check-suggest.mjs",
     "check-xr": "node scripts/check-xr.mjs",
     "check-chars": "node scripts/check-chars.mjs",
-    "check-props": "node scripts/check-props.mjs"
+    "check-props": "node scripts/check-props.mjs",
+    "check-folder-model": "node scripts/check-folder-model.mjs"
   },
   "keywords": [],
   "author": "",

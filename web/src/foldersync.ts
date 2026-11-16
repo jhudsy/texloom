@@ -95,13 +95,27 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
   // Text files: the text last synced with disk (the base of a three-way merge), and the hashes
   // of versions recently written or read here. An older one reappearing on disk is a replay
   // (an editor saving or reloading a stale copy), not an edit. Same rules as texloom/folder.py.
-  const base = new Map<string, string>(), recent = new Map<string, string[]>()
+  // Only when the latest was written here by the sync (others' changes) can an older version be a
+  // stale copy coming back; when it was a save in the folder, going back is that editor's undo.
+  const base = new Map<string, string>(), recent = new Map<string, string[]>(), wroteLast = new Map<string, boolean>()
+  // Each text file's last-synced text is kept in this browser's storage too, with the hash noted for
+  // the file (base is what the file holds): reopening the page needs it to merge a save made while it
+  // was closed. Without it the save replaced the project's text, undoing changes the file never got.
+  const BKEY = (p: string) => `base.${r.keys.project}.${p}`
+  const savedBase = new Map<string, string>() // path -> hash of the base kept in storage
+  if (same) {
+    for (const p of Object.keys(known)) {
+      const b = await kv<{ h: string; t: string }>(BKEY(p)).catch(() => undefined)
+      if (b && b.h === known[p].h) { base.set(p, b.t); savedBase.set(p, b.h) }
+    }
+  }
   let rewrite = false
-  const remember = (p: string, h: string) => {
+  const remember = (p: string, h: string, wrote?: boolean) => {
     const seen = (recent.get(p) ?? []).filter((x) => x !== h)
     seen.push(h); recent.set(p, seen.slice(-30))
+    if (wrote !== undefined) wroteLast.set(p, wrote)
   }
-  const stale = (p: string, h: string) => (recent.get(p) ?? []).slice(0, -1).includes(h)
+  const stale = (p: string, h: string) => !!wroteLast.get(p) && (recent.get(p) ?? []).slice(0, -1).includes(h)
   // A changed file is read only once it has stopped changing: a read halfway through a save (some
   // editors empty a file, then write it) or through copying a big file in would share a cut-off
   // file, for text its missing end as deleted. Same rules as _settle in texloom/folder.py.
@@ -128,7 +142,15 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
   const bytes = async (f: File): Promise<Uint8Array | null> => {
     try { return new Uint8Array(await f.arrayBuffer()) } catch { lookAgain(SETTLE + 50); return null }
   }
-  const save = () => Promise.all([kv(KEY, known), kv(DKEY, [...knownDirs])]).catch(() => {})
+  const saveBases = async () => {
+    for (const [p, t] of base) {
+      const h = known[p]?.h
+      if (!h || savedBase.get(p) === h) continue
+      await kv(BKEY(p), { h, t }); savedBase.set(p, h)
+    }
+    for (const p of [...savedBase.keys()]) if (!known[p]) { await kv(BKEY(p), null); savedBase.delete(p) }
+  }
+  const save = () => Promise.all([kv(KEY, known), kv(DKEY, [...knownDirs]), saveBases()]).catch(() => {})
   const sync: FolderSync = { name: root.name, stop, status: () => last, onChange: null, onPrograms: null }
   const note = (s: string) => { last = s; sync.onChange?.() }
 
@@ -142,6 +164,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       const text = yt.toString(), data = new TextEncoder().encode(known[p]?.c ? text.replace(/\r?\n/g, '\r\n') : text)
       const h = await sha(data)
       if (known[p]?.h === h) { base.set(p, text); continue } // what disk holds, as the project has it
+      if (await unreadNow(p)) continue
       const prev = await readText(p)
       let wrote = false
       try { wrote = await put(p, data, h, text) } catch { /* refused (open in another program): tried again next round */ }
@@ -153,6 +176,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       want.add(p)
       if (unread.has(p)) continue
       if (known[p]?.h === b.h) continue
+      if (await unreadNow(p)) continue
       try { if (await put(p, await r.getBlob(b.h), b.h)) n++ } catch { /* not fetched yet: next round */ }
     }
     const dirs = new Set([...r.dirs.keys()])
@@ -186,6 +210,20 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     if (n) { await save(); note(tn(n, '↓ {{n}} file · {{time}}', '↓ {{n}} files · {{time}}', { time: new Date().toLocaleTimeString(locale) })) }
   }
 
+  /** The file changed in the folder since the sync last saw it (a save not read yet, or still being
+   *  written): it's read first, and written once its changes are in. Writing over it would lose that
+   *  save: changes arriving from others start a write 300 ms later, before the next look at the folder. */
+  async function unreadNow(p: string): Promise<boolean> {
+    const fh = await fileHandle(root, p, false)
+    if (!fh) return false
+    let f: File
+    try { f = await fh.getFile() } catch { return false }
+    const k = known[p]
+    if (k && k.m === f.lastModified && k.z === f.size) return false
+    unread.add(p); lookAgain(SETTLE + 50)
+    return true
+  }
+
   /** A file's current text in the folder, or null. */
   async function readText(p: string): Promise<string | null> {
     const fh = await fileHandle(root, p, false)
@@ -204,7 +242,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     // An editor saving just now would be taken for this write, and its save never shared: what's
     // there is checked first (up to 1 MB; bigger files by size).
     const back = f.size === data.length && (data.length > 1 << 20 || sameBytes(await bytes(f), data))
-    if (back) { known[p] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(p, h); if (text !== undefined) base.set(p, text) }
+    if (back) { known[p] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(p, h, true); if (text !== undefined) base.set(p, text) }
     else { unread.add(p); lookAgain(SETTLE + 50) }
     return true
   }
@@ -272,7 +310,8 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       if (text !== null && data.length && stale(path, h)) { // (an empty file is an editor halfway through saving)
         // an older version came back: not an edit (it would undo collaborators' changes)
         console.warn(`${path}: an older version reappeared in the folder; keeping the project's text`)
-        delete known[path]; rewrite = true
+        if (known[path]) known[path] = { ...known[path], h: '', m: f.lastModified, z: f.size } // written again; its line endings stay as noted, not the copy's
+        rewrite = true
         continue
       }
       if (text !== null) {
@@ -287,7 +326,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
           if (merged !== text) rewrite = true // the file lacks collaborators' changes
         })
       } else { const id = await r.putBlob(data); r.doc.transact(() => putBinary(r, path, id, data.length)) }
-      known[path] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(path, h); n++
+      known[path] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(path, h, false); n++
     }
     for (const p of Object.keys(known)) {
       if (disk.has(p)) { missing.delete(p); continue }
