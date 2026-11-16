@@ -571,6 +571,13 @@ more than 64 links, and each tab remembers the snapshot at the tip of the chain,
 a version rebuilds nothing it has already rebuilt. `npm run check-versions` in `web/` tests
 all this.
 
+Automatic versions (`autoSave`, `web/src/history.ts`) are saved after two minutes without local
+edits and when the tab is hidden, but at most one per project every 15 minutes, whoever is
+editing: a version anyone saves after your edits covers them. Older ones thin out (`thinned`: all
+from the last day, the newest per hour for a week, per day before that, at most 300), and the
+History list folds them by day between named versions. Edits themselves are stored as they are
+made (IndexedDB, and the server or people online), so versions are only bookmarks.
+
 ## Agents (MCP)
 
 `texloom mcp` keeps its own replica (state under `~/.cache/texloom/mcp/<project>`) and
@@ -619,7 +626,8 @@ one to the projects it names.
   value + 1, otherwise 409 and the client merges and retries) and `X-Sig`, a signature over
   `list:<id>:<seq>:` + blob. `DELETE` is signed over `listdel:<id>`. A new list needs what a new
   project needs (`X-Create-Code`) and belongs to that code, so purging the code removes it.
-- Document: `{"v":1,"projects":{"<id>":{"f":fragment,"n":name,"at":ms,"w":bool,"nick"?,"t"?,"by"?,"c"?:ms,"m"?:ms}},"gone":{"<id>":ms}}`.
+- Document: `{"v":1,"projects":{"<id>":{"f":fragment,"n":name,"at":ms,"w":bool,"s"?,"nick"?,"t"?,"by"?,"c"?:ms,"m"?:ms}},"gone":{"<id>":ms}}`.
+  `s` is the project's server (an origin) when it isn't the one keeping the list.
   `c` is when the project joined the list and `m` when a device last saw its files change (the
   server can't tell, and at most every few minutes, because each write syncs the list).
   Merging keeps the latest `gone` time per project and the most recently opened entry, never
@@ -719,6 +727,23 @@ the commit last brought in or sent, the base for the next three-way merge, whoev
   folder through TeXLoom as usual; when its turn comes, git merges the identical change once.
   A synced folder that is a plain clone of the linked repository, without `--git`, gets a
   warning: pulling there by hand while a browser syncs could bring changes in twice.
+
+## Projects on several servers
+
+A project lives on one server; a person's projects needn't. The web app belongs to the server it's
+loaded from (its "home": the list, settings, creation code and new projects are there), and a
+project from elsewhere syncs with its own server straight from the page (`web/src/servers.ts`):
+
+- Inside the app a project from another server is opened as `#s=<origin>&p=…&k=…`; pasting another
+  server's link (`https://other/#p=…`) turns into that. Share still gives the project's own links,
+  on its own server. The list keeps the server per project (`s`), and so does the desktop app,
+  whose folders always had their own servers.
+- A server must be `https` (`http` only on this computer, for testing, or when the app itself is
+  on `http`), and nothing but encrypted data goes to it: the same as for the home server. The relay
+  already answers any origin (CORS `*`), and the page's policy allows `https:`/`wss:` connections.
+- The creation code is the home server's, so it isn't sent to other servers. Copies are made on the
+  home server. Moving to new keys makes a new project, so it's done from the project's own server's
+  web app, where its owner's code is.
 
 ## Copying a project
 

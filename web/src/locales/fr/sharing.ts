@@ -76,6 +76,7 @@ const fr: Catalog = {
   'Moving failed: {{error}}. Nothing was retired; the project is unchanged.':
     'Le déplacement a échoué : {{error}}. Rien n’a été retiré ; le projet est inchangé.',
   'Show your owner link': 'Afficher votre lien de propriétaire',
+  '{{name}} can no longer edit, but their link still lets them read new changes. To stop that, open the project on {{server}} and move it to new keys there.': '{{name}} ne peut plus modifier, mais son lien lui permet encore de lire les nouvelles modifications. Pour l’en empêcher, ouvrez le projet sur {{server}} et déplacez-le vers de nouvelles clés là-bas.',
 }
 
 export default fr

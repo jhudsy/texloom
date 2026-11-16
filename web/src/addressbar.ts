@@ -5,6 +5,7 @@ import { Keys } from './crypto'
 import { dialog, h } from './dom'
 import { t } from './i18n'
 import { projects, tabKeysItem } from './projects'
+import { normalServer, serverOr } from './servers'
 
 /** Remember this tab's link, so that reloading keeps the same access. False if the browser won't store it. */
 function rememberForTab(project: string, fragment: string): boolean {
@@ -22,21 +23,31 @@ function linkKnownHere(project: string): string | null {
   return projects.fragmentOf(project)
 }
 
+export interface Opened { keys: Keys; server: string }
+
+/** Keys and server from a fragment: the server is "s", if it's another server's project (servers.ts). */
+function opened(fragment: string): Opened | null {
+  const s = new URLSearchParams(fragment).get('s')
+  if (s && !normalServer(s)) throw new Error(t('This link names a server that can’t be used: {{server}}', { server: s }))
+  const keys = Keys.fromFragment(fragment)
+  return keys && { keys, server: serverOr(s) }
+}
+
 /** The project the address opens: null if none, 'no-key' if this browser doesn't have its keys. */
-export function projectFromAddress(): Keys | 'no-key' | null {
+export function projectFromAddress(): Opened | 'no-key' | null {
   const fragment = location.hash.slice(1)
   const params = new URLSearchParams(fragment)
   const project = params.get('p')
   if (!project) return null
   if (params.get('k')) {
-    const keys = Keys.fromFragment(fragment)
-    if (keys && rememberForTab(project, fragment)) history.replaceState(null, '', `${location.pathname}${location.search}#p=${project}`)
-    return keys
+    const found = opened(fragment)
+    if (found && rememberForTab(project, fragment)) history.replaceState(null, '', `${location.pathname}${location.search}#p=${project}`)
+    return found
   }
   const known = linkKnownHere(project)
   if (!known) return 'no-key'
   rememberForTab(project, known)
-  return Keys.fromFragment(known)
+  return opened(known)
 }
 
 /** Someone opened a copied address, which has no keys in it. */

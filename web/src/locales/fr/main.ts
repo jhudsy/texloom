@@ -159,5 +159,6 @@ const fr: Catalog = {
   "Sync to a folder…: keep this project in a folder on this computer, using the TeXLoom app": "Synchroniser avec un dossier… : garder ce projet dans un dossier de cet ordinateur, avec l’application TeXLoom",
   "{{name}} is in the TeXLoom app": "{{name}} est dans l’application TeXLoom",
   "Reference…": "Référence…",
+  'Kept on another server, {{server}}: this page syncs it with that server.': 'Conservé sur un autre serveur, {{server}} : cette page le synchronise avec ce serveur.',
 }
 export default fr

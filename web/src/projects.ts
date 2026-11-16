@@ -7,6 +7,7 @@ import { rememberFolder } from './foldersync'
 import { t, locale } from './i18n'
 import type { ListDoc, ListEntry } from './listcore'
 import { tags } from './tags'
+import { awayServer, fragmentFor } from './servers'
 
 export interface Recent {
   project: string // unique id (from the link)
@@ -21,6 +22,7 @@ export interface Recent {
   people?: string[] // collaborators seen in this project, most recent first
   createdBy?: string
   files?: number
+  server?: string // the project's server, if not this app's own (servers.ts)
   storage?: 'server' | 'relay'
   atRisk?: boolean // no server copy as far as this browser knows
   deleted?: number // when the owner deleted it for everyone (ms): this copy is read-only
@@ -80,6 +82,7 @@ export const projects = {
     const out: Record<string, ListEntry> = {}
     for (const r of read()) {
       const e: ListEntry = { f: r.fragment, n: r.name, at: r.at, w: r.writable }
+      if (awayServer(r.server)) e.s = awayServer(r.server)
       if (r.nick) e.nick = r.nick
       if (r.docTitle) e.t = r.docTitle
       if (r.createdBy) e.by = r.createdBy
@@ -93,13 +96,13 @@ export const projects = {
   /** Take on the merged list. True if what this browser shows changed. */
   applyList(doc: ListDoc): boolean {
     const before = read()
-    const keepFields = (r: Recent) => [r.project, r.fragment, r.name, r.at, r.writable, r.nick ?? '', r.docTitle ?? '', r.createdBy ?? '', r.created ?? 0, r.modified ?? 0]
+    const keepFields = (r: Recent) => [r.project, r.fragment, r.server ?? '', r.name, r.at, r.writable, r.nick ?? '', r.docTitle ?? '', r.createdBy ?? '', r.created ?? 0, r.modified ?? 0]
     const same = (l: Recent[]) => JSON.stringify(l.map(keepFields).sort())
     const next = Object.entries(doc.projects).map(([project, e]): Recent => {
       const had = before.find((x) => x.project === project)
       return {
         ...had,
-        project, fragment: e.f, name: e.n ?? '', at: e.at, writable: !!e.w, nick: e.nick, docTitle: e.t, createdBy: e.by,
+        project, fragment: e.f, server: awayServer(e.s), name: e.n ?? '', at: e.at, writable: !!e.w, nick: e.nick, docTitle: e.t, createdBy: e.by,
         created: e.c ?? had?.created ?? e.at, modified: e.m ?? had?.modified,
       }
     }).sort((a, b) => b.at - a.at)
@@ -118,9 +121,10 @@ export const projects = {
     if (people.join('\n') !== (r.people ?? []).join('\n')) projects.update(project, { people })
   },
 
-  /** The best link this browser has for a project. */
+  /** The best link this browser has for a project, as this app opens it (with its server if it's another one). */
   fragmentOf(project: string): string | null {
-    return read().find((r) => r.project === project)?.fragment ?? null
+    const r = read().find((x) => x.project === project)
+    return r ? fragmentFor(r.fragment, r.server) : null
   },
 
   async forget(project: string) {

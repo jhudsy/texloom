@@ -157,6 +157,9 @@ export class Replica {
   isRemote(origin: unknown): boolean { return origin === REMOTE }
 
   /** A transaction made changes here (not received, and not this browser's copy loading). */
+  /** The creation code to show this project's server: it's this app's server's code, so none for a
+   *  project on another server (servers.ts), which would only refuse it. */
+  private creationCode(): string { return this.server === location.origin ? creationCode.get() : '' }
   isLocal(origin: unknown): boolean { return origin !== REMOTE && origin !== this.persistence }
 
   /** Changes made now don't reach anyone yet: offline, still catching up, or sync-only with nobody else online. */
@@ -250,7 +253,7 @@ export class Replica {
     this.ws = ws
     ws.onopen = () => {
       this.backoff = 1000
-      const code = creationCode.get()
+      const code = this.creationCode()
       ws.send(JSON.stringify({ t: 'hello', since: this.since, ...(code ? { code } : {}) }))
     }
     ws.onmessage = (ev) => this.handle(JSON.parse(ev.data)).catch((e) => console.error(e))
@@ -841,7 +844,7 @@ export class Replica {
       hist ??= this.historyIds()
       const output = marked || (hist.outputs.has(id) && !hist.files.has(id))
       const d = await this.keys.encrypt(plain)
-      const code = creationCode.get()
+      const code = this.creationCode()
       const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
         method: 'PUT', body: d as BodyInit,
         headers: { 'X-Sig': b64e(this.keys.sign(`blob:${id}:`, d)), ...(code ? { 'X-Create-Code': code } : {}), ...(output ? { 'X-Kind': 'output' } : {}) },

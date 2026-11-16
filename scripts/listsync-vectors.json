@@ -45,6 +45,64 @@
  ],
  "merges": [
   {
+   "what": "a project's server goes with it, whichever copy is newer",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "p=a&k=1",
+      "n": "A",
+      "at": 5,
+      "w": true,
+      "s": "https://other.example"
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "p=a&k=1",
+      "n": "A",
+      "at": 9,
+      "w": true
+     }
+    },
+    "gone": {}
+   },
+   "merged": "{\"gone\":{},\"projects\":{\"a\":{\"at\":9,\"f\":\"p=a&k=1\",\"n\":\"A\",\"s\":\"https://other.example\",\"w\":true}},\"v\":1}"
+  },
+  {
+   "what": "projects on different servers side by side",
+   "a": {
+    "v": 1,
+    "projects": {
+     "a": {
+      "f": "p=a&k=1",
+      "n": "A",
+      "at": 5,
+      "w": true,
+      "s": "https://other.example"
+     }
+    },
+    "gone": {}
+   },
+   "b": {
+    "v": 1,
+    "projects": {
+     "b": {
+      "f": "p=b&k=2",
+      "n": "B",
+      "at": 6,
+      "w": false
+     }
+    },
+    "gone": {}
+   },
+   "merged": "{\"gone\":{},\"projects\":{\"a\":{\"at\":5,\"f\":\"p=a&k=1\",\"n\":\"A\",\"s\":\"https://other.example\",\"w\":true},\"b\":{\"at\":6,\"f\":\"p=b&k=2\",\"n\":\"B\",\"w\":false}},\"v\":1}"
+  },
+  {
    "what": "newest wins",
    "a": {
     "v": 1,

@@ -1068,7 +1068,8 @@ class ProjectListDialog(QtWidgets.QDialog):
             names = [t.name for t in of(project)]
             title = entry.get("nick") or entry.get("n") or _("Untitled project")
             item = QtWidgets.QListWidgetItem(title + (f"  ·  {', '.join(names)}" if names else ""))
-            item.setData(Qt.UserRole, f"{server}/#{entry['f']}")
+            there = entry.get("s") if isinstance(entry.get("s"), str) and entry["s"].startswith(("https://", "http://")) else server
+            item.setData(Qt.UserRole, f"{there.rstrip('/')}/#{entry['f']}")  # on its own server
             self.items.addItem(item)
         self.apply_find()
 

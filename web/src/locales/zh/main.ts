@@ -159,6 +159,7 @@ const zh: Catalog = {
   "Sync to a folder…: keep this project in a folder on this computer, using the TeXLoom app": "同步到文件夹…：使用 TeXLoom 应用把此项目保存在这台电脑上的文件夹中",
   "{{name}} is in the TeXLoom app": "{{name}} 在 TeXLoom 应用中",
   "Reference…": "参考文献…",
+  'Kept on another server, {{server}}: this page syncs it with that server.': '保存在另一台服务器 {{server}} 上：此页面会与该服务器同步。',
 }
 
 export default zh

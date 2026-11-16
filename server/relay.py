@@ -1527,7 +1527,7 @@ class Relay:
 # allowed for in-browser TeX); network to this origin and https: (LLM providers) and
 # localhost (local LLMs); no framing, plugins or base/form tricks.
 CSP = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; "
-       "connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' blob: data:; "
+       "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' blob: data:; "
        "style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; "
        "form-action 'none'; frame-ancestors 'none'")
 

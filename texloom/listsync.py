@@ -438,7 +438,8 @@ def folder_dates(d: Path) -> tuple[int, int]:
 
 
 def local_folders(server: str) -> dict:
-    """This computer's synced folders on `server`, as a list."""
+    """This computer's synced folders, as a list kept on `server`: a project on another server
+    carries that server ("s"), as in the web app (web/src/servers.ts)."""
     from .cli import config_path, load
     doc = empty()
     for d in registry.folders():
@@ -448,8 +449,10 @@ def local_folders(server: str) -> dict:
             created, changed = folder_dates(d)
         except (OSError, ValueError, KeyError):
             continue
-        if there.rstrip("/") == server.rstrip("/"):
-            doc["projects"][keys.project] = {"f": keys.fragment(), "n": d.name, "at": at, "w": keys.writable, "c": created, "m": changed}
+        e = {"f": keys.fragment(), "n": d.name, "at": at, "w": keys.writable, "c": created, "m": changed}
+        if there.rstrip("/") != server.rstrip("/"):
+            e["s"] = there.rstrip("/")
+        doc["projects"][keys.project] = e
     return doc
 
 
@@ -496,7 +499,7 @@ def _sync_my_tags(key: ListKey, server: str, doc: dict, code: str | None) -> Non
     from . import tags
     from .cli import load
     listed = set(doc["projects"])
-    here = set(listed)  # a folder on another server isn't on this list, but keeps its tags here
+    here = set(listed)  # and any folder not on the list yet keeps its tags here
     for d in registry.folders():
         try:
             here.add(load(d)[0].project)

@@ -18,6 +18,8 @@ VECTORS = Path(__file__).with_name("listsync-vectors.json")
 E = lambda f, n, at, w, **more: {"f": f, "n": n, "at": at, "w": w, **more}  # noqa: E731
 doc = lambda projects=None, gone=None: {"v": 1, "projects": projects or {}, "gone": gone or {}}  # noqa: E731
 MERGES = [
+    ("a project's server goes with it, whichever copy is newer", doc({"a": E("p=a&k=1", "A", 5, True, s="https://other.example")}), doc({"a": E("p=a&k=1", "A", 9, True)})),
+    ("projects on different servers side by side", doc({"a": E("p=a&k=1", "A", 5, True, s="https://other.example")}), doc({"b": E("p=b&k=2", "B", 6, False)})),
     ("newest wins", doc({"a": E("p=a&k=1", "Old", 5, False)}), doc({"a": E("p=a&k=2", "New", 7, False)})),
     ("an edit link is never downgraded", doc({"a": E("p=a&k=1&w=x", "A", 5, True)}), doc({"a": E("p=a&k=1", "A", 9, False)})),
     ("empty values don't replace real ones", doc({"a": E("f1", "Name", 5, True, nick="mine", t="Title")}), doc({"a": E("f2", "", 9, True, nick="")})),

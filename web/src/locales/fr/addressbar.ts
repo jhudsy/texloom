@@ -7,5 +7,6 @@ const fr: Catalog = {
   'Ask whoever sent it to use Share and send you a link. If this is your own project, open it from your project list or from its link.':
     'Demandez à la personne qui vous l’a envoyée d’utiliser Partager et de vous envoyer un lien. S’il s’agit de votre propre projet, ouvrez-le depuis votre liste de projets ou avec son lien.',
   'OK': 'OK',
+  'This link names a server that can’t be used: {{server}}': 'Ce lien indique un serveur qui ne peut pas être utilisé : {{server}}',
 }
 export default fr

@@ -340,6 +340,7 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 .recent li.dupe .pcode { color: var(--fg); border-color: var(--warn); }
 .recent .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; white-space: nowrap; }
 .recent .tag.ro { color: var(--warn); }
+.recent .tag.away { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .recent .details { font-size: 12px; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
 .recent .dtitle { font-size: 13px; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent .to-app.on { color: var(--accent); }

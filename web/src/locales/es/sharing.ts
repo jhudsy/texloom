@@ -49,6 +49,7 @@ const es: Catalog = {
   'Moving failed part-way: {{error}}. The new copy may exist already; reopen this project to check, and try again.': 'El traslado falló a medias: {{error}}. Puede que la copia nueva ya exista; vuelve a abrir este proyecto para comprobarlo y reinténtalo.',
   'Moving failed: {{error}}. Nothing was retired; the project is unchanged.': 'El traslado falló: {{error}}. No se ha retirado nada; el proyecto no ha cambiado.',
   'Show your owner link': 'Mostrar tu enlace de propietario',
+  '{{name}} can no longer edit, but their link still lets them read new changes. To stop that, open the project on {{server}} and move it to new keys there.': '{{name}} ya no puede editar, pero su enlace aún le permite leer los cambios nuevos. Para evitarlo, abre el proyecto en {{server}} y muévelo allí a claves nuevas.',
 }
 
 export default es

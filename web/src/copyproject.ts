@@ -7,6 +7,7 @@ import { t, tn } from './i18n'
 import { cleanPath } from './projectfiles'
 import { projects } from './projects'
 import { Replica } from './replica'
+import { home } from './servers'
 import { chooseNewProject } from './storagenotice'
 
 const SETTINGS = ['main', 'bib', 'engine', 'lang'] // what else in the shared document a copy keeps
@@ -84,8 +85,9 @@ export function copyDialog(source: { name: string; by: string; server: string } 
       from = 'replica' in source ? source.replica : await fetchSource(source.keys, source.server)
       if (!hasFiles(from)) throw new Error(t('its files aren’t available right now. If it has no server copy, someone who has it needs to be online.'))
       // Not connected: the copy goes to the server when it is opened, with the storage chosen for it.
+      // That's this app's own server, wherever the original lives: new projects are made here.
       const keys = Keys.generate()
-      const to = new Replica(keys, source.server, 'manual')
+      const to = new Replica(keys, home(), 'manual')
       await to.open()
       const missing = await fill(from, to, name, source.by, (done, total) => { status.textContent = t('Copying… ({{done}} of {{total}})', { done: done + 1, total }) })
       await to.close()

@@ -145,6 +145,14 @@ computer, which asks before using it. For the helper, see `texloom projects` bel
 unlocks with a password). Starting a list counts as creating something on the server, so servers
 that require a creation code ask for one. Servers can turn lists off with `--no-project-lists`.
 
+**Projects on other servers.** A list can hold projects from any TeXLoom server, not just the
+one keeping it. Paste another server's project link under **Paste a project link…**: the project
+opens here and syncs with its own server, straight from this page, and the start page marks it with
+that server's name. Only encrypted data goes there, as here; the keys stay in your browser. The
+desktop app lists its folders with their own servers too. New projects, copies, your list and
+your creation code belong to the server whose web app you use; to move another server's project
+to new keys, open it on that server.
+
 Your **creation code** travels with the list too: the latest one entered in any browser or in the
 app is filled in when you make a project elsewhere, such as **New project from a folder…** in the
 app. Anyone with your sync link can see it, as they can every project on the list.

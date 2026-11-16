@@ -49,6 +49,7 @@ const zh: Catalog = {
   'Moving failed part-way: {{error}}. The new copy may exist already; reopen this project to check, and try again.': '迁移中途失败：{{error}}。新副本可能已存在；请重新打开此项目查看，然后重试。',
   'Moving failed: {{error}}. Nothing was retired; the project is unchanged.': '迁移失败：{{error}}。未停用任何内容；项目未更改。',
   'Show your owner link': '显示您的所有者链接',
+  '{{name}} can no longer edit, but their link still lets them read new changes. To stop that, open the project on {{server}} and move it to new keys there.': '{{name}} 已无法编辑，但其链接仍可读取新的更改。要阻止这一点，请在 {{server}} 上打开项目并在那里将其移至新密钥。',
 }
 
 export default zh

@@ -7,6 +7,7 @@ import { dialog, h } from './dom'
 import { projects } from './projects'
 import { t, locale } from './i18n'
 import { privateServerAllows } from './storagenotice'
+import { awayServer, serverName } from './servers'
 
 function copyRow(text: string, mail?: { subject: string; body: string }) {
   const inp = h('input', { value: text, readonly: true, onfocus: (e: any) => e.target.select() })
@@ -81,6 +82,9 @@ function people(r: Replica): Person[] {
 
 export function shareDialog(r: Replica, server: string, me: string) {
   const keys = r.keys
+  // Moving to new keys makes a new project, which this app makes only on its own server: a project
+  // from another server is moved from that server's web app, where its creation code is.
+  const away = awayServer(server)
   const list = h('ul', { class: 'members' })
   const nameIn = h('input', { placeholder: t('Name, e.g. Alice'), 'aria-label': t('Name for the personal link'), maxlength: 60 })
   const newLink = h('div', {})
@@ -115,7 +119,8 @@ export function shareDialog(r: Replica, server: string, me: string) {
     if (!r.revoke(pub)) return alert(t('You’re offline: connect first so the server can be told.'))
     const m = r.members.get(pub)
     if (m) r.members.set(pub, { ...m, revoked: Date.now() })
-    if (confirm(t('{{name}} can no longer edit, but their link still lets them read new changes.\n\nMove the project to new keys so they can’t? Everyone else then needs a new link from you.', { name }))) {
+    if (away) alert(t('{{name}} can no longer edit, but their link still lets them read new changes. To stop that, open the project on {{server}} and move it to new keys there.', { name, server: serverName(away) }))
+    else if (confirm(t('{{name}} can no longer edit, but their link still lets them read new changes.\n\nMove the project to new keys so they can’t? Everyone else then needs a new link from you.', { name }))) {
       dlg.close()
       rotateKeys(r, server)
     }
@@ -146,7 +151,7 @@ export function shareDialog(r: Replica, server: string, me: string) {
     h('p', { class: 'muted small' }, t('“Email…” opens your own email app. The link travels in that email (not through this server), so anyone who can read the email can open the project.')),
     h('p', { class: 'muted small' }, t('Keys stay in the part after “#”, which is never sent to the server.') +
       (keys.owner ? ' ' + t('To shut someone out completely, revoke their link and move the project to new keys.') : '')),
-    keys.owner ? h('details', {}, h('summary', {}, t('Move to new keys…')),
+    keys.owner && !away ? h('details', {}, h('summary', {}, t('Move to new keys…')),
       h('p', { class: 'muted small' }, t('Copies everything (with history) into a new project with new keys and deletes the server’s copy of this one. Every existing link stops receiving changes; you hand out new ones.')),
       h('button', { class: 'danger', onclick: () => { dlg.close(); rotateKeys(r, server) } }, t('Move to new keys'))) : null,
     h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Close'))))

@@ -5,6 +5,7 @@ const pt: Catalog = {
   'For safety, the address bar doesn’t contain a project’s keys, so a copied address only works in the browser that opened the project.': 'Por segurança, a barra de endereços não contém as chaves do projeto, então um endereço copiado só funciona no navegador que abriu o projeto.',
   'Ask whoever sent it to use Share and send you a link. If this is your own project, open it from your project list or from its link.': 'Peça a quem enviou que use Compartilhar e envie um link. Se o projeto for seu, abra-o pela sua lista de projetos ou pelo link dele.',
   'OK': 'OK',
+  'This link names a server that can’t be used: {{server}}': 'Este link indica um servidor que não pode ser usado: {{server}}',
 }
 
 export default pt

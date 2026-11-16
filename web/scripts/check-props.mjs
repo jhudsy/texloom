@@ -38,6 +38,8 @@ const { applyText, setText, merge3, merge3Strict } = await load('src/diff.ts')
 const { lf, keepLF } = await load('src/lineends.ts')
 globalThis.localStorage ??= { getItem: () => null, setItem: () => {}, removeItem: () => {} }
 const { mathSpans } = await load('src/mathpreview.ts')
+globalThis.location = { origin: 'https://app.texloom.org', protocol: 'https:' }
+const { normalServer, fragmentOfLink, fragmentFor, awayServer } = await load('src/servers.ts')
 
 if (process.argv[2] === '--same') { // cases from scripts/check_props.py: the web app's answers
   const cases = JSON.parse(readFileSync(process.argv[3], 'utf8'))
@@ -155,6 +157,21 @@ const examples = [
   ['$a\nb$ across a line', ['$a\nb$']],
   ['$a\n\nb$', []],
 ]
+const serverCases = [ // [what, got, want]: projects on other servers (src/servers.ts)
+  ['https origin kept', normalServer('https://other.org/some/path?x#y'), 'https://other.org'],
+  ['port kept', normalServer('https://other.org:8443'), 'https://other.org:8443'],
+  ['plain http refused', normalServer('http://other.org'), null],
+  ['http on this computer allowed', normalServer('http://127.0.0.1:8793'), 'http://127.0.0.1:8793'],
+  ['other schemes refused', normalServer('javascript:alert(1)'), null],
+  ['credentials refused', normalServer('https://me:pw@other.org'), null],
+  ['home is no away server', awayServer('https://app.texloom.org/'), undefined],
+  ['a link here opens as it is', fragmentOfLink('https://app.texloom.org/#p=A&k=B'), 'p=A&k=B'],
+  ['a link elsewhere names its server', fragmentOfLink('https://other.org/#p=A&k=B&w=C'), 's=https%3A%2F%2Fother.org&p=A&k=B&w=C'],
+  ['an in-app link to elsewhere keeps its server', fragmentOfLink('https://app.texloom.org/#s=https%3A%2F%2Fother.org&p=A&k=B'), 's=https%3A%2F%2Fother.org&p=A&k=B'],
+  ['not a project link', fragmentOfLink('https://other.org/#sync=XYZ'), null],
+  ['keys and server round-trip', new URLSearchParams(fragmentFor('p=A&k=B', 'https://other.org')).get('s'), 'https://other.org'],
+]
+for (const [what, got, want] of serverCases) if (got !== want) { console.error(`props: servers, ${what}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); process.exit(1) }
 for (const [text, want] of examples) {
   const got = mathSpans(text).map((m) => text.slice(m.from, m.to))
   if (JSON.stringify(got) !== JSON.stringify(want)) { console.error(`props: maths in ${JSON.stringify(text)}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); process.exit(1) }

@@ -44,6 +44,7 @@ import { checking, wellFormed } from './invariants'
 import { sharedPos, type SharedPos } from './positions'
 import { githubAccountBox, runGitHub } from './githubui'
 import { shareDialog } from './sharing'
+import { awayServer, fragmentOfLink, serverName, serverOr } from './servers'
 import { folderFiles, folderPermission, folderSyncSupported, pickFolder, rememberFolder, savedFolder, startFolderSync, type FolderSync } from './foldersync'
 import { applyTemplate, chooseTemplate, importDialog, TEMPLATES, type NewProject } from './templates'
 import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from './navigate'
@@ -62,7 +63,6 @@ const inAppKey = (project: string) => `texloom.inApp.${project}`
 const keptByApp = (project: string) => { try { return !!localStorage.getItem(inAppKey(project)) } catch { return false } }
 
 const APP = 'TeXLoom'
-const server = location.origin
 const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#469990', '#9a6324']
 const UNTITLED = 'Untitled project' // stored in the shared document (and compared in templates.ts): kept in English
 const brand = () => h('span', { class: 'logo', 'aria-label': APP }, 'T', h('span', { class: 'e' }, 'e'), 'XLoom')
@@ -77,7 +77,7 @@ window.addEventListener('hashchange', () => location.reload())
 const pdfWindowFor = pdfWindowProject() // this page is only a window showing a project's PDF
 const listHash = pdfWindowFor ? null : takeListHash()
 const opened = (() => { try { return projectFromAddress() } catch (e) { alert(e); return null } })()
-const keys = opened === 'no-key' ? null : opened
+const openedProject = opened === 'no-key' ? null : opened
 let refreshProjects = () => {}
 /** What the start page's list is narrowed to. */
 const finding = { text: '', tags: new Set<string>(), page: 0 }
@@ -112,7 +112,7 @@ function landing() {
   const app = $('#app')
   app.className = 'landing'
   const linkIn = h('input', { placeholder: t('Paste a project link…'), 'aria-label': t('Project link'), onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') open() } }) as HTMLInputElement
-  const open = () => { const i = linkIn.value.indexOf('#'); if (i >= 0) location.hash = linkIn.value.slice(i) }
+  const open = () => { const f = fragmentOfLink(linkIn.value.trim()); if (f) location.hash = f } // a link to another server's project opens here, synced with that server
   const list = h('div', {}, projectList())
   const finder = h('input', { type: 'search', class: 'finder', value: finding.text, placeholder: t('Search by name or tag…'), 'aria-label': t('Search your projects'), oninput: (e: any) => { finding.text = e.target.value; finding.page = 0; list.replaceChildren(projectList()) } })
   selectAllBox = h('input', { type: 'checkbox', class: 'selectall', onchange: (e: any) => {
@@ -236,7 +236,7 @@ async function removeProject(r: Recent, scope: RemoveScope) {
   let keys: Keys | null = null
   try { keys = Keys.fromFragment('#' + r.fragment) } catch {}
   if (scope !== 'browser' && keys) {
-    const rep = new Replica(keys, server, 'live')
+    const rep = new Replica(keys, serverOr(r.server), 'live')
     await rep.open()
     try { await (scope === 'everyone' ? rep.deleteForEveryone() : rep.removeFromServer()) } finally { await rep.close() }
   }
@@ -357,13 +357,14 @@ function projectList(): HTMLElement {
         h('a', { href: `#p=${r.project}`, class: 'pname', title: t('{{name}} · project code {{code}}', { name: label, code }) }, label),
         dupes.has(label) ? h('code', { class: 'pcode', title: t('Project code: derived from this project’s unique ID. Two projects with the same name always have different codes.') }, code) : null,
         r.writable ? null : h('span', { class: 'tag ro' }, t('read-only')),
+        r.server ? h('span', { class: 'tag away', title: t('Kept on another server, {{server}}: this page syncs it with that server.', { server: r.server }) }, serverName(r.server)) : null,
         r.deleted ? h('span', { class: 'tag warn', title: t('The owner deleted this project for everyone. This browser keeps a read-only copy.') }, t('deleted by the owner'))
           : !hasServerCopy(r) ? h('span', { class: 'tag warn', title: t('The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.') }, t('not on server')) : null,
         h('span', { class: 'spacer' }),
         r.deleted ? null : h('button', { class: `icon to-app${inApp ? ' on' : ''}`,
           title: inApp ? t('In the TeXLoom app: the app on this computer keeps this project in a folder. Click to show it there.') : t('Sync to a folder…: keep this project in a folder on this computer, using the TeXLoom app'),
           'aria-label': inApp ? t('{{name}} is in the TeXLoom app', { name: label }) : t('Sync {{name}} to a folder…', { name: label }),
-          onclick: () => openInApp(`${server}/#${r.fragment}`) }, icon('folder')),
+          onclick: () => openInApp(`${serverOr(r.server)}/#${r.fragment}`) }, icon('folder')),
         h('button', { class: 'icon', title: t('Private label (only you see it)'), 'aria-label': t('Label {{name}}', { name: label }), onclick: async () => {
           const v = await askText(t('Private label for “{{name}}” ({{code}}).\nOnly you see it, in this browser. Leave empty to use the shared name.', { name: r.name || t('this project'), code }), r.nick ?? '')
           if (v === null) return
@@ -373,7 +374,7 @@ function projectList(): HTMLElement {
         h('button', { class: 'icon', title: t('Make a copy'), 'aria-label': t('Make a copy of {{name}}…', { name: label }), onclick: () => {
           try {
             const keys = Keys.fromFragment('#' + r.fragment)
-            if (keys) copyDialog({ name: label, by: prefs.name, server, keys })
+            if (keys) copyDialog({ name: label, by: prefs.name, server: serverOr(r.server), keys })
           } catch (e) { alert(e) }
         } }, icon('copy')),
         h('button', { class: 'icon forget', title: t('Remove…'), 'aria-label': t('Remove {{name}}…', { name: label }), onclick: async () => {
@@ -391,7 +392,8 @@ function projectList(): HTMLElement {
 }
 
 // ---- project view -----------------------------------------------------------------
-async function openProject(keys: Keys) {
+/** Open a project, syncing with `server`: this app's own, or the project's if it lives elsewhere. */
+async function openProject(keys: Keys, server: string) {
   // a personal link the owner revoked opens read-only
   try {
     if (keys.member && localStorage.getItem(`texloom.withdrawn.${keys.project}`)) keys = new Keys(keys.project, keys.key, null)
@@ -1021,7 +1023,7 @@ async function openProject(keys: Keys) {
     title.value = name === UNTITLED ? t('Untitled project') : name
     document.title = `${title.value} — ${APP}`
     if (!removing) projects.update(keys.project, {
-      fragment: keys.fragment(), writable, at: Date.now(), name,
+      fragment: keys.fragment(), server: awayServer(server), writable, at: Date.now(), name,
       createdBy: r.meta.get('createdBy'), storage: r.storage,
     })
     title.title = t('Project name (shared with collaborators) · code {{code}}', { code: projectCode(keys.project) })
@@ -1036,7 +1038,7 @@ async function openProject(keys: Keys) {
 // Last, so that everything above is defined by the time the page is built.
 if (pdfWindowFor) openPdfWindow(pdfWindowFor)
 else {
-  if (keys) openProject(keys)
+  if (openedProject) openProject(openedProject.keys, openedProject.server)
   else landing()
   startListSync(() => refreshProjects())
   if (listHash) handleListHash(listHash)
