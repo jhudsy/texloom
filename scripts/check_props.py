@@ -9,7 +9,9 @@ always hold. A failure prints the smallest case Hypothesis found.
 3. strip_cr takes every "\\r" out and nothing else; lf and on_disk round-trip, and a file written
    with Windows line endings has nothing but "\\r\\n".
 4. merges.shift keeps a remembered range on the same text through any edits, local or merged in.
-5. The "same rules" as the web app: merge3 and lf give the same answers here and in web/src
+5. A write refused (on Windows, the file open elsewhere), then a save made there: both that save and
+   the edit that couldn't be written end up in the project, and in the file once it can be written.
+6. The "same rules" as the web app: merge3 and lf give the same answers here and in web/src
    (asked of web/scripts/check-props.mjs --same, so `npm ci` in web/ first).
 
   uv run --with hypothesis python scripts/check_props.py
@@ -132,6 +134,66 @@ def shift_keeps_a_range_on_its_text(s, edits):
     del watching
 
 
+def refused_then_saved() -> None:
+    """A collaborator's edit can't be written (refused), and the file is then saved here: both edits
+    stay. Noting the text as written before the write took place made the save undo it."""
+    import asyncio
+    import pathlib
+    import shutil
+
+    from texloom import folder
+    from texloom.crypto import Keys
+    from texloom.replica import Replica
+
+    async def run() -> None:
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            root = tmp / "proj"
+            (root / ".texloom").mkdir(parents=True)
+            r = Replica(root / ".texloom", Keys.generate(), "http://127.0.0.1:1")
+            (root / "main.tex").write_text("One.\n\nTwo.\n\nThree.\n")
+            fs = folder.FolderSync(root, r)
+            async with r.lock:
+                await fs.ingest_all()
+                await fs.write_out()
+            other = Doc()
+            other.apply_update(r.doc.get_update())
+            ot = other.get("files", type=Map)["main.tex"]
+            ot.insert(len("One.\n\nTwo."), " Collaborator's edit.")
+            real = pathlib.Path.replace
+
+            def refuse(self, target):
+                if ".texloom-tmp" in self.name:
+                    raise PermissionError(32, "in use (check)")
+                return real(self, target)
+            pathlib.Path.replace = refuse  # type: ignore[method-assign]
+            try:
+                with r.doc.transaction(origin="remote"):
+                    r.doc.apply_update(other.get_update(r.doc.get_state()))
+                async with r.lock:
+                    await fs.write_out()
+            finally:
+                pathlib.Path.replace = real  # type: ignore[method-assign]
+                if fs._retry_task:
+                    fs._retry_task.cancel()
+            await asyncio.sleep(0.05)
+            (root / "main.tex").write_text("One, saved here.\n\nTwo.\n\nThree.\n")
+            async with r.lock:
+                await fs.ingest_all()
+                await fs.write_out()
+            want = "One, saved here.\n\nTwo. Collaborator's edit.\n\nThree.\n"
+            assert str(r.files["main.tex"]) == want, f"project: {str(r.files['main.tex'])!r}"
+            assert (root / "main.tex").read_text() == want, f"file: {(root / 'main.tex').read_text()!r}"
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    folder_settle = (folder.SETTLE, folder.SETTLE_DOUBT)
+    folder.SETTLE, folder.SETTLE_DOUBT = 0.01, 0.05
+    try:
+        asyncio.run(run())
+    finally:
+        folder.SETTLE, folder.SETTLE_DOUBT = folder_settle
+
+
 def same_rules() -> list[str]:
     """merge3 and lf give the same answers here and in the web app."""
     import random
@@ -157,7 +219,7 @@ def same_rules() -> list[str]:
 
 def main() -> None:
     checks = [conversions_round_trip, textpos_edits_like_strings, apply_text_gives_the_target, strip_cr_takes_out_cr_only,
-              line_endings_round_trip, shift_keeps_a_range_on_its_text]
+              line_endings_round_trip, shift_keeps_a_range_on_its_text, refused_then_saved]
     bad = []
     for check in checks:
         try:

@@ -38,7 +38,8 @@ SETTLE = 0.2  # seconds a changed file must stay unchanged before it is read (se
 SETTLE_DOUBT = 2.0  # the same, for a file that became empty or disappeared (rarely meant; editors can take a while to write it again)
 SETTLE_BIG = 1.0  # the same, for a big file (BIG bytes or more): copying one in can pause for a moment
 BIG = 1_000_000
-WRITE_RETRY = (0.5, 60.0)  # a file that couldn't be written is tried again after this long, doubling up to the second
+WRITE_RETRY = (0.5, 5.0)  # a file that couldn't be written is tried again after this long, doubling up to the second
+# (trying costs one write; waiting longer only leaves the folder behind once the file is free again)
 
 
 def pending(task: asyncio.Task | None) -> bool:
@@ -743,7 +744,7 @@ class FolderSync:
                     # collaborators changed meanwhile (without a base: the file as it is)
                     merged = merge3(base, cur, new) if base is not None else new
                     apply_text(yt, cur, merged)
-                    self.base[rel] = merged
+                    self.base[rel] = new  # what the file holds; the merged text once it's written there (write_out)
                     if merged != new:
                         self._rewrite = True  # the file lacks collaborators' changes
                 self.r.local_change(edit)
@@ -798,10 +799,18 @@ class FolderSync:
             text = lf(str(yt))
             data = on_disk(text, self._windows(rel))
             h = sha(data)
-            self.base[rel] = text  # what disk will hold (or holds already), as the project has it
             if self.known.get(rel, {}).get("h") == h and (self.root / rel).exists():
+                self.base[rel] = text  # what disk holds, as the project has it
                 continue
-            attempt(lambda rel=rel, data=data, h=h: self._write(rel, data, h), rel)
+
+            def put(rel=rel, data=data, h=h, text=text):
+                self._write(rel, data, h)
+                # Only once it's written: while a write is refused the file still holds the older
+                # text, and a save made there meanwhile must be merged against that. Taken as
+                # written, the edit that couldn't be written would look deleted from the file and
+                # be undone in the project.
+                self.base[rel] = text
+            attempt(put, rel)
         for rel, info in list(self.r.bin.items()):
             if self.ignored(rel) or self.target(rel) is None:
                 continue
@@ -863,9 +872,13 @@ class FolderSync:
 
         async def again():
             await asyncio.sleep(wait)
-            async with self.r.lock:
-                await self.ingest_all()
-                await self.write_out()
+            try:
+                async with self.r.lock:
+                    await self.ingest_all()
+                    await self.write_out()
+            except Exception:  # never let the retries stop: the folder would stay behind
+                log.exception("retrying the files that couldn't be written failed; trying again")
+                self._retry_writes()
         try:
             self._retry_task = asyncio.get_running_loop().create_task(again())
         except RuntimeError:
@@ -879,16 +892,19 @@ class FolderSync:
             text = str(yt)
             well_formed(f"the project's {rel}", text)
             k, full = self.known.get(rel), self.target(rel)
-            if not k or full is None or self.ignored(rel) or rel in self._unwritten:
-                continue  # (one that couldn't be written holds an older copy until it's tried again)
+            if not k or full is None or self.ignored(rel):
+                continue
             try:
                 data = full.read_bytes()
             except OSError:
                 continue
             if sha(data) != k.get("h"):
                 continue  # changed on disk since: the next ingest takes it
-            if lf(data.decode("utf-8", "replace")) != text:
-                broken(f"{rel} is noted as in step, but differs from the project", first_difference(lf(data.decode("utf-8", "replace")), text))
+            on_disk_text = lf(data.decode("utf-8", "replace"))
+            if rel in self.base and self.base[rel] != on_disk_text:  # base: what the file holds, so saves there merge right
+                broken(f"{rel}: the text noted as the file's isn't what it holds", first_difference(self.base[rel], on_disk_text))
+            if on_disk_text != text and rel not in self._unwritten:  # (one that couldn't be written is behind until it can be)
+                broken(f"{rel} is noted as in step, but differs from the project", first_difference(on_disk_text, text))
             if b"\n" in data and bool(k.get("c")) != crlf(data):
                 broken(f"{rel}: the line endings noted for it aren't the file's", f"noted \\r\\n: {bool(k.get('c'))}")
 

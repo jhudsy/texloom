@@ -141,10 +141,11 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       if (unread.has(p)) continue // an editor's save is there: it's read first
       const text = yt.toString(), data = new TextEncoder().encode(known[p]?.c ? text.replace(/\r?\n/g, '\r\n') : text)
       const h = await sha(data)
-      base.set(p, text) // what disk holds, or will
-      if (known[p]?.h === h) continue
+      if (known[p]?.h === h) { base.set(p, text); continue } // what disk holds, as the project has it
       const prev = await readText(p)
-      if (await put(p, data, h)) { n++; programs.push(...addedProgramLines(p, prev, text)) }
+      let wrote = false
+      try { wrote = await put(p, data, h, text) } catch { /* refused (open in another program): tried again next round */ }
+      if (wrote) { n++; programs.push(...addedProgramLines(p, prev, text)) }
     }
     if (programs.length) sync.onPrograms?.(programs)
     for (const [p, b] of r.bin) {
@@ -191,7 +192,10 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     try { return fh ? await (await fh.getFile()).text() : null } catch { return null }
   }
 
-  async function put(p: string, data: Uint8Array, h: string): Promise<boolean> {
+  /** Write a file. `text`: a project text's content, noted as what the file holds once it's there
+   *  (not before: while a write fails, or an editor's save replaces it, the file holds something
+   *  else, and a save made there must be merged against that, or the unwritten edit looks deleted). */
+  async function put(p: string, data: Uint8Array, h: string, text?: string): Promise<boolean> {
     const fh = await fileHandle(root, p, true)
     if (!fh) return false
     const w = await fh.createWritable()
@@ -200,7 +204,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     // An editor saving just now would be taken for this write, and its save never shared: what's
     // there is checked first (up to 1 MB; bigger files by size).
     const back = f.size === data.length && (data.length > 1 << 20 || sameBytes(await bytes(f), data))
-    if (back) { known[p] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(p, h) }
+    if (back) { known[p] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; remember(p, h); if (text !== undefined) base.set(p, text) }
     else { unread.add(p); lookAgain(SETTLE + 50) }
     return true
   }
@@ -279,7 +283,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
           const cur = yt.toString(), b = base.get(path)
           const merged = b !== undefined ? merge3(b, cur, text) : text
           applyText(yt, cur, merged)
-          base.set(path, merged)
+          base.set(path, text) // what the file holds; the merged text once it's written there (put)
           if (merged !== text) rewrite = true // the file lacks collaborators' changes
         })
       } else { const id = await r.putBlob(data); r.doc.transact(() => putBinary(r, path, id, data.length)) }
