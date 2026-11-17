@@ -48,9 +48,9 @@ export function sendListToApp(link: string) {
 /** Make a project from a folder on this computer: the desktop app asks which folder, uploads it
  *  (encrypted, with keys it makes itself) and keeps it in sync. This server and the creation code
  *  entered here go with the request, so nothing needs typing again. */
-export function newProjectInApp() {
-  const q = new URLSearchParams({ server: location.origin })
-  if (creationCode.get()) q.set('code', creationCode.get())
+export function newProjectInApp(server = location.origin) {
+  const q = new URLSearchParams({ server })
+  if (creationCode.get(server)) q.set('code', creationCode.get(server))
   const send = () => { location.href = `texloom://new?${q}` }
   const dlg = dialog('settings',
     h('h3', {}, t('Opening the TeXLoom app…')),

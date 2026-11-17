@@ -390,6 +390,63 @@ def remember_name(name: str, at: int | None = None) -> None:
         json.dump({"v": name.strip()[:64], "at": int(time.time() * 1000) if at is None else at}, f)
 
 
+def _origin(s: str) -> str | None:
+    """A server address as an origin (scheme://host[:port]), or None: https, or http on this computer."""
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(s)
+    except ValueError:
+        return None
+    local = u.hostname in ("localhost", "127.0.0.1", "::1")
+    if not u.netloc or u.username or u.password or not (u.scheme == "https" or (u.scheme == "http" and local)):
+        return None
+    return f"{u.scheme}://{u.netloc}".lower()
+
+
+def _last_server_file() -> Path:
+    return registry.config_dir() / "last-server.json"
+
+
+def last_server() -> str | None:
+    """The server the last new project here was made on."""
+    try:
+        s = json.loads(_last_server_file().read_text()).get("server")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return _origin(s) if isinstance(s, str) else None
+
+
+def remember_server(server: str) -> None:
+    if o := _origin(server):
+        p = _last_server_file()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"server": o}))
+
+
+def known_servers() -> list[str]:
+    """Servers this computer knows: the last used, its folders', the project list's, and those it
+    has a creation code for. For choosing where a new project goes."""
+    from .cli import load
+    out: list[str] = []
+    def add(s: str | None) -> None:
+        if s and (o := _origin(s)) and o not in out:
+            out.append(o)
+    add(last_server())
+    for d in registry.folders():
+        try:
+            add(load(d)[1])
+        except (OSError, ValueError, KeyError):
+            continue
+    if link := saved_link():
+        try:
+            add(ListKey.from_link(link)[1])
+        except ValueError:
+            pass
+    for s in _saved_codes():
+        add(s)
+    return out
+
+
 def _codes_file() -> Path:
     return registry.config_dir() / "creation-codes.json"
 
@@ -512,15 +569,25 @@ def _sync_my_tags(key: ListKey, server: str, doc: dict, code: str | None) -> Non
         _tags_error = e.code
 
 
+CODE_FOR = "code:"  # settings key of another server's code: code:<origin> (as web/src/listsync.ts)
+
+
 def _sync_my_settings(key: ListKey, server: str, code: str | None) -> None:
-    """The creation code and your name follow the list: this computer's latest ones go on it, and
-    later ones set elsewhere (say in the web app) come back here."""
-    saved = _saved_codes().get(server.rstrip("/"))
+    """The creation codes and your name follow the list: this computer's latest ones go on it, and
+    later ones set elsewhere (say in the web app) come back here. `code` is the list's own server's
+    code; each other server's is `code:<origin>`."""
+    home = server.rstrip("/")
+    saved_all = _saved_codes()
+    saved = saved_all.get(home)
     local = empty_settings()
     if isinstance(saved, dict) and isinstance(saved.get("v"), str) and isinstance(saved.get("at"), int):
         local["s"]["code"] = {"v": saved["v"], "at": saved["at"]}
     elif known := _known_code(server):
         local["s"]["code"] = {"v": known, "at": 1}  # from before codes were dated: older than any that is
+    for origin, c in saved_all.items():
+        if origin != home and _origin(origin) == origin and isinstance(c, dict) and isinstance(c.get("v"), str) and c["v"] \
+                and isinstance(c.get("at"), int):
+            local["s"][CODE_FOR + origin] = {"v": c["v"], "at": c["at"]}
     name, name_at = my_name()
     if name_at:
         local["s"]["name"] = {"v": name, "at": name_at}
@@ -529,9 +596,15 @@ def _sync_my_settings(key: ListKey, server: str, code: str | None) -> None:
     except ListError as e:
         log.debug("list settings: %s", e.code)
         return
-    got = merged["s"].get("code")
-    if got and got != local["s"].get("code") and isinstance(got.get("v"), str) and isinstance(got.get("at"), int):
-        remember_code(server, got["v"], got["at"])
+    for name, got in merged["s"].items():
+        if name == "code":
+            there = home
+        elif name.startswith(CODE_FOR) and (o := _origin(name[len(CODE_FOR):])) == name[len(CODE_FOR):] and o != home:
+            there = o
+        else:
+            continue
+        if got and got != local["s"].get(name) and isinstance(got.get("v"), str) and isinstance(got.get("at"), int):
+            remember_code(there, got["v"], got["at"])
     got = merged["s"].get("name")
     if got and got != local["s"].get("name") and isinstance(got.get("v"), str) and isinstance(got.get("at"), int):
         remember_name(got["v"], got["at"])

@@ -16,6 +16,7 @@ import { myName, NAME_CHANGED } from './myname'
 import { zoteroAccount } from './zotero'
 import { githubAccount } from './github'
 import { tags } from './tags'
+import { normalServer } from './servers'
 
 /** The message is a code: needs-code, code-expired, list-full, list-retired, password-taken,
  *  wrong-password, no-prf, passkey-failed, busy or server. */
@@ -104,9 +105,22 @@ const SETTINGS: Record<string, { get(): string; at(): number; set(v: string, at:
   },
 }
 
+/** SETTINGS, with a code:<server> entry for each other server whose code this browser holds or the
+ *  list carries (`code` is this server's, which keeps the list). The desktop app reads the same keys. */
+const CODE_FOR = 'code:'
+function settingsFor(names: Iterable<string> = []): typeof SETTINGS {
+  const all = { ...SETTINGS }
+  for (const name of [...names, ...creationCode.servers().map((s) => CODE_FOR + s)]) {
+    const server = name.startsWith(CODE_FOR) ? normalServer(name.slice(CODE_FOR.length)) : null
+    if (!server || server !== name.slice(CODE_FOR.length) || server === location.origin || all[name]) continue
+    all[name] = { get: () => creationCode.get(server), at: () => creationCode.at(server), set: (v, at) => creationCode.set(v, at, server) }
+  }
+  return all
+}
+
 function localSettings(): SettingsDoc {
   const doc = emptySettings()
-  for (const [name, s] of Object.entries(SETTINGS)) {
+  for (const [name, s] of Object.entries(settingsFor())) {
     const v = s.get(), at = s.at()
     if (v || at) doc.s[name] = { v, at: at || 1 }
   }
@@ -119,7 +133,7 @@ async function exchangeSettings(secret: Uint8Array): Promise<boolean> {
   const local = localSettings()
   const doc = await update<SettingsDoc>(await settingsKey(secret), (had) => mergeSettings(had ?? emptySettings(), local), emptySettings())
   let changed = false
-  for (const [name, s] of Object.entries(SETTINGS)) {
+  for (const [name, s] of Object.entries(settingsFor(Object.keys(doc.s)))) {
     const got = doc.s[name]
     if (!got || canon(got) === canon(local.s[name])) continue
     s.set(got.v, got.at)

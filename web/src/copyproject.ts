@@ -7,8 +7,8 @@ import { t, tn } from './i18n'
 import { cleanPath } from './projectfiles'
 import { projects } from './projects'
 import { Replica } from './replica'
-import { home } from './servers'
-import { chooseNewProject } from './storagenotice'
+import { awayServer, fragmentFor } from './servers'
+import { chooseNewProject, chooseServer } from './storagenotice'
 
 const SETTINGS = ['main', 'bib', 'engine', 'lang'] // what else in the shared document a copy keeps
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
@@ -75,7 +75,9 @@ export function copyDialog(source: { name: string; by: string; server: string } 
   async function run() {
     if (busy) return
     const name = nameIn.value.trim() || source.name
-    const where = await chooseNewProject()
+    const server = await chooseServer([source.server, ...projects.list().map((r) => r.server)])
+    if (!server) return
+    const where = await chooseNewProject(server)
     if (!where) return
     busy = true
     go.disabled = cancel.disabled = nameIn.disabled = true
@@ -84,18 +86,17 @@ export function copyDialog(source: { name: string; by: string; server: string } 
     try {
       from = 'replica' in source ? source.replica : await fetchSource(source.keys, source.server)
       if (!hasFiles(from)) throw new Error(t('its files aren’t available right now. If it has no server copy, someone who has it needs to be online.'))
-      // Not connected: the copy goes to the server when it is opened, with the storage chosen for it.
-      // That's this app's own server, wherever the original lives: new projects are made here.
+      // Not connected: the copy goes to the server chosen for it when it is opened, with the storage chosen for it.
       const keys = Keys.generate()
-      const to = new Replica(keys, home(), 'manual')
+      const to = new Replica(keys, server, 'manual')
       await to.open()
       const missing = await fill(from, to, name, source.by, (done, total) => { status.textContent = t('Copying… ({{done}} of {{total}})', { done: done + 1, total }) })
       await to.close()
       const storage = where === 'relay' || from.storage === 'relay' ? 'relay' : 'server'
       try { if (storage === 'relay') localStorage.setItem(`texloom.newRelay.${keys.project}`, '1') } catch {}
-      projects.update(keys.project, { fragment: keys.fragment(), writable: true, at: Date.now(), name, storage, createdBy: source.by || undefined })
+      projects.update(keys.project, { fragment: keys.fragment(), server: awayServer(server), writable: true, at: Date.now(), name, storage, createdBy: source.by || undefined })
       if (missing.length) alert(tn(missing.length, 'The copy is missing {{n}} file whose content isn’t available right now: {{files}}', 'The copy is missing {{n}} files whose content isn’t available right now: {{files}}', { files: missing.slice(0, 5).join(', ') }))
-      location.hash = keys.fragment()
+      location.hash = fragmentFor(keys.fragment(), server)
     } catch (e) {
       status.textContent = t('Couldn’t copy the project: {{err}}', { err: (e as Error).message })
       busy = false

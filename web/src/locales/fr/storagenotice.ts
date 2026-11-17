@@ -55,6 +55,15 @@ const fr: Catalog = {
   'A creation code lets this server keep an encrypted copy of projects you create, so co-authors can catch up while you’re offline. You don’t need one to open or edit projects shared with you; without one, a new project is sync-only.': 'Un code de création permet à ce serveur de garder une copie chiffrée des projets que vous créez, pour que vos coauteurs puissent rattraper leur retard pendant que vous êtes hors ligne. Vous n’en avez pas besoin pour ouvrir ou modifier les projets partagés avec vous ; sans code, un nouveau projet est synchronisé uniquement entre appareils.',
   'A creation code lets this server keep an encrypted copy of projects you create.': 'Un code de création permet à ce serveur de garder une copie chiffrée des projets que vous créez.',
   'Where to get one': 'Où en obtenir un',
+  '(on {{server}})': '(sur {{server}})',
+  'Another server’s address': 'Adresse d’un autre serveur',
+  'this server': 'ce serveur',
+  'you have a creation code here': 'vous avez un code de création ici',
+  'Give a server’s address, starting with https://': 'Indiquez l’adresse d’un serveur, commençant par https://',
+  'Where should the new project be kept?': 'Où conserver le nouveau projet ?',
+  'Its encrypted copy and its collaborators’ changes go through that server. This page syncs it from there, whichever server you choose.': 'Sa copie chiffrée et les modifications des collaborateurs passent par ce serveur. Cette page le synchronise depuis celui-ci, quel que soit le serveur choisi.',
+  'Another server…': 'Autre serveur…',
+  'Continue': 'Continuer',
 }
 
 export default fr

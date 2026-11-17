@@ -149,9 +149,11 @@ that require a creation code ask for one. Servers can turn lists off with `--no-
 one keeping it. Paste another server's project link under **Paste a project link…**: the project
 opens here and syncs with its own server, straight from this page, and the start page marks it with
 that server's name. Only encrypted data goes there, as here; the keys stay in your browser. The
-desktop app lists its folders with their own servers too. New projects, copies, your list and
-your creation code belong to the server whose web app you use; to move another server's project
-to new keys, open it on that server.
+desktop app lists its folders with their own servers too, and its Project list shows each
+project's server. Your creation codes travel with the list, one per server. When you know more
+than one server, **Create project** (and **Make a copy**, and the desktop app's **New project from a
+folder…**) asks which to keep the new project on, starting with the one you used last; **Another
+server…** takes any address. To move another server's project to new keys, open it on that server.
 
 Your **creation code** travels with the list too: the latest one entered in any browser or in the
 app is filled in when you make a project elsewhere, such as **New project from a folder…** in the

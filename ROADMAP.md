@@ -17,10 +17,10 @@ that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitat
    server can't read projects.
 3. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
-4. **[One project list across servers](https://github.com/jhudsy/texloom/issues/13)**: the rest of it.
-   Since 0.4.25 the list holds projects on any server and both apps open them there; still to do: a
-   creation code per server following the list, choosing the server for a new project, and the
-   desktop list showing each project's server. 2–3 days.
+4. **[Move a project list to another server](https://github.com/jhudsy/texloom/issues/20)**: for when a
+   server closes; passkeys have to be added again there. 2–3 days. (One list across servers, #13, is
+   done: since 0.4.28 it holds projects on any server, with a creation code for each, and new
+   projects go on the server you choose.)
 
 ## Testing
 

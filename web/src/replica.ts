@@ -79,12 +79,22 @@ export async function forgetLocalCopy(project: string): Promise<void> {
   await Promise.all([del(`texloom-${project}`), del(`texloom-doc-${project}`)])
 }
 
-/** Creation code for storing new projects on this server (if it requires one). */
+/** Creation codes for storing new projects on a server (if it requires one): one per server, this
+ *  app's own by default. Each follows the project list (listsync.ts), with when it was entered. */
+const codeKey = (server: string) => (server === location.origin ? 'texloom.code' : `texloom.code@${server}`)
 export const creationCode = {
-  get(): string { try { return localStorage.getItem('texloom.code') || '' } catch { return '' } },
+  get(server = location.origin): string { try { return localStorage.getItem(codeKey(server)) || '' } catch { return '' } },
   /** When it was entered here (0: before this was recorded), so the latest one follows the project list. */
-  at(): number { try { return Number(localStorage.getItem('texloom.codeAt')) || 0 } catch { return 0 } },
-  set(v: string, at = Date.now()) { try { localStorage.setItem('texloom.code', v); localStorage.setItem('texloom.codeAt', String(at)) } catch {} },
+  at(server = location.origin): number { try { return Number(localStorage.getItem(codeKey(server) + 'At')) || 0 } catch { return 0 } },
+  set(v: string, at = Date.now(), server = location.origin) {
+    try { localStorage.setItem(codeKey(server), v); localStorage.setItem(codeKey(server) + 'At', String(at)) } catch {}
+  },
+  /** The other servers this browser has a code for. */
+  servers(): string[] {
+    const out: string[] = []
+    try { for (const k of Object.keys(localStorage)) if (k.startsWith('texloom.code@') && !k.endsWith('At') && localStorage.getItem(k)) out.push(k.slice('texloom.code@'.length)) } catch {}
+    return out.sort()
+  },
 }
 
 /** Why the server isn't storing this project's changes (they still reach people online). */
@@ -157,9 +167,8 @@ export class Replica {
   isRemote(origin: unknown): boolean { return origin === REMOTE }
 
   /** A transaction made changes here (not received, and not this browser's copy loading). */
-  /** The creation code to show this project's server: it's this app's server's code, so none for a
-   *  project on another server (servers.ts), which would only refuse it. */
-  private creationCode(): string { return this.server === location.origin ? creationCode.get() : '' }
+  /** The creation code to show this project's server: the one for that server (servers.ts). */
+  private creationCode(): string { return creationCode.get(this.server) }
   isLocal(origin: unknown): boolean { return origin !== REMOTE && origin !== this.persistence }
 
   /** Changes made now don't reach anyone yet: offline, still catching up, or sync-only with nobody else online. */

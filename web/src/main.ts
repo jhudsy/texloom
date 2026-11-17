@@ -8,7 +8,7 @@ import { bulkRemoveDialog, removeDialog, type RemoveScope } from './remove'
 import { prefs, setupDialog, settingsDialog, languagePicker, type Device, type SettingsTab } from './settings'
 import { createAssistantPanel } from './assistant/panel'
 import { setupLayout } from './layout'
-import { askCode, chooseNewProject, riskBanner, SAFARI_NOTE } from './storagenotice'
+import { askCode, chooseNewProject, chooseServer, riskBanner, SAFARI_NOTE } from './storagenotice'
 import { $, dialog, h, saveFile, askText } from './dom'
 import { icon } from './icons'
 import { t, tn, tNodes, locale } from './i18n'
@@ -44,7 +44,7 @@ import { checking, wellFormed } from './invariants'
 import { sharedPos, type SharedPos } from './positions'
 import { githubAccountBox, runGitHub } from './githubui'
 import { shareDialog } from './sharing'
-import { awayServer, fragmentOfLink, serverName, serverOr } from './servers'
+import { awayServer, fragmentFor, fragmentOfLink, serverName, serverOr } from './servers'
 import { folderFiles, folderPermission, folderSyncSupported, pickFolder, rememberFolder, savedFolder, startFolderSync, type FolderSync } from './foldersync'
 import { applyTemplate, chooseTemplate, importDialog, TEMPLATES, type NewProject } from './templates'
 import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from './navigate'
@@ -155,8 +155,10 @@ function landing() {
 async function createProject(choice?: NewProject) {
   const c = choice ?? await chooseTemplate()
   if (!c) return
-  if (c.from === 'folder') return newProjectInApp()
-  const where = await chooseNewProject()
+  const server = await chooseServer(projects.list().map((r) => r.server))
+  if (!server) return
+  if (c.from === 'folder') return newProjectInApp(server)
+  const where = await chooseNewProject(server)
   if (!where) return
   const k = Keys.generate()
   try {
@@ -164,7 +166,7 @@ async function createProject(choice?: NewProject) {
     localStorage.setItem(`texloom.newTemplate.${k.project}`, c.from)
     if (c.name) localStorage.setItem(`texloom.newName.${k.project}`, c.name)
   } catch {}
-  location.hash = k.fragment()
+  location.hash = fragmentFor(k.fragment(), server)
 }
 
 /** The start page's own settings: your name and the language (set once, so not on the page). */

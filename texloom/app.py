@@ -837,12 +837,19 @@ class ShareFolderDialog(Dialog):
         lay.addRow(_("Folder"), row)
         self.name = QtWidgets.QLineEdit()
         lay.addRow(_("Project name"), self.name)
-        self.server = QtWidgets.QLineEdit(server or known_server())
-        self.server.setPlaceholderText("https://your.server")
+        # the servers this computer knows (last used first), and any other typed in
+        self.server = QtWidgets.QComboBox()
+        self.server.setEditable(True)
+        self.server.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
+        start = (server or known_server()).rstrip("/")
+        for s in [start, *[x for x in listsync.known_servers() if x != start]]:
+            self.server.addItem(s)
+        self.server.lineEdit().setPlaceholderText("https://your.server")
         lay.addRow(_("Server"), self.server)
-        self.code = QtWidgets.QLineEdit(code or listsync.code_for(self.server.text()))  # yours here, or from your project list
+        self.code = QtWidgets.QLineEdit(code or listsync.code_for(start))  # yours there, or from your project list
         self.code.setPlaceholderText(_("only if the server asks for one"))
-        self.server.editingFinished.connect(lambda: self.code.text() or self.code.setText(listsync.code_for(self.server.text().strip())))
+        self.given_code = bool(code)
+        self.server.currentTextChanged.connect(self.server_changed)
         lay.addRow(_("Creation code"), self.code)
         hint = QtWidgets.QLabel(_("Without a code, a server that asks for one keeps no copy: the project syncs only between "
                                   "computers that are online at the same time. You can add a code later."))
@@ -850,8 +857,7 @@ class ShareFolderDialog(Dialog):
         hint.setProperty("class", "hint")
         hint.setEnabled(False)  # greyed, as a note
         lay.addRow("", hint)
-        self.code_source = CodeSource(engine, self.server.text())
-        self.server.editingFinished.connect(lambda: self.code_source.show_for(self.server.text()))
+        self.code_source = CodeSource(engine, start)
         lay.addRow("", self.code_source)
         self.me = NameBox()
         self.accepted.connect(self.me.save)
@@ -865,6 +871,13 @@ class ShareFolderDialog(Dialog):
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
 
+    def server_changed(self, text: str) -> None:
+        """Another server chosen: its code (kept here or on your list), and where codes come from."""
+        s = text.strip().rstrip("/")
+        if not self.given_code:
+            self.code.setText(listsync.code_for(s))
+        self.code_source.show_for(s)
+
     def choose(self) -> None:
         d = QtWidgets.QFileDialog.getExistingDirectory(self, _("Folder for the new project"), str(Path.home()))
         if d:
@@ -873,7 +886,7 @@ class ShareFolderDialog(Dialog):
                 self.name.setText(Path(d).name)
 
     def do_share(self) -> None:
-        d, server = Path(self.folder.text()).expanduser(), self.server.text().strip().rstrip("/")
+        d, server = Path(self.folder.text()).expanduser(), self.server.currentText().strip().rstrip("/")
         if not d.is_dir():
             self.msg.setText(red(_("Choose an existing folder.")))
             return
@@ -893,6 +906,7 @@ class ShareFolderDialog(Dialog):
             return
         if code and code != listsync.code_for(server):  # a new code: keep it, and it follows your project list
             listsync.remember_code(server, code)
+        listsync.remember_server(server)  # the default next time
         self.made = d.resolve()
         self.engine.call(self.engine.daemon.poke)
         self.accept()
@@ -1067,7 +1081,9 @@ class ProjectListDialog(QtWidgets.QDialog):
         for project, entry in away:
             names = [t.name for t in of(project)]
             title = entry.get("nick") or entry.get("n") or _("Untitled project")
-            item = QtWidgets.QListWidgetItem(title + (f"  ·  {', '.join(names)}" if names else ""))
+            elsewhere = entry.get("s") if isinstance(entry.get("s"), str) else None  # a project on another server
+            where = f"  ·  {urlparse(elsewhere).netloc}" if elsewhere else ""
+            item = QtWidgets.QListWidgetItem(title + where + (f"  ·  {', '.join(names)}" if names else ""))
             there = entry.get("s") if isinstance(entry.get("s"), str) and entry["s"].startswith(("https://", "http://")) else server
             item.setData(Qt.UserRole, f"{there.rstrip('/')}/#{entry['f']}")  # on its own server
             self.items.addItem(item)
@@ -1593,7 +1609,10 @@ def folder_of(project: str) -> Path | None:
 
 
 def known_server() -> str:
-    """The server of this computer's projects, else TeXLoom's own."""
+    """Where a new project or list goes by default: the server last used for one, else that of this
+    computer's projects, else TeXLoom's own."""
+    if last := listsync.last_server():
+        return last
     for d in registry.folders():
         try:
             return Keys.from_link(load_config(d)["link"])[1]

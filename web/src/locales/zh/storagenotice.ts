@@ -34,6 +34,15 @@ const zh: Catalog = {
   'A creation code lets this server keep an encrypted copy of projects you create, so co-authors can catch up while you’re offline. You don’t need one to open or edit projects shared with you; without one, a new project is sync-only.': '创建码让此服务器为您创建的项目保留一份加密副本，这样在您离线时，合著者也能获取最新内容。打开或编辑他人与您共享的项目不需要创建码；没有创建码时，新项目只会直接同步。',
   'A creation code lets this server keep an encrypted copy of projects you create.': '创建码让此服务器为您创建的项目保留一份加密副本。',
   'Where to get one': '在哪里获取',
+  '(on {{server}})': '（在 {{server}}）',
+  'Another server’s address': '其他服务器的地址',
+  'this server': '此服务器',
+  'you have a creation code here': '您在此有创建码',
+  'Give a server’s address, starting with https://': '请输入以 https:// 开头的服务器地址',
+  'Where should the new project be kept?': '新项目应保存在哪里？',
+  'Its encrypted copy and its collaborators’ changes go through that server. This page syncs it from there, whichever server you choose.': '其加密副本和协作者的更改都经过该服务器。无论您选择哪台服务器，此页面都会从那里同步。',
+  'Another server…': '其他服务器…',
+  'Continue': '继续',
 }
 
 export default zh
