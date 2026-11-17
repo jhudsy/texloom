@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -76,13 +77,16 @@ class FolderFiles(Files):
         self.root = root.resolve()
         self.name = str(self.root)
         self.tmp = self.root / ".incoming"
+        # Creating a project's folder and moving a file in, or erasing a file and removing the folder
+        # once empty, happen one at a time (on worker threads): otherwise a folder can be removed
+        # just as a file is moved into it. Writing the file's content happens outside it.
+        self._dirs = threading.Lock()
 
     def _path(self, key: str) -> Path:
         return self.root / _check(key)
 
     def _write(self, key: str, data: bytes | memoryview) -> None:
         path = self._path(key)
-        path.parent.mkdir(parents=True, exist_ok=True)
         self.tmp.mkdir(parents=True, exist_ok=True)
         part = self.tmp / f"{secrets.token_hex(8)}.part"
         try:
@@ -90,7 +94,9 @@ class FolderFiles(Files):
                 f.write(data)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(part, path)  # whole or not at all
+            with self._dirs:  # (erasing a project's last file removes its folder)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(part, path)  # whole or not at all
         finally:
             part.unlink(missing_ok=True)
 
@@ -107,11 +113,12 @@ class FolderFiles(Files):
 
     def _remove(self, key: str) -> None:
         path = self._path(key)
-        path.unlink(missing_ok=True)
-        try:
-            path.parent.rmdir()  # the project's folder, once it's empty
-        except OSError:
-            pass
+        with self._dirs:
+            path.unlink(missing_ok=True)
+            try:
+                path.parent.rmdir()  # the project's folder, once it's empty
+            except OSError:
+                pass
 
     async def delete(self, key: str) -> None:
         await asyncio.to_thread(self._remove, key)

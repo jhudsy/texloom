@@ -9,7 +9,8 @@ against a throwaway Garage, a real S3-compatible store started for the purpose:
 - a dropped project's files stop counting at once and are erased in the background, and a stop
   part way leaves the rest for the next start;
 - uploading content that is waiting to be erased keeps it;
-- an upload counts while it's under way, and the same content uploaded twice at once is stored once.
+- an upload counts while it's under way, and the same content uploaded twice at once is stored once;
+- in a folder, files written while others in the same project's folder are erased all land.
 
 The database is a throwaway PostgreSQL (scripts/pg.py).
 
@@ -135,6 +136,25 @@ async def cases(make_files, tmp: Path, db: str) -> None:
     await store.close()
 
 
+async def folder_race(root: Path) -> None:
+    """Files written into a project's folder while others in it are erased, which removes the
+    folder once it's empty: no write may land in a folder that's going away."""
+    f = FolderFiles(root)
+    await f.check()
+    p = project()
+
+    async def churn():
+        for _ in range(1500):
+            k = f"{p}/{bid()}"
+            await f.put(k, b"x")
+            await f.delete(k)
+    try:
+        await asyncio.gather(*(churn() for _ in range(8)))
+        ok(True, "writes racing erases in the same folder: none lost")
+    except OSError as e:
+        ok(False, f"writes racing erases in the same folder: {e!r}")
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -205,6 +225,7 @@ def main() -> None:
                 print("folder:")
                 with pg.running() as db:
                     asyncio.run(cases(lambda tmp=tmp: FolderFiles(tmp / "files"), tmp, db))
+                asyncio.run(folder_race(tmp / "race"))
             elif which == "garage":
                 if not shutil.which("garage"):
                     print("garage: not installed (brew install garage), skipped")

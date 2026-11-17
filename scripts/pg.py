@@ -63,7 +63,10 @@ def start(folder: Path) -> tuple[str, int]:
     folder = folder.resolve()
     if not (folder / "PG_VERSION").exists():
         folder.mkdir(parents=True, exist_ok=True)
-        _run(bin_ / "initdb", "-D", folder, "-U", USER, "--auth=trust", "-E", "UTF8", "--no-locale")
+        try:
+            _run(bin_ / "initdb", "-D", folder, "-U", USER, "--auth=trust", "-E", "UTF8", "--no-locale")
+        except subprocess.CalledProcessError as e:
+            sys.exit(f"initdb failed: {e.stderr}")
     port = free_port()
     opts = f"-p {port} -c listen_addresses=127.0.0.1 -c unix_socket_directories= -c fsync=off -c synchronous_commit=off"
     try:
