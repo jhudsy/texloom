@@ -34,7 +34,7 @@ const zh: Catalog = {
   'Unlock with a password': '使用密码解锁',
   'Your username and password stay on this device. Only a value worked out from them reaches the server, so it never learns either one.': '用户名和密码只保留在此设备上。只有由它们计算出的值会发送到服务器，因此服务器无法得知两者中的任何一个。',
   'A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else.': '忘记的密码任何人都无法重置。你需要同步链接或通行密钥才能设置新密码。获取服务器数据的人可能会尝试猜测密码，所以请使用一个未在其他地方使用过的长密码。',
-  'Username or email (not checked, and never stored)': '用户名或邮箱（不验证，也不保存）',
+  'Username or email': '用户名或邮箱',
   'Password': '密码',
   'That password is too easy to guess.': '此密码太容易被猜到。',
   'Password again': '再次输入密码',

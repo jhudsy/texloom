@@ -34,7 +34,7 @@ const es: Catalog = {
   'Unlock with a password': 'Desbloquear con una contraseña',
   'Your username and password stay on this device. Only a value worked out from them reaches the server, so it never learns either one.': 'Tu nombre de usuario y tu contraseña se quedan en este dispositivo. Al servidor solo llega un valor calculado a partir de ellos, así que nunca conoce ninguno de los dos.',
   'A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else.': 'Una contraseña olvidada no se puede restablecer, nadie puede hacerlo. Necesitarías tu enlace de sincronización o una clave de acceso para poner una nueva. Quien consiguiera los datos del servidor podría intentar adivinarla, así que usa una contraseña larga que no uses en ningún otro sitio.',
-  'Username or email (not checked, and never stored)': 'Nombre de usuario o correo electrónico (no se comprueba ni se guarda)',
+  'Username or email': 'Nombre de usuario o correo electrónico',
   'Password': 'Contraseña',
   'That password is too easy to guess.': 'Esa contraseña es demasiado fácil de adivinar.',
   'Password again': 'Repite la contraseña',

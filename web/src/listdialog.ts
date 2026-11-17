@@ -82,7 +82,7 @@ function askPassword(setting: boolean): Promise<{ username: string; password: st
       h('h3', {}, setting ? t('Set a password') : t('Unlock with a password')),
       h('p', { class: 'muted small' }, t('Your username and password stay on this device. Only a value worked out from them reaches the server, so it never learns either one.')),
       setting ? h('p', { class: 'recovery-warning', role: 'note' }, t('A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else.')) : '',
-      h('label', { class: 'field' }, t('Username or email (not checked, and never stored)'), username),
+      h('label', { class: 'field' }, t('Username or email'), username),
       h('label', { class: 'field' }, t('Password'), password),
       setting ? h('label', { class: 'field' }, t('Password again'), again) : '',
       msg,

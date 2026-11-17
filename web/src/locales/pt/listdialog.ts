@@ -34,7 +34,7 @@ const pt: Catalog = {
   'Unlock with a password': 'Desbloquear com uma senha',
   'Your username and password stay on this device. Only a value worked out from them reaches the server, so it never learns either one.': 'Seu nome de usuário e sua senha ficam neste dispositivo. Somente um valor calculado a partir deles chega ao servidor, que nunca conhece nenhum dos dois.',
   'A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else.': 'Uma senha esquecida não pode ser redefinida por ninguém. Você precisaria do link de sincronização ou de uma chave de acesso para definir outra. Quem obtivesse os dados do servidor poderia tentar adivinhá-la, então use uma senha longa que você não use em nenhum outro lugar.',
-  'Username or email (not checked, and never stored)': 'Nome de usuário ou e-mail (não verificado nem armazenado)',
+  'Username or email': 'Nome de usuário ou e-mail',
   'Password': 'Senha',
   'That password is too easy to guess.': 'Essa senha é fácil demais de adivinhar.',
   'Password again': 'Repita a senha',

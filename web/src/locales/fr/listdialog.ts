@@ -49,8 +49,7 @@ const fr: Catalog = {
     'Votre nom d’utilisateur et votre mot de passe restent sur cet appareil. Seule une valeur calculée à partir d’eux parvient au serveur, qui ne connaît donc ni l’un ni l’autre.',
   'A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else.':
     'Un mot de passe oublié ne peut être réinitialisé par personne. Il vous faudrait votre lien de synchronisation ou une clé d’accès pour en définir un nouveau. Quelqu’un qui obtiendrait les données du serveur pourrait essayer de le deviner\xa0\\1 choisissez donc un mot de passe long, que vous n’utilisez nulle part ailleurs.',
-  'Username or email (not checked, and never stored)':
-    'Nom d’utilisateur ou e-mail (ni vérifié ni conservé)',
+  'Username or email': 'Nom d’utilisateur ou e-mail',
   'Password':
     'Mot de passe',
   'That password is too easy to guess.': 'Ce mot de passe est trop facile à deviner.',
