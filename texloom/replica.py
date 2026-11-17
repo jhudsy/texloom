@@ -22,6 +22,7 @@ from pycrdt import Doc, Map, merge_updates
 
 from . import __version__, tls
 from .crypto import Keys, b64d, b64e, canonical_pub, revoke_msg, signer
+from .packing import unpack
 
 log = logging.getLogger("texloom")
 
@@ -280,6 +281,7 @@ class Replica:
                     self.refs[e["q"]] = json.loads(ref[len(REF):])["b"]
                 except (ValueError, KeyError):
                     pass
+            update = unpack(update)  # a compressed snapshot or change (packing.py)
             with self.doc.transaction(origin="remote"):
                 self.doc.apply_update(update)
         self.save()
@@ -518,7 +520,7 @@ class Replica:
                 if self.before_remote:
                     await self.before_remote()
                 with self.doc.transaction(origin="remote"):
-                    self.doc.apply_update(b64d(p["u"]))
+                    self.doc.apply_update(unpack(b64d(p["u"])))
                 self.save()
                 if self.on_remote:
                     await self.on_remote()

@@ -141,6 +141,14 @@ the burst of reconnections that follows isn't refused. Clients reconnect with ba
 full-state snapshot; the server drops the entries it replaces. (The server can't
 compact by itself: it can't read the data.)
 
+**Compressed updates:** an update (a snapshot, a big change, or one passed between peers) may be
+*packed*: `\x00TLz` followed by the update compressed with zlib, before it's encrypted
+(`texloom/packing.py`, `web/src/packing.ts`; `scripts/packing-vectors.json` checks that both read
+the same cases). Data counts as packed only if it also decompresses cleanly, so a plain update
+is never taken for one. Every app reads packed updates; none writes them yet. Writing starts once
+apps too old to read them can no longer connect (`min_version`), so that no one is handed a
+snapshot they can't read ([#18](https://github.com/jhudsy/texloom/issues/18)).
+
 **Peer catch-up (Yjs sync step 1/2, relayed):** after `hello`, every replica broadcasts
 `p2p {k:"sv1", sv}`, its state vector. Each writer that receives it replies directly
 with `{k:"upd", u}`, the update the newcomer lacks, signed with `"p2p:" ‖ ciphertext`.

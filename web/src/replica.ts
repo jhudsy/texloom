@@ -10,6 +10,7 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import { Keys, b64d, b64e, canonicalPub, revokeMsg, signer } from './crypto'
+import { unpack } from './packing'
 import { t } from './i18n'
 import { APP_VERSION } from './version'
 import type { Link } from './versions'
@@ -420,6 +421,7 @@ export class Replica {
         await idbPut(this.db, 'kv', 'refs', this.refs)
         update = got.content
       }
+      update = await unpack(update) // a compressed snapshot or change (packing.ts)
       try {
         Y.applyUpdate(this.doc, update, REMOTE)
       } catch (err) {
@@ -639,7 +641,7 @@ export class Replica {
         // (Peers resend after our state vector, which goes out once the log is applied.)
         if (!this.synced) return
         if (!m.s || !this.keys.verify('p2p:', data, b64d(m.s), true)) { console.warn('unsigned p2p update ignored'); return }
-        Y.applyUpdate(this.doc, b64d(p.u), REMOTE)
+        Y.applyUpdate(this.doc, await unpack(b64d(p.u)), REMOTE)
         break
       case 'breq': {
         if (typeof p.id !== 'string' || !BLOB_ID.test(p.id)) return
