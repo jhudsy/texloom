@@ -38,7 +38,6 @@ const zh: Catalog = {
   'Use this link': '使用此链接',
   'This server doesn’t keep project lists.': '此服务器不保存项目列表。',
   'That isn’t a sync link.': '这不是同步链接。',
-  'That list is kept on {{server}}: open the link there.': '该列表保存在 {{server}} 上：请在那里打开此链接。',
   'The TeXLoom app on this computer asked for your project list. Continue only if you just asked for this in the app.': '此电脑上的 TeXLoom 应用请求获取你的项目列表。请仅在你刚刚在应用中发起此操作时继续。',
   'This list was replaced or deleted. Stop on this browser, then use its new sync link.': '此列表已被替换或删除。请在此浏览器上停止使用，然后使用新的同步链接。',
   'That username and password are already in use. Choose another password.': '该用户名和密码已被使用。请换一个密码。',
@@ -70,6 +69,11 @@ const zh: Catalog = {
   "Use this list, and your creation code, in the TeXLoom app on this computer": "在这台电脑上的 TeXLoom 应用中使用此列表和你的创建码",
   "Use in the TeXLoom app": "在 TeXLoom 应用中使用",
   "Send this browser’s list": "发送此浏览器的列表",
+  'The list needs at least one copy.': '列表至少需要一个副本。',
+  'not reached at the last sync': '上次同步时无法连接',
+  'Copies of this list': '此列表的副本',
+  'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': '列表保存在多台服务器上，就不会因任何一台消失而丢失，每台设备都会保持所有副本最新。每个副本都经过加密。同步链接在其中任何一台上都可使用；通行密钥只在添加它的服务器上有效。',
+  'Keep a copy there too': '也在那里保留一份副本',
 }
 
 export default zh

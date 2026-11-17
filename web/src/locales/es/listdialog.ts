@@ -38,7 +38,6 @@ const es: Catalog = {
   'Use this link': 'Usar este enlace',
   'This server doesn’t keep project lists.': 'Este servidor no guarda listas de proyectos.',
   'That isn’t a sync link.': 'Eso no es un enlace de sincronización.',
-  'That list is kept on {{server}}: open the link there.': 'Esa lista está en {{server}}: abre el enlace allí.',
   'The TeXLoom app on this computer asked for your project list. Continue only if you just asked for this in the app.': 'La aplicación TeXLoom de este ordenador ha pedido tu lista de proyectos. Continúa solo si acabas de pedirlo en la aplicación.',
   'This list was replaced or deleted. Stop on this browser, then use its new sync link.': 'Esta lista se ha sustituido o eliminado. Deja de usarla en este navegador y luego usa su nuevo enlace de sincronización.',
   'That username and password are already in use. Choose another password.': 'Ese nombre de usuario y esa contraseña ya están en uso. Elige otra contraseña.',
@@ -70,6 +69,11 @@ const es: Catalog = {
   "Use this list, and your creation code, in the TeXLoom app on this computer": "Usar esta lista, y su código de creación, en la aplicación TeXLoom de este ordenador",
   "Use in the TeXLoom app": "Usar en la aplicación TeXLoom",
   "Send this browser’s list": "Enviar la lista de este navegador",
+  'The list needs at least one copy.': 'La lista necesita al menos una copia.',
+  'not reached at the last sync': 'no se alcanzó en la última sincronización',
+  'Copies of this list': 'Copias de esta lista',
+  'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': 'Guardada en más de un servidor, la lista sobrevive a cualquiera de ellos, y cada dispositivo mantiene todas las copias al día. Cada copia está cifrada. El enlace de sincronización funciona en cualquiera de ellos; las llaves de acceso solo funcionan en el servidor donde se añadieron.',
+  'Keep a copy there too': 'Guardar también una copia allí',
 }
 
 export default es

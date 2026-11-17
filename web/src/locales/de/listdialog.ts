@@ -38,7 +38,6 @@ const de: Catalog = {
   'Use this link': 'Diesen Link verwenden',
   'This server doesn’t keep project lists.': 'Dieser Server speichert keine Projektlisten.',
   'That isn’t a sync link.': 'Das ist kein Synchronisationslink.',
-  'That list is kept on {{server}}: open the link there.': 'Diese Liste liegt auf {{server}}: Öffnen Sie den Link dort.',
   'The TeXLoom app on this computer asked for your project list. Continue only if you just asked for this in the app.': 'Die TeXLoom-App auf diesem Computer hat Ihre Projektliste angefordert. Fahren Sie nur fort, wenn Sie dies gerade in der App veranlasst haben.',
   'This list was replaced or deleted. Stop on this browser, then use its new sync link.': 'Diese Liste wurde ersetzt oder gelöscht. Beenden Sie sie in diesem Browser und verwenden Sie dann ihren neuen Synchronisationslink.',
   'That username and password are already in use. Choose another password.': 'Dieser Benutzername und dieses Passwort werden bereits verwendet. Wählen Sie ein anderes Passwort.',
@@ -70,6 +69,11 @@ const de: Catalog = {
   "Use this list, and your creation code, in the TeXLoom app on this computer": "Diese Liste und Ihren Erstellungscode in der TeXLoom-App auf diesem Computer verwenden",
   "Use in the TeXLoom app": "In der TeXLoom-App verwenden",
   "Send this browser’s list": "Liste dieses Browsers senden",
+  'The list needs at least one copy.': 'Die Liste braucht mindestens eine Kopie.',
+  'not reached at the last sync': 'beim letzten Abgleich nicht erreicht',
+  'Copies of this list': 'Kopien dieser Liste',
+  'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': 'Auf mehr als einem Server gespeichert, überdauert die Liste jeden einzelnen davon, und jedes Gerät hält alle Kopien aktuell. Jede Kopie ist verschlüsselt. Der Sync-Link funktioniert auf jedem dieser Server; Passkeys nur auf dem Server, auf dem sie hinzugefügt wurden.',
+  'Keep a copy there too': 'Auch dort eine Kopie behalten',
 }
 
 export default de

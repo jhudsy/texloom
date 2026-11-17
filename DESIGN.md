@@ -640,6 +640,20 @@ one to the projects it names.
   passkey's secret comes from WebAuthn PRF with the salt `texloom project list v1`. An entry opened
   by `HMAC-SHA256(K, "texloom list slots")` records each way in with its signing seed (not its
   encryption key), so whoever holds K can remove them but not read them.
+- **Copies.** A list can be kept on several servers (`web/src/listsync.ts`, `texloom/listsync.py`).
+  Its settings carry `copy:<origin>` (on or off, with when), each device remembers the set beside
+  its key, and every entry is synced on every copy: each is read and merged into what's known so
+  far, written back where that adds something, and the copies written before others added more are
+  written again. Everything in a list merges in any order (entries, tags, settings, and the record of
+  ways in, which keeps removed ones as `gone`), so a copy that was offline just catches up; one that
+  can't be reached is skipped, but one is needed. Settings are synced first, since they say where
+  the copies are. Password entries are copied to every copy, as they are (encrypted, and signed
+  with the seed the record of ways in keeps); passkeys belong to their server's address, so they
+  stay where they were made. A list retired on any copy is retired: replacing or deleting it retires
+  it on every copy. Dropping a copy leaves what's there, with its settings marking it dropped. The
+  servers allow `X-Seq` across sites, so a page can sync copies on other servers. Every list entry
+  names its project's server (`s`), and every creation code its server (`code:<origin>`), since
+  "the server keeping the list" is no longer one server.
 - `DELETE` retires an entry: its contents go, but its id answers 410 until it is purged, so a
   device with a replaced (perhaps leaked) link can't start the list again under that link. Replacing
   a link retires every way in, because anyone holding the old link can read what it records. The

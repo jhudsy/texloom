@@ -1011,6 +1011,12 @@ class ProjectListDialog(QtWidgets.QDialog):
         row.addWidget(off)
         u.addLayout(row)
         u.addWidget(grey_note(_("Keep the sync link in a password manager: it opens every project on the list, and a lost list can’t be recovered.")))
+        u.addWidget(self.heading(_("Copies of this list")))
+        u.addWidget(grey_note(_("Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.")))
+        self.copies = QtWidgets.QListWidget()
+        self.copies.setMaximumHeight(110)
+        self.copies.itemChanged.connect(self.copy_changed)
+        u.addWidget(self.copies)
         self.pages.addWidget(inuse)
 
         self.status = QtWidgets.QLabel("")
@@ -1076,18 +1082,44 @@ class ProjectListDialog(QtWidgets.QDialog):
             self.count.setText(_("This computer has no project list yet."))
             return
         server, doc, away = found
+        self.show_copies(server)
         self.count.setText(ngettext(len(doc["projects"]), "The list has {n} project.", "The list has {n} projects.", n=len(doc["projects"])))
         of = tags.reader()
         for project, entry in away:
             names = [t.name for t in of(project)]
             title = entry.get("nick") or entry.get("n") or _("Untitled project")
-            elsewhere = entry.get("s") if isinstance(entry.get("s"), str) else None  # a project on another server
+            elsewhere = entry.get("s") if isinstance(entry.get("s"), str) and entry["s"].rstrip("/") != server.rstrip("/") else None  # on another server
             where = f"  ·  {urlparse(elsewhere).netloc}" if elsewhere else ""
             item = QtWidgets.QListWidgetItem(title + where + (f"  ·  {', '.join(names)}" if names else ""))
             there = entry.get("s") if isinstance(entry.get("s"), str) and entry["s"].startswith(("https://", "http://")) else server
             item.setData(Qt.UserRole, f"{there.rstrip('/')}/#{entry['f']}")  # on its own server
             self.items.addItem(item)
         self.apply_find()
+
+    def show_copies(self, home: str) -> None:
+        """The servers keeping a copy of the list, and the others this computer knows, to tick."""
+        self.home = home
+        on = set(listsync.copy_servers(home))
+        self.copies.blockSignals(True)
+        self.copies.clear()
+        for server in [*listsync.copy_servers(home), *[x for x in listsync.known_servers() if x not in on]]:
+            trouble = listsync.copy_problems.get(server) if server in on else None
+            label = urlparse(server).netloc + (f"  ·  {listsync.explain(trouble)}" if trouble else "")
+            item = QtWidgets.QListWidgetItem(label)
+            item.setData(Qt.UserRole, server)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if server in on else Qt.Unchecked)
+            self.copies.addItem(item)
+        self.copies.blockSignals(False)
+
+    def copy_changed(self, item) -> None:
+        server, keep = item.data(Qt.UserRole), item.checkState() == Qt.Checked
+        if not keep and listsync.copy_servers(self.home) == [server]:
+            self.status.setText(red(_("The list needs at least one copy.")))
+            self.show_copies(self.home)
+            return
+        listsync.set_copy(self.home, server, keep)
+        self.refresh_list()  # the next sync writes it there (or stops)
 
     def apply_find(self) -> None:
         words = tags.fold_search(self.find.text()).split()

@@ -3,11 +3,12 @@ import { b64d, b64e } from './crypto'
 import { dialog, h } from './dom'
 import { locale, t, tn } from './i18n'
 import {
-  addSlot, adopt, createPasskey, deleteList, lastProblem, linkFor, ListError, MIN_PASSWORD, newSecret, passkeySupported, readSlots,
-  removeSlot, replaceList, savedSecret, saveSecret, setPassword, syncNow, unlockWithPasskey, unlockWithPassword, type Slot,
+  addSlot, adopt, copyProblems, copyServers, createPasskey, deleteList, lastProblem, linkFor, ListError, MIN_PASSWORD, newSecret, passkeySupported, readSlots,
+  removeSlot, replaceList, savedSecret, saveSecret, setCopy, setPassword, syncNow, unlockWithPasskey, unlockWithPassword, type Slot,
 } from './listsync'
 import { projects } from './projects'
 import { creationCode } from './replica'
+import { normalServer, serverName } from './servers'
 import { askCode, serverInfo } from './storagenotice'
 import { sendListToApp } from './openinapp'
 
@@ -96,6 +97,7 @@ function askPassword(setting: boolean): Promise<{ username: string; password: st
 export function listDialog(onClose?: () => void) {
   const body = h('div', {})
   const ways = h('div', { class: 'list-ways' })
+  const copies = h('div', { class: 'list-copies' })
   const msg = h('p', { class: 'err small', role: 'status' })
   const dlg = dialog('settings', h('h3', {}, t('Project list')), body, msg, h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Close'))))
   if (onClose) dlg.addEventListener('close', onClose)
@@ -117,6 +119,41 @@ export function listDialog(onClose?: () => void) {
       h('span', { class: 'spacer' }, slot.kind === 'passkey' ? t('Passkey, added {{when}}', { when: whenAdded(slot.at) }) : t('Password, set {{when}}', { when: whenAdded(slot.at) })),
       removeBtn(secret, id, slot)))
     ways.replaceChildren(...(rows.length ? [h('h5', {}, t('Other ways to open this list')), ...rows] : []))
+  }
+
+  /** The servers keeping a copy, and others this browser knows, to tick. */
+  function showCopies() {
+    const on = new Set(copyServers())
+    const known = [...new Set([...on, location.origin, ...projects.list().map((r) => r.server ?? ''), ...creationCode.servers()].map((x) => normalServer(x)).filter((x): x is string => !!x))]
+    const toggle = (server: string, box: HTMLInputElement) => async () => {
+      say('')
+      if (!box.checked && on.size === 1) { box.checked = true; say(t('The list needs at least one copy.')); return }
+      try {
+        await setCopy(server, box.checked)
+        if (box.checked && copyProblems.get(server) === 'needs-code' && await askCode(CODE_FOR_LIST(), server)) await syncNow()
+      } catch (e) { say(problem(e)) }
+      showCopies()
+    }
+    const row = (server: string) => {
+      const box = h('input', { type: 'checkbox', checked: on.has(server) }) as HTMLInputElement
+      box.addEventListener('change', toggle(server, box))
+      const trouble = on.has(server) ? copyProblems.get(server) : undefined
+      return h('label', { class: 'check' }, box, h('span', {}, serverName(server),
+        server === location.origin ? h('small', { class: 'muted' }, ' · ' + t('this server')) : '',
+        trouble ? h('small', { class: 'err' }, ' · ' + (trouble === 'network' ? t('not reached at the last sync') : explain(trouble))) : ''))
+    }
+    const other = h('input', { placeholder: 'https://…', 'aria-label': t('Another server’s address') }) as HTMLInputElement
+    copies.replaceChildren(
+      h('h5', {}, t('Copies of this list')),
+      h('p', { class: 'muted small' }, t('Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.')),
+      ...known.map(row),
+      h('div', { class: 'row' }, other, btn(t('Keep a copy there too'), async () => {
+        const server = normalServer(other.value.trim())
+        if (!server) { say(t('Give a server’s address, starting with https://')); return }
+        await setCopy(server, true)
+        if (copyProblems.get(server) === 'needs-code' && await askCode(CODE_FOR_LIST(), server)) await syncNow()
+      })),
+    )
   }
 
   function renderOpen(secret: Uint8Array) {
@@ -143,6 +180,7 @@ export function listDialog(onClose?: () => void) {
         h('button', { onclick: () => { saveSecret(null); render() } }, t('Stop on this browser')),
       ),
       ways,
+      copies,
       h('h5', {}, t('If the link has got out, or you’re finished with the list')),
       h('div', { class: 'row' },
         btn(t('Replace the sync link…'), async () => {
@@ -155,12 +193,13 @@ export function listDialog(onClose?: () => void) {
       ),
     )
     showWays(secret)
+    showCopies()
   }
 
   function renderClosed() {
     ways.replaceChildren()
     const input = h('input', { type: 'password', placeholder: t('Sync link'), 'aria-label': t('Sync link'), autocomplete: 'off' }) as HTMLInputElement
-    const useIfMine = async (secret: Uint8Array) => { if (confirm(ADD_WARNING())) await adopt(secret) }
+    const useIfMine = async (secret: Uint8Array, server?: string) => { if (confirm(ADD_WARNING())) await adopt(secret, server) }
     body.replaceChildren(
       h('p', {}, t('Keep the list of your projects on the server, encrypted, so it follows you to other computers and browsers. The server can’t read it.')),
       h('p', { class: 'muted small' }, t('It is opened by a sync link, and optionally by a passkey or a password.')),
@@ -206,9 +245,9 @@ export function listDialog(onClose?: () => void) {
         }),
       ),
       h('div', { class: 'row' }, input, btn(t('Use this link'), async () => {
-        const secret = secretFromLink(input.value)
-        if (typeof secret === 'string') say(secret)
-        else await useIfMine(secret)
+        const got = secretFromLink(input.value)
+        if (typeof got === 'string') say(got)
+        else await useIfMine(got.secret, got.server)
       })),
     )
   }
@@ -223,14 +262,16 @@ export function listDialog(onClose?: () => void) {
   serverInfo().then((i) => { if (i?.projectLists === false) body.replaceChildren(h('p', {}, t('This server doesn’t keep project lists.'))) })
 }
 
-function secretFromLink(link: string): Uint8Array | string {
+/** A sync link's secret, and the server it points to (one keeping a copy: any works, so a link to
+ *  another server's list is used from here as it is). */
+function secretFromLink(link: string): { secret: Uint8Array; server: string } | string {
   try {
     const u = new URL(link.trim())
     const v = new URLSearchParams(u.hash.slice(1)).get('sync')
     const secret = v ? b64d(v) : null
-    if (secret?.length !== 32) return t('That isn’t a sync link.')
-    if (u.origin !== location.origin) return t('That list is kept on {{server}}: open the link there.', { server: u.origin })
-    return secret
+    const server = normalServer(u.origin)
+    if (secret?.length !== 32 || !server) return t('That isn’t a sync link.')
+    return { secret, server }
   } catch { return t('That isn’t a sync link.') }
 }
 
@@ -246,11 +287,11 @@ export function takeListHash(): ListHash | null {
 
 export function handleListHash(what: ListHash) {
   if (what.kind === 'app') { sendToAppDialog(); return }
-  const secret = secretFromLink(what.link)
-  if (typeof secret === 'string') { alert(secret); return }
+  const got = secretFromLink(what.link)
+  if (typeof got === 'string') { alert(got); return }
   const mine = savedSecret()
-  if (mine && b64e(mine) === b64e(secret)) return
-  if (confirm(ADD_WARNING())) adopt(secret).catch((e) => alert(problem(e)))
+  if (mine && b64e(mine) === b64e(got.secret)) return
+  if (confirm(ADD_WARNING())) adopt(got.secret, got.server).catch((e) => alert(problem(e)))
 }
 
 /** The desktop app can't use a passkey itself: unlock here (or use the list this browser already

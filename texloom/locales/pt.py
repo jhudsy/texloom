@@ -324,4 +324,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     "The server keeps an encrypted copy of a project only with a creation code. With one, your other computers and collaborators get changes even when you're not online together, and the project opens anywhere in the browser.": 'O servidor só guarda uma cópia criptografada de um projeto com um código de criação. Com um código, seus outros computadores e colaboradores recebem as alterações mesmo quando vocês não estão on-line ao mesmo tempo, e o projeto abre em qualquer navegador.',
     "The server didn't accept that code.": 'O servidor não aceitou esse código.',
     "Couldn't reach the server: {err}": 'Não foi possível contactar o servidor: {err}',
+    'Copies of this list': 'Cópias desta lista',
+    'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': 'Guardada em mais de um servidor, a lista sobrevive a qualquer um deles, e cada dispositivo mantém todas as cópias atualizadas. Cada cópia é cifrada. O link de sincronização funciona em qualquer um deles; as chaves de acesso só funcionam no servidor onde foram adicionadas.',
+    'The list needs at least one copy.': 'A lista precisa de pelo menos uma cópia.',
 }

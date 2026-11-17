@@ -17,14 +17,10 @@ that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitat
    server can't read projects.
 3. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
-4. **[Move a project list to another server](https://github.com/jhudsy/texloom/issues/20)**: for when a
-   server closes; passkeys have to be added again there. 2–3 days. (One list across servers, #13, is
-   done: since 0.4.28 it holds projects on any server, with a creation code for each, and new
-   projects go on the server you choose.)
 
 ## Testing
 
-5. **[TLA+ model of the GitHub lease](https://github.com/jhudsy/texloom/issues/8)**, and later the
+4. **[TLA+ model of the GitHub lease](https://github.com/jhudsy/texloom/issues/8)**, and later the
    server protocol. 2–3 days each; once several people use GitHub sync.
 
 What's checked already: README → Checks, and DESIGN.md → Guarding text handling (including the

@@ -1542,7 +1542,8 @@ async def headers(request: web.Request, handler):
         except web.HTTPException as e:
             resp = e
     resp.headers["Access-Control-Allow-Origin"] = "*"  # sync data is ciphertext; keys never leave the page
-    resp.headers["Access-Control-Allow-Headers"] = "X-Sig, X-Create-Code, X-Kind, X-Only-Output, Content-Type"
+    resp.headers["Access-Control-Allow-Headers"] = "X-Sig, X-Seq, X-Create-Code, X-Kind, X-Only-Output, Content-Type"
+    resp.headers["Access-Control-Expose-Headers"] = "X-Seq"  # project lists kept on several servers are read and written from any page
     resp.headers["Access-Control-Allow-Methods"] = "GET, PUT, POST, DELETE, OPTIONS"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "no-referrer"

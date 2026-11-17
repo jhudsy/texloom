@@ -82,7 +82,7 @@ export const projects = {
     const out: Record<string, ListEntry> = {}
     for (const r of read()) {
       const e: ListEntry = { f: r.fragment, n: r.name, at: r.at, w: r.writable }
-      if (awayServer(r.server)) e.s = awayServer(r.server)
+      e.s = awayServer(r.server) ?? location.origin // always named: copies of the list are on several servers (listsync.ts)
       if (r.nick) e.nick = r.nick
       if (r.docTitle) e.t = r.docTitle
       if (r.createdBy) e.by = r.createdBy

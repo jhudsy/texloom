@@ -52,7 +52,6 @@ const fr: Catalog = {
   'Use this link': 'Utiliser ce lien',
   'This server doesn’t keep project lists.': 'Ce serveur ne conserve pas de listes de projets.',
   'That isn’t a sync link.': 'Ce n’est pas un lien de synchronisation.',
-  'That list is kept on {{server}}: open the link there.': 'Cette liste est conservée sur {{server}} : ouvrez le lien là-bas.',
   'The TeXLoom app on this computer asked for your project list. Continue only if you just asked for this in the app.':
     'L’application TeXLoom de cet ordinateur a demandé votre liste de projets. Ne continuez que si vous venez de le demander dans l’application.',
   'This list was replaced or deleted. Stop on this browser, then use its new sync link.':
@@ -111,5 +110,10 @@ const fr: Catalog = {
   "Use this list, and your creation code, in the TeXLoom app on this computer": "Utiliser cette liste, et votre code de création, dans l’application TeXLoom de cet ordinateur",
   "Use in the TeXLoom app": "Utiliser dans l’application TeXLoom",
   "Send this browser’s list": "Envoyer la liste de ce navigateur",
+  'The list needs at least one copy.': 'La liste doit avoir au moins une copie.',
+  'not reached at the last sync': 'pas atteint lors de la dernière synchronisation',
+  'Copies of this list': 'Copies de cette liste',
+  'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': 'Conservée sur plusieurs serveurs, la liste survit à chacun d’eux, et chaque appareil tient toutes les copies à jour. Chaque copie est chiffrée. Le lien de synchronisation fonctionne sur n’importe lequel ; les clés d’accès ne fonctionnent que sur le serveur où elles ont été ajoutées.',
+  'Keep a copy there too': 'Y garder aussi une copie',
 }
 export default fr

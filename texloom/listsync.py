@@ -279,27 +279,70 @@ def _push(key: ListKey, server: str, seq: int, doc: dict, code: str | None) -> b
     return True
 
 
-def sync(key: ListKey, server: str, local: dict, code: str | None = None) -> dict:
-    """Merge `local` with the server's list, update the server if that changed it; returns the result."""
-    for _attempt in range(5):
-        seq, remote = pull(key, server)
-        merged = _forget_old_removals(merge(remote or empty(), local))
-        if remote is not None and _canon(merged) == _canon(remote):
-            return merged
-        if _push(key, server, seq + 1, merged, code):
-            return merged
-    raise ListError("the list keeps changing: try again")
+# --- copies of the list on several servers -----------------------------------------------------
+# A list can be kept on several servers, so it outlives any one of them. Its settings carry
+# copy:<origin> (on or off, with when that was set), this computer remembers the set (with the
+# link), and each sync reads every copy, merges, and writes back to those that lack something.
+# Every part of a list merges in any order, so a copy that was offline catches up the next time; a
+# list retired on any copy is retired. Same rules as web/src/listsync.ts.
+COPY = "copy:"
+copy_problems: dict[str, str] = {}  # server -> why it wasn't reached or written at the last sync
 
 
-def sync_tags(key: ListKey, server: str, local: dict, listed: set[str], code: str | None = None) -> dict:
-    """Merge `local` with the tags kept beside the list (an entry of their own, so that clients which
-    don't know about tags can't lose them). A new entry needs a creation code; without one, none is
-    made until there is something to put in it."""
-    entry = ListKey(hmac.new(key.secret, TAGS_LABEL, hashlib.sha256).digest())
+def copies(home: str) -> dict[str, dict]:
+    """The servers keeping copies (origin -> {"on", "at"}); at first, the one the link points to."""
+    try:
+        c = json.loads(_saved().read_text()).get("copies")
+    except (OSError, ValueError, AttributeError):
+        c = None
+    return c if isinstance(c, dict) and c else {home.rstrip("/"): {"on": True, "at": 1}}
+
+
+def _save_copies(c: dict[str, dict]) -> None:
+    link = saved_link()
+    if link:
+        _write_saved({"link": link, "copies": c})
+
+
+def copy_servers(home: str) -> list[str]:
+    """The servers keeping copies of the list, the link's own first."""
+    home = home.rstrip("/")
+    on = [s for s, v in copies(home).items() if isinstance(v, dict) and v.get("on") and _origin(s) == s]
+    return sorted(on, key=lambda s: (s != home, s))
+
+
+def set_copy(home: str, server: str, on: bool) -> None:
+    """Keep a copy of the list on `server`, or stop (the next sync tells the list's settings)."""
+    c = copies(home)
+    c[server] = {"on": on, "at": int(time.time() * 1000)}
+    _save_copies(c)
+
+
+def _take_copies(home: str, settings: dict) -> bool:
+    """The copies the list's settings name, taken on here. True if they changed."""
+    had = copies(home)
+    nxt = dict(had)
+    for name, v in settings.get("s", {}).items():
+        server = _origin(name[len(COPY):]) if name.startswith(COPY) else None
+        if not server or server != name[len(COPY):] or not isinstance(v, dict) or not isinstance(v.get("at"), int):
+            continue
+        mine = had.get(server)
+        on = v.get("v") == "1"
+        if not mine or v["at"] > mine.get("at", 0) or (v["at"] == mine.get("at") and on != mine.get("on")):
+            nxt[server] = {"on": on, "at": v["at"]}
+    if _canon(nxt) == _canon(had):
+        return False
+    _save_copies(nxt)
+    return True
+
+
+def _update_on(entry: ListKey, server: str, change, blank: dict | None, code: str | None) -> dict:
+    """Read an entry on one server, change it, write it back unless that changed nothing (a missing
+    entry that would equal `blank` isn't made), retrying if another device got there first."""
     for _attempt in range(5):
         seq, remote = pull(entry, server)
-        merged = tidy_tags(merge_tags(remote or empty_tags(), local), listed)
-        before = remote if remote is not None else None if code else empty_tags()
+        merged = change(remote)
+        before = remote if remote is not None else blank
         if before is not None and _canon(merged) == _canon(before):
             return merged
         if _push(entry, server, seq + 1, merged, code):
@@ -307,18 +350,59 @@ def sync_tags(key: ListKey, server: str, local: dict, listed: set[str], code: st
     raise ListError("the list keeps changing: try again")
 
 
+def _replicate(entry: ListKey, home: str, merge_in, mine: dict, blank_for, code: str | None) -> dict:
+    """One entry on every copy: each read and merged into what's known so far (`merge_in(had,
+    known)`, from `mine`), written back where that adds something; then the copies written before
+    others added more are written again. An unreachable copy is skipped (it catches up later), but
+    one is needed; a copy that says the list was retired stops it. `code`: the link's own server's."""
+    known, holds, failure = mine, {}, None
+    def code_there(s: str) -> str | None:
+        return (code if s == home.rstrip("/") else None) or code_for(s) or None
+    for s in copy_servers(home):
+        try:
+            known = _update_on(entry, s, lambda had, k=known: merge_in(had, k), blank_for(s), code_there(s))
+            holds[s] = _canon(known)
+            copy_problems.pop(s, None)
+        except ListError as e:
+            if e.code == "list-retired":
+                raise
+            failure = e
+            copy_problems[s] = e.code
+    if not holds:
+        raise failure or ListError("server")
+    for s, held in holds.items():
+        if held != _canon(known):
+            try:
+                known = _update_on(entry, s, lambda had, k=known: merge_in(had, k), blank_for(s), code_there(s))
+            except ListError:
+                pass  # next sync
+    return known
+
+
+def sync(key: ListKey, server: str, local: dict, code: str | None = None) -> dict:
+    """Merge `local` with the list's copies (`server`: the one its link points to), update those that
+    lacked something; returns the result."""
+    return _replicate(key, server, lambda had, known: _forget_old_removals(merge(had or empty(), known)), local,
+                      lambda _s: None, code)
+
+
+def sync_tags(key: ListKey, server: str, local: dict, listed: set[str], code: str | None = None) -> dict:
+    """Merge `local` with the tags kept beside the list (an entry of their own, so that clients which
+    don't know about tags can't lose them). A new entry needs a creation code; without one, none is
+    made until there is something to put in it."""
+    entry = ListKey(hmac.new(key.secret, TAGS_LABEL, hashlib.sha256).digest())
+    def blank(s: str) -> dict | None:
+        return None if ((code if s == server.rstrip("/") else None) or code_for(s)) else empty_tags()
+    return _replicate(entry, server, lambda had, known: tidy_tags(merge_tags(had or empty_tags(), known), listed), local, blank, code)
+
+
 def sync_settings(key: ListKey, server: str, local: dict, code: str | None = None) -> dict:
-    """Merge `local` with the settings kept beside the list, such as the creation code (an entry of
-    their own, like tags). A missing entry isn't made until there is something to put in it."""
+    """Merge `local` with the settings kept beside the list, such as the creation codes and the
+    copies (an entry of their own, like tags). A missing entry isn't made until there is something
+    to put in it."""
     entry = ListKey(hmac.new(key.secret, SETTINGS_LABEL, hashlib.sha256).digest())
-    for _attempt in range(5):
-        seq, remote = pull(entry, server)
-        merged = merge_settings(remote or empty_settings(), local)
-        if _canon(merged) == _canon(remote if remote is not None else empty_settings()):
-            return merged
-        if _push(entry, server, seq + 1, merged, code):
-            return merged
-    raise ListError("the list keeps changing: try again")
+    return _replicate(entry, server, lambda had, known: merge_settings(had or empty_settings(), known), local,
+                      lambda _s: empty_settings(), code)
 
 
 def password_secret(username: str, password: str) -> bytes:
@@ -356,14 +440,20 @@ def saved_link() -> str | None:
 
 
 def save_link(link: str | None) -> None:
+    """Use this list here (its copies start as the server the link points to), or none."""
     if link is None:
         _saved().unlink(missing_ok=True)
         return
+    _write_saved({"link": link, "copies": {ListKey.from_link(link)[1].rstrip("/"): {"on": True, "at": 1}}})
+    copy_problems.clear()
+
+
+def _write_saved(state: dict) -> None:
     p = _saved()
     p.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # it opens every project on the list
     with os.fdopen(fd, "w") as f:
-        json.dump({"link": link}, f)
+        json.dump(state, f)
 
 
 def _name_file() -> Path:
@@ -506,10 +596,9 @@ def local_folders(server: str) -> dict:
             created, changed = folder_dates(d)
         except (OSError, ValueError, KeyError):
             continue
-        e = {"f": keys.fragment(), "n": d.name, "at": at, "w": keys.writable, "c": created, "m": changed}
-        if there.rstrip("/") != server.rstrip("/"):
-            e["s"] = there.rstrip("/")
-        doc["projects"][keys.project] = e
+        # its server always named: copies of the list may be on several servers
+        doc["projects"][keys.project] = {"f": keys.fragment(), "n": d.name, "at": at, "w": keys.writable, "c": created, "m": changed,
+                                         "s": there.rstrip("/")}
     return doc
 
 
@@ -525,9 +614,9 @@ def sync_this_computer(code: str | None = None) -> tuple[str, dict] | None:
     if not link:
         return None
     key, server = ListKey.from_link(link)
+    _sync_my_settings(key, server, code)  # first: they say where the copies are
     doc = sync(key, server, local_folders(server), code)
     _sync_my_tags(key, server, doc, code)
-    _sync_my_settings(key, server, code)
     return server, doc
 
 
@@ -569,37 +658,39 @@ def _sync_my_tags(key: ListKey, server: str, doc: dict, code: str | None) -> Non
         _tags_error = e.code
 
 
-CODE_FOR = "code:"  # settings key of another server's code: code:<origin> (as web/src/listsync.ts)
+CODE_FOR = "code:"  # settings key of a server's creation code: code:<origin> (as web/src/listsync.ts)
 
 
 def _sync_my_settings(key: ListKey, server: str, code: str | None) -> None:
     """The creation codes and your name follow the list: this computer's latest ones go on it, and
-    later ones set elsewhere (say in the web app) come back here. `code` is the list's own server's
-    code; each other server's is `code:<origin>`."""
+    later ones set elsewhere (say in the web app) come back here. Each code is `code:<origin>`,
+    named by its server, as the list may be kept on several."""
     home = server.rstrip("/")
     saved_all = _saved_codes()
-    saved = saved_all.get(home)
     local = empty_settings()
-    if isinstance(saved, dict) and isinstance(saved.get("v"), str) and isinstance(saved.get("at"), int):
-        local["s"]["code"] = {"v": saved["v"], "at": saved["at"]}
-    elif known := _known_code(server):
-        local["s"]["code"] = {"v": known, "at": 1}  # from before codes were dated: older than any that is
     for origin, c in saved_all.items():
-        if origin != home and _origin(origin) == origin and isinstance(c, dict) and isinstance(c.get("v"), str) and c["v"] \
+        if _origin(origin) == origin and isinstance(c, dict) and isinstance(c.get("v"), str) and c["v"] \
                 and isinstance(c.get("at"), int):
             local["s"][CODE_FOR + origin] = {"v": c["v"], "at": c["at"]}
+    if CODE_FOR + home not in local["s"] and (known := _known_code(server)):
+        local["s"][CODE_FOR + home] = {"v": known, "at": 1}  # from before codes were dated: older than any that is
     name, name_at = my_name()
     if name_at:
         local["s"]["name"] = {"v": name, "at": name_at}
+    for origin, c in copies(server).items():
+        if _origin(origin) == origin and isinstance(c, dict):
+            local["s"][COPY + origin] = {"v": "1" if c.get("on") else "", "at": int(c.get("at", 1))}
     try:
         merged = sync_settings(key, server, local, code or code_for(server) or None)
+        if _take_copies(server, merged):  # new copies: they get the settings too
+            merged = sync_settings(key, server, merged, code or code_for(server) or None)
     except ListError as e:
+        if e.code == "list-retired":
+            raise
         log.debug("list settings: %s", e.code)
         return
     for name, got in merged["s"].items():
-        if name == "code":
-            there = home
-        elif name.startswith(CODE_FOR) and (o := _origin(name[len(CODE_FOR):])) == name[len(CODE_FOR):] and o != home:
+        if name.startswith(CODE_FOR) and (o := _origin(name[len(CODE_FOR):])) == name[len(CODE_FOR):]:
             there = o
         else:
             continue

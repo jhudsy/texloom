@@ -38,7 +38,6 @@ const pt: Catalog = {
   'Use this link': 'Usar este link',
   'This server doesn’t keep project lists.': 'Este servidor não mantém listas de projetos.',
   'That isn’t a sync link.': 'Isso não é um link de sincronização.',
-  'That list is kept on {{server}}: open the link there.': 'Essa lista está em {{server}}: abra o link lá.',
   'The TeXLoom app on this computer asked for your project list. Continue only if you just asked for this in the app.': 'O aplicativo TeXLoom neste computador pediu sua lista de projetos. Continue somente se você acabou de pedir isso no aplicativo.',
   'This list was replaced or deleted. Stop on this browser, then use its new sync link.': 'Esta lista foi substituída ou excluída. Pare de usá-la neste navegador e depois use o novo link de sincronização.',
   'That username and password are already in use. Choose another password.': 'Esse nome de usuário e essa senha já estão em uso. Escolha outra senha.',
@@ -70,6 +69,11 @@ const pt: Catalog = {
   "Use this list, and your creation code, in the TeXLoom app on this computer": "Usar esta lista, e seu código de criação, no aplicativo TeXLoom deste computador",
   "Use in the TeXLoom app": "Usar no aplicativo TeXLoom",
   "Send this browser’s list": "Enviar a lista deste navegador",
+  'The list needs at least one copy.': 'A lista precisa de pelo menos uma cópia.',
+  'not reached at the last sync': 'não alcançado na última sincronização',
+  'Copies of this list': 'Cópias desta lista',
+  'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': 'Guardada em mais de um servidor, a lista sobrevive a qualquer um deles, e cada dispositivo mantém todas as cópias atualizadas. Cada cópia é cifrada. O link de sincronização funciona em qualquer um deles; as chaves de acesso só funcionam no servidor onde foram adicionadas.',
+  'Keep a copy there too': 'Guardar também uma cópia lá',
 }
 
 export default pt

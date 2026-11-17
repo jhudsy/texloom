@@ -5,7 +5,8 @@ import { ed25519 } from '@noble/curves/ed25519.js'
 import { scryptAsync } from '@noble/hashes/scrypt.js'
 import { b64e } from './crypto'
 
-/** s: the project's server, when it isn't the one keeping the list (a project lives on one server). */
+/** s: the project's server (a project lives on one server; the list may be kept on several). An entry
+ *  from before 0.4.29 may lack it: its project is on the server that kept the list then. */
 export interface ListEntry { f: string; n: string; at: number; w: boolean; s?: string; nick?: string; t?: string; by?: string; c?: number; m?: number }
 export interface ListDoc { v: 1; projects: Record<string, ListEntry>; gone: Record<string, number> }
 

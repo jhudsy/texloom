@@ -122,6 +122,12 @@ you, choose **Sync this list…**: the list is kept on the server, encrypted, an
 between every browser and computer you connect. The server can't read it. Removing a project from
 the list on one device removes it on the others.
 
+**Copies on several servers.** Under **Copies of this list** (web app: Manage sync…; desktop
+app: Project list), tick other servers to keep a copy of the list there too, encrypted like the
+first. Every device keeps all the copies up to date, a copy that was offline catches up, and the
+list lives on if one of its servers closes. The sync link works on any of them (change its address),
+and so does a password; a passkey only works on the server where you added it.
+
 A list is opened by a **sync link** (`https://server/#sync=…`). Keep that link in a password
 manager, because it opens every project on the list. You can also add a **passkey**, which your
 phone or password manager carries between devices; passkeys need a browser with the WebAuthn PRF
