@@ -408,6 +408,16 @@ from its last compile, so repeated compiles settle. The MCP `compile` builds the
 
 Either way the PDF goes into the `out` map, so other peers just view it.
 
+**A submission `.zip`** (arXiv, journals; `web/src/submission.ts`, checked by
+`web/scripts/check-submission.mjs`) has to build where it's sent, so it errs towards too much:
+every file named in the argument of any command in the main file, and in the files it reaches
+(.tex, .sty, .cls, …), goes in, with or without its extension, from the main file's folder or a
+`\graphicspath` folder. A file named but unused costs a few bytes; one missing fails the build.
+The `.bbl` comes from a compile in the browser, which hands it back with the PDF; it replaces the
+`.bib`. Removing comments is per line: a comment-only line goes, a comment after code leaves a bare
+`%` (so the line end keeps its meaning), and `%` in verbatim environments, `\verb` and URLs isn't a
+comment. It's in the web app only: the desktop app syncs folders and isn't an export tool.
+
 ### Moving to a new TeX Live release
 
 The in-browser engine's formats are built from one release, so everything follows it. It keeps

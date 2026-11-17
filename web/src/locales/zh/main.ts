@@ -160,6 +160,9 @@ const zh: Catalog = {
   "{{name}} is in the TeXLoom app": "{{name}} 在 TeXLoom 应用中",
   "Reference…": "参考文献…",
   'Kept on another server, {{server}}: this page syncs it with that server.': '保存在另一台服务器 {{server}} 上：此页面会与该服务器同步。',
+  "Download a .zip for arXiv or a journal: only the files the document uses, with the compiled bibliography": "下载适用于 arXiv 或期刊的 .zip：只含文档用到的文件，并附编译好的参考文献",
+  "Submission": "投稿",
+  "Download for submission (.zip)": "下载投稿文件 (.zip)",
 }
 
 export default zh

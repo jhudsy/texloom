@@ -239,6 +239,14 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   filled in. **New → Import…** in
   the file list does the same for an existing project. From git: clone it and run
   `texloom new` in the folder.
+- **Submission** (next to **Source**; under ⋯ in small windows) downloads a `.zip` for arXiv or a
+  journal: only the files the main document uses (followed through `\input`, `\include`,
+  `\includegraphics`, `\usepackage`, … and `\graphicspath`), with the compiled bibliography
+  (`.bbl`, from a compile in the browser) instead of the `.bib`, and without build files.
+  **Remove comments** (on by default: arXiv publishes the source) keeps what follows `%` in
+  verbatim, `\verb` and URLs; **One .tex file** merges the `\input` and `\include` files into the
+  main one, and with BibTeX the bibliography too. When everything is inside the main file's folder,
+  that folder is the `.zip`'s top level. Web app only.
 - **New → Reference…** in the file list adds a bibliography entry with a readable key such as
   `vaswani2017attention`, and cites it at the cursor. Type words from the title and authors to search
   (Crossref for published work, DataCite for arXiv preprints) and pick the paper, or paste a DOI, a
@@ -898,6 +906,7 @@ cd web && npm run check-listsync
 npm run check-versions  # saved versions: every one opens exactly, and storing them stays small
 npm run check-suggest   # suggest mode: random typing and collaborators' edits keep the view and suggestions in step
 npm run check-chars     # edits never cut an emoji (or any character outside the BMP) in two
+npm run check-submission  # the arXiv / journal .zip: files followed, comments removed, files merged
 npm run check-props     # random texts and edits (Windows line endings, emoji): the editor and the shared text stay identical, merges and line endings behave
 cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for the desktop, and its merge agrees with the web app's
 uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)

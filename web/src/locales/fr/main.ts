@@ -160,5 +160,8 @@ const fr: Catalog = {
   "{{name}} is in the TeXLoom app": "{{name}} est dans l’application TeXLoom",
   "Reference…": "Référence…",
   'Kept on another server, {{server}}: this page syncs it with that server.': 'Conservé sur un autre serveur, {{server}} : cette page le synchronise avec ce serveur.',
+  "Download a .zip for arXiv or a journal: only the files the document uses, with the compiled bibliography": "Télécharger un .zip pour arXiv ou une revue : seulement les fichiers qu’utilise le document, avec la bibliographie compilée",
+  "Submission": "Soumission",
+  "Download for submission (.zip)": "Télécharger pour soumission (.zip)",
 }
 export default fr

@@ -207,7 +207,7 @@ export function stopBrowserCompile() {
   job.stop(new CompileStopped())
 }
 
-type CompileResult = { pdf: Uint8Array | null; log: string; synctex: Uint8Array | null }
+type CompileResult = { pdf: Uint8Array | null; log: string; synctex: Uint8Array | null; bbl: string | null }
 
 // The engine handles one call at a time: each one replaces its worker's message handler, so a
 // second call while one runs takes the first's result and leaves it waiting until busytex gives
@@ -285,7 +285,12 @@ async function compiling(
     let log = res.log ?? ''
     if (!res.success) log = await withTexLog(r, main, log)
     if (notes.length) log = `${notes.join('\n')}\n\n${log}`
-    return { pdf: res.success && res.pdf ? res.pdf : null, log, synctex: res.synctex ?? null }
+    let bbl: string | null = null // the compiled bibliography, which a submission needs (submission.ts)
+    if (bibtex || biber) {
+      const f = (await r.readProjectFiles()).find((f) => f.path === main.replace(/\.tex$/i, '.bbl'))
+      if (f) bbl = typeof f.content === 'string' ? f.content : new TextDecoder().decode(f.content)
+    }
+    return { pdf: res.success && res.pdf ? res.pdf : null, log, synctex: res.synctex ?? null, bbl }
   } finally {
     if (progressCb === onProgress) progressCb = undefined // a stopped compile may end after a new one began
   }
