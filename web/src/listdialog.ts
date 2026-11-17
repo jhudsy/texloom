@@ -60,7 +60,6 @@ async function startList(addWay?: (secret: Uint8Array) => Promise<unknown>): Pro
 
 const NO_RECOVERY = () => t('There is no way to recover a lost list. The server can’t read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren’t deleted, but you’ll need each project’s own link to open it.')
 const ADD_WARNING = () => t('The projects in this browser will be added to this list, and anyone who has its link can open them. Use it only if the link is yours.')
-const COPY_WARNING = () => t('Keep this link somewhere safe, such as a password manager: it opens every project on the list.')
 const whenAdded = (at: number) => new Date(at).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
 
 /** Ask for a username and password; `setting` also confirms it and explains the limits. */
@@ -96,30 +95,35 @@ function askPassword(setting: boolean): Promise<{ username: string; password: st
 }
 
 export function listDialog(onClose?: () => void) {
-  const body = h('div', {})
-  const ways = h('div', { class: 'list-ways' })
-  const copies = h('div', { class: 'list-copies' })
-  const msg = h('p', { class: 'err small', role: 'status' })
-  const dlg = dialog('settings', h('h3', {}, t('Project list')), body, msg, h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Close'))))
+  const title = h('h3', {})
+  const body = h('div', { class: 'listsync' })
+  const ways = h('div', {})
+  const copies = h('div', {})
+  const msg = h('p', { class: 'small', role: 'status' })
+  const dlg = dialog('settings', title, body, msg, h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Close'))))
   if (onClose) dlg.addEventListener('close', onClose)
-  const say = (text: string) => { msg.textContent = text }
+  /** A message under the dialog: a problem (red) or, with `ok`, news (green). */
+  const say = (text: string, ok = false) => { msg.textContent = text; msg.className = `small ${ok ? 'ok' : 'err'}` }
+  const done = (text: string) => say(text, true)
 
   /** A button whose work may fail, after which the dialog shows the new state. */
-  const btn = (label: string, work: () => Promise<unknown>, attrs: Record<string, string> = {}) => h('button', { ...attrs, onclick: async () => {
+  const btn = (label: string, tip: string, work: () => Promise<unknown>, attrs: Record<string, string> = {}) => h('button', { ...attrs, title: tip, onclick: async () => {
     say('')
     try { await work() } catch (e) { say(problem(e)) }
     render()
   } }, label)
-  const removeBtn = (secret: Uint8Array, id: string, slot: Slot) => btn(t('Remove'), async () => {
+  const removeBtn = (secret: Uint8Array, id: string, slot: Slot) => btn(t('Remove'), slot.kind === 'passkey' ? t('Stop this passkey opening the list') : t('Stop this password opening the list'), async () => {
     if (confirm(slot.kind === 'passkey' ? t('Stop this passkey opening the list? You can also delete it from your password manager.') : t('Remove this password?'))) await removeSlot(secret, id, slot)
   })
+  const section = (heading: string, ...kids: (Node | string)[]) => h('section', { class: 'listsync-step' }, h('h5', {}, heading), ...kids)
+  const warning = () => h('p', { class: 'recovery-warning', role: 'note', title: NO_RECOVERY() }, t('Nobody can recover a lost list, not even the server’s owner: keep the sync link safe.'))
 
   async function showWays(secret: Uint8Array) {
     const slots = await readSlots(secret).catch(() => ({} as Record<string, Slot>))
     const rows = Object.entries(slots).sort((a, b) => a[1].at - b[1].at).map(([id, slot]) => h('div', { class: 'row' },
       h('span', { class: 'spacer' }, slot.kind === 'passkey' ? t('Passkey, added {{when}}', { when: whenAdded(slot.at) }) : t('Password, set {{when}}', { when: whenAdded(slot.at) })),
       removeBtn(secret, id, slot)))
-    ways.replaceChildren(...(rows.length ? [h('h5', {}, t('Other ways to open this list')), ...rows] : []))
+    ways.replaceChildren(...(rows.length ? rows : [h('p', { class: 'muted small' }, t('None yet: only the sync link opens it.'))]))
   }
 
   /** The servers keeping a copy, and others this browser knows, to tick. */
@@ -139,16 +143,16 @@ export function listDialog(onClose?: () => void) {
       const box = h('input', { type: 'checkbox', checked: on.has(server) }) as HTMLInputElement
       box.addEventListener('change', toggle(server, box))
       const trouble = on.has(server) ? copyProblems.get(server) : undefined
-      return h('label', { class: 'check' }, box, h('span', {}, serverName(server),
+      return h('label', { class: 'check', title: t('Keep an encrypted copy of the list on {{server}}', { server: serverName(server) }) }, box, h('span', {}, serverName(server),
         server === location.origin ? h('small', { class: 'muted' }, ' · ' + t('this server')) : '',
         trouble ? h('small', { class: 'err' }, ' · ' + (trouble === 'network' ? t('not reached at the last sync') : explain(trouble))) : ''))
     }
     const other = h('input', { placeholder: 'https://…', 'aria-label': t('Another server’s address') }) as HTMLInputElement
     copies.replaceChildren(
-      h('h5', {}, t('Copies of this list')),
-      h('p', { class: 'muted small' }, t('Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.')),
+      h('h5', {}, t('Copies on other servers')),
+      h('p', { class: 'muted small' }, t('With copies on several servers, the list survives if one goes away. Passkeys only work on the server where they were added.')),
       ...known.map(row),
-      h('div', { class: 'row' }, other, btn(t('Keep a copy there too'), async () => {
+      h('div', { class: 'row' }, other, btn(t('Add'), t('Keep a copy of the list on this server too'), async () => {
         const server = normalServer(other.value.trim())
         if (!server) { say(t('Give a server’s address, starting with https://')); return }
         await setCopy(server, true)
@@ -159,97 +163,107 @@ export function listDialog(onClose?: () => void) {
 
   function renderOpen(secret: Uint8Array) {
     const count = projects.list().length
+    title.textContent = t('Project list sync')
+    const copyBtn = h('button', { class: 'primary', title: t('Copy the link, to paste into another browser or a password manager'), onclick: () => {
+      navigator.clipboard.writeText(linkFor(secret)).then(() => done(t('Sync link copied.')), () => say(t('Couldn’t copy: your browser didn’t allow it.')))
+    } }, t('Copy sync link'))
     body.replaceChildren(
-      h('p', {}, tn(count, 'This browser keeps its list of {{n}} project on the server, encrypted. The server can’t read it.', 'This browser keeps its list of {{n}} projects on the server, encrypted. The server can’t read it.')),
+      h('div', { class: 'row listsync-status' },
+        h('span', { class: 'spacer' }, '✓ ', count ? tn(count, 'Your {{n}} project is synced, encrypted.', 'Your {{n}} projects are synced, encrypted.') : t('Your list is synced, encrypted.')),
+        btn(t('Sync now'), t('Send and fetch changes to the list now. It also happens by itself.'), syncNow, { class: 'small' })),
       lastProblem() ? h('p', { class: 'err small' }, explain(lastProblem())) : '',
-      h('p', { class: 'recovery-warning', role: 'note' }, NO_RECOVERY()),
-      h('p', { class: 'muted small' }, COPY_WARNING()),
-      h('div', { class: 'row' },
-        btn(t('Sync now'), syncNow),
-        h('button', { onclick: (e: any) => { navigator.clipboard.writeText(linkFor(secret)); e.target.textContent = t('Copied') } }, t('Copy sync link')),
-        h('button', { title: t('Use this list, and your creation code, in the TeXLoom app on this computer'), onclick: () => sendListToApp(linkFor(secret)) }, t('Use in the TeXLoom app')),
-        passkeySupported() ? btn(t('Add a passkey'), async () => {
-          const unlocking = await createPasskey()
-          if (unlocking && await withCode(() => addSlot(secret, unlocking, 'passkey'))) say(t('Passkey added. Keep the sync link as well: it still opens the list if you lose this passkey.'))
-        }) : '',
-        btn(t('Set a password'), async () => {
-          const asked = await askPassword(true)
-          if (!asked) return
-          say(t('Working…'))
-          await withCode(() => setPassword(secret, asked.username, asked.password).then(() => say(t('Password set.'))))
-        }),
-        h('button', { onclick: () => { saveSecret(null); render() } }, t('Stop on this browser')),
-      ),
-      ways,
-      copies,
-      h('h5', {}, t('If the link has got out, or you’re finished with the list')),
-      h('div', { class: 'row' },
-        btn(t('Replace the sync link…'), async () => {
-          if (!confirm(t('Replace the sync link? The old link, and every passkey and password, will stop working. Other devices will need the new link.'))) return
-          await withCode(() => replaceList(secret).then(() => say(t('Done. Copy the new sync link and keep it safe. Add any passkeys and password again.'))))
-        }),
-        btn(t('Delete this list…'), async () => {
-          if (confirm(t('Delete this list from the server, for every device? Your projects aren’t deleted, and this browser keeps its own list.'))) await deleteList(secret)
-        }, { class: 'danger' }),
-      ),
+      section(t('Your sync link'),
+        h('p', { class: 'muted small' }, t('It opens this list on any computer or browser. Save it in a password manager.')),
+        h('div', { class: 'row' }, copyBtn,
+          h('button', { title: t('Use this list, and your creation code, in the TeXLoom app on this computer'), onclick: () => sendListToApp(linkFor(secret)) }, t('Use in the TeXLoom app'))),
+        warning()),
+      section(t('Other ways to open it'),
+        ways,
+        h('div', { class: 'row' },
+          passkeySupported() ? btn(t('Add a passkey'), t('Open the list with Touch ID, Windows Hello, your phone or a security key, on this server'), async () => {
+            const unlocking = await createPasskey()
+            if (unlocking && await withCode(() => addSlot(secret, unlocking, 'passkey'))) done(t('Passkey added. Keep the sync link as well: it still opens the list if you lose this passkey.'))
+          }) : '',
+          btn(t('Set a password'), t('Open the list with a username and password of your choice. Nobody can reset it if you forget it.'), async () => {
+            const asked = await askPassword(true)
+            if (!asked) return
+            say(t('Working…'), true)
+            await withCode(() => setPassword(secret, asked.username, asked.password).then(() => done(t('Password set.'))))
+          }))),
+      h('details', {},
+        h('summary', {}, t('More options')),
+        copies,
+        h('h5', {}, t('Stop or start over')),
+        h('div', { class: 'row' },
+          h('button', { title: t('This browser keeps its projects but stops syncing the list. Other devices carry on.'), onclick: () => { say(''); saveSecret(null); render() } }, t('Stop on this browser')),
+          btn(t('Replace the sync link…'), t('If the link has got out: a new link, and the old one stops working everywhere'), async () => {
+            if (!confirm(t('Replace the sync link? The old link, and every passkey and password, will stop working. Other devices will need the new link.'))) return
+            await withCode(() => replaceList(secret).then(() => done(t('Done. Copy the new sync link and keep it safe. Add any passkeys and password again.'))))
+          }),
+          btn(t('Delete this list…'), t('Delete the list from the server for every device. Projects aren’t deleted.'), async () => {
+            if (confirm(t('Delete this list from the server, for every device? Your projects aren’t deleted, and this browser keeps its own list.'))) await deleteList(secret)
+          }, { class: 'danger' }))),
     )
     showWays(secret)
     showCopies()
   }
 
   function renderClosed() {
+    title.textContent = t('Sync your project list')
     ways.replaceChildren()
-    const input = h('input', { type: 'password', placeholder: t('Sync link'), 'aria-label': t('Sync link'), autocomplete: 'off' }) as HTMLInputElement
+    const input = h('input', { type: 'password', placeholder: t('Paste a sync link'), 'aria-label': t('Sync link'), autocomplete: 'off' }) as HTMLInputElement
     const useIfMine = async (secret: Uint8Array, server?: string) => { if (confirm(ADD_WARNING())) await adopt(secret, server) }
+    const PASSKEY_TIP = t('Touch ID, Windows Hello, your phone or a security key. Works on this server only.')
+    const PASSWORD_TIP = t('A username and password of your choice. Nobody can reset it if you forget it.')
     body.replaceChildren(
-      h('p', {}, t('Keep the list of your projects on the server, encrypted, so it follows you to other computers and browsers. The server can’t read it.')),
-      h('p', { class: 'muted small' }, t('It is opened by a sync link, and optionally by a passkey or a password.')),
-      h('p', { class: 'recovery-warning', role: 'note' }, NO_RECOVERY()),
-      h('h5', {}, t('Start a new list')),
-      h('div', { class: 'row' },
-        passkeySupported() ? btn(t('Start with a passkey'), async () => {
-          if (!await haveCode()) return
-          const unlocking = await createPasskey()
-          if (unlocking && await startList((secret) => addSlot(secret, unlocking, 'passkey'))) say(t('List started. Copy its sync link and keep it safe: it’s your way back in if you lose this passkey.'))
-        }, { class: 'primary' }) : '',
-        btn(t('Start with a password'), async () => {
-          if (!await haveCode()) return
-          const asked = await askPassword(true)
-          if (!asked) return
-          say(t('Working…'))
-          try {
-            const started = await startList((secret) => setPassword(secret, asked.username, asked.password))
-            say(started ? t('List started. Copy its sync link and keep it safe: it’s your way back in if you forget this password.') : '')
-          } catch (e) {
-            if (!(e instanceof ListError && e.message === 'password-taken')) throw e
-            say(t('That username and password are already in use. If the list is yours, use “Unlock with a password” instead.'))
-          }
-        }, passkeySupported() ? {} : { class: 'primary' }),
-        btn(t('Sync link only'), async () => {
-          if (await startList()) say(t('List started. Copy its sync link and keep it safe.'))
-        }),
-      ),
-      h('h5', {}, t('Open a list you already have')),
-      h('div', { class: 'row' },
-        passkeySupported() ? btn(t('Unlock with a passkey'), async () => {
-          const unlocked = await unlockWithPasskey()
-          if (unlocked === 'none') say(t('That passkey doesn’t open a list on this server.'))
-          else if (unlocked) await useIfMine(unlocked)
-        }) : '',
-        btn(t('Unlock with a password'), async () => {
-          const asked = await askPassword(false)
-          if (!asked) return
-          say(t('Working…'))
-          const unlocked = await unlockWithPassword(asked.username, asked.password)
-          say('')
-          await useIfMine(unlocked)
-        }),
-      ),
-      h('div', { class: 'row' }, input, btn(t('Use this link'), async () => {
-        const got = secretFromLink(input.value)
-        if (typeof got === 'string') say(got)
-        else await useIfMine(got.secret, got.server)
-      })),
+      h('p', {}, t('See the same projects on all your computers and browsers. The list is encrypted: the server can’t read it.')),
+      section(t('First time? Start syncing'),
+        h('p', { class: 'muted small' }, t('Choose how you’ll open the list elsewhere. You also get a sync link, which always works.')),
+        h('div', { class: 'row' },
+          passkeySupported() ? btn(t('With a passkey'), PASSKEY_TIP, async () => {
+            if (!await haveCode()) return
+            const unlocking = await createPasskey()
+            if (unlocking && await startList((secret) => addSlot(secret, unlocking, 'passkey'))) done(t('Syncing. Now copy the sync link and keep it safe: it’s your way back in if you lose this passkey.'))
+          }, { class: 'primary' }) : '',
+          btn(t('With a password'), PASSWORD_TIP, async () => {
+            if (!await haveCode()) return
+            const asked = await askPassword(true)
+            if (!asked) return
+            say(t('Working…'), true)
+            try {
+              const started = await startList((secret) => setPassword(secret, asked.username, asked.password))
+              if (started) done(t('Syncing. Now copy the sync link and keep it safe: it’s your way back in if you forget this password.'))
+              else say('')
+            } catch (e) {
+              if (!(e instanceof ListError && e.message === 'password-taken')) throw e
+              say(t('That username and password are already in use. If the list is yours, open it with “Password” below instead.'))
+            }
+          }, passkeySupported() ? {} : { class: 'primary' }),
+          btn(t('With the link only'), t('Paste the sync link into each browser where you want the list.'), async () => {
+            if (await startList()) done(t('Syncing. Now copy the sync link and keep it safe.'))
+          })),
+        warning()),
+      section(t('Already syncing on another device?'),
+        h('p', { class: 'muted small' }, t('Open the same list here with:')),
+        h('div', { class: 'row' },
+          passkeySupported() ? btn(t('Passkey'), PASSKEY_TIP, async () => {
+            const unlocked = await unlockWithPasskey()
+            if (unlocked === 'none') say(t('That passkey doesn’t open a list on this server.'))
+            else if (unlocked) await useIfMine(unlocked)
+          }) : '',
+          btn(t('Password'), t('The username and password you set for the list'), async () => {
+            const asked = await askPassword(false)
+            if (!asked) return
+            say(t('Working…'), true)
+            const unlocked = await unlockWithPassword(asked.username, asked.password)
+            say('')
+            await useIfMine(unlocked)
+          })),
+        h('div', { class: 'row' }, input, btn(t('Open'), t('Open the list this sync link belongs to'), async () => {
+          const got = secretFromLink(input.value)
+          if (typeof got === 'string') say(got)
+          else await useIfMine(got.secret, got.server)
+        }))),
     )
   }
 

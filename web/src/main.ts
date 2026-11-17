@@ -112,10 +112,19 @@ function landing() {
   document.title = APP
   const app = $('#app')
   app.className = 'landing'
-  const linkIn = h('input', { placeholder: t('Paste a project link…'), 'aria-label': t('Project link'), onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') open() } }) as HTMLInputElement
-  const open = () => { const f = fragmentOfLink(linkIn.value.trim()); if (f) location.hash = f } // a link to another server's project opens here, synced with that server
+  const linkIn = h('input', { id: 'openlink', placeholder: t('Paste a project link…'), autocomplete: 'off', spellcheck: 'false',
+    oninput: () => { openBtn.disabled = !linkIn.value.trim(); linkErr.textContent = '' } }) as HTMLInputElement
+  const linkErr = h('span', { class: 'err small', role: 'status' })
+  const openBtn = h('button', { type: 'submit', disabled: true, title: t('Open the project this link belongs to') }, t('Open')) as HTMLButtonElement
+  const open = (e: Event) => { // a link to another server's project opens here, synced with that server
+    e.preventDefault()
+    const f = fragmentOfLink(linkIn.value.trim())
+    if (f) location.hash = f
+    else linkErr.textContent = t('That isn’t a project link. Ask whoever shared it to copy it again with Share.')
+  }
   const list = h('div', {}, projectList())
-  const finder = h('input', { type: 'search', class: 'finder', value: finding.text, placeholder: t('Search by name or tag…'), 'aria-label': t('Search your projects'), oninput: (e: any) => { finding.text = e.target.value; finding.page = 0; list.replaceChildren(projectList()) } })
+  const finder = h('label', { class: 'finder', title: t('Search your projects by name, document title or tag') }, icon('search'),
+    h('input', { type: 'search', value: finding.text, placeholder: t('Search by name or tag…'), 'aria-label': t('Search your projects'), oninput: (e: any) => { finding.text = e.target.value; finding.page = 0; list.replaceChildren(projectList()) } }))
   selectAllBox = h('input', { type: 'checkbox', class: 'selectall', onchange: (e: any) => {
     for (const r of matchingNow) { if (e.target.checked) selected.add(r.project); else selected.delete(r.project) }
     refreshProjects()
@@ -137,13 +146,16 @@ function landing() {
     h('div', { class: 'masthead' },
       h('div', {}, h('h1', {}, brand()), h('p', { class: 'sub' }, t('Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.'))),
       h('button', { class: 'icon gear', title: t('Settings'), 'aria-label': t('Settings'), onclick: startSettings }, icon('gear'))),
-    h('div', { class: 'row startrow' },
-      h('button', { class: 'primary', onclick: () => createProject() }, t('Create project')),
-      linkIn,
-      h('button', { onclick: open }, t('Open'))),
-    h('div', { class: 'listhead' }, h('h2', {}, t('Your projects')), syncNote),
-    finderRow,
-    list,
+    h('div', { class: 'startrow' },
+      h('button', { class: 'primary big', title: t('Start a new project from a template, an import or a folder'), onclick: () => createProject() }, icon('plus'), t('Create project')),
+      h('form', { class: 'openlink', onsubmit: open },
+        h('label', { for: 'openlink' }, t('Have a link to a project?')),
+        h('div', { class: 'joined' }, linkIn, openBtn),
+        linkErr)),
+    h('section', { class: 'yours' },
+      h('div', { class: 'listhead' }, h('h2', {}, t('Your projects')), syncNote),
+      finderRow,
+      list),
     sourceNote(),
   )
   refreshProjects = () => {

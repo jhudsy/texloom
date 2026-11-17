@@ -12,7 +12,6 @@ const fr: Catalog = {
 
   'Your name (shown to collaborators)': 'Votre nom (visible par les collaborateurs)',
   'Paste a project link…': 'Collez un lien de projet…',
-  'Project link': 'Lien du projet',
   'Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.': 'LaTeX collaboratif, local d’abord. Vos fichiers restent sur vos appareils ; le serveur ne fait que relayer des modifications chiffrées.',
   'Name': 'Nom',
   'Open': 'Ouvrir',
@@ -163,5 +162,10 @@ const fr: Catalog = {
   "Download a .zip for arXiv or a journal: only the files the document uses, with the compiled bibliography": "Télécharger un .zip pour arXiv ou une revue : seulement les fichiers qu’utilise le document, avec la bibliographie compilée",
   "Submission": "Soumission",
   "Download for submission (.zip)": "Télécharger pour soumission (.zip)",
+  'Open the project this link belongs to': 'Ouvrir le projet auquel appartient ce lien',
+  'That isn’t a project link. Ask whoever shared it to copy it again with Share.': 'Ce n’est pas un lien de projet. Demandez à la personne qui l’a partagé de le copier à nouveau avec « Partager ».',
+  'Search your projects by name, document title or tag': 'Rechercher vos projets par nom, titre du document ou étiquette',
+  'Start a new project from a template, an import or a folder': 'Commencer un nouveau projet à partir d’un modèle, d’une importation ou d’un dossier',
+  'Have a link to a project?': 'Vous avez un lien vers un projet ?',
 }
 export default fr

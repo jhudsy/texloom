@@ -35,9 +35,18 @@ input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-r
 header .gearbtn { display: inline-grid; place-items: center; padding: 3px 6px; }
 header .gearbtn svg { width: 19px; height: 19px; }
 .landing .gear:hover, .landing .gear:focus-visible { color: var(--fg); background: var(--panel); border-color: var(--line); }
-.landing .startrow { margin-top: 20px; }
-.landing .listhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 32px; }
-.landing .listhead h2 { margin: 0; }
+.landing .startrow { margin-top: 24px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 28px; }
+.landing .startrow .big { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; font-size: 15px; }
+.landing .startrow .big svg { width: 18px; height: 18px; }
+.landing .openlink { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 4px; }
+.landing .openlink label { margin: 0; font-size: 12px; color: var(--muted); }
+.joined { display: flex; }
+.joined input { flex: 1; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.joined button[disabled] { cursor: default; }
+.joined button { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+.landing .yours { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); }
+.landing .listhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+.landing .listhead h2 { margin: 0; font-size: 20px; }
 .landing .syncnote { display: inline-flex; align-items: baseline; gap: 8px; }
 .landing .empty { margin-top: 8px; }
 .landing .empty .tgrid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
@@ -359,13 +368,16 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
   .recent .top { flex-wrap: wrap; }
   .recent .pname { max-width: 100%; }
   .findrow { flex-wrap: wrap; }
-  .landing .finder { flex-basis: 100%; }
+  .landing .findrow .finder { flex: 1 1 calc(100% - 40px); }
   .sorter { max-width: 100%; }
 }
 dialog.dlg input.tagfind { width: 100%; box-sizing: border-box; margin-top: 8px; }
-.findrow { display: flex; gap: 8px; margin: 4px 0 8px; }
+.findrow { display: flex; gap: 8px; margin: 12px 0 8px; }
 .findrow[hidden] { display: none; }
-.landing .finder { flex: 1; min-width: 0; box-sizing: border-box; }
+.landing .finder { flex: 1; min-width: 0; display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); }
+.landing .finder:focus-within { border-color: var(--accent); }
+.landing .finder svg { width: 16px; height: 16px; flex: none; }
+.landing .finder input { flex: 1; min-width: 0; border: none; background: transparent; padding: 7px 0; outline: none; }
 .sorter { flex: 0 1 auto; max-width: 45%; }
 .selectbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 2px 0 6px; min-height: 26px; }
 .selectbar[hidden] { display: none; }
@@ -574,6 +586,14 @@ dialog.templates h4 { margin: 16px 0 8px; font-size: 13px; color: var(--muted); 
 .md-preview .md-noimage { color: var(--muted); font-size: .9em; }
 
 .recovery-warning { margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+/* project list sync dialog */
+.listsync .listsync-status { margin: 4px 0 8px; }
+.listsync-step { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.listsync-step h5 { margin: 0 0 6px; }
+.listsync-step p { margin: 4px 0 8px; }
+.listsync-step .recovery-warning { margin: 10px 0 0; font-size: 12px; }
+.listsync details summary { cursor: pointer; color: var(--muted); }
+p.ok { color: var(--ok); }
 /* the assistant's proposed changes, shown like suggestions */
 .diff.wdiff .wtext { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; padding: 4px 6px; }
 .diff.wdiff > del, .diff.wdiff > ins { display: block; white-space: pre-wrap; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; padding: 4px 6px; }

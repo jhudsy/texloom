@@ -12,7 +12,6 @@ const pt: Catalog = {
   'sets the program your LaTeX editor runs': 'define o programa que seu editor de LaTeX executa',
   'Your name (shown to collaborators)': 'Seu nome (visível para os colaboradores)',
   'Paste a project link…': 'Cole o link de um projeto…',
-  'Project link': 'Link do projeto',
   'Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.': 'LaTeX colaborativo e local em primeiro lugar. Seus arquivos ficam nos seus dispositivos; o servidor apenas retransmite alterações criptografadas.',
   'Name': 'Nome',
   'Open': 'Abrir',
@@ -163,6 +162,11 @@ const pt: Catalog = {
   "Download a .zip for arXiv or a journal: only the files the document uses, with the compiled bibliography": "Transferir um .zip para o arXiv ou uma revista: só os ficheiros que o documento usa, com a bibliografia compilada",
   "Submission": "Submissão",
   "Download for submission (.zip)": "Transferir para submissão (.zip)",
+  'Open the project this link belongs to': 'Abra o projeto a que pertence este link',
+  'That isn’t a project link. Ask whoever shared it to copy it again with Share.': 'Isso não é um link de projeto. Peça a quem o compartilhou que o copie de novo com “Compartilhar”.',
+  'Search your projects by name, document title or tag': 'Pesquise seus projetos por nome, título do documento ou etiqueta',
+  'Start a new project from a template, an import or a folder': 'Comece um novo projeto a partir de um modelo, de uma importação ou de uma pasta',
+  'Have a link to a project?': 'Tem um link para um projeto?',
 }
 
 export default pt

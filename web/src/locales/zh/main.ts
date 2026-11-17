@@ -12,7 +12,6 @@ const zh: Catalog = {
   'sets the program your LaTeX editor runs': '设置 LaTeX 编辑器运行的程序',
   'Your name (shown to collaborators)': '你的姓名（协作者可见）',
   'Paste a project link…': '粘贴项目链接…',
-  'Project link': '项目链接',
   'Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.': '本地优先的协作式 LaTeX。文件保存在你的设备上；服务器只转发加密的更改。',
   'Name': '名称',
   'Open': '打开',
@@ -163,6 +162,11 @@ const zh: Catalog = {
   "Download a .zip for arXiv or a journal: only the files the document uses, with the compiled bibliography": "下载适用于 arXiv 或期刊的 .zip：只含文档用到的文件，并附编译好的参考文献",
   "Submission": "投稿",
   "Download for submission (.zip)": "下载投稿文件 (.zip)",
+  'Open the project this link belongs to': '打开此链接所属的项目',
+  'That isn’t a project link. Ask whoever shared it to copy it again with Share.': '这不是项目链接。请让分享者用“分享”重新复制。',
+  'Search your projects by name, document title or tag': '按名称、文档标题或标签搜索你的项目',
+  'Start a new project from a template, an import or a folder': '从模板、导入或文件夹开始新项目',
+  'Have a link to a project?': '有项目链接？',
 }
 
 export default zh
