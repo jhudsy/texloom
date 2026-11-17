@@ -3,7 +3,8 @@
 Every option of texloom-server can be set in the file, under its name without the dashes
 (`min_free = "2G"`, `codes_file = ["/etc/texloom/codes.txt"]`); the S3 store's settings go in an
 [s3] table (`[s3] endpoint = …`, read as `s3_endpoint`). The file is --config, else
-TEXLOOM_CONFIG, else /etc/texloom/texloom.toml if it exists.
+TEXLOOM_CONFIG, else ./texloom.toml, else /etc/texloom/texloom.toml, if they exist.
+texloom.example.toml lists every setting.
 
 An environment variable TEXLOOM_<NAME> (TEXLOOM_MIN_FREE, TEXLOOM_S3_SECRET…) overrides the file,
 and the command line overrides both. Lists in the environment are separated by ':' (';' on
@@ -21,10 +22,10 @@ import sys
 import tomllib
 from pathlib import Path
 
-DEFAULT_FILE = Path("/etc/texloom/texloom.toml")
+DEFAULT_FILES = (Path("texloom.toml"), Path("/etc/texloom/texloom.toml"))
 # One-off commands, and options that only make sense typed: not read from the file or environment.
 COMMANDS = {"config", "add_code", "renew_code", "purge_code", "list_codes", "allowance", "until", "months",
-            "texlive_init", "import_sqlite", "help"}
+            "texlive_init", "import_sqlite", "files_for_backup", "files_restore", "help"}
 ADDED = {"codes_file": "TEXLOOM_CODES_FILES"}  # environment lists added to, rather than replacing, the rest
 
 
@@ -69,8 +70,8 @@ def parse(parser: argparse.ArgumentParser, argv: list[str] | None = None) -> arg
     pre.add_argument("--config", type=Path)
     known, _ = pre.parse_known_args(argv)
     path = known.config or (Path(os.environ["TEXLOOM_CONFIG"]) if os.environ.get("TEXLOOM_CONFIG") else None)
-    if path is None and DEFAULT_FILE.exists():
-        path = DEFAULT_FILE
+    if path is None:
+        path = next((f for f in DEFAULT_FILES if f.exists()), None)
     actions = {a.dest: a for a in parser._actions if a.dest not in COMMANDS}
     values: dict[str, object] = {}
     try:

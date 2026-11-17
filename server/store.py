@@ -22,6 +22,7 @@ import base64
 import contextlib
 import hashlib
 import logging
+import os
 import shutil
 import time
 from collections import defaultdict
@@ -512,6 +513,54 @@ class Store:
     def read_blob(self, project: str, bid: str):
         """A stored file's content, a piece at a time."""
         return self.files.get(f"{project}/{bid}")
+
+    # --- copies of the stored files, for backups and restores ------------------------
+    async def files_to_folder(self, dest: Path) -> tuple[int, int]:
+        """Make `dest` hold exactly the stored files (<project>/<id>), copying only those it lacks
+        (a file never changes, so one already there is the same). Returns (copied, removed)."""
+        want = {(r["project"], r["id"]): r["size"] for r in await self.pool.fetch("SELECT project, id, size FROM stored")}
+        copied = removed = 0
+        for (project, bid), size in want.items():
+            path = dest / project / bid
+            if path.is_file() and path.stat().st_size == size:
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            part = path.with_name(path.name + ".part")
+            try:
+                with open(part, "wb") as f:  # noqa: ASYNC230 - the command line's, not the server's
+                    async for piece in self.files.get(f"{project}/{bid}"):
+                        f.write(piece)
+            except FileNotFoundError:
+                part.unlink(missing_ok=True)
+                log.warning("stored file %s/%s… isn't in the file store", project[:8], bid[:8])
+                continue
+            os.replace(part, path)
+            copied += 1
+        for path in list(dest.glob("*/*")):
+            if path.is_file() and (path.parent.name, path.name) not in want:
+                path.unlink()
+                removed += 1
+        for folder in list(dest.iterdir()) if dest.is_dir() else []:
+            if folder.is_dir() and not any(folder.iterdir()):
+                folder.rmdir()
+        return copied, removed
+
+    async def files_from_folder(self, src: Path) -> tuple[int, int]:
+        """Put back into the file store every stored file it lacks, from `src` (<project>/<id>, as
+        files_to_folder or a folder store leaves them). Returns (copied, still missing)."""
+        rows = await self.pool.fetch("SELECT project, id FROM stored")
+        copied = missing = 0
+        for project, bid in rows:
+            key = f"{project}/{bid}"
+            if await self.files.exists(key):
+                continue
+            path = src / project / bid
+            if not path.is_file():
+                missing += 1
+                continue
+            await self.files.put(key, await asyncio.to_thread(path.read_bytes))
+            copied += 1
+        return copied, missing
 
     # --- the admin page and app versions ----------------------------------------------
     async def note_client(self, app: str, version: str) -> None:

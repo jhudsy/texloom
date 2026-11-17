@@ -1311,6 +1311,12 @@ def parser() -> argparse.ArgumentParser:
                    help="delete the stored copies of every project created with this code (expired or removed "
                         "codes only), then exit. Prefer --purge-expired-after, which does it inside the server")
     p.add_argument("--list-codes", action="store_true", help="list codes, allowances, expiry and usage, then exit")
+    p.add_argument("--files-for-backup", type=Path, metavar="DIR",
+                   help="print the folder that holds the stored files, for a backup to include, then exit. With "
+                        "a bucket, first make DIR a copy of it (copying only what's new), and print DIR")
+    p.add_argument("--files-restore", type=Path, metavar="DIR",
+                   help="put back into the file store every stored file it lacks, from DIR (a restored backup, "
+                        "or the folder when moving to a bucket), then exit")
     p.add_argument("--import-sqlite", type=Path, metavar="FILE",
                    help="copy a database from an older server (SQLite) into the empty --database, then exit")
     p.add_argument("--purge-expired-after", type=float, metavar="DAYS", default=None,
@@ -1342,6 +1348,28 @@ def parser() -> argparse.ArgumentParser:
                    help="TeX Live mirror to use first (…/systems/texlive/tlnet/), e.g. one in your country; "
                         "repeatable. Without it, mirror.ctan.org picks one near the server")
     return p
+
+
+async def _files_command(a: argparse.Namespace, files: Files) -> None:
+    """--files-for-backup and --files-restore."""
+    from .files import FolderFiles
+    store = await Store.open(a.database, files, a.data)
+    try:
+        await files.check()
+        if a.files_for_backup is not None:
+            if isinstance(files, FolderFiles):
+                print(files.root)  # back it up as it is
+                return
+            copied, removed = await store.files_to_folder(a.files_for_backup)
+            print(a.files_for_backup.resolve())
+            print(f"{copied} file(s) copied from {files.name}, {removed} removed", file=sys.stderr)
+        else:
+            copied, missing = await store.files_from_folder(a.files_restore)
+            print(f"{copied} file(s) put back into {files.name}" + (f"; {missing} not in {a.files_restore}" if missing else ""))
+            if missing:
+                sys.exit(1)
+    finally:
+        await store.close()
 
 
 async def _codes_command(a: argparse.Namespace, codes: CodeBook, files: Files) -> None:
@@ -1395,6 +1423,9 @@ def main() -> None:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
         tl = TexLive(a.texlive, extra_mirrors=a.texlive_mirror)
         asyncio.run(tl.build_index(tl.index_sources() if tl.ready or tl.extra_mirrors else None))
+        return
+    if a.files_for_backup is not None or a.files_restore is not None:
+        asyncio.run(_files_command(a, files))
         return
     if a.import_sqlite:
         counts = asyncio.run(import_sqlite(a.import_sqlite, a.database))

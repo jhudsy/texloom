@@ -62,6 +62,9 @@ class Files:
         """Remove the file; nothing happens if it isn't there."""
         raise NotImplementedError
 
+    async def exists(self, key: str) -> bool:
+        raise NotImplementedError
+
     async def check(self) -> None:
         """Fail early, with a clear message, if the store can't be used."""
 
@@ -122,6 +125,9 @@ class FolderFiles(Files):
 
     async def delete(self, key: str) -> None:
         await asyncio.to_thread(self._remove, key)
+
+    async def exists(self, key: str) -> bool:
+        return await asyncio.to_thread(self._path(key).is_file)
 
     async def check(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -235,6 +241,9 @@ class S3Files(Files):
 
     async def delete(self, key: str) -> None:
         await self._request("DELETE", key, ok=(200, 204, 404))
+
+    async def exists(self, key: str) -> bool:
+        return await self._request("HEAD", key, ok=(200, 404)) == 200
 
     async def check(self) -> None:
         try:

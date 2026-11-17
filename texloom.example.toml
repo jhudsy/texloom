@@ -1,0 +1,55 @@
+# TeXLoom server settings: an example to copy. INSTALL.md explains each setting.
+#
+# The server reads --config FILE, else TEXLOOM_CONFIG, else ./texloom.toml, else
+# /etc/texloom/texloom.toml. deploy/install.sh writes /etc/texloom/texloom.toml from this file the
+# first time (with the paths of its install), and never changes it afterwards.
+#
+# Every option of texloom-server can be set here, by name with "_" for "-". TEXLOOM_<NAME> in the
+# environment overrides this file, and the command line overrides both. A setting the server
+# doesn't know is an error. Keep this file readable only by the server's user: it may hold secrets.
+# After a change: systemctl restart texloom
+
+# --- where things are ------------------------------------------------------------------------
+# The PostgreSQL database: on this machine over the local socket, as the user the server runs as
+# (no password), or e.g. "postgresql://texloom:PASSWORD@db.example.org:5432/texloom?sslmode=require".
+database = "postgresql:///texloom?host=/var/run/postgresql"
+# This server's own folder: uploads are spooled here, min_free is kept free here, and stored files
+# go in data/files unless "files" says otherwise.
+data = "/var/lib/texloom"
+static = "/var/www/texloom/web/dist"          # the built web app
+tex_assets = "/var/www/texloom/tex-assets"    # in-browser TeX (busytex/)
+# host = "127.0.0.1"
+# port = 8787
+
+# --- who may store what --------------------------------------------------------------------
+codes_file = ["/etc/texloom/codes.txt"]  # creation codes and allowances (TEXLOOM_CODES_FILES adds more)
+# codes_url = "https://example.org/how-to-get-a-code"
+# private = false                     # only projects created with a creation code may connect
+min_free = "2G"                       # stop storing when the disk of "data" has less free
+project_max_bytes = "200M"            # most one project may store (except unlimited allowances)
+# max_bytes = "unlimited"             # most the server stores in all
+# evict_idle_days = 0                 # drop stored copies of projects unopened this long (0 = never)
+# purge_expired_after = 30            # drop stored copies of projects whose code expired this many days ago
+# min_version = "0.4.30"              # the oldest app allowed to connect
+
+# --- the admin page (/admin) ---------------------------------------------------------------
+admin_token_file = "/etc/texloom/admin-token"   # or: admin_token = "at least 16 characters"
+
+# --- TeX Live packages on demand, for in-browser compiles ----------------------------------
+texlive = "/var/lib/texloom/texlive"
+texlive_max = "3G"
+# texlive_mirror = ["https://mirror.example.org/ctan/systems/texlive/tlnet/"]
+
+# --- turning features off ------------------------------------------------------------------
+# no_project_lists = false            # storing people's encrypted project lists
+# no_arxiv = false                    # importing arXiv sources through the server
+
+# --- stored files in an S3-compatible bucket (Garage, RustFS, Cloudflare R2, Backblaze B2, AWS S3)
+# instead of the folder data/files. To switch, see INSTALL.md → Stored files. Keep this last: in
+# TOML, every line after "[s3]" belongs to it.
+# files = "s3://my-bucket"            # or "s3://my-bucket/some/prefix"
+# [s3]
+# endpoint = "https://s3.example.org"
+# region = "auto"                     # Garage: "garage" unless set otherwise; Cloudflare R2: "auto"
+# key_id = "…"
+# secret = "…"

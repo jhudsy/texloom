@@ -133,6 +133,27 @@ async def cases(make_files, tmp: Path, db: str) -> None:
     await store.start()
     await store._reaper
     ok(all([await gone(store.files, f"{r_}/{i}") for i in ids]), "after a restart, the trash is emptied")
+
+    # a backup copy in a folder, and a restore from it after the store loses files
+    b_, ids = project(), [bid() for _ in range(4)]
+    contents = {i: secrets.token_bytes(5000 + n) for n, i in enumerate(ids)}
+    for i, d in contents.items():
+        await store.put_blob(b_, i, d)
+    copy = tmp / "backup-copy"
+    copied, _ = await store.files_to_folder(copy)
+    ok(copied >= len(ids) and all((copy / b_ / i).read_bytes() == d for i, d in contents.items()),
+       "a backup copy in a folder holds every stored file")
+    again, _ = await store.files_to_folder(copy)
+    ok(again == 0, "a second copy copies nothing new")
+    await store.delete_blob(b_, ids[0], any_kind=True)
+    await store._reaper
+    _, removed = await store.files_to_folder(copy)
+    ok(removed == 1 and not (copy / b_ / ids[0]).exists(), "a file erased since is removed from the copy")
+    for i in ids[1:3]:
+        await store.files.delete(f"{b_}/{i}")  # the store loses two files
+    put_back, missing = await store.files_from_folder(copy)
+    ok(put_back == 2 and missing == 0 and all([await read(store, b_, i) == contents[i] for i in ids[1:]]),
+       "a restore puts back what the store lost, and only that")
     await store.close()
 
 

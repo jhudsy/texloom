@@ -17,3 +17,5 @@ tex-assets/
 .claude/
 .DS_Store
 deploy/.requirements.txt
+# a real server settings file (texloom.example.toml is the example): it may hold secrets
+/texloom.toml

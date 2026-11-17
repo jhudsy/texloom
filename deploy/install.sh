@@ -42,7 +42,7 @@ rsync -az --delete -e "ssh $SSH_OPTS" \
   --exclude /dist --exclude /packaging --exclude /.github --exclude .ruff_cache --exclude .pytest_cache \
   --exclude .git --exclude .venv --exclude node_modules --exclude /tex-assets --exclude /data \
   --exclude .claude --exclude '__pycache__' --exclude .DS_Store --exclude /build --exclude '*.egg-info' \
-  --exclude /.python-version \
+  --exclude /.python-version --exclude /texloom.toml \
   "$HERE/" "$TARGET:$APP_DIR/"
 
 echo "==> Installing on the server"
@@ -93,34 +93,11 @@ python3 deploy/patch-busytex.py tex-assets
 
 # settings: written once, then yours to edit (texloom-server --help lists every setting)
 install -d -o root -g texloom -m 750 /etc/texloom
-MIRROR_LINE=${TEXLIVE_MIRROR:+texlive_mirror = [\"$TEXLIVE_MIRROR\"]}
-if [ ! -f /etc/texloom/texloom.toml ]; then
-  cat > /etc/texloom/texloom.toml <<TOML
-# TeXLoom server settings. Every option of texloom-server can be set here by name (see
-# texloom-server --help and INSTALL.md); TEXLOOM_<NAME> in the environment overrides this file.
-# After a change: systemctl restart texloom
-
-database = "postgresql:///texloom?host=/var/run/postgresql"
-data = "/var/lib/texloom"          # stored files go in data/files unless 'files' says otherwise
-static = "$APP_DIR/web/dist"
-tex_assets = "$APP_DIR/tex-assets"
-codes_file = ["/etc/texloom/codes.txt"]
-admin_token_file = "/etc/texloom/admin-token"
-min_free = "2G"
-project_max_bytes = "200M"
-texlive = "/var/lib/texloom/texlive"
-texlive_max = "3G"
-${MIRROR_LINE:-# texlive_mirror = ["https://mirror.example.org/ctan/systems/texlive/tlnet/"]}
-
-# Stored files in an S3-compatible bucket (Garage, RustFS, Cloudflare R2, Backblaze B2, AWS S3)
-# instead of the folder data/files. Copy what's in the folder to the bucket before switching.
-# files = "s3://my-bucket"
-# [s3]
-# endpoint = "https://s3.example.org"
-# region = "auto"
-# key_id = "…"
-# secret = "…"
-TOML
+if [ ! -f /etc/texloom/texloom.toml ]; then  # from texloom.example.toml, with this install's paths
+  sed -e "s#/var/www/texloom#$APP_DIR#g" texloom.example.toml > /etc/texloom/texloom.toml
+  if [ -n "$TEXLIVE_MIRROR" ]; then
+    sed -i "s#^\# texlive_mirror = .*#texlive_mirror = [\"$TEXLIVE_MIRROR\"]#" /etc/texloom/texloom.toml
+  fi
 fi
 chown root:texloom /etc/texloom/texloom.toml && chmod 640 /etc/texloom/texloom.toml
 

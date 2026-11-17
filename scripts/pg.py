@@ -62,7 +62,10 @@ def start(folder: Path) -> tuple[str, int]:
     bin_ = bindir()
     folder = folder.resolve()
     if not (folder / "PG_VERSION").exists():
-        folder.mkdir(parents=True, exist_ok=True)
+        # initdb makes the folder itself: on Windows it can't set the permissions of one made by us
+        folder.parent.mkdir(parents=True, exist_ok=True)
+        if folder.exists() and not any(folder.iterdir()):
+            folder.rmdir()
         try:
             _run(bin_ / "initdb", "-D", folder, "-U", USER, "--auth=trust", "-E", "UTF8", "--no-locale")
         except subprocess.CalledProcessError as e:

@@ -73,7 +73,8 @@ cd ..
 ```
 
 Create a PostgreSQL database for it (here `texloom`, owned by the user the server runs as), write
-a settings file ([Settings](#settings); at least `database`), and start it:
+a settings file (copy [`texloom.example.toml`](texloom.example.toml) and change what differs;
+[Settings](#settings)), and start it:
 
 ```bash
 uv run texloom-server --config /etc/texloom/texloom.toml
@@ -101,8 +102,11 @@ Then open http://localhost:8787. Browsers treat `localhost` as secure, so no cer
 ## Settings
 
 Every option of `texloom-server` (`texloom-server --help` lists them) can be set in the settings
-file under its name, with `_` for `-`. The file is `--config`, else `TEXLOOM_CONFIG`, else
-`/etc/texloom/texloom.toml` if it exists. An environment variable `TEXLOOM_<NAME>`
+file under its name, with `_` for `-`; [`texloom.example.toml`](texloom.example.toml) lists them
+all, and is what the install script starts from. The file is `--config`, else `TEXLOOM_CONFIG`,
+else `./texloom.toml`, else `/etc/texloom/texloom.toml`, if they exist (a `texloom.toml` in the
+checkout is ignored by git). Tables such as `[s3]` go last: in TOML, every line after one belongs
+to it. An environment variable `TEXLOOM_<NAME>`
 (`TEXLOOM_MIN_VERSION=0.4.30`) overrides the file, and the command line overrides both. A setting
 the server doesn't know is an error, so a typo doesn't go unnoticed. After a change:
 `systemctl restart texloom`.
@@ -179,9 +183,12 @@ checks it can reach the store when it starts, and stops with the reason if not. 
 redundancy only if the store has it: one Garage on the same machine is no safer than the folder;
 Garage on three machines, or a hosted store, is.
 
-To move from the folder to a bucket, stop the server, copy the folder's contents (without
-`.incoming`) to the bucket, keeping the paths (`<project>/<id>`), switch `files`, and start it.
-With [rclone](https://rclone.org): `rclone copy /var/lib/texloom/files remote:BUCKET --exclude ".incoming/**"`.
+To move from the folder to a bucket: stop the server, set `files` and `[s3]`, put the folder's
+files into the bucket, and start it:
+
+```bash
+sudo -u texloom texloom-server --files-restore /var/lib/texloom/files   # copies only what the bucket lacks
+```
 
 `uv run --extra server python scripts/check_files.py s3://BUCKET/PREFIX` (with `TEXLOOM_S3_*` set)
 checks a store of your own.
@@ -285,13 +292,16 @@ The install script keeps none. Back up, every night and somewhere else:
 
 - **the database**: `sudo -u postgres pg_dump --format=custom texloom > texloom.pgdump`
   (consistent while the server runs);
-- **stored files**: `/var/lib/texloom/files`, without `.incoming` (files are written once and never
-  changed, so a copy taken while the server runs is consistent). Not needed with a bucket that
-  keeps its own copies;
+- **stored files**: `texloom-server --files-for-backup DIR` prints the folder to back up: the files
+  folder (without its `.incoming`), or, with a bucket, DIR, which it first makes a copy of the
+  bucket (copying only what's new since last time). Files are written once and never changed, so a
+  copy taken while the server runs is consistent;
 - **settings**: `/etc/texloom`.
 
 To restore: install the server, stop it, `sudo -u postgres pg_restore -d texloom --clean --if-exists
-texloom.pgdump`, put back the files and settings, and start it. Everyone's devices hold full copies
+texloom.pgdump`, put back the settings and the files (into the files folder; with a bucket,
+`texloom-server --files-restore <the restored copy>` puts back whatever the bucket lacks), and
+start it. Everyone's devices hold full copies
 of their projects, so edits made since the backup come back as people reconnect.
 
 ## Updating
