@@ -77,8 +77,7 @@ class Admin:
         r, st = self.relay, self.relay.store
         r.codes._load()
         e = html.escape
-        modes = dict(st.db.execute("SELECT project, relay FROM mode"))
-        rows = st.db.execute("SELECT project, created, owner, seen, evicted FROM projects").fetchall()
+        modes, rows, apps = await st.admin_rows()
         online = {p: len(ws) for p, ws in r.rooms.items() if ws}
         label = {c: lab for c, (_, lab) in r.codes.codes.items()}
         label["default"] = "default (no code)"
@@ -114,7 +113,6 @@ class Admin:
             f"<tr><td>{e(code_name(c))}</td>{code_cell(c)}{expiry_cell(c)}<td class=n>{_size(r.codes.allowance(c))}</td>"
             f"<td class=n>{_size(st.owner_usage(c))}</td><td class=n>{len(owners.get(c, []))}</td></tr>"
             for c in ["default", *r.codes.codes.keys()])
-        apps = st.db.execute("SELECT app, version, n, seen FROM clients ORDER BY seen DESC").fetchall()
         mv = ".".join(map(str, r.min_version)) if r.min_version else ""
         arow = "".join(
             f"<tr><td>{e(a)}</td><td>{e(v)}</td><td class=n>{n}</td><td>{_ago(seen)}</td>"

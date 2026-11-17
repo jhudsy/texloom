@@ -41,11 +41,11 @@ identical everywhere, with no \\r or half characters; one ⌘S starts one compil
 never two at once; the server keeps nothing.
 """
 import argparse
+import asyncio
 import os
 import random
 import shutil
 import socket
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -54,6 +54,9 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import pg  # noqa: E402  (a throwaway PostgreSQL for the server)
+
 PY = [sys.executable, "-c"]
 CLI = "import sys; from texloom.cli import main; sys.argv[0] = 'texloom'; main()"
 SERVER = "import sys; from server.relay import main; sys.argv[0] = 'texloom-server'; main()"
@@ -194,7 +197,27 @@ def sound(*cs: Computer) -> None:
                 raise Failed(f"{c.name}: {rel}, saved here with \\r\\n, lost them: {d[:200]!r}")
 
 
-def pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> None:
+def server_kept(server: tuple[str, Path], project: str) -> tuple[list[int], tuple | None]:
+    """What the server keeps of a project: [changes, files] (files in its database and its file
+    store), and its storage mode (relay-only: (True,))."""
+    import asyncpg
+
+    async def ask():
+        c = await asyncpg.connect(server[0])
+        try:
+            n = [await c.fetchval(f"SELECT COUNT(*) FROM {t} WHERE project=$1", project) for t in ("log", "stored")]  # noqa: S608
+            mode = await c.fetchval("SELECT relay FROM mode WHERE project=$1", project)
+        finally:
+            await c.close()
+        n[1] += len(list((server[1] / "files" / project).glob("*")))  # and no content in its file store
+        return n, (mode,) if mode is not None else None
+    # on a thread of its own: the browser pairings run inside Playwright's event loop
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(1) as pool:
+        return pool.submit(asyncio.run, ask()).result()
+
+
+def pairing(name: str, url: str, tmp: Path, server_db: tuple[str, Path], step) -> None:
     first, second = name.split("/")
     a, b = Computer("A", first, tmp), Computer("B", second, tmp)
     rng = random.Random(7)
@@ -306,11 +329,7 @@ def pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> None:
         sound(a, b)
         step("a 2 MB picture, a rename (then an edit to it) and a deletion arrive")
 
-        db = sqlite3.connect(server_db)
-        stored = [db.execute(f"SELECT COUNT(*) FROM {t} WHERE project=?", (project,)).fetchone()[0] for t in ("log", "stored")]
-        stored[1] += len(list((server_db.parent / "files" / project).glob("*")))  # and no content in its file store
-        mode = db.execute("SELECT relay FROM mode WHERE project=?", (project,)).fetchone()
-        db.close()
+        stored, mode = server_kept(server_db, project)
         if stored != [0, 0] or not (mode and mode[0]):
             raise Failed(f"the server kept something: {stored[0]} changes, {stored[1]} files, mode {mode}")
         step("the server kept nothing of the project (sync-only)")
@@ -420,7 +439,7 @@ def lone_halves(s: str) -> int:
     return sum(1 for c in s if 0xD800 <= ord(c) <= 0xDFFF)
 
 
-def browser_pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> None:
+def browser_pairing(name: str, url: str, tmp: Path, server_db: tuple[str, Path], step) -> None:
     system = name.split("/")[0]
     a, b = Computer("A", system, tmp), Browser(tmp)
     rng = random.Random(11)
@@ -546,10 +565,7 @@ def browser_pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> No
             step("⌘S compiles once per press (not compiling here: tex-assets/ isn't set up, or CHECK_NO_TEX)")
 
         invariants(a, b)
-        db = sqlite3.connect(server_db)
-        stored = [db.execute(f"SELECT COUNT(*) FROM {t} WHERE project=?", (project,)).fetchone()[0] for t in ("log", "stored")]
-        stored[1] += len(list((server_db.parent / "files" / project).glob("*")))  # and no content in its file store
-        db.close()
+        stored, mode = server_kept(server_db, project)
         if stored != [0, 0]:
             raise Failed(f"the server kept something: {stored[0]} changes, {stored[1]} files")
         step("the server kept nothing of the project (sync-only)")
@@ -581,7 +597,9 @@ def main() -> None:
     port = free_port()
     url = f"http://127.0.0.1:{port}"
     (tmp / "codes.txt").write_text("CHECK-ONLY-NOT-A-REAL-CODE 1G check\n")  # stores projects only with a code
-    server = subprocess.Popen(PY + [SERVER, "--port", str(port), "--db", str(tmp / "relay.db"), "--codes-file", str(tmp / "codes.txt")],
+    database, _ = pg.start(tmp / "pg")  # stopped at the end, below
+    server = subprocess.Popen(PY + [SERVER, "--port", str(port), "--database", database, "--data", str(tmp / "relay"),
+                                    "--codes-file", str(tmp / "codes.txt")],
                               cwd=ROOT, stdout=open(tmp / "server.log", "w"), stderr=subprocess.STDOUT)  # noqa: SIM115 - open while it runs
     failed: list[str] = []
     try:
@@ -595,7 +613,7 @@ def main() -> None:
                 if run is browser_pairing and not playwright_ready():
                     print("  – skipped: Playwright isn't installed (uv run --with playwright …; playwright install chromium)", flush=True)
                     continue
-                run(name, url, where, tmp / "relay.db", lambda msg: print(f"  ✓ {msg}", flush=True))
+                run(name, url, where, (database, tmp / "relay"), lambda msg: print(f"  ✓ {msg}", flush=True))
             except Failed as e:
                 print(f"  ✗ {e}", flush=True)
                 failed.append(name)
@@ -605,6 +623,7 @@ def main() -> None:
     finally:
         server.terminate()
         server.wait(10)
+        pg.stop(tmp / "pg")
         if failed or args.keep:
             print(f"folders, logs and the server's database: {tmp}")
         else:

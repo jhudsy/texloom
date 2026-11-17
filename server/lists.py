@@ -15,8 +15,9 @@ that created it has expired. Reading needs only the id, a 256-bit value derived 
 
 from __future__ import annotations
 
-import sqlite3
 import time
+
+import asyncpg
 
 MAX_LIST = 256 * 1024  # bytes per entry: thousands of projects
 MAX_PER_OWNER = 32  # entries per creation code (a list, and the passkeys that unlock it)
@@ -25,59 +26,65 @@ RETIRED = -1  # sequence number of a replaced or deleted list: its id can't be u
 RETIRED_KEEP = 365 * 86400  # seconds a retired id is remembered (like removal records in a list)
 
 
-class Lists:
-    def __init__(self, db: sqlite3.Connection):
-        self.db = db
-        self.db.execute(
-            "CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, seq INTEGER NOT NULL, data BLOB NOT NULL, "
-            "owner TEXT NOT NULL, seen REAL NOT NULL)")
-        # owner and seen sit after the blob: without these, reading them walks every entry's pages
-        self.db.execute("CREATE INDEX IF NOT EXISTS lists_owner ON lists(owner, seq)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS lists_seen ON lists(seen)")
-        self.db.commit()
+def _n(status: str) -> int:
+    try:
+        return int(status.rsplit(" ", 1)[1])
+    except (IndexError, ValueError):
+        return 0
 
-    def get(self, lid: str) -> tuple[int, bytes, str] | None:
+
+class Lists:
+    """Entries in the table `lists` (created with the store's schema, store.py)."""
+
+    def __init__(self, pool: asyncpg.Pool):
+        self.pool = pool
+
+    async def get(self, lid: str) -> tuple[int, bytes, str] | None:
         """(sequence number, data, owner) of an entry; reading it counts as using it."""
-        row = self.db.execute("SELECT seq, data, owner, seen FROM lists WHERE id=?", (lid, )).fetchone()
+        row = await self.pool.fetchrow("SELECT seq, data, owner, seen FROM lists WHERE id=$1", lid)
         if row is None:
             return None
         now = time.time()
-        if now - row[3] > 86400:
-            with self.db:
-                self.db.execute("UPDATE lists SET seen=? WHERE id=?", (now, lid))
-        return row[0], row[1], row[2]
+        if now - row["seen"] > 86400:
+            await self.pool.execute("UPDATE lists SET seen=$1 WHERE id=$2", now, lid)
+        return row["seq"], row["data"], row["owner"]
 
-    def meta(self, lid: str) -> tuple[int, str] | None:
+    async def meta(self, lid: str) -> tuple[int, str] | None:
         """(sequence number, owner) of an entry, without reading its contents."""
-        return self.db.execute("SELECT seq, owner FROM lists WHERE id=?", (lid, )).fetchone()
+        row = await self.pool.fetchrow("SELECT seq, owner FROM lists WHERE id=$1", lid)
+        return (row["seq"], row["owner"]) if row else None
 
-    def put(self, lid: str, seq: int, data: bytes, owner: str) -> None:
-        with self.db:
-            self.db.execute("INSERT INTO lists(id, seq, data, owner, seen) VALUES (?,?,?,?,?) "
-                            "ON CONFLICT(id) DO UPDATE SET seq=excluded.seq, data=excluded.data, seen=excluded.seen",
-                            (lid, seq, data, owner, time.time()))
+    async def put(self, lid: str, seq: int, data: bytes, owner: str) -> bool:
+        """Store version `seq`, if the entry is still at seq - 1 (or new, for 1). False if someone
+        else's update got there first."""
+        if seq == 1:
+            status = await self.pool.execute(
+                "INSERT INTO lists(id, seq, data, owner, seen) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+                lid, seq, data, owner, time.time())
+        else:
+            status = await self.pool.execute("UPDATE lists SET seq=$1, data=$2, seen=$3 WHERE id=$4 AND seq=$5",
+                                             seq, data, time.time(), lid, seq - 1)
+        return _n(status) == 1
 
-    def retire(self, lid: str) -> None:
+    async def retire(self, lid: str) -> None:
         """Delete an entry's contents but remember its id, so a device still holding a replaced
         (perhaps leaked) link can't quietly start the list again under that link."""
-        with self.db:
-            self.db.execute("UPDATE lists SET seq=?, data=x'', seen=? WHERE id=?", (RETIRED, time.time(), lid))
+        async with self.pool.acquire() as c, c.transaction():
+            await c.execute("UPDATE lists SET seq=$1, data=''::bytea, seen=$2 WHERE id=$3", RETIRED, time.time(), lid)
             # old markers go after a year; none are pushed out to make room, or anyone could retire
             # enough lists of their own to bring a replaced (leaked) id back to life
-            self.db.execute("DELETE FROM lists WHERE seq=? AND seen<?", (RETIRED, time.time() - RETIRED_KEEP))
+            await c.execute("DELETE FROM lists WHERE seq=$1 AND seen<$2", RETIRED, time.time() - RETIRED_KEEP)
 
-    def count(self, owner: str) -> int:
-        return self.db.execute("SELECT COUNT(*) FROM lists WHERE owner=? AND seq<>?", (owner, RETIRED)).fetchone()[0]
+    async def count(self, owner: str) -> int:
+        return await self.pool.fetchval("SELECT COUNT(*) FROM lists WHERE owner=$1 AND seq<>$2", owner, RETIRED)
 
-    def room_for(self, owner: str) -> bool:
-        if self.db.execute("SELECT COUNT(*) FROM lists WHERE seq<>?", (RETIRED, )).fetchone()[0] >= MAX_TOTAL:
+    async def room_for(self, owner: str) -> bool:
+        if await self.pool.fetchval("SELECT COUNT(*) FROM lists WHERE seq<>$1", RETIRED) >= MAX_TOTAL:
             return False
-        return owner == "default" or self.count(owner) < MAX_PER_OWNER
+        return owner == "default" or await self.count(owner) < MAX_PER_OWNER
 
-    def purge_owner(self, owner: str) -> int:
-        with self.db:
-            return self.db.execute("DELETE FROM lists WHERE owner=?", (owner, )).rowcount
+    async def purge_owner(self, owner: str) -> int:
+        return _n(await self.pool.execute("DELETE FROM lists WHERE owner=$1", owner))
 
-    def drop_idle(self, before: float) -> int:
-        with self.db:
-            return self.db.execute("DELETE FROM lists WHERE seen < ?", (before, )).rowcount
+    async def drop_idle(self, before: float) -> int:
+        return _n(await self.pool.execute("DELETE FROM lists WHERE seen < $1", before))

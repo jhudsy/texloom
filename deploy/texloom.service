@@ -2,13 +2,15 @@
 # Install: sudo cp deploy/texloom.service /etc/systemd/system/ && sudo systemctl enable --now texloom
 [Unit]
 Description=TeXLoom relay server
-After=network-online.target
-Wants=network-online.target
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
 
 [Service]
 User=texloom
 WorkingDirectory=/var/www/texloom
-ExecStart=/var/www/texloom/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static /var/www/texloom/web/dist --tex-assets /var/www/texloom/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M --texlive /var/lib/texloom/texlive --texlive-max 3G
+# settings: /etc/texloom/texloom.toml (see INSTALL.md); TEXLOOM_<NAME> in /etc/texloom/env overrides it
+EnvironmentFile=-/etc/texloom/env
+ExecStart=/var/www/texloom/.venv/bin/texloom-server --config /etc/texloom/texloom.toml --host 127.0.0.1 --port 8787
 Restart=on-failure
 UMask=0077
 MemoryMax=768M

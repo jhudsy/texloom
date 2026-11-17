@@ -8,22 +8,17 @@ that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitat
 
 In this order, each building on the one before:
 
-1. **[Relay throughput](https://github.com/jhudsy/texloom/issues/14)**: a writer thread for SQLite
-   that groups commits, so edits and other writes don't wait on each other. 1–2 days. (Its other
-   half, stored files outside the database, is done: see #9.)
-2. **[A warm standby](https://github.com/jhudsy/texloom/issues/12)**: the database streamed to the
-   bucket with Litestream, and a second server ready to take over. 1–2 days, no change to the
-   relay's code. Needs the bucket in production (#9) first.
-3. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:
+1. **[A warm standby](https://github.com/jhudsy/texloom/issues/12)**: PostgreSQL streaming to a
+   second server (or a hosted PostgreSQL), stored files in a bucket, and a written switch-over. About
+   2 days; no change to the relay's code.
+2. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:
    most of the traffic, off the relay. About 2 days.
-4. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
+3. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
    (TLA+, with the GitHub lease), before several servers run at once. 2–3 days.
-5. **[Several servers at once](https://github.com/jhudsy/texloom/issues/12)**: each project routed
-   to one server, or the log in a shared database (Postgres). 1–2 weeks.
-
-Done: **[stored files in a folder or an S3-compatible bucket](https://github.com/jhudsy/texloom/issues/9)**
-(Garage, RustFS, R2, B2, S3), instead of inside SQLite. Production still uses a folder until a
-bucket is chosen.
+4. **[Several servers at once](https://github.com/jhudsy/texloom/issues/12)**: the database already
+   numbers each project's changes correctly with several writers. Left: changes reaching people
+   connected to another server (PostgreSQL LISTEN/NOTIFY), sharing what each server keeps in memory
+   (usage, deletions, storage modes, revocations), and running maintenance once. About a week.
 
 ## Later
 
@@ -35,11 +30,9 @@ bucket is chosen.
 
 ## Testing
 
-- The **[TLA+ model](https://github.com/jhudsy/texloom/issues/8)** of the GitHub lease and the
-  server protocol is step 4 of Next.
-
-What's checked already: README → Checks, and DESIGN.md → Guarding text handling (including the
-folder sync's model-based checks, [#7](https://github.com/jhudsy/texloom/issues/7), done).
+The **[TLA+ model](https://github.com/jhudsy/texloom/issues/8)** of the GitHub lease and the server
+protocol is step 3 of Next. What's checked already: README → Checks, and DESIGN.md → Guarding text
+handling.
 
 ## Parked
 

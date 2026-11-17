@@ -32,7 +32,7 @@ no copy at all. No accounts: you share a link. (The command-line tools are calle
   desktop app follows the system language, or the one chosen in its Settings).
 - Start from templates, or import a `.zip` (e.g. from Overleaf) or an arXiv paper's source.
 - Read-only links, and personal edit links that can be revoked one by one.
-- The server is a single Python process with SQLite, small enough for a Raspberry Pi.
+- The server is a single Python process with PostgreSQL ([INSTALL.md](INSTALL.md)).
 
 See [DESIGN.md](DESIGN.md) for how it works.
 
@@ -316,172 +316,9 @@ math in `$…$` or `$$…$$`. Raw HTML appears as plain text, and images from ot
 
 ## Running a server
 
-The server is the web app, the encrypted relay and the in-browser TeX files, all in one
-small Python process.
-
-```bash
-git clone https://github.com/jhudsy/texloom && cd texloom
-uv sync                                     # Python: server + folder helper
-cd web && npm install && npm run build      # web editor -> web/dist
-npm run download-tex                        # in-browser TeX (~685 MB, into ../tex-assets)
-cd .. && uv run texloom-server --port 8787
-```
-
-For TeX Live files on demand (every TeX Live package available to in-browser compiles;
-otherwise only the bundles in `tex-assets` are), build the package index once and start
-the server with it:
-
-```bash
-uv run texloom-server --texlive data/texlive --texlive-init   # ~2 s; re-run to refresh
-uv run texloom-server --port 8787 --texlive data/texlive       # --texlive-max 3G caps its disk use
-```
-
-On your own machine, that's enough: open http://localhost:8787. Browsers treat
-`localhost` as secure. To let other people in, the server needs **HTTPS**, because
-browsers only allow the encryption the editor relies on over secure connections. Pick one:
-
-| option | what you need | result |
-|---|---|---|
-| **nginx + Let's Encrypt** ([deploy/install.sh](deploy/install.sh)) | an Ubuntu/Debian server with a domain name | a sandboxed service plus an nginx site with a certificate, rate limits and security headers. It works alongside other sites. Run `deploy/install.sh root@host texloom.example.org`; re-run it to update |
-| **Caddy** ([deploy/Caddyfile](deploy/Caddyfile)) | a domain name pointing at the server, ports 80/443 open | Caddy gets and renews the certificate itself |
-| **Cloudflare Tunnel** | a free Cloudflare account | HTTPS with **no open ports**, ideal for a Raspberry Pi at home. Try `cloudflared tunnel --url http://localhost:8787` |
-| **Tailscale Funnel** | Tailscale on the server | `tailscale funnel 8787`, also with no open ports |
-
-Participants only ever make outgoing HTTPS connections to the server, so their
-firewalls and NAT need no changes.
-
-### Storage allowances (creation codes)
-
-The server can't see what it stores, and making a project needs no account, so storage
-is governed by **allowances** in a small text file (`--codes-file`):
-
-```
-# <code|default>  <allowance>  [until=YYYY-MM-DD]  [label]
-default          0                               # projects created without a code: not stored on the server
-A3F7-9KQ2-XM4P   unlimited                       owner
-K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
-```
-
-- A code's allowance is the total stored across **all** projects created with it.
-  `default` covers people without a code. `0` means "not stored on the server": those
-  people can still create projects, but only as live, relay-only projects whose copies
-  live on their devices. The desktop app makes a project relay-only ("sync-only") by itself
-  when it's created without a code, or when the server refuses to store one that has none;
-  **Keep a copy on the server…** (Project menu) adds a code later.
-- Anyone with a project's link can open and edit it; codes only govern **storage of new
-  projects**. A code is entered once per browser (**Create project** asks, or ⚙ Settings → Sync & storage →
-  Creation code…). The folder helper takes `texloom new … --code`, `create_code` in
-  `.texloom/config.json`. `TEXLOOM_CODE` is read only when creating something new, so it can't reach
-  whichever server a link you open points at.
-- The file is re-read when it changes. Deleting a line revokes a code: its projects stay
-  stored, but new changes then count against `default`.
-- `until=` (optional) is the last day, in UTC, that a code is valid. After that it counts as
-  revoked: new changes to its projects aren't stored and it can't store new projects.
-  Renewing (changing the date) restores it, with no restart. Projects stay tied to the
-  code they were created with, so renew a code rather than issuing a new one.
-- `--purge-expired-after DAYS` deletes the stored copies of projects whose code expired
-  more than DAYS days ago (checked hourly; skipped while someone has the project open).
-  As with idle eviction, the files stay on people's devices and the projects carry on
-  relay-only; renewing the code later stores them again on their next sync.
-  `--purge-code CODE` does the same at once for one expired or deleted code.
-  (`TEXLOOM_PURGE_EXPIRED_AFTER` sets it too, e.g. from a systemd drop-in.)
-- `--codes-url URL` (or `TEXLOOM_CODES_URL`) names a web page saying how to get a code for
-  this server. Where the web and desktop apps ask for a code, they say codes come from whoever
-  runs the server and link to that page; without it, they only say the first part. Each server
-  gives its own (in `/api/info`), so the apps never point at one in particular.
-- Several codes files can be combined: repeat `--codes-file`, or list extra files in
-  `TEXLOOM_CODES_FILES` (separated by `:`), for example one kept by hand and one kept by a
-  sales service. The first file that sets `default` decides it; `--add-code` writes to the
-  first file given; `--renew-code` finds the code in whichever file lists it.
-
-```bash
-texloom-server --codes-file /etc/texloom/codes.txt --add-code alice --allowance 2G --months 12   # prints a new code
-texloom-server --codes-file /etc/texloom/codes.txt --renew-code K7P2-QX4M-9H3D --months 12          # or --until 2028-01-31, --allowance 10G
-texloom-server --codes-file /etc/texloom/codes.txt --list-codes --db /var/lib/texloom/texloom.db   # usage, expiry, deleted codes
-texloom-server --codes-file /etc/texloom/codes.txt --purge-code K7P2-QX4M-9H3D --db /var/lib/texloom/texloom.db
-```
-
-A renewal with `--months` counts from the later of today and the code's current expiry,
-so renewing early loses nothing. `--purge-code` refuses a code that is still valid; run it
-with the server stopped, or restart the server afterwards so its storage totals are
-current (`--purge-expired-after`, inside the server, needs neither).
-
-The server also refuses to store anything when free disk drops below `--min-free`
-(default 2G), which protects other sites on the machine. Space freed inside the
-database counts as free, because SQLite reuses it before growing the file. Two more limits are
-`--project-max-bytes` (default 200M per project, except for unlimited allowances) and
-`--max-bytes` (total). Without `--codes-file`, every project may be stored.
-
-### Where stored files go
-
-The database (`--db`) holds the edit logs and which files are stored. The files themselves
-(pictures, PDFs, uploads, all encrypted by the apps) go in a folder `files` next to the
-database, or wherever `--files` (or `TEXLOOM_FILES` in `/etc/texloom/env`) says:
-
-- a folder: `--files /srv/texloom-files`;
-- an S3-compatible bucket: `--files s3://BUCKET` or `s3://BUCKET/PREFIX`, with the endpoint and
-  keys in the environment: `TEXLOOM_S3_ENDPOINT` (e.g. `https://s3.example.org`),
-  `TEXLOOM_S3_REGION` (what the store calls its region: `garage` for Garage by default, `auto`
-  for Cloudflare R2), `TEXLOOM_S3_KEY_ID` and `TEXLOOM_S3_SECRET`.
-
-Any S3-compatible store works: [Garage](https://garagehq.deuxfleurs.fr/) or RustFS on your own
-machines, or Cloudflare R2, Backblaze B2 or AWS S3. The store only ever sees encrypted data.
-The server checks it can reach the bucket when it starts, and stops with the reason if not.
-Files kept in the database by older versions move to the store by themselves the first time
-the new version starts. With a bucket, `--min-free` still guards the disk the database is on.
-
-`uv run python scripts/check_files.py` checks the store against a folder and, if `garage` is
-installed, a throwaway Garage; `s3://bucket/prefix` as the argument checks a store of your own.
-
-A refused change is never lost:
-- it still reaches everyone online at that moment;
-- the sender keeps it and retries;
-- the editor shows a warning that the project isn't saved on the server.
-
-
-### Retiring old app versions
-
-The apps tell the server which version they are when they connect, and the admin page lists the
-apps and versions that connect, with when each was last seen. Once old versions have stopped
-connecting, set the oldest allowed with `--min-version X.Y.Z` (or `TEXLOOM_MIN_VERSION`; with
-`deploy/install.sh`, put `TEXLOOM_MIN_VERSION=X.Y.Z` in `/etc/texloom/env` and restart). Older apps,
-and those too old to say, are then turned away with a request to update: the desktop app shows
-"Update needed", the web app offers to reload (its newest version comes from the server), and
-project lists refuse them too. Support for what only those versions did can then be dropped.
-
-### Private servers
-
-By default anyone who can reach your server can use it for live projects, though they can't read
-anyone else's. To keep it for your own group, add `--private` (or `TEXLOOM_PRIVATE=1`), which
-needs a `--codes-file`:
-
-- Only projects created with a valid creation code may connect, even without server storage. The
-  `default` line doesn't count.
-- People with such a project's link need nothing else. Give a code to whoever creates projects,
-  and links to everyone else.
-- When a code expires or is removed, its projects stop syncing until it's renewed. Copies on
-  people's devices carry on working.
-- Projects from before the server went private are re-registered the first time someone opens one
-  with a valid code.
-
-The web app and TeX files can still be downloaded by anyone, and `--no-arxiv` turns off importing
-through the server. For a server nobody outside can even see, put it behind a VPN such as
-Tailscale or WireGuard, or a firewall.
-
-### Idle projects, admin page, arXiv import
-
-- `--evict-idle-days N` (or `TEXLOOM_EVICT_IDLE_DAYS`) drops the stored copy of projects nobody has opened for N days
-  (default: never). The server copy then behaves like a cache: the next time someone with
-  an edit link opens the project (browser or helper), their copy is uploaded again. Until
-  then, someone with only a link and no copy of their own can't open it.
-- `--admin-token-file FILE` (or `TEXLOOM_ADMIN_TOKEN`) turns on a read-only page at
-  `/admin`. Log in with any user name and the token as password. It shows storage, disk,
-  limits, usage per creation code, and per-project size, owner code, state and last
-  activity. Names and contents stay encrypted. The install script creates the token in
-  `/etc/texloom/admin-token`.
-- Importing an arXiv paper's source goes through the server, because arXiv doesn't allow
-  browsers to fetch it. The server makes one request at a time, at least 3 s apart, at most
-  10 per hour per address, with size caps. `--no-arxiv` turns it off.
+A server is one small Python process with PostgreSQL. [INSTALL.md](INSTALL.md) covers installing
+one (a script does it on Ubuntu or Debian), its settings file, stored files in a folder or an
+S3-compatible bucket, creation codes and storage allowances, private servers, and backups.
 
 ## Working on a project as a folder
 
@@ -880,14 +717,20 @@ Found a problem? Please open an issue.
 ## Development
 
 ```bash
-uv run texloom-server --port 8787   # terminal 1
-cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxies to :8787)
+uv sync --extra server
+uv run python scripts/pg.py data/pg -- uv run texloom-server --data data   # terminal 1: a database of its own, and the server
+cd web && npm run dev                                                      # terminal 2 -> http://localhost:5173 (proxies to :8787)
 ```
+
+`scripts/pg.py` needs PostgreSQL's programs (`brew install postgresql@17`, `apt install postgresql`);
+it runs a database of its own from the folder, nothing installed as a service.
 
 | path | what |
 |---|---|
-| `server/relay.py` | relay + encrypted store (aiohttp, SQLite): signatures, storage modes, allowances, limits |
+| `server/relay.py` | relay (aiohttp): connections, signatures, storage modes, allowances, limits, the command line |
+| `server/store.py` | what the relay stores, in PostgreSQL: edit logs, projects, which files are stored |
 | `server/files.py` | where stored files' content goes: a folder or an S3-compatible bucket |
+| `server/config.py` | the server's settings: the settings file, `TEXLOOM_*` variables, the command line |
 | `texloom/crypto.py` | keys, links, AES-GCM, Ed25519 (mirrors `web/src/crypto.ts`) |
 | `texloom/replica.py` | folder helper's replica: pycrdt document, outbox, peer handshake, blobs |
 | `texloom/folder.py` | two-way folder ⇄ CRDT sync, path safety, locked-down latexmk |
@@ -914,7 +757,7 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | `web/src/sharing.ts`, `crypto.ts` | links, personal links, revocation, moving to new keys |
 | `web/src/foldersync.ts` | folder sync from the browser (File System Access API) |
 | `web/sw-template.js` | service worker (offline app) |
-| `deploy/` | install script (nginx, certbot, systemd), Caddy config, systemd unit |
+| `deploy/` | install script (PostgreSQL, nginx, certbot, systemd, settings file), Caddy config |
 
 
 ### Checks
@@ -933,11 +776,14 @@ npm run check-props     # random texts and edits (Windows line endings, emoji): 
 cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for the desktop, and its merge agrees with the web app's
 uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
 uv run --with hypothesis python scripts/check_folder_model.py     # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
-uv run python scripts/check_files.py                              # the server's file store: a folder, and Garage (S3) if installed
+uv run --extra server python scripts/check_files.py               # the server's file store: a folder, and Garage (S3) if installed
 (cd web && npm run check-folder-model)                           # the same for the browser's folder sync, on a fake clock and folder
 ```
 
-Sync-only projects end to end: `uv run python scripts/check_synconly.py` starts its own throwaway
+The server's checks need PostgreSQL's programs: each starts a throwaway database of its own
+(`scripts/pg.py`).
+
+Sync-only projects end to end: `uv run --extra server python scripts/check_synconly.py` starts its own throwaway
 server (which keeps nothing without a creation code) and two copies of `texloom run`, as two
 computers, then edits through their folders: every file arriving, edits both ways and at once,
 a burst of edits, one computer off for a while, pictures, renames and deletions, and that the
@@ -951,14 +797,14 @@ this on Linux too). A few minutes; `--keep` leaves the folders and logs:
 
 ```bash
 uv run --with playwright python -m playwright install chromium   # once
-uv run --with playwright python scripts/check_synconly.py
+uv run --extra server --with playwright python scripts/check_synconly.py
 ```
 
 The quick checks run on every push (`.github/workflows/checks.yml`). The sync-only check takes a
 few minutes, so it runs when the desktop app's sync or the server changes, every night, and on
 demand (Actions → Sync-only check), on Linux, macOS and a real Windows (`sync-only.yml`).
 
-To see what a relay can take, `uv run python scripts/loadtest.py all` starts its own throwaway server
+To see what a relay can take, `uv run --extra server python scripts/loadtest.py all` starts its own throwaway server
 and reports latency, CPU and memory for each scenario. Results depend on the machine.
 
 ### Translations

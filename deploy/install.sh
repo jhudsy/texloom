@@ -3,13 +3,13 @@
 #
 #   deploy/install.sh root@server.example.org texloom.example.org
 #
-# Re-run it to update. Used for https://texloom.jhudsy.org (Ubuntu 24.04, aarch64,
-# alongside other nginx sites). It only adds things: a `texloom` system user, the app in
-# /var/www/texloom (set TEXLOOM_DIR for elsewhere), its data in /var/lib/texloom, settings
-# in /etc/texloom, a systemd service on 127.0.0.1:8787 and an nginx site for the domain,
-# plus a Let's Encrypt certificate via certbot. Other sites are left alone. It keeps no backups: back up
-# /var/lib/texloom (the data) and /etc/texloom (codes, admin token) yourself. Extra ssh
-# options can be passed in SSH_OPTS; set SKIP_CERT=1 to skip certbot.
+# Re-run it to update. Used for https://texloom.jhudsy.org (Ubuntu 24.04, alongside other nginx
+# sites). It only adds things: a `texloom` system user, PostgreSQL with a `texloom` database, the
+# app in /var/www/texloom (set TEXLOOM_DIR for elsewhere), its files in /var/lib/texloom, settings
+# in /etc/texloom (texloom.toml, written once: edit it there), a systemd service on 127.0.0.1:8787
+# and an nginx site for the domain, plus a Let's Encrypt certificate via certbot. Other sites are
+# left alone. It keeps no backups: see INSTALL.md. Extra ssh options can be passed in SSH_OPTS;
+# set SKIP_CERT=1 to skip certbot.
 set -euo pipefail
 
 TARGET=${1:?usage: deploy/install.sh user@host domain}
@@ -30,7 +30,7 @@ ssh_() { ssh $SSH_OPTS "$TARGET" "$@"; }
 
 echo "==> Building the web app locally"
 (cd "$HERE/web" && npx tsc && npx vite build >/dev/null)
-(cd "$HERE" && uv export --frozen --no-dev --no-emit-project --format requirements-txt -q -o deploy/.requirements.txt)
+(cd "$HERE" && uv export --frozen --no-dev --extra server --no-emit-project --format requirements-txt -q -o deploy/.requirements.txt)
 
 echo "==> Copying code to $TARGET:$APP_DIR"
 ssh_ "mkdir -p '$APP_DIR'"
@@ -53,7 +53,7 @@ export PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1  # leave no caches beh
 
 # packages (only installs what's missing)
 need=()
-for p in nginx python3-venv rsync curl; do dpkg -s "$p" >/dev/null 2>&1 || need+=("$p"); done
+for p in nginx python3-venv rsync curl postgresql; do dpkg -s "$p" >/dev/null 2>&1 || need+=("$p"); done
 command -v certbot >/dev/null || need+=(certbot python3-certbot-nginx)
 if ((${#need[@]})); then apt-get update -qq && apt-get install -y -qq "${need[@]}"; fi
 
@@ -67,6 +67,12 @@ python3 -m venv .venv
 .venv/bin/pip install -q --no-cache-dir --require-hashes -r deploy/.requirements.txt
 .venv/bin/pip install -q --no-cache-dir --no-deps .
 chown -R root:root "$APP_DIR" && chmod -R a+rX "$APP_DIR"
+
+# PostgreSQL: a `texloom` database, which the texloom user reaches over the local socket (no password)
+systemctl enable -q --now postgresql
+pg() { runuser -u postgres -- psql -qtAX "$@"; }
+[ "$(pg -c "SELECT 1 FROM pg_roles WHERE rolname='texloom'")" = 1 ] || runuser -u postgres -- createuser texloom
+[ "$(pg -c "SELECT 1 FROM pg_database WHERE datname='texloom'")" = 1 ] || runuser -u postgres -- createdb -O texloom texloom
 
 # in-browser TeX (WebAssembly TeX Live): downloaded once, ~700 MB unpacked
 if [ "$(cat tex-assets/.version 2>/dev/null)" != "$BUSYTEX_VERSION" ]; then
@@ -85,10 +91,42 @@ fi
 # fixes to the engine (e.g. biber and .bib files in folders); idempotent, on every deploy
 python3 deploy/patch-busytex.py tex-assets
 
-# storage allowances: without a code nothing is stored (default 0); print the owner's code
+# settings: written once, then yours to edit (texloom-server --help lists every setting)
 install -d -o root -g texloom -m 750 /etc/texloom
+MIRROR_LINE=${TEXLIVE_MIRROR:+texlive_mirror = [\"$TEXLIVE_MIRROR\"]}
+if [ ! -f /etc/texloom/texloom.toml ]; then
+  cat > /etc/texloom/texloom.toml <<TOML
+# TeXLoom server settings. Every option of texloom-server can be set here by name (see
+# texloom-server --help and INSTALL.md); TEXLOOM_<NAME> in the environment overrides this file.
+# After a change: systemctl restart texloom
+
+database = "postgresql:///texloom?host=/var/run/postgresql"
+data = "/var/lib/texloom"          # stored files go in data/files unless 'files' says otherwise
+static = "$APP_DIR/web/dist"
+tex_assets = "$APP_DIR/tex-assets"
+codes_file = ["/etc/texloom/codes.txt"]
+admin_token_file = "/etc/texloom/admin-token"
+min_free = "2G"
+project_max_bytes = "200M"
+texlive = "/var/lib/texloom/texlive"
+texlive_max = "3G"
+${MIRROR_LINE:-# texlive_mirror = ["https://mirror.example.org/ctan/systems/texlive/tlnet/"]}
+
+# Stored files in an S3-compatible bucket (Garage, RustFS, Cloudflare R2, Backblaze B2, AWS S3)
+# instead of the folder data/files. Copy what's in the folder to the bucket before switching.
+# files = "s3://my-bucket"
+# [s3]
+# endpoint = "https://s3.example.org"
+# region = "auto"
+# key_id = "…"
+# secret = "…"
+TOML
+fi
+chown root:texloom /etc/texloom/texloom.toml && chmod 640 /etc/texloom/texloom.toml
+
+# storage allowances: without a code nothing is stored (default 0); print the owner's code
 if [ ! -s /etc/texloom/codes.txt ]; then
-  echo "    owner's creation code (unlimited): $(.venv/bin/texloom-server --codes-file /etc/texloom/codes.txt --db /var/lib/texloom/texloom.db --add-code owner --allowance unlimited)"
+  echo "    owner's creation code (unlimited): $(.venv/bin/texloom-server --config /etc/texloom/texloom.toml --add-code owner --allowance unlimited)"
 fi
 chown root:texloom /etc/texloom/codes.txt && chmod 640 /etc/texloom/codes.txt
 # admin page (/admin, read-only usage): password in /etc/texloom/admin-token
@@ -101,23 +139,32 @@ chown root:texloom /etc/texloom/admin-token && chmod 640 /etc/texloom/admin-toke
 # TeX Live files on demand for the in-browser engine: the package index (refreshed on each
 # deploy; ~2 s), packages fetched from mirrors when first asked for, into this folder
 install -d -o texloom -g texloom -m 750 /var/lib/texloom/texlive
-MIRROR_ARG=${TEXLIVE_MIRROR:+--texlive-mirror $TEXLIVE_MIRROR}
-runuser -u texloom -- .venv/bin/texloom-server --texlive /var/lib/texloom/texlive --texlive-init $MIRROR_ARG \
+runuser -u texloom -- .venv/bin/texloom-server --config /etc/texloom/texloom.toml --texlive-init \
   || echo "    couldn't refresh the TeX Live index; keeping the one there is (if any)"
+
+# a database from before PostgreSQL (SQLite): copied in once, then kept aside as texloom.db.imported
+if [ -f /var/lib/texloom/texloom.db ]; then
+  echo "    copying the SQLite database into PostgreSQL"
+  systemctl stop texloom 2>/dev/null || true
+  runuser -u texloom -- .venv/bin/texloom-server --config /etc/texloom/texloom.toml --import-sqlite /var/lib/texloom/texloom.db
+  for f in texloom.db texloom.db-wal texloom.db-shm; do
+    [ ! -f "/var/lib/texloom/$f" ] || mv "/var/lib/texloom/$f" "/var/lib/texloom/${f/texloom.db/texloom.db.imported}"
+  done
+fi
 
 # systemd service
 cat > /etc/systemd/system/texloom.service <<UNIT
 [Unit]
 Description=TeXLoom relay server
-After=network-online.target
-Wants=network-online.target
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
 
 [Service]
 User=texloom
 WorkingDirectory=$APP_DIR
-# settings without editing this file, e.g. TEXLOOM_MIN_VERSION=0.4.30 (then: systemctl restart texloom)
+# settings: /etc/texloom/texloom.toml (TEXLOOM_<NAME> variables in /etc/texloom/env override it)
 EnvironmentFile=-/etc/texloom/env
-ExecStart=$APP_DIR/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static $APP_DIR/web/dist --tex-assets $APP_DIR/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M --texlive /var/lib/texloom/texlive --texlive-max 3G $MIRROR_ARG
+ExecStart=$APP_DIR/.venv/bin/texloom-server --config /etc/texloom/texloom.toml --host 127.0.0.1 --port 8787
 Restart=on-failure
 UMask=0077
 MemoryMax=768M

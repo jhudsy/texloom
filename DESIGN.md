@@ -22,15 +22,15 @@ No accounts: a project is shared by sending a link.
                   ├──── updates over WS ────┤
  local daemon    ─┘       ┌────────┐        └─ local daemon (collaborator)
  (Python, folder  ───────▶│ server │
-  sync + latexmk)         │ relay +│  SQLite: opaque ciphertext log; files: a folder or S3 bucket
+  sync + latexmk)         │ relay +│  PostgreSQL: opaque ciphertext log; files: a folder or S3 bucket
                           │ store  │
                           └────────┘
 ```
 
-1. **Server** (`server/`, Python + aiohttp + SQLite). Relays updates between connected
-   peers, appends them to a per-project log, stores encrypted blobs (in a folder or an
-   S3-compatible bucket, `server/files.py`; SQLite only records which exist), serves the web
-   app. It never sees keys or plaintext. It verifies write signatures so that holders
+1. **Server** (`server/`, Python + aiohttp + PostgreSQL). Relays updates between connected
+   peers, appends them to a per-project log (`server/store.py`), stores encrypted blobs (in a
+   folder or an S3-compatible bucket, `server/files.py`; the database only records which exist),
+   serves the web app. It never sees keys or plaintext. It verifies write signatures so that holders
    of a read-only link cannot write.
 2. **Web editor** (`web/`, TypeScript + Vite + CodeMirror 6 + Yjs). Full replica in
    IndexedDB, works offline, live cursors, file tree, PDF view, in-browser compile.
@@ -215,8 +215,16 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   unrecorded copy, which the same upload later overwrites. An upload counts against the
   allowances from the moment it's accepted (`Store.pending`), so uploads at once can't
   together pass a limit. Folder reads and writes, and checking an upload's signature, run on
-  worker threads, so a large file doesn't hold up live editing. A database from before this
-  (content in a table `blob`) is moved out, a file at a time, when the server starts.
+  worker threads, so a large file doesn't hold up live editing.
+- **The database:** PostgreSQL, through asyncpg, so the relay never waits on it. A project's
+  edits are numbered in the database: `head` is incremented and read back (`UPDATE … RETURNING`)
+  in the same transaction as the log row, so numbers stay right however many servers write.
+  Within one server, `Store.lock(project)` keeps a project's check-then-write steps (is this a
+  replay? may it be stored? store it; a snapshot's range check and the snapshot; mode changes,
+  deletion, an upload's quota check and reservation) from interleaving with another message for
+  it; different projects go on at once. What every message consults is also kept in memory:
+  usage per project and owner, owners, deletions, storage modes, revocations, last-seen times.
+  That's right for one server; several at once need them shared (ROADMAP.md).
 - **Erasing:** when a project is evicted, purged, made relay-only or deleted for everyone, or a
   file is deleted, its stored files stop counting and can no longer be fetched at once: their
   rows move to the table `trash`, and their content is erased in the background
@@ -312,16 +320,15 @@ relay) as the fallback for symmetric NATs.
 - CRDT → disk: write the merged file. If the file changed on disk since the last
   sync, ingest that change first. A file that can't be written is tried again after 0.5 s,
   doubling up to a minute, local edits taken in first as before any remote change: on Windows a
-  file another program has open (an antivirus scan, an indexer, an editor) can't be replaced,
-  and the folder kept an old copy until the next change arrived.
+  file another program has open (an antivirus scan, an indexer, an editor) can't be replaced.
 - Reading a changed file: only once it has stopped changing. A read halfway through a save
   (some editors empty a file, then write it), or through copying a big file in, would share a
   cut-off file, and for text its missing end as deleted. Changed files are looked at, then again
   0.2 s later (1 s for a file of 1 MB or more, whose copying can pause for a moment; 2 s for one
   that became empty or vanished: rarely meant), and any still changing wait for their next
   change, or a look shortly after. Each time a file is found still changing, the wait doubles,
-  up to 2 s (`settle_for`): on a slow or busy disk, copying in a 20 MB file paused for more than
-  0.2 s and a cut-off copy was shared. Their date and size are noted before
+  up to 2 s (`settle_for`), since on a slow or busy disk copying in a big file can pause for longer
+  than 0.2 s. Their date and size are noted before
   reading (and after writing, from the file written before it goes into place), so a save that
   lands in between is never taken for what was read and missed. An empty file is never taken
   for an older copy reappearing, whose repair would write over a save in progress. The browser's
@@ -334,19 +341,17 @@ relay) as the fallback for symmetric NATs.
   lines with "\r\n"; it comes in as "\n" and is written back with "\r\n" (`c` in known.json,
   judged by the file's first line; for entries from before it was noted, by the file on disk).
   The browser's folder sync does the same. The editor counts only "\n" as a line break
-  (`EditorState.lineSeparator`): by default CodeMirror also takes "\r\n" as one, so its
-  positions fell one short of the shared text's per line above and typing landed off, in the
-  middle of words, leaving lone "\r"s inside words that Windows editors show as line breaks.
-  Any "\r" in a project text (put there by an older app, pasted, or left by that bug; a lone one
-  too, rather than taken for an old Mac line break) is taken out, each by itself, by the web app as it arrives and by the folder sync when it starts
-  (`keepLF`, `strip_cr`).
+  (`EditorState.lineSeparator`; by default CodeMirror also takes "\r\n" as one), so its
+  positions match the shared text's. Any "\r" in a project text (pasted, say; a lone one too,
+  rather than taken for an old Mac line break) is taken out, each by itself, by the web app as it
+  arrives and by the folder sync when it starts (`keepLF`, `strip_cr`).
 - Whole characters: a character outside the BMP (an emoji, Unicode maths such as 𝒜) is two
   UTF-16 units in the web app. An edit between them leaves half a character: Yjs turns both
   halves into "\ufffd" for everyone, and the desktop's copy (whole characters only) differs.
-  Typing never does this, but position-based edits could: `setText` (restoring from History,
-  importing over a file) kept common ends by unit, so 😀 → 😁 or 𝒜 → 𝒞, which share their first
-  half, became "��". It now keeps whole characters, and an editor filter (`wholechars.ts`)
-  widens any other change that would cut one. `npm run check-chars` checks both.
+  Typing never does this, but position-based edits could (restoring from History, importing over a
+  file: 😀 → 😁 or 𝒜 → 𝒞 share their first half). `setText` keeps common ends by whole character,
+  and an editor filter (`wholechars.ts`) widens any other change that would cut one.
+  `npm run check-chars` checks both.
 - Renames on disk: a rename reaches the sync as a deletion and an addition, perhaps in
   different batches. A file gone from disk whose last synced content (by hash) is now in a
   file the project doesn't have yet has moved there, and moves as renaming in the web app
@@ -389,8 +394,8 @@ related-work section"`. Edits appear live in collaborators' browsers.
    if all differ, the index is refreshed from another mirror (at most every 10 minutes).
    A request waits up to 25 s for a first install (the engine gives up after 30); a
    bigger package answers 503 and is there for the next compile. Servers without
-   `--texlive` keep the old behaviour: the recommended (200 MB) and extra (340 MB) bundles,
-   fetched when a document needs them.
+   `--texlive` use the recommended (200 MB) and extra (340 MB) bundles instead, fetched when a
+   document needs them.
 2. **Native:** a daemon with `--compile` (or the desktop app, per folder) runs `latexmk`.
    Full TeX Live: shell-escape, minted, etc. It finds TeX the way a terminal would
    (`use_tex_on_path`: /etc/paths.d on macOS, TeX Live's and MiKTeX's usual folders), since
@@ -798,8 +803,8 @@ symlinks) into a new folder and shares that as a new project with the same setti
 
 ## Guarding text handling
 
-The bugs behind scrambled text were at boundaries: two parts counting positions differently. Three
-kinds of check guard against that kind of bug coming back.
+Text goes wrong at boundaries, where two parts count positions differently. Three kinds of check
+guard them.
 
 - **Positions are typed.** In the desktop app a Python string index, a UTF-8 byte offset (pycrdt's
   edits and change events) and a UTF-16 offset (Yjs, the editor, anchors) are distinct types
@@ -833,23 +838,12 @@ kinds of check guard against that kind of bug coming back.
   Timers, and in the browser the clock, folder and storage, belong to the test, so a failure
   replays exactly, shrunk to the shortest sequence. The rule behind most of what they found:
   *base* is what the file holds (set only once a write succeeds, kept across restarts), and a file
-  changed since the sync last saw it is read before anything is written over it. Besides a
-  write refused and then saved over (found by hand first), they found: the last-synced texts lost on
-  restart, so a save made while the app or page was closed undid changes the file never got; an undo
-  saved in the editor taken for a stale copy and reverted; a Windows file losing its line endings
-  when a stale copy came back; and, in the browser, a save made in the last couple of seconds
-  overwritten by changes arriving from others.
+  changed since the sync last saw it is read before anything is written over it.
 
 - **A library of the failures found.** `scripts/folder-cases.json` holds every folder-sync failure
   found so far (by the models, the end-to-end check or a report) as its exact steps, with what it
   caught; both models run every case on every check before their random runs, so each stays
   exercised. A new failure gets a case.
-
-Each was checked against the code from before its fix: the properties and the invariant both find
-the "\r\n" bug from 0.4.21 at once. Writing them found more: `applyText` dropped a newline added
-at the very end of a file; the desktop and the web app merged differently around lone "\r", form
-feeds and Unicode line separators, and from their different line diffs (once keeping a change made
-on both sides twice); and a remembered range slipped when the text just before it was replaced.
 
 ## Known limitations / open questions
 

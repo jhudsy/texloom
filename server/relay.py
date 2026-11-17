@@ -40,9 +40,7 @@ import argparse
 import asyncio
 import base64
 import binascii
-import contextlib
 import datetime as dt
-import hashlib
 import hmac
 import json
 import logging
@@ -50,8 +48,6 @@ import math
 import os
 import re
 import secrets
-import shutil
-import sqlite3
 import sys
 import tempfile
 import time
@@ -64,8 +60,9 @@ from aiohttp import WSCloseCode, WSMsgType, web
 
 from texloom.crypto import canonical_pub, revoke_msg, signer
 
-from .files import Files, FilesError, FolderFiles, open_files
+from .files import Files, FilesError, open_files
 from .lists import MAX_LIST, RETIRED, Lists
+from .store import Store, import_sqlite, redact
 
 log = logging.getLogger("texloom.relay")
 
@@ -90,16 +87,6 @@ CLOSE_WAIT = 5.0  # seconds to let connections close cleanly when the server sto
 SHUTDOWN_WAIT = 10.0  # then seconds to let other requests (an upload, say) finish
 PURGE_PAUSE = 0.01  # seconds between deleted projects: lets live editing through
 MODE_SKEW = 600  # seconds a signed mode-change command stays valid
-MAX_REVOKED = 1000  # revocations kept per project
-# Compacted edits are remembered by hash so a replay of one isn't stored again. Only the most
-# recent are kept per project, and each counts against the allowance, so the table can't grow
-# without limit. Replaying something older is harmless: edits are idempotent, and the copy
-# counts against the allowance only until the next compaction.
-GONE_KEEP = 10_000  # sequence numbers
-GONE_COST = 100  # bytes a remembered edit counts for
-# Rows for projects that store nothing (relay-only mode, revocations) cost nothing to create,
-# so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
-META_RATE, META_BURST = 1.0, 600
 SEND_TIMEOUT = 20  # seconds; a peer that doesn't read is disconnected rather than holding up others
 PEER_BUFFER_MAX = 8 * MiB  # bytes waiting to go to one peer: beyond this it isn't reading, and is cut off
 OUT_MAX = 256 * MiB  # bytes waiting to go out on all connections: beyond this, peers holding a lot are cut off
@@ -374,475 +361,6 @@ class CodeBook:
         raise KeyError(f"no such code: {code}")
 
 
-class Store:
-    def __init__(self, path: Path, files: Files | None = None):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.path = path.resolve()
-        # the content of stored files: a folder next to the database unless told otherwise
-        self.files: Files = files or FolderFiles(path.parent / "files")
-        self.db = sqlite3.connect(path)
-        self._revoked: dict[str, dict[str, bytes]] = {}
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.page_size: int = self.db.execute("PRAGMA page_size").fetchone()[0]
-        self.db.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS log (
-              project TEXT NOT NULL, seq INTEGER NOT NULL, snap INTEGER NOT NULL DEFAULT 0,
-              data BLOB NOT NULL, sig BLOB NOT NULL,
-              h BLOB NOT NULL,  -- content hash, to recognise replayed updates
-              PRIMARY KEY (project, seq));
-            CREATE TABLE IF NOT EXISTS head (project TEXT PRIMARY KEY, seq INTEGER NOT NULL);
-            CREATE TABLE IF NOT EXISTS mode (project TEXT PRIMARY KEY, relay INTEGER NOT NULL);
-            -- Stored files; their content is in self.files under "<project>/<id>".
-            -- kind 'output' = compiled PDF/log/SyncTeX, replaced by every compile: any writer may
-            -- erase the stored content. 'file' = content of project files: only the owner may erase
-            -- it (deleting a file from the project is a document edit, and History can restore it
-            -- only while this content exists)
-            CREATE TABLE IF NOT EXISTS stored (
-              project TEXT NOT NULL, id TEXT NOT NULL, size INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'file',
-              PRIMARY KEY (project, id)) WITHOUT ROWID;
-            -- Stored files that no longer count and can't be fetched, waiting for their content to
-            -- be erased (see _reap). Kept here so a restart carries on where it stopped.
-            CREATE TABLE IF NOT EXISTS trash (project TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (project, id)) WITHOUT ROWID;
-            CREATE TABLE IF NOT EXISTS revoked (
-              project TEXT NOT NULL, pub TEXT NOT NULL, sig BLOB NOT NULL, at REAL NOT NULL,
-              PRIMARY KEY (project, pub));
-            -- seen: the last time anyone connected (for idle-project eviction)
-            CREATE TABLE IF NOT EXISTS projects (
-              project TEXT PRIMARY KEY, created REAL NOT NULL, owner TEXT NOT NULL,
-              seen REAL NOT NULL DEFAULT 0, evicted REAL NOT NULL DEFAULT 0);
-            CREATE TABLE IF NOT EXISTS gone (
-              project TEXT NOT NULL, h BLOB NOT NULL, seq INTEGER NOT NULL DEFAULT 0,
-              PRIMARY KEY (project, h)) WITHOUT ROWID;
-            CREATE TABLE IF NOT EXISTS floor (project TEXT PRIMARY KEY, seq INTEGER NOT NULL);
-            CREATE TABLE IF NOT EXISTS deleted (project TEXT PRIMARY KEY, at REAL NOT NULL, sig BLOB NOT NULL, ts INTEGER NOT NULL);
-            -- the apps that connect (for the admin page, and choosing --min-version): how often, last when
-            CREATE TABLE IF NOT EXISTS clients (app TEXT NOT NULL, version TEXT NOT NULL, n INTEGER NOT NULL,
-              seen REAL NOT NULL, PRIMARY KEY (app, version)) WITHOUT ROWID;
-            CREATE INDEX IF NOT EXISTS log_h ON log(project, h);
-            """
-        )
-        with self.db:  # a deleted project keeps only its tombstone (registrations from before this rule go now)
-            self.db.execute("DELETE FROM projects WHERE project IN (SELECT project FROM deleted)")
-        # Stored files used to be kept in the database itself, in a table `blob`; start() moves them out.
-        self.legacy = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='blob'").fetchone() is not None
-        self.usage: dict[str, int] = defaultdict(int)
-        for q in ("SELECT project, SUM(length(data) + length(sig)) FROM log GROUP BY project",
-                  "SELECT project, SUM(size) FROM stored GROUP BY project",
-                  *(["SELECT project, SUM(length(data)) FROM blob GROUP BY project"] if self.legacy else []),
-                  f"SELECT project, COUNT(*) * {GONE_COST} FROM gone GROUP BY project"):
-            for project, n in self.db.execute(q):
-                self.usage[project] += n or 0
-        self.total = sum(self.usage.values())
-        self.owners: dict[str, str] = dict(self.db.execute("SELECT project, owner FROM projects"))
-        # project -> the message telling clients, with the owner's signature so they needn't trust the server
-        self.deleted: dict[str, dict] = {p: self._deleted_msg(at, ts, sig) for p, at, ts, sig in self.db.execute("SELECT project, at, ts, sig FROM deleted")}
-        self.owner_bytes: dict[str, int] = defaultdict(int)  # checked on every stored edit: kept, not added up
-        for project, n in self.usage.items():
-            if project in self.owners:
-                self.owner_bytes[self.owners[project]] += n
-        self.seen: dict[str, float] = {p: max(s, c) for p, s, c in self.db.execute("SELECT project, seen, created FROM projects")}
-        self.dir = path.parent
-        self.meta_tokens, self.meta_at = float(META_BURST), time.monotonic()
-        # bytes of uploads under way: they count from the moment they're accepted (see put_blob)
-        self.pending: dict[str, int] = defaultdict(int)
-        self._reaper: asyncio.Task | None = None
-        self._locks: dict[str, list] = {}  # key -> [lock, users]: one write or erase of a key at a time
-        # files a stop left behind, of projects that keep none. (An evicted project's leftovers stay:
-        # its writers may have uploaded again since, and what is there is valid content.)
-        left = self.db.execute("SELECT DISTINCT project FROM stored WHERE project IN "
-                               "(SELECT project FROM deleted UNION SELECT project FROM mode WHERE relay=1)").fetchall()
-        for (project,) in left:
-            self._drop_files(project)
-
-    async def start(self) -> None:
-        """Before serving: check that the file store works, move files still in the database out to
-        it, and carry on erasing what a stop left in the trash."""
-        await self.files.check()
-        log.info("stored files: %s", self.files.name)
-        if self.legacy:
-            await self._move_out_of_db()
-        self._kick_reaper()
-
-    async def _move_out_of_db(self) -> None:
-        """Move the content of stored files from the database to the file store, a file at a time
-        (each committed once it's safe in the store, so a stop just leaves the rest for next time)."""
-        rows = self.db.execute("SELECT rowid, project, id, kind FROM blob").fetchall()
-        dropped = {p for (p,) in self.db.execute("SELECT project FROM deleted UNION SELECT project FROM mode WHERE relay=1")}
-        log.info("moving %d stored file(s) out of the database to %s", len(rows), self.files.name)
-        moved = 0
-        for i, (rowid, project, bid, kind) in enumerate(rows):
-            with self.db.blobopen("blob", "data", rowid, readonly=True) as b:
-                data = b.read()
-            if project not in dropped:
-                await self.files.put(f"{project}/{bid}", data)
-                moved += len(data)
-            with self.db:
-                if project not in dropped:
-                    self.db.execute("INSERT OR IGNORE INTO stored(project, id, size, kind) VALUES (?,?,?,?)",
-                                    (project, bid, len(data), kind))
-                self.db.execute("DELETE FROM blob WHERE rowid=?", (rowid,))
-            if (i + 1) % 100 == 0:
-                log.info("  %d of %d", i + 1, len(rows))
-        with self.db:
-            self.db.execute("DROP TABLE blob")
-        self.db.execute("VACUUM")  # give the freed space back to the disk (once checkpointed: WAL mode)
-        self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        self.legacy = False
-        for project in {r[1] for r in rows}:
-            if project in self.usage or project in self.owners:
-                self._recount(project)
-        log.info("moved %s of stored files out of the database", fmt_size(moved))
-
-    # --- registration & accounting -------------------------------------------
-    def owner(self, project: str) -> str | None:
-        return self.owners.get(project)
-
-    def register(self, project: str, owner: str, label: str) -> None:
-        with self.db:
-            self.db.execute("INSERT OR IGNORE INTO projects(project, created, owner) VALUES (?,?,?)",
-                            (project, time.time(), owner))
-        self._own(project, owner)
-        log.info("registered project %s… (%s)", project[:8], label)
-
-    def claim(self, project: str, owner: str) -> None:
-        """Move a project created without a code to `owner` (a private server's re-registration)."""
-        with self.db:
-            self.db.execute("UPDATE projects SET owner=? WHERE project=?", (owner, project))
-        self._own(project, owner)
-        log.info("project %s… now belongs to a creation code", project[:8])
-
-    def _own(self, project: str, owner: str) -> None:
-        n = self.usage.get(project, 0)
-        if project in self.owners:
-            self.owner_bytes[self.owners[project]] -= n
-        self.owner_bytes[owner] += n
-        self.owners[project] = owner
-
-    def _grew(self, project: str, n: int) -> None:
-        self.usage[project] += n
-        self.total += n
-        if project in self.owners:
-            self.owner_bytes[self.owners[project]] += n
-
-    def meta_budget(self) -> bool:
-        """Take one unit from the server-wide budget for rows that store nothing (see META_RATE)."""
-        now = time.monotonic()
-        self.meta_tokens = min(META_BURST, self.meta_tokens + (now - self.meta_at) * META_RATE)
-        self.meta_at = now
-        if self.meta_tokens < 1:
-            return False
-        self.meta_tokens -= 1
-        return True
-
-    def touch(self, project: str) -> None:
-        """Remember that someone opened a stored project (written at most hourly)."""
-        if project not in self.owners:
-            return  # nothing stored: nothing to keep track of (and no unbounded map)
-        now = time.time()
-        if now - self.seen.get(project, 0) < 3600:
-            return
-        self.seen[project] = now
-        with self.db:
-            self.db.execute("UPDATE projects SET seen=?, evicted=0 WHERE project=?", (now, project))
-
-    def idle(self, days: float) -> list[str]:
-        """Stored projects nobody has opened for `days`."""
-        cutoff = time.time() - days * 86400
-        return [p for p, n in self.usage.items() if n > 0 and self.seen.get(p, 0) < cutoff]
-
-    def evict(self, project: str) -> int:
-        """Drop the stored copy (log and files) of an idle project. Its writers re-upload it
-        when they next connect; until then, link holders without a copy can't open it.
-        Sequence numbers keep counting (so old entries can't be replayed into the gap);
-        `floor` tells clients that everything up to it is gone."""
-        freed = self.usage.get(project, 0)
-        with self.db:
-            self.db.execute("DELETE FROM log WHERE project=?", (project,))
-            self.db.execute("DELETE FROM gone WHERE project=?", (project,))
-            self.db.execute("INSERT INTO floor(project, seq) VALUES (?,?) "
-                            "ON CONFLICT(project) DO UPDATE SET seq=excluded.seq", (project, self.head(project)))
-            self.db.execute("UPDATE projects SET evicted=? WHERE project=?", (time.time(), project))
-        self._drop_files(project)
-        return freed
-
-    def owner_usage(self, owner: str) -> int:
-        return self.owner_bytes.get(owner, 0)
-
-    def stored_by(self, owner: str) -> list[str]:
-        """Projects registered to this owner that have something stored."""
-        return [p for p, o in self.owners.items() if o == owner and self.usage.get(p, 0) > 0]
-
-    def _recount(self, project: str) -> None:
-        n = self.db.execute("SELECT COALESCE(SUM(length(data) + length(sig)), 0) FROM log WHERE project=?",
-                            (project,)).fetchone()[0]
-        n += self.db.execute("SELECT COALESCE(SUM(size), 0) FROM stored WHERE project=?",
-                             (project,)).fetchone()[0]
-        if self.legacy:
-            n += self.db.execute("SELECT COALESCE(SUM(length(data)), 0) FROM blob WHERE project=?",
-                                 (project,)).fetchone()[0]
-        n += GONE_COST * self.db.execute("SELECT COUNT(*) FROM gone WHERE project=?", (project,)).fetchone()[0]
-        n += self.pending.get(project, 0)
-        self._grew(project, n - self.usage[project])
-
-    def free_disk(self) -> int:
-        return shutil.disk_usage(self.dir).free
-
-    def free_for_data(self) -> int:
-        """Room for new data: free disk, plus pages in the database that deletions freed, which
-        SQLite fills before growing the file. Without them a purge on a nearly full disk
-        wouldn't help, since the file doesn't shrink."""
-        return self.free_disk() + self.db.execute("PRAGMA freelist_count").fetchone()[0] * self.page_size
-
-    # --- log ---------------------------------------------------------------------
-    def head(self, project: str) -> int:
-        row = self.db.execute("SELECT seq FROM head WHERE project=?", (project,)).fetchone()
-        return row[0] if row else 0
-
-    def floor(self, project: str) -> int:
-        """Entries up to this sequence number were dropped by eviction."""
-        row = self.db.execute("SELECT seq FROM floor WHERE project=?", (project,)).fetchone()
-        return row[0] if row else 0
-
-    def duplicate(self, project: str, data: bytes) -> int | None:
-        """A replay of an update already stored (its seq), or already compacted away (0)."""
-        h = hashlib.sha256(data).digest()
-        row = self.db.execute("SELECT seq FROM log WHERE project=? AND h=?", (project, h)).fetchone()
-        if row:
-            return row[0]
-        return 0 if self.db.execute("SELECT 1 FROM gone WHERE project=? AND h=?", (project, h)).fetchone() else None
-
-    def append(self, project: str, data: bytes, sig: bytes) -> int:
-        seq = self.head(project) + 1
-        with self.db:
-            self.db.execute("INSERT INTO log(project, seq, data, sig, h) VALUES (?,?,?,?,?)",
-                            (project, seq, data, sig, hashlib.sha256(data).digest()))
-            self.db.execute("INSERT INTO head(project, seq) VALUES (?,?) "
-                            "ON CONFLICT(project) DO UPDATE SET seq=excluded.seq", (project, seq))
-        self._grew(project, len(data) + len(sig))
-        return seq
-
-    def last_snapshot(self, project: str) -> int:
-        row = self.db.execute("SELECT MAX(seq) FROM log WHERE project=? AND snap=1", (project,)).fetchone()
-        return row[0] or 0
-
-    def snapshot_delta(self, project: str, upto: int, size: int) -> int:
-        """Bytes a snapshot would add (negative when it frees space)."""
-        freed, remembered = self.db.execute(
-            "SELECT COALESCE(SUM(length(data) + length(sig)), 0), COALESCE(SUM(snap=0), 0) "
-            "FROM log WHERE project=? AND seq<=?", (project, upto)).fetchone()
-        forgotten = self.db.execute("SELECT COUNT(*) FROM gone WHERE project=? AND seq<=?",
-                                    (project, upto - GONE_KEEP)).fetchone()[0]
-        return size - freed + (remembered - forgotten) * GONE_COST
-
-    def snapshot(self, project: str, upto: int, data: bytes, sig: bytes) -> None:
-        with self.db:
-            # remember what the snapshot replaces, so those updates can't be stored again
-            self.db.execute("INSERT OR IGNORE INTO gone(project, h, seq) SELECT project, h, seq FROM log "
-                            "WHERE project=? AND seq<=? AND snap=0", (project, upto))
-            self.db.execute("DELETE FROM gone WHERE project=? AND seq<=?", (project, upto - GONE_KEEP))
-            self.db.execute("DELETE FROM log WHERE project=? AND seq<=?", (project, upto))
-            self.db.execute("INSERT INTO log(project, seq, snap, data, sig, h) VALUES (?,?,1,?,?,?)",
-                            (project, upto, data, sig, hashlib.sha256(data).digest()))
-        self._recount(project)
-
-    def _since_start(self, project: str, since: int) -> int:
-        snap = self.last_snapshot(project)
-        return snap - 1 if snap and since < snap else since  # behind the snapshot: send it too
-
-    def since_size(self, project: str, since: int) -> int:
-        """Bytes that since() would return."""
-        return self.db.execute("SELECT COALESCE(SUM(length(data) + length(sig)), 0) FROM log WHERE project=? AND seq>?",
-                               (project, self._since_start(project, since))).fetchone()[0]
-
-    def since(self, project: str, since: int) -> list[dict]:
-        rows = self.db.execute(
-            "SELECT seq, snap, data, sig FROM log WHERE project=? AND seq>? ORDER BY seq",
-            (project, self._since_start(project, since)),
-        ).fetchall()
-        return [{"q": q, "snap": bool(sn), "d": b64e(d), "s": b64e(s)} for q, sn, d, s in rows]
-
-    def count(self, project: str) -> int:
-        return self.db.execute("SELECT COUNT(*) FROM log WHERE project=?", (project,)).fetchone()[0]
-
-    # --- storage mode & blobs ---------------------------------------------------
-    def revoked(self, project: str) -> dict[str, bytes]:
-        """Personal keys the owner revoked: canonical pub -> owner's signature."""
-        if project not in self._revoked:
-            rows = self.db.execute("SELECT pub, sig FROM revoked WHERE project=?", (project,)).fetchall()
-            self._revoked[project] = {c: sig for p, sig in rows if (c := canonical_pub(p))}
-            if len(self._revoked) > 10000:
-                self._revoked.pop(next(iter(self._revoked)))
-        return self._revoked[project]
-
-    def revoke(self, project: str, pub: str, sig: bytes) -> bool:
-        """Record a revocation (`pub` canonical). False if this project has too many already."""
-        known = self.revoked(project)
-        if pub in known:
-            return True
-        if len(known) >= MAX_REVOKED:
-            return False
-        with self.db:
-            self.db.execute("INSERT OR IGNORE INTO revoked(project, pub, sig, at) VALUES (?,?,?,?)",
-                            (project, pub, sig, time.time()))
-        self._revoked.pop(project, None)
-        return True
-
-    def relay_only(self, project: str) -> bool:
-        row = self.db.execute("SELECT relay FROM mode WHERE project=?", (project,)).fetchone()
-        return bool(row and row[0])
-
-    def has_mode(self, project: str) -> bool:
-        return self.db.execute("SELECT 1 FROM mode WHERE project=?", (project,)).fetchone() is not None
-
-    def set_mode(self, project: str, relay_only: bool) -> None:
-        with self.db:
-            self.db.execute("INSERT INTO mode(project, relay) VALUES (?,?) "
-                            "ON CONFLICT(project) DO UPDATE SET relay=excluded.relay", (project, int(relay_only)))
-            if relay_only:  # forget everything we stored for this project
-                self.db.execute("DELETE FROM log WHERE project=?", (project,))
-                self.db.execute("DELETE FROM gone WHERE project=?", (project,))
-        if relay_only:
-            self._drop_files(project)
-        else:
-            self._recount(project)
-
-    # --- deleted for everyone ---------------------------------------------------------
-
-    @staticmethod
-    def _deleted_msg(at: float, ts: int, sig: bytes) -> dict:
-        return {"t": "deleted", "at": int(at * 1000), "ts": ts, "s": b64e(sig)}
-
-    def delete_project(self, project: str, sig: bytes, ts: int) -> dict:
-        """The owner deleted the project for everyone: forget what's stored and keep, for good, the
-        fact (the owner's signature proves it), so that no copy can bring it back here."""
-        at = time.time()
-        with self.db:
-            self.db.execute("INSERT OR IGNORE INTO deleted(project, at, sig, ts) VALUES (?,?,?,?)", (project, at, sig, ts))
-            # the tombstone above is all that's kept: its registration (owner, dates) goes too
-            for table in ("log", "gone", "head", "floor", "mode", "projects"):
-                self.db.execute(f"DELETE FROM {table} WHERE project=?", (project,))  # noqa: S608 - fixed names
-        msg = self.deleted.setdefault(project, self._deleted_msg(at, ts, sig))  # a second deletion keeps the first
-        self._drop_files(project)
-        self.owners.pop(project, None)  # its bytes came off its owner in _recount
-        self.usage.pop(project, None)
-        self.seen.pop(project, None)
-        return msg
-
-    def _drop_files(self, project: str) -> None:
-        """Erase a project's stored files: at once they no longer count or can be fetched, and their
-        content is erased in the background (see _reap)."""
-        with self.db:
-            self.db.execute("INSERT OR IGNORE INTO trash(project, id) SELECT project, id FROM stored WHERE project=?", (project,))
-            self.db.execute("DELETE FROM stored WHERE project=?", (project,))
-        self._recount(project)
-        self._kick_reaper()
-
-    def _kick_reaper(self) -> None:
-        """Erase what's in the trash, in the background. From the command line (no event loop),
-        empty_trash() does it."""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        if self._reaper is None or self._reaper.done():
-            self._reaper = loop.create_task(self._reap())
-
-    async def _reap(self) -> None:
-        while True:
-            rows = self.db.execute("SELECT project, id FROM trash LIMIT 100").fetchall()
-            if not rows:
-                return
-            for project, bid in rows:
-                key = f"{project}/{bid}"
-                async with self._holding(key):
-                    if self.db.execute("SELECT 1 FROM trash WHERE project=? AND id=?", (project, bid)).fetchone() is None:
-                        continue  # uploaded again meanwhile: it's a stored file once more
-                    try:
-                        await self.files.delete(key)
-                    except (FilesError, OSError):
-                        log.exception("erasing a stored file (tried again later)")
-                        return
-                    with self.db:
-                        self.db.execute("DELETE FROM trash WHERE project=? AND id=?", (project, bid))
-
-    async def empty_trash(self) -> None:
-        """Erase everything in the trash now (the command line's --purge-code)."""
-        try:
-            await self.files.check()
-            await self._reap()
-        finally:
-            await self.files.close()
-
-    @contextlib.asynccontextmanager
-    async def _holding(self, key: str):
-        """One write or erase of a stored file's content at a time, so an erase that was decided
-        before an upload of the same content can't remove what that upload wrote."""
-        entry = self._locks.setdefault(key, [asyncio.Lock(), 0])
-        entry[1] += 1
-        try:
-            async with entry[0]:
-                yield
-        finally:
-            entry[1] -= 1
-            if not entry[1]:
-                del self._locks[key]
-
-    def blob_size(self, project: str, bid: str) -> int | None:
-        """A stored file's size; None if it isn't stored (or is in the trash)."""
-        row = self.db.execute("SELECT size FROM stored WHERE project=? AND id=?", (project, bid)).fetchone()
-        return row[0] if row else None
-
-    def has_blob(self, project: str, bid: str) -> bool:
-        return self.blob_size(project, bid) is not None
-
-    async def put_blob(self, project: str, bid: str, data: bytes | memoryview, kind: str = "file") -> bool:
-        """Store a file's content. It counts from the start (call this right after may_store, with
-        nothing awaited between), so uploads under way at once can't together pass a limit. False
-        if it was stored already. FilesError if the file store failed."""
-        n = len(data)
-        self.pending[project] += n
-        self._grew(project, n)
-        key = f"{project}/{bid}"
-        try:
-            async with self._holding(key):
-                if self.has_blob(project, bid):
-                    if kind == "file":
-                        self.mark_file(project, bid)
-                    return False
-                await self.files.put(key, data)
-                with self.db:
-                    self.db.execute("INSERT OR IGNORE INTO stored(project, id, size, kind) VALUES (?,?,?,?)", (project, bid, n, kind))
-                    self.db.execute("DELETE FROM trash WHERE project=? AND id=?", (project, bid))  # not to be erased now
-                return True
-        finally:
-            self.pending[project] -= n
-            if not self.pending[project]:
-                del self.pending[project]
-            if project in self.usage or project in self.owners:
-                self._recount(project)  # the stored size instead of the reservation (or nothing)
-
-    def mark_file(self, project: str, bid: str) -> None:
-        """Content uploaded as a project file is a file, even if it was first stored as output."""
-        with self.db:
-            self.db.execute("UPDATE stored SET kind='file' WHERE project=? AND id=? AND kind!='file'", (project, bid))
-
-    def delete_blob(self, project: str, bid: str, any_kind: bool) -> bool:
-        with self.db:
-            cur = self.db.execute("DELETE FROM stored WHERE project=? AND id=?" + ("" if any_kind else " AND kind='output'"),
-                                  (project, bid))
-            if cur.rowcount:
-                self.db.execute("INSERT OR IGNORE INTO trash(project, id) VALUES (?,?)", (project, bid))
-        if cur.rowcount:
-            self._recount(project)
-            self._kick_reaper()
-        return bool(cur.rowcount)
-
-    def read_blob(self, project: str, bid: str):
-        """A stored file's content, a piece at a time."""
-        return self.files.get(f"{project}/{bid}")
-
-
 class Conn:
     """Per-connection state: peer id, creation code, and a simple rate limiter."""
 
@@ -960,15 +478,18 @@ def version_tuple(v: object) -> tuple[int, ...] | None:
 
 
 class Relay:
-    def __init__(self, store: Store, limits: Limits | None = None, codes: CodeBook | None = None, lists: bool = True,
+    def __init__(self, store: Store | None, limits: Limits | None = None, codes: CodeBook | None = None, lists: bool = True,
                  private: bool = False, min_version: str = ""):
         # the oldest app version allowed (--min-version): older ones, or apps too old to say, are
         # asked to update, so that support for older data and protocols can be dropped
         self.min_version = version_tuple(min_version) if min_version else None
         self.codes_url = ""  # where people learn how to get a creation code (/api/info)
-        self.store = store
+        self.store: Store = store  # type: ignore[assignment]  # (attach, when the server starts)
         self.private = private  # only projects created with a valid creation code may use this server
-        self.lists = Lists(store.db) if lists else None
+        self.want_lists = lists
+        self.lists: Lists | None = None
+        if store is not None:
+            self.attach(store)
         self.limits = limits or Limits()
         self.codes = codes or CodeBook(None)
         self.rooms: dict[str, set[web.WebSocketResponse]] = defaultdict(set)
@@ -980,8 +501,12 @@ class Relay:
         self.held = 0  # bytes held for connections, see Metered
         self.stopping = False
 
+    def attach(self, store: Store) -> None:
+        self.store = store
+        self.lists = Lists(store.pool) if self.want_lists else None
+
     # --- private servers -----------------------------------------------------------
-    def denied(self, project: str, code: object, claim: bool = True) -> str | None:
+    async def denied(self, project: str, code: object, claim: bool = True) -> str | None:
         """On a private server, why this project may not use it (None if it may). A project
         belongs to a creation code, so people with its link need nothing else. One that has no
         code yet gets the first valid one offered; one whose code has lapsed waits for a renewal."""
@@ -996,9 +521,9 @@ class Relay:
         if not claim:  # asked before anything is verified: say yes, but don't bind the project yet
             return None
         if owner:
-            self.store.claim(project, valid)
+            await self.store.claim(project, valid)
         else:
-            self.store.register(project, valid, self.codes.label(valid))
+            await self.store.register(project, valid, self.codes.label(valid))
         return None
 
     async def _admit(self, project: str, ws: web.WebSocketResponse, conn: Conn) -> dict | None:
@@ -1012,7 +537,7 @@ class Relay:
         if not isinstance(msg, dict) or msg.get("t") != "hello":
             await ws.close(code=1008, message=b"hello first")
             return None
-        why = self.denied(project, msg.get("code"))
+        why = await self.denied(project, msg.get("code"))
         if why:
             await self._refuse(ws, why)
             return None
@@ -1030,7 +555,7 @@ class Relay:
         conn.held = 0
 
     # --- storage policy ------------------------------------------------------------
-    def may_store(self, project: str, nbytes: int, code: str | None) -> str | None:
+    async def may_store(self, project: str, nbytes: int, code: str | None) -> str | None:
         """None if this write may be stored, else a reason code for the client."""
         owner = self.store.owner(project)
         if owner is None:  # first write: the creator's code (or the default) owns it
@@ -1048,30 +573,29 @@ class Relay:
             if self.store.total + nbytes > self.limits.max_bytes or self.store.free_for_data() - nbytes < self.limits.min_free:
                 return "server-full"
         if self.store.owner(project) is None:
-            self.store.register(project, owner, self.codes.label(owner) if code else "default")
+            await self.store.register(project, owner, self.codes.label(owner) if code else "default")
         return None
 
-    def purge(self, owner: str) -> tuple[int, int, int]:
+    async def purge(self, owner: str) -> tuple[int, int, int]:
         """Drop the stored copies of every project created with `owner` (a creation code), as
         idle eviction does. Writers' re-uploads are refused while the code is expired or
         removed, so the projects carry on relay-only, on people's devices. Projects someone
         has open are skipped (and picked up next time). Returns (purged, bytes freed, skipped)."""
         tally = [0, 0, 0]
-        for _project in self._purging(owner, tally):
-            pass
+        await self._purging(owner, tally)
         return tally[0], tally[1], tally[2]
 
-    def _purging(self, owner: str, tally: list[int]):
-        """Purge a code's projects one at a time, yielding after each. `tally`: purged, freed, skipped."""
+    async def _purging(self, owner: str, tally: list[int], pause: float = 0) -> None:
+        """Purge a code's projects one at a time, pausing after each. `tally`: purged, freed, skipped."""
         if self.lists:
-            self.lists.purge_owner(owner)
+            await self.lists.purge_owner(owner)
         for p in self.store.stored_by(owner):
             if self.rooms.get(p):
                 tally[2] += 1
                 continue
-            tally[1] += self.store.evict(p)
+            tally[1] += await self.store.evict(p)
             tally[0] += 1
-            yield p
+            await asyncio.sleep(pause)
 
     async def purge_expired(self, after_days: float) -> None:
         """Purge the projects of codes that expired more than `after_days` ago, letting live
@@ -1079,11 +603,10 @@ class Relay:
         self.codes._load()
         for c in list(self.codes.until):
             days = self.codes.lapsed_since(c)
-            if days is None or days <= after_days or not (self.store.stored_by(c) or (self.lists and self.lists.count(c))):
+            if days is None or days <= after_days or not (self.store.stored_by(c) or (self.lists and await self.lists.count(c))):
                 continue
             tally = [0, 0, 0]
-            for _project in self._purging(c, tally):
-                await asyncio.sleep(PURGE_PAUSE)
+            await self._purging(c, tally, PURGE_PAUSE)
             n, freed, skipped = tally
             log.info("purged %d project(s) of code %s… (%s), expired %d day(s) ago%s", n, c[:4],
                      fmt_size(freed), days, f"; {skipped} open, left for later" if skipped else "")
@@ -1237,7 +760,7 @@ class Relay:
                     break
                 if self.private and time.monotonic() >= conn.recheck:
                     conn.recheck = time.monotonic() + RECHECK
-                    why = self.denied(project, conn.code)
+                    why = await self.denied(project, conn.code)
                     if why:
                         await self._refuse(ws, why)
                         break
@@ -1256,7 +779,7 @@ class Relay:
                     await self.handle(project, ws, conn, t, msg)
                 except (BadMessage, ValueError, TypeError, KeyError, OverflowError, binascii.Error, RecursionError) as e:
                     await ws.send_json({"t": "err", "m": f"bad message: {e}"[:200]})
-                except Exception:  # noqa: BLE001 - one bad frame mustn't take the connection down
+                except Exception:
                     log.exception("error handling message")
                 finally:
                     self.inflight -= size
@@ -1281,27 +804,27 @@ class Relay:
                 return
             if not conn.counted:  # (once per connection: hellos repeat)
                 conn.counted = True
-                self.note_client(msg.get("app"), msg.get("v"))
+                await self.note_client(msg.get("app"), msg.get("v"))
             if self.too_old(msg.get("v")):
                 await ws.send_json({"t": "err", "denied": True, **self.update_needed()})
                 await ws.close(code=1008, message=b"update needed")
                 return
-            self.store.touch(project)
+            await self.store.touch(project)
             if msg.get("code") and not conn.code_tried:  # one code check per connection
                 conn.code_tried = True
                 conn.code = self.codes.check(field(msg, "code", str))
             since = max(0, min(field(msg, "since", int, 0), 2**62))
-            size = self.store.since_size(project, since)
+            size = await self.store.since_size(project, since)
             cost = size * CATCHUP_OVERHEAD if size >= MiB else 0
             await self.catchup.take(cost)
             try:
-                entries = self.store.since(project, since)
+                entries = await self.store.since(project, since)
                 await asyncio.wait_for(self.send_large(ws,
-                    {"t": "log", "entries": entries, "head": self.store.head(project),
-                     "floor": self.store.floor(project), "count": self.store.count(project), "you": conn.id,
+                    {"t": "log", "entries": entries, "head": await self.store.head(project),
+                     "floor": await self.store.floor(project), "count": await self.store.count(project), "you": conn.id,
                      "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
                      "store": self.store_status(project, conn),
-                     "rv": [{"p": p, "s": b64e(sig)} for p, sig in self.store.revoked(project).items()]}), CATCHUP_TIMEOUT)
+                     "rv": [{"p": p, "s": b64e(sig)} for p, sig in (await self.store.revoked(project)).items()]}), CATCHUP_TIMEOUT)
             except (asyncio.TimeoutError, ConnectionError, RuntimeError):  # too slow, or it has gone
                 self.cut_off(ws, "was too slow to catch up")
             finally:
@@ -1309,24 +832,25 @@ class Relay:
         elif t == "up":
             d, s = field(msg, "d", str), field(msg, "s", str)
             data, sig = b64d(d), b64d(s)
-            if len(data) > MAX_UPDATE or not verify(project, b"upd:" + data, sig, self.store.revoked(project)):
+            if len(data) > MAX_UPDATE or not verify(project, b"upd:" + data, sig, await self.store.revoked(project)):
                 await ws.send_json({"t": "err", "m": "rejected update (bad signature, or this personal link was revoked)"})
                 return
             if relay_only:  # pass it on, but keep nothing
                 await ws.send_json({"t": "ack", "q": 0, "id": msg.get("id")})
                 await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
                 return
-            dup = self.store.duplicate(project, data)
+            async with self.store.lock(project):
+                dup = await self.store.duplicate(project, data)
+                refused = None if dup is not None else await self.may_store(project, len(data) + len(sig), conn.code)
+                seq = None if dup is not None or refused else await self.store.append(project, data, sig)
             if dup is not None:  # a replay of something already stored (or compacted): acknowledge, keep nothing
                 await ws.send_json({"t": "ack", "q": dup, "id": msg.get("id")})
                 return
-            refused = self.may_store(project, len(data) + len(sig), conn.code)
             if refused:
                 # Collaborators online still get it; the sender keeps it (no ack) and retries later.
                 await ws.send_json({"t": "err", "code": refused, "m": f"not stored: {refused}", "id": msg.get("id")})
                 await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
                 return
-            seq = self.store.append(project, data, sig)
             await ws.send_json({"t": "ack", "q": seq, "id": msg.get("id")})
             await self.broadcast(project, {"t": "up", "q": seq, "d": d, "s": s}, ws)
         elif t == "snap":
@@ -1334,18 +858,20 @@ class Relay:
             data, sig = b64d(field(msg, "d", str)), b64d(field(msg, "s", str))
             if relay_only or self.store.owner(project) is None:
                 return
-            # A snapshot must replace part of the log: after the previous snapshot (and anything
-            # evicted), up to head.
-            after = max(self.store.last_snapshot(project), self.store.floor(project))
-            if not (after < upto <= self.store.head(project)) or len(data) > MAX_SNAPSHOT:
+            if len(data) > MAX_SNAPSHOT or not await asyncio.to_thread(
+                    verify, project, f"snap:{upto}:".encode() + data, sig, await self.store.revoked(project)):
                 await ws.send_json({"t": "err", "m": "rejected snapshot"})
                 return
-            if not verify(project, f"snap:{upto}:".encode() + data, sig, self.store.revoked(project)):
-                await ws.send_json({"t": "err", "m": "rejected snapshot"})
-                return
-            if self.may_store(project, self.store.snapshot_delta(project, upto, len(data) + len(sig)), conn.code):
-                return  # over a limit: skip compaction; the log stays as it is
-            self.store.snapshot(project, upto, data, sig)
+            async with self.store.lock(project):
+                # A snapshot must replace part of the log: after the previous snapshot (and anything
+                # evicted), up to head.
+                after = max(await self.store.last_snapshot(project), await self.store.floor(project))
+                if not (after < upto <= await self.store.head(project)):
+                    await ws.send_json({"t": "err", "m": "rejected snapshot"})
+                    return
+                if await self.may_store(project, await self.store.snapshot_delta(project, upto, len(data) + len(sig)), conn.code):
+                    return  # over a limit: skip compaction; the log stays as it is
+                await self.store.snapshot(project, upto, data, sig)
             log.info("compacted %s… up to %d", project[:8], upto)
             # the sender may now delete what the snapshot replaced (changes it kept as uploads)
             await ws.send_json({"t": "snapped", "upto": upto})
@@ -1357,7 +883,7 @@ class Relay:
             out = {"t": "p2p", "d": field(msg, "d", str), "from": conn.id}
             if "s" in msg:  # a signed update: don't pass on one from a revoked personal link
                 out["s"] = field(msg, "s", str)
-                revoked = self.store.revoked(project)
+                revoked = await self.store.revoked(project)
                 if revoked and not verify(project, b"p2p:" + b64d(out["d"]), b64d(out["s"]), revoked):
                     return
             to = msg.get("to")
@@ -1375,13 +901,14 @@ class Relay:
             # Anyone with edit access may turn server storage on; only the owner may turn it off,
             # since that deletes the server's copy.
             if (mode not in ("server", "relay") or abs(time.time() - ts) > MODE_SKEW or who is None
-                    or who in self.store.revoked(project) or (mode == "relay" and who != "owner")):
+                    or who in await self.store.revoked(project) or (mode == "relay" and who != "owner")):
                 await ws.send_json({"t": "err", "code": "mode-rejected", "m": "rejected mode change"})
                 return
             if self.store.owner(project) is None and not self.store.has_mode(project) and not self.store.meta_budget():
                 await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
                 return
-            self.store.set_mode(project, mode == "relay")
+            async with self.store.lock(project):
+                await self.store.set_mode(project, mode == "relay")
             log.info("project %s… storage mode -> %s", project[:8], mode)
             await self.broadcast(project, {"t": "mode", "m": mode})
         elif t == "delete":  # the owner deletes the project for everyone
@@ -1391,11 +918,12 @@ class Relay:
                 return
             # a project this server has never held anything for costs a permanent row: from the
             # same budget as other rows that store nothing, so ids can't be minted to fill the disk
-            known = self.store.owner(project) is not None or self.store.has_mode(project) or self.store.head(project) > 0
+            known = self.store.owner(project) is not None or self.store.has_mode(project) or await self.store.head(project) > 0
             if not known and not self.store.meta_budget():
                 await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
                 return
-            gone = self.store.delete_project(project, sig, ts)
+            async with self.store.lock(project):
+                gone = await self.store.delete_project(project, sig, ts)
             log.info("project %s… deleted for everyone by its owner", project[:8])
             room = list(self.rooms.get(project, ()))
             await self.broadcast(project, gone)  # including the owner
@@ -1407,7 +935,7 @@ class Relay:
                 await ws.send_json({"t": "err", "m": "rejected revocation"})
                 return
             known = self.store.owner(project) is not None or self.store.has_mode(project)
-            if not known and not self.store.meta_budget() or not self.store.revoke(project, pub, sig):
+            if not known and not self.store.meta_budget() or not await self.store.revoke(project, pub, sig):
                 await ws.send_json({"t": "err", "m": "rejected revocation: too many"})
                 return
             log.info("project %s…: revoked a personal link", project[:8])
@@ -1425,7 +953,7 @@ class Relay:
         if project in self.store.deleted:
             return web.json_response({"code": "deleted"}, status=410)
         # before reading a large body; the project is bound to the code only once the upload is signed
-        why = self.denied(project, request.headers.get("X-Create-Code"), claim=False)
+        why = await self.denied(project, request.headers.get("X-Create-Code"), claim=False)
         if why:
             return web.json_response({"code": why}, status=403)
         try:
@@ -1458,25 +986,27 @@ class Relay:
                 raise web.HTTPBadRequest(text="short upload")
             data = memoryview(signed)[len(prefix):]
         # checking the signature reads the whole file: on a worker thread, so live editing carries on
-        if not await asyncio.to_thread(verify, project, signed, sig, self.store.revoked(project)):
+        if not await asyncio.to_thread(verify, project, signed, sig, await self.store.revoked(project)):
             raise web.HTTPForbidden(text="bad signature")
         if project in self.store.deleted:  # deleted while it was uploading
             return web.json_response({"code": "deleted"}, status=410)
-        if self.denied(project, request.headers.get("X-Create-Code")):  # a genuine upload: now it may claim
+        if await self.denied(project, request.headers.get("X-Create-Code")):  # a genuine upload: now it may claim
             return web.json_response({"code": "needs-code"}, status=403)
         if self.store.relay_only(project):
             raise web.HTTPConflict(text="project is relay-only: blobs are exchanged peer to peer")
         kind = "output" if request.headers.get("X-Kind") == "output" else "file"
-        if self.store.has_blob(project, bid):
-            if kind == "file":
-                self.store.mark_file(project, bid)
-            return web.Response(status=200)
-        refused = self.may_store(project, len(data), self.codes.check(request.headers.get("X-Create-Code")))
-        if refused:
-            status = {"needs-code": 403, "code-expired": 403, "quota-full": 507, "project-full": 413, "server-full": 507}[refused]
-            return web.json_response({"code": refused}, status=status)
+        async with self.store.lock(project):  # the check and the reservation; not the (maybe slow) write
+            if await self.store.has_blob(project, bid):
+                if kind == "file":
+                    await self.store.mark_file(project, bid)
+                return web.Response(status=200)
+            refused = await self.may_store(project, len(data), self.codes.check(request.headers.get("X-Create-Code")))
+            if refused:
+                status = {"needs-code": 403, "code-expired": 403, "quota-full": 507, "project-full": 413, "server-full": 507}[refused]
+                return web.json_response({"code": refused}, status=status)
+            self.store.reserve(project, len(data))
         try:
-            stored = await self.store.put_blob(project, bid, data, kind)
+            stored = await self.store.put_blob(project, bid, data, kind, reserved=True)
         except (FilesError, OSError):
             log.exception("storing a file")
             return web.json_response({"code": "store-failed"}, status=503)
@@ -1494,14 +1024,14 @@ class Relay:
         except (ValueError, binascii.Error):
             raise web.HTTPForbidden(text="bad signature")
         who = signer(project, f"del:{bid}".encode(), sig)
-        if who is None or who in self.store.revoked(project):
+        if who is None or who in await self.store.revoked(project):
             raise web.HTTPForbidden(text="bad signature")
         # X-Only-Output: a client that can't check history asks to delete only marked output
         any_kind = who == "owner" and request.headers.get("X-Only-Output") != "1"
-        if self.store.delete_blob(project, bid, any_kind=any_kind):
+        if await self.store.delete_blob(project, bid, any_kind=any_kind):
             return web.Response(status=204)
         # gone already, or a project file that only the owner may delete
-        return web.Response(status=404 if not self.store.has_blob(project, bid) else 403)
+        return web.Response(status=404 if not await self.store.has_blob(project, bid) else 403)
 
     async def get_blob(self, request: web.Request) -> web.Response:
         project, bid = request.match_info["project"], request.match_info["id"]
@@ -1509,9 +1039,9 @@ class Relay:
             raise web.HTTPBadRequest()
         if project in self.store.deleted:
             raise web.HTTPGone()
-        if self.denied(project, None):
+        if await self.denied(project, None):
             raise web.HTTPForbidden()
-        size = self.store.blob_size(project, bid)
+        size = await self.store.blob_size(project, bid)
         if size is None:
             raise web.HTTPNotFound()
         return web.Response(body=self.store.read_blob(project, bid), content_type="application/octet-stream", headers={
@@ -1520,13 +1050,11 @@ class Relay:
             "Content-Disposition": "attachment",  # ciphertext; never something to render
         })
 
-    def note_client(self, app: object, version: object) -> None:
+    async def note_client(self, app: object, version: object) -> None:
         """Count an app connecting, by kind and version (shown on the admin page)."""
         a = app if app in APPS else "unknown"
         v = version if version_tuple(version) else "unknown"
-        with self.store.db:
-            self.store.db.execute("INSERT INTO clients(app, version, n, seen) VALUES (?,?,1,?) "
-                                  "ON CONFLICT(app, version) DO UPDATE SET n = n + 1, seen = excluded.seen", (a, v, time.time()))
+        await self.store.note_client(a, v)
 
     def too_old(self, version: object) -> bool:
         """Below --min-version (an app that doesn't say is older than this check)."""
@@ -1567,7 +1095,7 @@ class Relay:
     async def get_list(self, request: web.Request) -> web.Response:
         lid = self._list_request(request)
         assert self.lists
-        row = self.lists.get(lid)
+        row = await self.lists.get(lid)
         if row is None:
             raise web.HTTPNotFound()
         if row[0] == RETIRED:
@@ -1594,7 +1122,7 @@ class Relay:
         data = await request.read()
         if len(data) > MAX_LIST or not self._list_signed(lid, f"list:{lid}:{seq}:".encode() + data, request):
             raise web.HTTPForbidden(text="bad signature")
-        row = self.lists.meta(lid)
+        row = await self.lists.meta(lid)
         if row and row[0] == RETIRED:
             return web.json_response({"code": "list-retired"}, status=410)
         current = row[0] if row else 0
@@ -1603,9 +1131,11 @@ class Relay:
         owner = row[1] if row else (self.codes.check(request.headers.get("X-Create-Code")) or "default")
         if self.codes.allowance(owner) <= 0 or (self.private and owner == "default"):
             return web.json_response({"code": "code-expired" if self.codes.lapsed(owner) else "needs-code"}, status=403)
-        if self.store.free_for_data() - len(data) < self.limits.min_free or (not row and not self.lists.room_for(owner)):
+        if self.store.free_for_data() - len(data) < self.limits.min_free or (not row and not await self.lists.room_for(owner)):
             return web.json_response({"code": "list-full"}, status=507)
-        self.lists.put(lid, seq, data, owner)
+        if not await self.lists.put(lid, seq, data, owner):  # another update got there first (another server, say)
+            now = await self.lists.meta(lid)
+            return web.json_response({"seq": now[0] if now else 0}, status=409)
         return web.json_response({"seq": seq})
 
     async def delete_list(self, request: web.Request) -> web.Response:
@@ -1613,7 +1143,7 @@ class Relay:
         assert self.lists
         if not self._list_signed(lid, f"listdel:{lid}".encode(), request):
             raise web.HTTPForbidden(text="bad signature")
-        self.lists.retire(lid)
+        await self.lists.retire(lid)
         return web.Response(status=204)
 
     async def check_code(self, request: web.Request) -> web.Response:
@@ -1661,13 +1191,14 @@ async def headers(request: web.Request, handler):
     return resp
 
 
-def make_app(db: Path, static: Path | None, tex: Path | None = None,
+def make_app(database: str, static: Path | None, tex: Path | None = None,
              limits: Limits | None = None, codes: CodeBook | None = None, arxiv: bool = True,
              admin_token: str = "", evict_days: float = 0, texlive: Path | None = None,
              texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None,
              purge_days: float | None = None, lists: bool = True, private: bool = False,
-             codes_url: str = "", min_version: str = "", files: Files | None = None) -> web.Application:
-    relay = Relay(Store(db, files), limits, codes, lists, private, min_version)
+             codes_url: str = "", min_version: str = "", files: Files | None = None,
+             data: Path = Path("data")) -> web.Application:
+    relay = Relay(None, limits, codes, lists, private, min_version)
     relay.codes_url = codes_url
     if texlive:  # TeX Live files on demand for the in-browser engine
         from .texlive import TexLive
@@ -1678,11 +1209,14 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
             log.warning("--texlive %s has no index yet: run with --texlive-init first", texlive)
     app = web.Application(middlewares=[headers], client_max_size=MAX_BLOB + 1024)
 
-    async def file_store(_app: web.Application):
-        await relay.store.start()
+    async def store(_app: web.Application):
+        s = await Store.open(database, files, data)
+        log.info("database: %s", redact(database))
+        relay.attach(s)
+        await s.start()
         yield
-        await relay.store.files.close()
-    app.cleanup_ctx.append(file_store)
+        await s.close()
+    app.cleanup_ctx.append(store)
     if admin_token:
         from .admin import Admin
         app.router.add_get("/admin", Admin(relay, admin_token, evict_days, purge_days).page)
@@ -1690,17 +1224,20 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
         async def maintenance(_app: web.Application):
             async def loop():
                 while True:
-                    if evict_days > 0:
-                        for p in relay.store.idle(evict_days):
-                            if relay.rooms.get(p):
-                                continue  # someone is connected right now
-                            freed = relay.store.evict(p)
-                            log.info("evicted idle project %s… (%s, unopened for %g days)", p[:8], fmt_size(freed), evict_days)
-                            await asyncio.sleep(PURGE_PAUSE)
-                    if purge_days is not None:
-                        await relay.purge_expired(purge_days)
-                    if evict_days > 0 and relay.lists:
-                        relay.lists.drop_idle(time.time() - evict_days * 86400)
+                    try:
+                        if evict_days > 0:
+                            for p in relay.store.idle(evict_days):
+                                if relay.rooms.get(p):
+                                    continue  # someone is connected right now
+                                freed = await relay.store.evict(p)
+                                log.info("evicted idle project %s… (%s, unopened for %g days)", p[:8], fmt_size(freed), evict_days)
+                                await asyncio.sleep(PURGE_PAUSE)
+                        if purge_days is not None:
+                            await relay.purge_expired(purge_days)
+                        if evict_days > 0 and relay.lists:
+                            await relay.lists.drop_idle(time.time() - evict_days * 86400)
+                    except Exception:
+                        log.exception("maintenance")
                     await asyncio.sleep(min(3600, max(60, evict_days * 8640)) if evict_days > 0 else 3600)
             task = asyncio.create_task(loop())
             yield
@@ -1732,15 +1269,26 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
     return app
 
 
-def main() -> None:
+def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="TeXLoom relay server", epilog=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--config", type=Path, metavar="FILE",
+                   help="settings file (TOML; default: TEXLOOM_CONFIG, else /etc/texloom/texloom.toml if it exists). "
+                        "Every option below can be set there by name, and as TEXLOOM_<NAME> in the environment")
     p.add_argument("--host", default="127.0.0.1", help="interface to listen on (default: localhost only)")
     p.add_argument("--port", type=int, default=8787)
-    p.add_argument("--db", type=Path, default=Path("data/texloom.db"))
-    p.add_argument("--files", default=os.environ.get("TEXLOOM_FILES", ""), metavar="DIR or s3://BUCKET[/PREFIX]",
-                   help="where stored files' content goes (default: a folder 'files' next to --db). For s3://, "
-                        "set TEXLOOM_S3_ENDPOINT, TEXLOOM_S3_REGION, TEXLOOM_S3_KEY_ID and TEXLOOM_S3_SECRET")
+    p.add_argument("--database", "--db", dest="database", default="postgresql:///texloom", metavar="URL",
+                   help="the PostgreSQL database, e.g. postgresql:///texloom (this machine, as this user) or "
+                        "postgresql://texloom:PASSWORD@db.example.org/texloom")
+    p.add_argument("--data", type=Path, default=Path("data"), metavar="DIR",
+                   help="this server's own folder: uploads are spooled here, --min-free is kept free here, and "
+                        "stored files go in DIR/files unless --files says otherwise")
+    p.add_argument("--files", default="", metavar="DIR or s3://BUCKET[/PREFIX]",
+                   help="where stored files' content goes (default: DIR/files of --data)")
+    p.add_argument("--s3-endpoint", default="", metavar="URL", help="for --files s3://…: the store's address")
+    p.add_argument("--s3-region", default="auto", help="for --files s3://…: the store's region (Garage: garage; R2: auto)")
+    p.add_argument("--s3-key-id", default="", help="for --files s3://…: the access key id")
+    p.add_argument("--s3-secret", default="", help="for --files s3://…: the secret key (put it in the settings file)")
     p.add_argument("--static", type=Path, default=Path("web/dist"))
     p.add_argument("--tex-assets", type=Path, default=Path("tex-assets"),
                    help="directory containing busytex/ (in-browser TeX); optional")
@@ -1748,8 +1296,8 @@ def main() -> None:
     p.add_argument("--min-free", type=parse_size, default=2 * GiB, help="keep this much disk free, e.g. 2G")
     p.add_argument("--project-max-bytes", type=parse_size, default=200 * MiB, help="per-project cap, e.g. 200M")
     p.add_argument("--codes-file", type=Path, action="append",
-                   help="storage allowances per creation code (see above); repeatable, and more files can be "
-                        "listed in TEXLOOM_CODES_FILES (separated by ':'). --add-code writes to the first")
+                   help="storage allowances per creation code (see above); repeatable. TEXLOOM_CODES_FILES adds "
+                        "more (separated by ':'). --add-code writes to the first")
     p.add_argument("--add-code", metavar="LABEL", help="create a creation code with this label, print it, exit")
     p.add_argument("--allowance", help="allowance for --add-code (default 1G) or --renew-code (default: unchanged): "
                                        "0, a size, or unlimited")
@@ -1763,29 +1311,29 @@ def main() -> None:
                    help="delete the stored copies of every project created with this code (expired or removed "
                         "codes only), then exit. Prefer --purge-expired-after, which does it inside the server")
     p.add_argument("--list-codes", action="store_true", help="list codes, allowances, expiry and usage, then exit")
-    p.add_argument("--purge-expired-after", type=float, metavar="DAYS",
-                   default=float(os.environ["TEXLOOM_PURGE_EXPIRED_AFTER"]) if os.environ.get("TEXLOOM_PURGE_EXPIRED_AFTER") else None,
+    p.add_argument("--import-sqlite", type=Path, metavar="FILE",
+                   help="copy a database from an older server (SQLite) into the empty --database, then exit")
+    p.add_argument("--purge-expired-after", type=float, metavar="DAYS", default=None,
                    help="delete the stored copies of projects whose creation code expired more than DAYS days "
-                        "ago (checked hourly; default: never, or TEXLOOM_PURGE_EXPIRED_AFTER). Their files stay "
-                        "on people's devices")
-    p.add_argument("--private", action="store_true", default=os.environ.get("TEXLOOM_PRIVATE", "") not in ("", "0"),
+                        "ago (checked hourly; default: never). Their files stay on people's devices")
+    p.add_argument("--private", action="store_true",
                    help="only projects created with a valid creation code may use this server, even without "
                         "storage; people with such a project's link need nothing else (needs --codes-file)")
-    p.add_argument("--min-version", default=os.environ.get("TEXLOOM_MIN_VERSION", ""), metavar="X.Y.Z",
-                   help="the oldest TeXLoom app allowed to connect (or TEXLOOM_MIN_VERSION): older ones, and those "
-                        "too old to say, are asked to update. The admin page shows which versions connect")
-    p.add_argument("--codes-url", default=os.environ.get("TEXLOOM_CODES_URL", ""), metavar="URL",
+    p.add_argument("--min-version", default="", metavar="X.Y.Z",
+                   help="the oldest TeXLoom app allowed to connect: older ones, and those too old to say, are asked "
+                        "to update. The admin page shows which versions connect")
+    p.add_argument("--codes-url", default="", metavar="URL",
                    help="a web page saying how to get a creation code for this server; the apps link to it where "
-                        "they ask for a code (or TEXLOOM_CODES_URL; default: none, and they say to ask whoever runs it)")
+                        "they ask for a code (default: none, and they say to ask whoever runs it)")
     p.add_argument("--no-project-lists", action="store_true",
                    help="don't store people's encrypted project lists (the sync link and passkey features)")
     p.add_argument("--no-arxiv", action="store_true", help="disable importing arXiv sources through this server")
-    p.add_argument("--evict-idle-days", type=float, default=float(os.environ.get("TEXLOOM_EVICT_IDLE_DAYS") or 0),
-                   help="drop the stored copy of projects nobody opened for this many days (0 = never; or "
-                        "TEXLOOM_EVICT_IDLE_DAYS); their writers re-upload them on their next visit")
-    p.add_argument("--admin-token-file", type=Path,
-                   help="enable /admin (read-only usage page); password = this file's content "
-                        "(or set TEXLOOM_ADMIN_TOKEN)")
+    p.add_argument("--evict-idle-days", type=float, default=0,
+                   help="drop the stored copy of projects nobody opened for this many days (0 = never); their "
+                        "writers re-upload them on their next visit")
+    p.add_argument("--admin-token", default="", help="enable /admin (read-only usage page) with this password "
+                                                     "(at least 16 characters; put it in the settings file)")
+    p.add_argument("--admin-token-file", type=Path, help="as --admin-token, read from this file")
     p.add_argument("--texlive", type=Path, metavar="DIR",
                    help="serve TeX Live files on demand to the in-browser engine, cached in DIR")
     p.add_argument("--texlive-init", action="store_true", help="download/refresh TeX Live's package index into --texlive, then exit")
@@ -1793,9 +1341,51 @@ def main() -> None:
     p.add_argument("--texlive-mirror", action="append", default=[], metavar="URL",
                    help="TeX Live mirror to use first (…/systems/texlive/tlnet/), e.g. one in your country; "
                         "repeatable. Without it, mirror.ctan.org picks one near the server")
-    a = p.parse_args()
+    return p
+
+
+async def _codes_command(a: argparse.Namespace, codes: CodeBook, files: Files) -> None:
+    """--list-codes and --purge-code: they read (and purge) the store."""
+    store = await Store.open(a.database, files, a.data)
     try:
-        files = open_files(a.files, a.db.parent / "files")
+        if a.purge_code is not None:
+            c = CodeBook.normalize(a.purge_code)
+            if c in codes.codes and not codes.expired(c):
+                sys.exit(f"{a.purge_code} is still valid{f' (until {codes.until[c]})' if c in codes.until else ''}: "
+                         "let it expire, or delete its line, first")
+            n, freed, _ = await Relay(store, codes=codes).purge(c)
+            await store.empty_trash()
+            print(f"purged {n} project(s), {fmt_size(freed)} freed. If the server is running, restart it so its "
+                  "storage totals are up to date.")
+            return
+
+        def expiry(c: str) -> str:
+            if c not in codes.until:
+                return ""
+            days = codes.lapsed_since(c)
+            return f"  EXPIRED {codes.until[c]} ({days} day{'s' * (days != 1)} ago)" if days is not None else f"  until {codes.until[c]}"
+        print(f"{'default':16}  {fmt_size(codes.default):>9}  used {fmt_size(store.owner_usage('default')):>7}  "
+              f"{sum(1 for o in store.owners.values() if o == 'default')} project(s)")
+        for c, (allowance, label) in codes.codes.items():
+            n = sum(1 for o in store.owners.values() if o == c)
+            print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {fmt_size(allowance):>9}  used {fmt_size(store.owner_usage(c)):>7}  "
+                  f"{n} project(s){expiry(c)}  {label}")
+        removed = sorted({o for o in store.owners.values() if o not in codes.codes and o != "default"})
+        for c in removed:
+            if store.owner_usage(c):
+                print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {'removed':>9}  used {fmt_size(store.owner_usage(c)):>7}  "
+                      f"{len(store.stored_by(c))} stored project(s)  (--purge-code to delete them)")
+    finally:
+        await store.close()
+
+
+def main() -> None:
+    from .config import parse
+    p = parser()
+    a = parse(p)
+    try:
+        files = open_files(a.files, a.data / "files",
+                           {"endpoint": a.s3_endpoint, "region": a.s3_region, "key_id": a.s3_key_id, "secret": a.s3_secret})
     except FilesError as e:
         p.error(str(e))
     if a.texlive_init:
@@ -1806,9 +1396,11 @@ def main() -> None:
         tl = TexLive(a.texlive, extra_mirrors=a.texlive_mirror)
         asyncio.run(tl.build_index(tl.index_sources() if tl.ready or tl.extra_mirrors else None))
         return
-    extra = [Path(x) for x in os.environ.get("TEXLOOM_CODES_FILES", "").split(os.pathsep) if x.strip()]
-    a.codes_file = [*(a.codes_file or []), *extra] or None
-    codes = CodeBook(a.codes_file)
+    if a.import_sqlite:
+        counts = asyncio.run(import_sqlite(a.import_sqlite, a.database))
+        print("copied " + ", ".join(f"{n} {t}" for t, n in counts.items() if n) + f" into {redact(a.database)}")
+        return
+    codes = CodeBook(a.codes_file or None)
     if a.until and a.months:
         sys.exit("give --until or --months, not both")
     if any(x is not None for x in (a.add_code, a.renew_code, a.purge_code)) or a.list_codes:
@@ -1828,42 +1420,17 @@ def main() -> None:
             print(f"{label or a.renew_code}: {size}, {f'valid until {until}' if until else 'no expiry'}")
             return
         codes._load()
-        store = Store(a.db, files)
-        if a.purge_code is not None:
-            c = CodeBook.normalize(a.purge_code)
-            if c in codes.codes and not codes.expired(c):
-                sys.exit(f"{a.purge_code} is still valid{f' (until {codes.until[c]})' if c in codes.until else ''}: "
-                         "let it expire, or delete its line, first")
-            n, freed, _ = Relay(store, codes=codes).purge(c)
-            asyncio.run(store.empty_trash())
-            print(f"purged {n} project(s), {fmt_size(freed)} freed. If the server is running, restart it so its "
-                  "storage totals are up to date.")
-            return
-        def expiry(c: str) -> str:
-            if c not in codes.until:
-                return ""
-            days = codes.lapsed_since(c)
-            return f"  EXPIRED {codes.until[c]} ({days} day{'s' * (days != 1)} ago)" if days is not None else f"  until {codes.until[c]}"
-        print(f"{'default':16}  {fmt_size(codes.default):>9}  used {fmt_size(store.owner_usage('default')):>7}  "
-              f"{sum(1 for o in store.owners.values() if o == 'default')} project(s)")
-        for c, (allowance, label) in codes.codes.items():
-            n = sum(1 for o in store.owners.values() if o == c)
-            print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {fmt_size(allowance):>9}  used {fmt_size(store.owner_usage(c)):>7}  "
-                  f"{n} project(s){expiry(c)}  {label}")
-        removed = sorted({o for o in store.owners.values() if o not in codes.codes and o != "default"})
-        for c in removed:
-            if store.owner_usage(c):
-                print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {'removed':>9}  used {fmt_size(store.owner_usage(c)):>7}  "
-                      f"{len(store.stored_by(c))} stored project(s)  (--purge-code to delete them)")
+        asyncio.run(_codes_command(a, codes, files))
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    admin_token = (a.admin_token_file.read_text().strip() if a.admin_token_file else
-                   os.environ.get("TEXLOOM_ADMIN_TOKEN", "").strip())
+    admin_token = (a.admin_token_file.read_text().strip() if a.admin_token_file else a.admin_token.strip())
     if admin_token and len(admin_token) < 16:
         sys.exit("the admin token must be at least 16 characters")
     if a.private and not codes.path:
         sys.exit("--private needs --codes-file: it's the creation codes that decide who may use the server")
     limits = Limits(a.max_bytes, a.min_free, a.project_max_bytes)
+    if a.config:
+        log.info("settings from %s", a.config)
     if a.private:
         log.info("private server: only projects with a valid creation code may connect")
     log.info("limits: total %s, keep %s free, %s per project; %s",
@@ -1873,11 +1440,11 @@ def main() -> None:
         p.error("--min-version is a version such as 0.4.30")
     if a.codes_url and not re.match(r"https?://", a.codes_url, re.I):
         p.error("--codes-url must be an http:// or https:// address")
-    web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv, codes_url=a.codes_url,
+    web.run_app(make_app(a.database, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv, codes_url=a.codes_url,
                         admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
                         texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
                         purge_days=a.purge_expired_after, lists=not a.no_project_lists, private=a.private,
-                        min_version=a.min_version, files=files), host=a.host, port=a.port,
+                        min_version=a.min_version, files=files, data=a.data), host=a.host, port=a.port,
                 backlog=LISTEN_BACKLOG, shutdown_timeout=SHUTDOWN_WAIT)
 
 

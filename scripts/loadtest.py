@@ -18,7 +18,6 @@ import multiprocessing as mp
 import os
 import random
 import shutil
-import sqlite3
 import struct
 import subprocess
 import sys
@@ -36,6 +35,8 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
+import pg  # noqa: E402  (a throwaway PostgreSQL for the server)
 MiB = 1 << 20
 MAX_SAMPLES = 40_000  # per process and kind of latency
 TOO_SLOW_MS = 200  # a step fails if the slowest 5% of edits take longer than this to arrive
@@ -279,29 +280,50 @@ class Server:
     def __init__(self, port: int, static: Path | None = None):
         self.dir = Path(tempfile.mkdtemp(prefix="texloom-loadtest-"))
         self.port, self.static = port, static
-        self.db = self.dir / "t.db"
+        self.database = ""  # a throwaway PostgreSQL in self.dir/pg, started by db()
         (self.dir / "codes.txt").write_text("default unlimited\n")
         self.proc: subprocess.Popen | None = None
         self.url = f"http://127.0.0.1:{port}"
 
+    def db(self) -> str:
+        """The server's database (started on first use)."""
+        if not self.database:
+            self.database, _ = pg.start(self.dir / "pg")
+        return self.database
+
+    def sql(self, query: str, *args):
+        """One value from the server's database."""
+        import asyncpg
+
+        async def ask():
+            c = await asyncpg.connect(self.db())
+            try:
+                return await c.fetchval(query, *args)
+            finally:
+                await c.close()
+        return asyncio.run(ask())
+
     def preload(self, projects: int) -> None:
         """Projects already stored, as many owners as a real server would have."""
-        from server.relay import Store
-        Store(self.db).db.close()
-        db = sqlite3.connect(self.db)
-        now = time.time()
-        with db:
-            db.executemany("INSERT INTO projects(project, created, label, owner, seen) VALUES (?,?,'',?,?)",
-                           ((f"{i:043d}", now, f"code{i // 3}", now) for i in range(projects)))
-            db.executemany("INSERT INTO log(project, seq, snap, data, sig, h) VALUES (?,1,0,?,?,?)",
-                           ((f"{i:043d}", os.urandom(300), b"s" * 64, sha256(str(i).encode()).digest()) for i in range(projects)))
-            db.executemany("INSERT INTO head(project, seq) VALUES (?,1)", ((f"{i:043d}",) for i in range(projects)))
-        db.close()
+        from server.files import FolderFiles
+        from server.store import Store
+
+        async def fill():
+            store = await Store.open(self.db(), FolderFiles(self.dir / "files"), self.dir)
+            now = time.time()
+            async with store.tx() as c:
+                await c.executemany("INSERT INTO projects(project, created, owner, seen) VALUES ($1,$2,$3,$4)",
+                                    [(f"{i:043d}", now, f"code{i // 3}", now) for i in range(projects)])
+                await c.executemany("INSERT INTO log(project, seq, snap, data, sig, h) VALUES ($1,1,false,$2,$3,$4)",
+                                    [(f"{i:043d}", os.urandom(300), b"s" * 64, sha256(str(i).encode()).digest()) for i in range(projects)])
+                await c.executemany("INSERT INTO head(project, seq) VALUES ($1,1)", [(f"{i:043d}",) for i in range(projects)])
+            await store.pool.close()
+        asyncio.run(fill())
 
     def start(self) -> float:
         """Returns how long the server took to come up."""
         exe = Path(sys.executable).parent / "texloom-server"
-        args = [str(exe), "--host", "127.0.0.1", "--port", str(self.port), "--db", str(self.db),
+        args = [str(exe), "--host", "127.0.0.1", "--port", str(self.port), "--database", self.db(), "--data", str(self.dir),
                 "--codes-file", str(self.dir / "codes.txt"), "--min-free", "0", "--project-max-bytes", "unlimited"]
         if self.static:
             args += ["--static", str(self.static)]
@@ -329,6 +351,8 @@ class Server:
 
     def close(self) -> None:
         self.stop()
+        if self.database:
+            pg.stop(self.dir / "pg")
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def usage(self) -> tuple[float, float]:
@@ -599,7 +623,7 @@ def joiners(a):
             s.start()
             room = new_project()
             asyncio.run(seed_snapshot(s.url, room, size))
-            stored = sqlite3.connect(s.db).execute("SELECT COUNT(*) FROM log WHERE snap=1").fetchone()[0]
+            stored = s.sql("SELECT COUNT(*) FROM log WHERE snap")
             r = step(s, a, f"{n} join {size / MiB:.0f} MB", [], extra={"joiners": {"project": room["project"], "n": n}}, connect=4, dur=12)
             show(r, a, f"snapshot_stored={stored} join_p95={r['joins_p95']:.0f}ms join_max={r['joins_max']:.0f}ms")
         finally:

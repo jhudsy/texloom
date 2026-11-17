@@ -24,6 +24,9 @@ texloom-app = "texloom.app:main"
 app = [
     "pyside6-essentials>=6.8",
 ]
+server = [
+    "asyncpg>=0.30",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -241,18 +241,14 @@ class S3Files(Files):
         self._session = None
 
 
-def open_files(where: str, default: Path) -> Files:
-    """The store named by --files (or TEXLOOM_FILES): a folder, or s3://bucket[/prefix] with the
-    endpoint and keys from the environment. Empty: a folder next to the database."""
+def open_files(where: str, default: Path, s3: dict[str, str] | None = None) -> Files:
+    """The store named by `where` (the files setting): a folder, or s3://bucket[/prefix] with the
+    endpoint, region and keys in `s3`. Empty: the folder `default`."""
     if not where:
         return FolderFiles(default)
     if where.startswith("s3://"):
         bucket, _, prefix = where[5:].partition("/")
-        env = os.environ.get
-        return S3Files(
-            endpoint=env("TEXLOOM_S3_ENDPOINT", ""),
-            bucket=bucket, prefix=prefix,
-            region=env("TEXLOOM_S3_REGION", "") or "auto",
-            key_id=env("TEXLOOM_S3_KEY_ID", "") or env("AWS_ACCESS_KEY_ID", ""),
-            secret=env("TEXLOOM_S3_SECRET", "") or env("AWS_SECRET_ACCESS_KEY", ""))
+        s3 = s3 or {}
+        return S3Files(endpoint=s3.get("endpoint", ""), bucket=bucket, prefix=prefix, region=s3.get("region") or "auto",
+                       key_id=s3.get("key_id", ""), secret=s3.get("secret", ""))
     return FolderFiles(Path(where))

@@ -24,8 +24,8 @@ jobs:
       - run: uv run python scripts/check_i18n.py
       - run: uv run python scripts/check_listsync.py
       - run: uv run python scripts/check_xr.py
-      - name: The server's file store (a folder; S3 is checked locally against Garage)
-        run: uv run python scripts/check_files.py folder
+      - name: The server's file store (a folder, with a throwaway PostgreSQL; S3 is checked locally against Garage)
+        run: uv run --extra server python scripts/check_files.py folder
       - name: Positions can't be mixed up (textpos, mypy)
         run: uv run --with mypy python scripts/check_textpos.py
       - name: Web app
