@@ -51,10 +51,17 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def _run(*args: str | Path) -> None:
+def _run(*args: str | Path, output: Path | None = None) -> None:
+    """Run one of PostgreSQL's programs; its error output is in the exception's stderr, or, with
+    `output`, in that file. (`pg_ctl start` must write to a file: the server it leaves running
+    inherits its output, and on Windows a pipe would then never close, so waiting for it hangs.)"""
     # a locale it can use: on macOS, PostgreSQL won't start without one (and "C" is the same everywhere)
     env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
-    subprocess.run([str(a) for a in args], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, env=env)
+    if output is None:
+        subprocess.run([str(a) for a in args], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, env=env)
+        return
+    with open(output, "w") as out:
+        subprocess.run([str(a) for a in args], check=True, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env)
 
 
 def start(folder: Path) -> tuple[str, int]:
@@ -72,17 +79,19 @@ def start(folder: Path) -> tuple[str, int]:
             sys.exit(f"initdb failed: {e.stderr}")
     port = free_port()
     opts = f"-p {port} -c listen_addresses=127.0.0.1 -c unix_socket_directories= -c fsync=off -c synchronous_commit=off"
+    said = folder.parent / f"{folder.name}-pg_ctl.txt"
     try:
-        _run(bin_ / "pg_ctl", "-D", folder, "-o", opts, "-l", folder / "server.log", "-w", "-t", "60", "start")
-    except subprocess.CalledProcessError as e:
+        _run(bin_ / "pg_ctl", "-D", folder, "-o", opts, "-l", folder / "server.log", "-w", "-t", "60", "start", output=said)
+    except subprocess.CalledProcessError:
         log = (folder / "server.log").read_text(errors="replace")[-2000:] if (folder / "server.log").exists() else ""
-        sys.exit(f"PostgreSQL didn't start: {e.stderr}\n{log}")
+        sys.exit(f"PostgreSQL didn't start: {said.read_text(errors='replace')}\n{log}")
     return f"postgresql://{USER}@127.0.0.1:{port}/postgres", port
 
 
 def stop(folder: Path) -> None:
+    folder = folder.resolve()
     with contextlib.suppress(subprocess.CalledProcessError):
-        _run(bindir() / "pg_ctl", "-D", folder.resolve(), "-m", "fast", "-w", "stop")
+        _run(bindir() / "pg_ctl", "-D", folder, "-m", "fast", "-w", "stop", output=folder.parent / f"{folder.name}-pg_ctl.txt")
 
 
 @contextlib.contextmanager
