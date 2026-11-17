@@ -154,7 +154,9 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
   const sync: FolderSync = { name: root.name, stop, status: () => last, onChange: null, onPrograms: null }
   const note = (s: string) => { last = s; sync.onChange?.() }
 
+  let owed = false // a write failed (the file open in another program): the poll tries again
   async function writeOut() {
+    owed = false
     let n = 0
     const want = new Set<string>(), programs: ProgramLine[] = []
     for (const [p, yt] of r.files) {
@@ -167,7 +169,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       if (await unreadNow(p)) continue
       const prev = await readText(p)
       let wrote = false
-      try { wrote = await put(p, data, h, text) } catch { /* refused (open in another program): tried again next round */ }
+      try { wrote = await put(p, data, h, text) } catch { owed = true /* refused (open in another program): the poll tries again */ }
       if (wrote) { n++; programs.push(...addedProgramLines(p, prev, text)) }
     }
     if (programs.length) sync.onPrograms?.(programs)
@@ -177,7 +179,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       if (unread.has(p)) continue
       if (known[p]?.h === b.h) continue
       if (await unreadNow(p)) continue
-      try { if (await put(p, await r.getBlob(b.h), b.h)) n++ } catch { /* not fetched yet: next round */ }
+      try { if (await put(p, await r.getBlob(b.h), b.h)) n++ } catch { owed = true /* not fetched yet, or refused: next round */ }
     }
     const dirs = new Set([...r.dirs.keys()])
     for (const d of dirs) { // explicit (possibly empty) folders
@@ -363,7 +365,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
   let outTimer: ReturnType<typeof setTimeout> | undefined
   const onDoc = (_e: unknown, tr: { local: boolean }) => { clearTimeout(outTimer); outTimer = setTimeout(() => round('out'), tr?.local ? 1200 : 300) }
   r.files.observeDeep(onDoc as any); r.bin.observe(onDoc as any); r.dirs.observe(onDoc as any)
-  const poll = setInterval(() => { if (document.visibilityState === 'visible') round('in') }, 2000)
+  const poll = setInterval(() => { if (document.visibilityState === 'visible') round(owed ? 'both' : 'in') }, 2000)
   function stop() {
     stopped = true
     clearInterval(poll); clearTimeout(outTimer); clearTimeout(soon)

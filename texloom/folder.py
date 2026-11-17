@@ -642,14 +642,23 @@ class FolderSync:
         return out
 
     # --- disk -> CRDT ----------------------------------------------------------
+    def keep_lf(self) -> None:
+        """Take "\r" out of the project's texts (they keep "\n" only): any already there, and any a
+        collaborator's older app brings in. The web app does the same (keepLF, lineends.ts); a
+        project with only desktop apps would otherwise keep them. Files are written with their own
+        line endings either way."""
+        if not self.r.can_write or self.r.deleted_at is not None:
+            return
+        if any("\r" in str(t) for t in self.r.files.values()):
+            def strip_all() -> None:
+                for t in self.r.files.values():
+                    strip_cr(t)
+            self.r.local_change(strip_all)
+
     async def ingest_all(self) -> None:
-        if not self._lf_done and self.r.can_write and self.r.deleted_at is None:
+        if not self._lf_done:
             self._lf_done = True  # "\r" a copy of the app from before 0.4.21 put into the project
-            if any("\r" in str(t) for t in self.r.files.values()):
-                def strip_all() -> None:
-                    for t in self.r.files.values():
-                        strip_cr(t)
-                self.r.local_change(strip_all)
+            self.keep_lf()
         await self.ingest(set(self.disk_files()) | set(self.known))
         self.ingest_dirs()
 
@@ -828,6 +837,7 @@ class FolderSync:
 
     # --- CRDT -> disk ----------------------------------------------------------
     async def on_remote(self) -> None:
+        self.keep_lf()  # (an older app's "\r", or one pasted there)
         await self.write_out()
 
     async def write_out(self) -> None:

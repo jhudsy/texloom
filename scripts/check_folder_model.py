@@ -32,6 +32,7 @@ sequence replays exactly. Hypothesis shrinks a failure to the shortest sequence 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import pathlib
 import shutil
@@ -103,6 +104,29 @@ def parse(text: str) -> dict[str, list[str]] | None:
     if at != sorted(at) or lines[0] != "\\documentclass{article}":
         return None
     return {z: lines[at[i] + 1:at[i + 1]] for i, z in enumerate(ZONES)}
+
+
+def parse_raw(text: str) -> tuple[list[str], dict[str, list[str]]] | None:
+    """As parse, but lines exactly as they are (other people's "\r" included) and the fixed lines
+    too: for editing one part without touching the others, as typing does."""
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    bare = [x.removesuffix("\r") for x in lines]
+    try:
+        at = [bare.index(sep(z)) for z in ZONES] + [bare.index("%% end")]
+    except ValueError:
+        return None
+    head = [lines[0]] + [lines[i] for i in at]
+    return head, {z: lines[at[i] + 1:at[i + 1]] for i, z in enumerate(ZONES)}
+
+
+def render_raw(head: list[str], parts: dict[str, list[str]]) -> str:
+    out = [head[0]]
+    for i, z in enumerate(ZONES):
+        out += [head[i + 1], *parts[z]]
+    out.append(head[-1])
+    return "\n".join(out) + "\n"
 
 
 class Computer:
@@ -234,20 +258,33 @@ class FolderModel(RuleBasedStateMachine):
         if not self.A.running:
             return  # (typing into A's project needs A's app)
         cur = self.A.project()
-        parts = parse(cur)
-        assert parts is not None, f"A's project is damaged: {cur!r}"
-        parts["typA"] = self.want["typA"] = self.changed("typA", parts["typA"], op, at)
-        new = render(parts)
+        got = parse_raw(cur)
+        assert got is not None, f"A's project is damaged: {cur!r}"
+        head, parts = got
+        parts["typA"] = self.want["typA"] = self.changed("typA", [x.removesuffix("\r") for x in parts["typA"]], op, at)
+        new = render_raw(head, parts)
         self.A.r.local_change(lambda: apply_text(self.A.r.files[F], cur, new))
 
     @rule(op=st.integers(0, 2), at=st.integers(0, 50))
     def collaborator_types(self, op: int, at: int) -> None:
         t = self.C.get("files", type=Map)[F]
         cur = str(t)
-        parts = parse(cur)
-        assert parts is not None, f"C's copy is damaged: {cur!r}"
-        parts["C"] = self.want["C"] = self.changed("C", parts["C"], op, at)
-        apply_text(t, cur, render(parts))
+        got = parse_raw(cur)
+        assert got is not None, f"C's copy is damaged: {cur!r}"
+        head, parts = got
+        parts["C"] = self.want["C"] = self.changed("C", [x.removesuffix("\r") for x in parts["C"]], op, at)
+        apply_text(t, cur, render_raw(head, parts))
+
+    @rule(op=st.integers(0, 2), at=st.integers(0, 50))
+    def collaborator_pastes_windows_text(self, op: int, at: int) -> None:
+        """C's older app (or a paste there) puts lines ending "\r\n" into the project."""
+        t = self.C.get("files", type=Map)[F]
+        cur = str(t)
+        got = parse_raw(cur)
+        assert got is not None, f"C's copy is damaged: {cur!r}"
+        head, parts = got
+        parts["C"] = self.want["C"] = self.changed("C", [x.removesuffix("\r") for x in parts["C"]], op, at)
+        apply_text(t, cur, render_raw(head, {**parts, "C": [line + "\r" for line in parts["C"]]}))
 
     @rule(src=st.sampled_from(["A", "B", "C"]), dst=st.sampled_from(["A", "B", "C"]))
     def deliver(self, src: str, dst: str) -> None:
@@ -367,14 +404,63 @@ FolderModel.TestCase.settings = settings(
     suppress_health_check=list(HealthCheck), derandomize=bool(os.environ.get("CHECK_SEED")))
 
 
+CASES = ROOT / "scripts" / "folder-cases.json"
+
+
+def run_case(steps: list) -> None:
+    """One case from folder-cases.json: its steps in order, the checks after each, then the end."""
+    m = FolderModel()
+    ok = False
+    try:
+        do = {
+            "save": lambda who, op, at: m.editor_saves(who=who, op=op, at=at),
+            "type": lambda op, at: m.typed_in_A(op=op, at=at),
+            "collab": lambda op, at: m.collaborator_types(op=op, at=at),
+            "collab_crlf": lambda op, at: m.collaborator_pastes_windows_text(op=op, at=at),
+            "deliver": lambda src, dst: m.deliver(src=src, dst=dst),
+            "sync": lambda who: m.sync_round(who=who),
+            "time": lambda ms: None,  # (the desktop's timers are its sync rounds here)
+            "refuse": lambda who, on: m.writes_refused(who=who, refuse=on),
+            "older": lambda who, pick: m.older_copy_comes_back(who=who, pick=pick),
+            "toggle": lambda who: m.app_quits_or_starts(who=who),
+        }
+        for kind, *args in steps:
+            do[kind](*args)
+            m.editors_parts_are_theirs()
+            m.typed_parts_are_kept()
+            m.sync_checks_hold()
+        ok = True
+    finally:
+        if ok:
+            m.teardown()  # checks that everything agrees at the end
+        else:
+            with contextlib.suppress(Exception):  # the step's failure is the one to report
+                m.teardown()
+
+
+def check_cases() -> list[str]:
+    import json
+    bad = []
+    for case in json.loads(CASES.read_text(encoding="utf-8"))["cases"]:
+        try:
+            run_case(case["steps"])
+        except Exception as e:  # noqa: BLE001 - report every failing case
+            bad.append(f"{case['name']}: {type(e).__name__}: {str(e)[:400]}")
+    return bad
+
+
 def main() -> None:
+    bad = check_cases()
+    if bad:
+        print("folder model: FAILED known cases (scripts/folder-cases.json)\n  " + "\n  ".join(bad))
+        sys.exit(1)
     import unittest
     suite = unittest.TestLoader().loadTestsFromTestCase(FolderModel.TestCase)
     result = unittest.TextTestRunner(verbosity=0, stream=sys.stdout).run(suite)
     if not result.wasSuccessful():
         print("folder model: FAILED")
         sys.exit(1)
-    print(f"folder model: every step held ({FolderModel.TestCase.settings.max_examples} random runs of up to 40 steps)")
+    print(f"folder model: every known case and every step held ({FolderModel.TestCase.settings.max_examples} random runs of up to 40 steps)")
 
 
 if __name__ == "__main__":

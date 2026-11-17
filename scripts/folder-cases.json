@@ -1,0 +1,40 @@
+{
+  "about": "Folder-sync failures found so far, as exact step sequences. scripts/check_folder_model.py (desktop) and web/scripts/check-folder-model.mjs (browser) run every case on every check, before their random runs: a failure once found stays exercised. Add one for each new failure (from those checks, the end-to-end check or a report), in the steps below, with what it caught. Steps: [\"save\", who, op, at] an editor saves its part of main.tex on A or B (op 0 insert, 1 delete, 2 change a line; at: where); [\"type\", op, at] typing into A's project; [\"collab\", op, at] the collaborator C types; [\"collab_crlf\", op, at] C's older app adds a line with Windows line endings; [\"deliver\", src, dst] changes from one of A, B, C to another; [\"sync\", who] a sync round on A or B (browser: 3 s pass); [\"time\", ms] time passes (browser only); [\"refuse\", who, true|false] writes to that folder refused or allowed again; [\"older\", who, pick] an older copy the sync wrote comes back; [\"toggle\", who] the app (page) quits, or starts again.",
+  "cases": [
+    {
+      "name": "a refused write, then the file saved",
+      "found": "0.4.26: by hand while chasing a CI timeout. The collaborator's edit was noted as written before the write; the save then undid it.",
+      "steps": [["refuse", "A", true], ["collab", 0, 0], ["deliver", "C", "A"], ["save", "A", 0, 0], ["sync", "A"], ["refuse", "A", false], ["sync", "A"]]
+    },
+    {
+      "name": "a change not yet written, the app closed, the file saved, the app started",
+      "found": "0.4.27: the model checks. The last-synced text was only in memory, so the save replaced the project's text.",
+      "steps": [["type", 0, 0], ["toggle", "A"], ["save", "A", 0, 0], ["toggle", "A"]]
+    },
+    {
+      "name": "an undo saved in the editor",
+      "found": "0.4.27: the model checks. Going back to an earlier version was taken for a stale copy and reverted.",
+      "steps": [["save", "A", 0, 0], ["sync", "A"], ["save", "A", 1, 0], ["sync", "A"]]
+    },
+    {
+      "name": "an older copy comes back to a Windows file",
+      "found": "0.4.27: the model checks. Detecting the stale copy dropped the file's record, and with it its line endings.",
+      "steps": [["save", "B", 0, 0], ["sync", "B"], ["collab", 0, 0], ["deliver", "C", "B"], ["sync", "B"], ["older", "B", 0], ["sync", "B"]]
+    },
+    {
+      "name": "changes arrive just after a save the sync hasn't read",
+      "found": "0.4.27: the browser model. The browser wrote the collaborators' changes over the save 300 ms later.",
+      "steps": [["save", "A", 0, 0], ["collab", 0, 0], ["deliver", "C", "A"], ["time", 400], ["sync", "A"]]
+    },
+    {
+      "name": "Windows line endings from a collaborator's older app",
+      "found": "0.4.28: the sync-only check on Windows (browser pasting \\r\\n). The desktop app kept \\r in the project; only the web app took them out.",
+      "steps": [["collab_crlf", 0, 0], ["deliver", "C", "A"], ["sync", "A"], ["deliver", "A", "B"], ["sync", "B"], ["deliver", "A", "C"]]
+    },
+    {
+      "name": "a refused write, then nothing else changes",
+      "found": "0.4.28: written for the browser, whose 2 s poll only read the folder: a refused write waited for the next change to be tried again.",
+      "steps": [["refuse", "A", true], ["collab", 0, 0], ["deliver", "C", "A"], ["sync", "A"], ["refuse", "A", false], ["sync", "A"], ["sync", "A"]]
+    }
+  ]
+}

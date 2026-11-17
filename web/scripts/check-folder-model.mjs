@@ -23,6 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vite'
 import * as Y from 'yjs'
 import fc from 'fast-check'
+import { readFileSync } from 'node:fs'
 
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const out = path.join(web, 'node_modules/.cache/check-folder-model')
@@ -34,6 +35,7 @@ const load = async (entry) => {
 }
 const { startFolderSync, rememberFolder } = await load('src/foldersync.ts')
 const { applyText } = await load('src/diff.ts')
+const { keepLF } = await load('src/lineends.ts')
 
 // ---- the fake world: clock and timers, browser storage, folders --------------------------------
 const clock = { now: 1_700_000_000_000, timers: new Map(), next: 1 }
@@ -107,19 +109,28 @@ class FakeFolder { // FileSystemDirectoryHandle over a Map: name -> { data, m } 
 const F = 'main.tex', ZONES = ['edA', 'edB', 'typA', 'C']
 const sep = (z) => `%% ---- ${z} ----`
 const render = (parts) => ['\\documentclass{article}', ...ZONES.flatMap((z) => [sep(z), ...parts[z]]), '%% end'].join('\n') + '\n'
-function parse(text) {
+/** A text's parts; `raw`: lines exactly as they are (other people's "\r" included), for editing
+ *  one part without touching the rest, as typing does. */
+function parse(text, raw = false) {
   if (text == null) return null
-  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const lines = (raw ? text : text.replace(/\r\n/g, '\n')).split('\n')
   if (lines[lines.length - 1] === '') lines.pop()
-  const at = [...ZONES.map((z) => lines.indexOf(sep(z))), lines.indexOf('%% end')]
-  if (at.includes(-1) || at.some((x, i) => i && x < at[i - 1]) || lines[0] !== '\\documentclass{article}') return null
-  return Object.fromEntries(ZONES.map((z, i) => [z, lines.slice(at[i] + 1, at[i + 1])]))
+  const bare = lines.map((l) => l.replace(/\r$/, ''))
+  const at = [...ZONES.map((z) => bare.indexOf(sep(z))), bare.indexOf('%% end')]
+  if (at.includes(-1) || at.some((x, i) => i && x < at[i - 1]) || bare[0] !== '\\documentclass{article}') return null
+  const parts = Object.fromEntries(ZONES.map((z, i) => [z, lines.slice(at[i] + 1, at[i + 1])]))
+  if (raw) parts.head = [lines[0], ...ZONES.map((z, i) => lines[at[i]]), lines[at[ZONES.length]]] // the fixed lines, as they are
+  return parts
 }
+/** The text again, with one part replaced (the other lines as they were). */
+const renderRaw = (parts) => [parts.head[0], ...ZONES.flatMap((z, i) => [parts.head[i + 1], ...parts[z]]), parts.head[ZONES.length + 1]].join('\n') + '\n'
+const bare = (lines) => lines.map((l) => l.replace(/\r$/, ''))
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
-function replica(doc, who) { // what startFolderSync uses of a Replica
+function replica(doc, who) { // what startFolderSync (and keepLF) use of a Replica
   const blobs = new Map()
   return {
+    isRemote: (o) => o === 'remote', isLocal: (o) => o !== 'remote', deletedAt: null,
     doc, files: doc.getMap('files'), bin: doc.getMap('bin'), dirs: doc.getMap('dirs'), meta: doc.getMap('meta'),
     // the project id names each browser's stored state: one per browser here, as each has its own storage
     keys: { project: `p${who}`, writable: true, blobId: async (d) => createHash('sha256').update(d).digest('hex').slice(0, 32) },
@@ -139,7 +150,9 @@ class World {
     this.editedB = false
   }
   async start(who) {
-    this.syncs[who] = await startFolderSync(replica(this.docs[who], who), this.folders[who])
+    const r = replica(this.docs[who], who)
+    if (!this.lf?.[who]) { (this.lf ??= {})[who] = true; keepLF(r) } // as the web app does for an open project
+    this.syncs[who] = await startFolderSync(r, this.folders[who])
     await rememberFolder(`p${who}`, this.folders[who]) // as main.ts does once a folder is linked
   }
   async setup() {
@@ -188,9 +201,9 @@ class TypedInA { // (the web app on A: only while its page is open)
   run = async (w) => { await this.act(w); invariants(w) }
   check = (w) => !!w.syncs.A
   async act(w) {
-    const t = w.docs.A.getMap('files').get(F), cur = t.toString(), parts = parse(cur)
-    parts.typA = w.want.typA = w.changed('typA', parts.typA, this.op, this.at)
-    w.docs.A.transact(() => applyText(t, cur, render(parts)))
+    const t = w.docs.A.getMap('files').get(F), cur = t.toString(), parts = parse(cur, true)
+    parts.typA = w.want.typA = w.changed('typA', bare(parts.typA), this.op, this.at)
+    w.docs.A.transact(() => applyText(t, cur, renderRaw(parts)))
     await flush()
   }
   toString() { return `typed in A (${this.op} @${this.at})` }
@@ -200,11 +213,22 @@ class CollaboratorTypes {
   run = async (w) => { await this.act(w); invariants(w) }
   check = () => true
   async act(w) {
-    const t = w.docs.C.getMap('files').get(F), cur = t.toString(), parts = parse(cur)
-    parts.C = w.want.C = w.changed('C', parts.C, this.op, this.at)
-    w.docs.C.transact(() => applyText(t, cur, render(parts)))
+    const t = w.docs.C.getMap('files').get(F), cur = t.toString(), parts = parse(cur, true)
+    parts.C = w.want.C = w.changed('C', bare(parts.C), this.op, this.at)
+    w.docs.C.transact(() => applyText(t, cur, renderRaw(parts)))
   }
   toString() { return `collaborator types (${this.op} @${this.at})` }
+}
+class CollaboratorPastesWindowsText { // C's older app puts lines ending "\r\n" into the project
+  constructor(op, at) { Object.assign(this, { op, at }) }
+  run = async (w) => { await this.act(w); invariants(w) }
+  check = () => true
+  async act(w) {
+    const t = w.docs.C.getMap('files').get(F), cur = t.toString(), parts = parse(cur, true)
+    parts.C = w.want.C = w.changed('C', bare(parts.C), this.op, this.at)
+    w.docs.C.transact(() => applyText(t, cur, renderRaw({ ...parts, C: parts.C.map((l) => l + '\r') })))
+  }
+  toString() { return `collaborator pastes Windows text (${this.op} @${this.at})` }
 }
 class Deliver {
   constructor(src, dst) { Object.assign(this, { src, dst }) }
@@ -294,12 +318,40 @@ const commands = fc.commands([
   fc.tuple(who, op, at).map(([a, b, c]) => new EditorSaves(a, b, c)),
   fc.tuple(op, at).map(([a, b]) => new TypedInA(a, b)),
   fc.tuple(op, at).map(([a, b]) => new CollaboratorTypes(a, b)),
+  fc.tuple(op, at).map(([a, b]) => new CollaboratorPastesWindowsText(a, b)),
   fc.tuple(fc.constantFrom('A', 'B', 'C'), fc.constantFrom('A', 'B', 'C')).map(([a, b]) => new Deliver(a, b)),
   fc.constantFrom(100, 300, 1000, 2500, 6000).map((ms) => new TimePasses(ms)),
   fc.tuple(who, fc.boolean()).map(([a, b]) => new Refuse(a, b)),
   fc.tuple(who, at).map(([a, b]) => new OlderCopy(a, b)),
   who.map((a) => new CloseOrOpen(a)),
 ], { maxCommands: 40 })
+
+// ---- the known cases first (scripts/folder-cases.json): every failure found so far, as its steps --
+const STEP = {
+  save: (who, op, at) => new EditorSaves(who, op, at), type: (op, at) => new TypedInA(op, at),
+  collab: (op, at) => new CollaboratorTypes(op, at), collab_crlf: (op, at) => new CollaboratorPastesWindowsText(op, at),
+  deliver: (src, dst) => new Deliver(src, dst), sync: () => new TimePasses(3000), time: (ms) => new TimePasses(ms),
+  refuse: (who, on) => new Refuse(who, on), older: (who, pick) => new OlderCopy(who, pick), toggle: (who) => new CloseOrOpen(who),
+}
+const known = JSON.parse(readFileSync(path.join(web, '..', 'scripts', 'folder-cases.json'), 'utf8')).cases
+if (process.env.CHECK_STEPS) { // replay one sequence, showing A's file and project after each step
+  const w = new World(); await w.setup()
+  const show = (what) => console.log(`${what}\n   file:    ${JSON.stringify(w.folders.A.read(F)?.split('%% ---- C ----')[1])}\n   project: ${JSON.stringify(w.text('A').split('%% ---- C ----')[1])}\n   C:       ${JSON.stringify(w.text('C').split('%% ---- C ----')[1])}`)
+  for (const [kind, ...args] of JSON.parse(process.env.CHECK_STEPS)) { const st = STEP[kind](...args); if (st.check(w)) await st.act(w); show(st.toString()) }
+  try { await converges(w); console.log('converged') } catch (e) { show('end'); console.log(e.message.slice(0, 300)) }
+  process.exit(0)
+}
+const failed = []
+for (const c of known) {
+  try {
+    const w = new World()
+    await w.setup()
+    for (const [kind, ...args] of c.steps) { const s = STEP[kind](...args); if (s.check(w)) await s.run(w) }
+    await converges(w)
+    for (const s of Object.values(w.syncs)) s.stop()
+  } catch (e) { failed.push(`${c.name}: ${String(e.message).slice(0, 400)}`) }
+}
+if (failed.length) { console.error('folder model (browser): FAILED known cases (scripts/folder-cases.json)\n  ' + failed.join('\n  ')); process.exit(1) }
 
 const seed = Number(process.env.CHECK_SEED) || Date.UTC(2026, 0, 1) % 2 ** 31 + Math.floor(Math.random() * 1e6)
 const runs = Number(process.env.CHECK_RUNS) || 150
@@ -311,7 +363,7 @@ try {
     await converges(w)
     for (const s of Object.values(w.syncs)) s.stop()
   }), { seed, numRuns: runs })
-  console.log(`folder model (browser): every step held (${runs} random runs of up to 40 steps, seed ${seed})`)
+  console.log(`folder model (browser): every known case and every step held (${runs} random runs of up to 40 steps, seed ${seed})`)
 } catch (e) {
   console.error(`folder model (browser): FAILED (seed ${seed})\n${String(e.message).split('\n').slice(0, 30).join('\n')}\n${e.cause ? String(e.cause.stack ?? e.cause).slice(0, 1500) : ''}`)
   process.exit(1)

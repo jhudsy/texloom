@@ -741,9 +741,14 @@ project from elsewhere syncs with its own server straight from the page (`web/sr
 - A server must be `https` (`http` only on this computer, for testing, or when the app itself is
   on `http`), and nothing but encrypted data goes to it: the same as for the home server. The relay
   already answers any origin (CORS `*`), and the page's policy allows `https:`/`wss:` connections.
-- The creation code is the home server's, so it isn't sent to other servers. Copies are made on the
-  home server. Moving to new keys makes a new project, so it's done from the project's own server's
-  web app, where its owner's code is.
+- Creation codes are per server, each sent only to its own server. The list's settings carry `code`
+  (the list's own server's) and `code:<origin>` for each other; the desktop app's
+  `creation-codes.json` maps onto them, so a code entered anywhere reaches every device.
+- A new project (or copy) goes on a server you choose when you know more than one: the home server,
+  the servers of projects on your list, those you hold a code for (and in the desktop app, its
+  folders' servers), defaulting to the last one used (`texloom.lastServer`; `last-server.json`).
+  The web app makes it there directly, with that server's code. Moving to new keys makes a new
+  project, so it's done from the project's own server's web app.
 
 ## Copying a project
 
@@ -799,6 +804,11 @@ kinds of check guard against that kind of bug coming back.
   saved in the editor taken for a stale copy and reverted; a Windows file losing its line endings
   when a stale copy came back; and, in the browser, a save made in the last couple of seconds
   overwritten by changes arriving from others.
+
+- **A library of the failures found.** `scripts/folder-cases.json` holds every folder-sync failure
+  found so far (by the models, the end-to-end check or a report) as its exact steps, with what it
+  caught; both models run every case on every check before their random runs, so each stays
+  exercised. A new failure gets a case.
 
 Each was checked against the code from before its fix: the properties and the invariant both find
 the "\r\n" bug from 0.4.21 at once. Writing them found more: `applyText` dropped a newline added
