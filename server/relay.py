@@ -40,6 +40,7 @@ import argparse
 import asyncio
 import base64
 import binascii
+import contextlib
 import datetime as dt
 import hashlib
 import hmac
@@ -63,6 +64,7 @@ from aiohttp import WSCloseCode, WSMsgType, web
 
 from texloom.crypto import canonical_pub, revoke_msg, signer
 
+from .files import Files, FilesError, FolderFiles, open_files
 from .lists import MAX_LIST, RETIRED, Lists
 
 log = logging.getLogger("texloom.relay")
@@ -87,10 +89,6 @@ LISTEN_BACKLOG = 2048  # connections waiting to be accepted: everyone reconnects
 CLOSE_WAIT = 5.0  # seconds to let connections close cleanly when the server stops
 SHUTDOWN_WAIT = 10.0  # then seconds to let other requests (an upload, say) finish
 PURGE_PAUSE = 0.01  # seconds between deleted projects: lets live editing through
-# Stored files of an evicted, relay-only or deleted project are erased a batch at a time, between
-# other work: SQLite reads every page of a row to free it, which for hundreds of MB on a cold disk
-# would hold up every connection for seconds.
-REAP_BATCH = 16 * MiB
 MODE_SKEW = 600  # seconds a signed mode-change command stays valid
 MAX_REVOKED = 1000  # revocations kept per project
 # Compacted edits are remembered by hash so a replay of one isn't stored again. Only the most
@@ -108,7 +106,6 @@ OUT_MAX = 256 * MiB  # bytes waiting to go out on all connections: beyond this, 
 STALL = 10  # seconds a large reply may make no progress before its reader is cut off
 HELLO_WAIT = 15  # seconds a private server gives a new connection to say who it is
 RECHECK = 60  # seconds between a private server's checks that a connected project's code still counts
-BLOB_PIECE = 256 * KiB  # files go out this much at a time, so a download holds little memory
 # A catch-up reply is built whole, for each person. Big ones take turns: together they may use
 # about this much memory. Building and sending one takes about four times its stored size.
 CATCHUP_MEMORY, CATCHUP_OVERHEAD = 192 * MiB, 4
@@ -378,9 +375,11 @@ class CodeBook:
 
 
 class Store:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, files: Files | None = None):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path.resolve()
+        # the content of stored files: a folder next to the database unless told otherwise
+        self.files: Files = files or FolderFiles(path.parent / "files")
         self.db = sqlite3.connect(path)
         self._revoked: dict[str, dict[str, bytes]] = {}
         self.db.execute("PRAGMA journal_mode=WAL")
@@ -394,13 +393,17 @@ class Store:
               PRIMARY KEY (project, seq));
             CREATE TABLE IF NOT EXISTS head (project TEXT PRIMARY KEY, seq INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS mode (project TEXT PRIMARY KEY, relay INTEGER NOT NULL);
+            -- Stored files; their content is in self.files under "<project>/<id>".
             -- kind 'output' = compiled PDF/log/SyncTeX, replaced by every compile: any writer may
             -- erase the stored content. 'file' = content of project files: only the owner may erase
             -- it (deleting a file from the project is a document edit, and History can restore it
             -- only while this content exists)
-            CREATE TABLE IF NOT EXISTS blob (
-              project TEXT NOT NULL, id TEXT NOT NULL, data BLOB NOT NULL, kind TEXT NOT NULL DEFAULT 'file',
-              PRIMARY KEY (project, id));
+            CREATE TABLE IF NOT EXISTS stored (
+              project TEXT NOT NULL, id TEXT NOT NULL, size INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'file',
+              PRIMARY KEY (project, id)) WITHOUT ROWID;
+            -- Stored files that no longer count and can't be fetched, waiting for their content to
+            -- be erased (see _reap). Kept here so a restart carries on where it stopped.
+            CREATE TABLE IF NOT EXISTS trash (project TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (project, id)) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS revoked (
               project TEXT NOT NULL, pub TEXT NOT NULL, sig BLOB NOT NULL, at REAL NOT NULL,
               PRIMARY KEY (project, pub));
@@ -421,9 +424,12 @@ class Store:
         )
         with self.db:  # a deleted project keeps only its tombstone (registrations from before this rule go now)
             self.db.execute("DELETE FROM projects WHERE project IN (SELECT project FROM deleted)")
+        # Stored files used to be kept in the database itself, in a table `blob`; start() moves them out.
+        self.legacy = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='blob'").fetchone() is not None
         self.usage: dict[str, int] = defaultdict(int)
         for q in ("SELECT project, SUM(length(data) + length(sig)) FROM log GROUP BY project",
-                  "SELECT project, SUM(length(data)) FROM blob GROUP BY project",
+                  "SELECT project, SUM(size) FROM stored GROUP BY project",
+                  *(["SELECT project, SUM(length(data)) FROM blob GROUP BY project"] if self.legacy else []),
                   f"SELECT project, COUNT(*) * {GONE_COST} FROM gone GROUP BY project"):
             for project, n in self.db.execute(q):
                 self.usage[project] += n or 0
@@ -438,17 +444,55 @@ class Store:
         self.seen: dict[str, float] = {p: max(s, c) for p, s, c in self.db.execute("SELECT project, seen, created FROM projects")}
         self.dir = path.parent
         self.meta_tokens, self.meta_at = float(META_BURST), time.monotonic()
-        # Stored files waiting to be erased (see REAP_BATCH): rowid -> (project, id, size). They no
-        # longer count, can't be fetched, and an upload of the same content keeps the row instead.
-        self.doomed: dict[int, tuple[str, str, int]] = {}
-        self.doomed_bytes: dict[str, int] = defaultdict(int)
+        # bytes of uploads under way: they count from the moment they're accepted (see put_blob)
+        self.pending: dict[str, int] = defaultdict(int)
         self._reaper: asyncio.Task | None = None
+        self._locks: dict[str, list] = {}  # key -> [lock, users]: one write or erase of a key at a time
         # files a stop left behind, of projects that keep none. (An evicted project's leftovers stay:
         # its writers may have uploaded again since, and what is there is valid content.)
-        left = self.db.execute("SELECT DISTINCT project FROM blob WHERE project IN "
+        left = self.db.execute("SELECT DISTINCT project FROM stored WHERE project IN "
                                "(SELECT project FROM deleted UNION SELECT project FROM mode WHERE relay=1)").fetchall()
         for (project,) in left:
             self._drop_files(project)
+
+    async def start(self) -> None:
+        """Before serving: check that the file store works, move files still in the database out to
+        it, and carry on erasing what a stop left in the trash."""
+        await self.files.check()
+        log.info("stored files: %s", self.files.name)
+        if self.legacy:
+            await self._move_out_of_db()
+        self._kick_reaper()
+
+    async def _move_out_of_db(self) -> None:
+        """Move the content of stored files from the database to the file store, a file at a time
+        (each committed once it's safe in the store, so a stop just leaves the rest for next time)."""
+        rows = self.db.execute("SELECT rowid, project, id, kind FROM blob").fetchall()
+        dropped = {p for (p,) in self.db.execute("SELECT project FROM deleted UNION SELECT project FROM mode WHERE relay=1")}
+        log.info("moving %d stored file(s) out of the database to %s", len(rows), self.files.name)
+        moved = 0
+        for i, (rowid, project, bid, kind) in enumerate(rows):
+            with self.db.blobopen("blob", "data", rowid, readonly=True) as b:
+                data = b.read()
+            if project not in dropped:
+                await self.files.put(f"{project}/{bid}", data)
+                moved += len(data)
+            with self.db:
+                if project not in dropped:
+                    self.db.execute("INSERT OR IGNORE INTO stored(project, id, size, kind) VALUES (?,?,?,?)",
+                                    (project, bid, len(data), kind))
+                self.db.execute("DELETE FROM blob WHERE rowid=?", (rowid,))
+            if (i + 1) % 100 == 0:
+                log.info("  %d of %d", i + 1, len(rows))
+        with self.db:
+            self.db.execute("DROP TABLE blob")
+        self.db.execute("VACUUM")  # give the freed space back to the disk (once checkpointed: WAL mode)
+        self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        self.legacy = False
+        for project in {r[1] for r in rows}:
+            if project in self.usage or project in self.owners:
+                self._recount(project)
+        log.info("moved %s of stored files out of the database", fmt_size(moved))
 
     # --- registration & accounting -------------------------------------------
     def owner(self, project: str) -> str | None:
@@ -532,10 +576,13 @@ class Store:
     def _recount(self, project: str) -> None:
         n = self.db.execute("SELECT COALESCE(SUM(length(data) + length(sig)), 0) FROM log WHERE project=?",
                             (project,)).fetchone()[0]
-        n += self.db.execute("SELECT COALESCE(SUM(length(data)), 0) FROM blob WHERE project=?",
+        n += self.db.execute("SELECT COALESCE(SUM(size), 0) FROM stored WHERE project=?",
                              (project,)).fetchone()[0]
+        if self.legacy:
+            n += self.db.execute("SELECT COALESCE(SUM(length(data)), 0) FROM blob WHERE project=?",
+                                 (project,)).fetchone()[0]
         n += GONE_COST * self.db.execute("SELECT COUNT(*) FROM gone WHERE project=?", (project,)).fetchone()[0]
-        n -= self.doomed_bytes.get(project, 0)
+        n += self.pending.get(project, 0)
         self._grew(project, n - self.usage[project])
 
     def free_disk(self) -> int:
@@ -683,107 +730,117 @@ class Store:
         return msg
 
     def _drop_files(self, project: str) -> None:
-        """Erase a project's stored files: at once they no longer count or can be fetched, and the
-        rows go a batch at a time in the background (see REAP_BATCH), or now if nothing is running."""
-        for rowid, bid, n in self.db.execute("SELECT rowid, id, length(data) FROM blob WHERE project=?", (project,)).fetchall():
-            if rowid not in self.doomed:
-                self.doomed[rowid] = (project, bid, n)
-                self.doomed_bytes[project] += n
+        """Erase a project's stored files: at once they no longer count or can be fetched, and their
+        content is erased in the background (see _reap)."""
+        with self.db:
+            self.db.execute("INSERT OR IGNORE INTO trash(project, id) SELECT project, id FROM stored WHERE project=?", (project,))
+            self.db.execute("DELETE FROM stored WHERE project=?", (project,))
         self._recount(project)
+        self._kick_reaper()
+
+    def _kick_reaper(self) -> None:
+        """Erase what's in the trash, in the background. From the command line (no event loop),
+        empty_trash() does it."""
         try:
             loop = asyncio.get_running_loop()
-        except RuntimeError:  # the command line: nothing to hold up
-            while self.doomed:
-                self._reap_some()
+        except RuntimeError:
             return
-        if self.doomed and (self._reaper is None or self._reaper.done()):
+        if self._reaper is None or self._reaper.done():
             self._reaper = loop.create_task(self._reap())
 
-    def _reap_some(self) -> None:
-        batch, size = [], 0
-        for rowid, (project, bid, n) in self.doomed.items():
-            batch.append((rowid, project, bid, n))
-            size += n
-            if size >= REAP_BATCH:
-                break
-        with self.db:
-            # by rowid, and only the very row that was doomed (a rowid could in principle be reused)
-            self.db.executemany("DELETE FROM blob WHERE rowid=? AND project=? AND id=?", [b[:3] for b in batch])
-        for rowid, project, _bid, n in batch:
-            del self.doomed[rowid]
-            self.doomed_bytes[project] -= n  # it no longer counted: usage stays as it is
-            if not self.doomed_bytes[project]:
-                del self.doomed_bytes[project]
-
     async def _reap(self) -> None:
-        while self.doomed:
-            try:
-                self._reap_some()
-            except sqlite3.Error:
-                log.exception("erasing stored files")
-                return  # left for the next deletion, or the next start
-            await asyncio.sleep(0)
+        while True:
+            rows = self.db.execute("SELECT project, id FROM trash LIMIT 100").fetchall()
+            if not rows:
+                return
+            for project, bid in rows:
+                key = f"{project}/{bid}"
+                async with self._holding(key):
+                    if self.db.execute("SELECT 1 FROM trash WHERE project=? AND id=?", (project, bid)).fetchone() is None:
+                        continue  # uploaded again meanwhile: it's a stored file once more
+                    try:
+                        await self.files.delete(key)
+                    except (FilesError, OSError):
+                        log.exception("erasing a stored file (tried again later)")
+                        return
+                    with self.db:
+                        self.db.execute("DELETE FROM trash WHERE project=? AND id=?", (project, bid))
 
-    def _live_row(self, project: str, bid: str) -> tuple[int, int] | None:
-        """A stored file's rowid and size, unless it is waiting to be erased."""
-        row = self.db.execute("SELECT rowid, length(data) FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
-        return row if row and row[0] not in self.doomed else None
+    async def empty_trash(self) -> None:
+        """Erase everything in the trash now (the command line's --purge-code)."""
+        try:
+            await self.files.check()
+            await self._reap()
+        finally:
+            await self.files.close()
+
+    @contextlib.asynccontextmanager
+    async def _holding(self, key: str):
+        """One write or erase of a stored file's content at a time, so an erase that was decided
+        before an upload of the same content can't remove what that upload wrote."""
+        entry = self._locks.setdefault(key, [asyncio.Lock(), 0])
+        entry[1] += 1
+        try:
+            async with entry[0]:
+                yield
+        finally:
+            entry[1] -= 1
+            if not entry[1]:
+                del self._locks[key]
+
+    def blob_size(self, project: str, bid: str) -> int | None:
+        """A stored file's size; None if it isn't stored (or is in the trash)."""
+        row = self.db.execute("SELECT size FROM stored WHERE project=? AND id=?", (project, bid)).fetchone()
+        return row[0] if row else None
 
     def has_blob(self, project: str, bid: str) -> bool:
-        return self._live_row(project, bid) is not None
+        return self.blob_size(project, bid) is not None
 
-    def put_blob(self, project: str, bid: str, data: bytes, kind: str = "file") -> None:
-        with self.db:
-            cur = self.db.execute("INSERT OR IGNORE INTO blob(project, id, data, kind) VALUES (?,?,?,?)",
-                                  (project, bid, data, kind))
-        if cur.rowcount:
-            self._grew(project, len(data))
-            return
-        # The row is there but waiting to be erased: keep it instead. Ids name the content, so it
-        # holds the same file (encrypted differently, which readers don't mind).
-        row = self.db.execute("SELECT rowid FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
-        if row and (gone := self.doomed.pop(row[0], None)):
-            self.doomed_bytes[project] -= gone[2]
-            if not self.doomed_bytes[project]:
-                del self.doomed_bytes[project]
-            if kind == "file":
-                self.mark_file(project, bid)
-            self._recount(project)
+    async def put_blob(self, project: str, bid: str, data: bytes | memoryview, kind: str = "file") -> bool:
+        """Store a file's content. It counts from the start (call this right after may_store, with
+        nothing awaited between), so uploads under way at once can't together pass a limit. False
+        if it was stored already. FilesError if the file store failed."""
+        n = len(data)
+        self.pending[project] += n
+        self._grew(project, n)
+        key = f"{project}/{bid}"
+        try:
+            async with self._holding(key):
+                if self.has_blob(project, bid):
+                    if kind == "file":
+                        self.mark_file(project, bid)
+                    return False
+                await self.files.put(key, data)
+                with self.db:
+                    self.db.execute("INSERT OR IGNORE INTO stored(project, id, size, kind) VALUES (?,?,?,?)", (project, bid, n, kind))
+                    self.db.execute("DELETE FROM trash WHERE project=? AND id=?", (project, bid))  # not to be erased now
+                return True
+        finally:
+            self.pending[project] -= n
+            if not self.pending[project]:
+                del self.pending[project]
+            if project in self.usage or project in self.owners:
+                self._recount(project)  # the stored size instead of the reservation (or nothing)
 
     def mark_file(self, project: str, bid: str) -> None:
         """Content uploaded as a project file is a file, even if it was first stored as output."""
         with self.db:
-            self.db.execute("UPDATE blob SET kind='file' WHERE project=? AND id=? AND kind!='file'", (project, bid))
+            self.db.execute("UPDATE stored SET kind='file' WHERE project=? AND id=? AND kind!='file'", (project, bid))
 
     def delete_blob(self, project: str, bid: str, any_kind: bool) -> bool:
-        if self._live_row(project, bid) is None:
-            return False  # not there, or already on its way out
         with self.db:
-            cur = self.db.execute("DELETE FROM blob WHERE project=? AND id=?" + ("" if any_kind else " AND kind='output'"),
+            cur = self.db.execute("DELETE FROM stored WHERE project=? AND id=?" + ("" if any_kind else " AND kind='output'"),
                                   (project, bid))
+            if cur.rowcount:
+                self.db.execute("INSERT OR IGNORE INTO trash(project, id) VALUES (?,?)", (project, bid))
         if cur.rowcount:
             self._recount(project)
+            self._kick_reaper()
         return bool(cur.rowcount)
 
-    def find_blob(self, project: str, bid: str) -> tuple[int, int] | None:
-        """Where a stored file is, and its size."""
-        return self._live_row(project, bid)
-
-    async def read_blob(self, rowid: int, project: str, bid: str):
-        """A stored file, a piece at a time. Its own connection, so a slow download holds nothing up.
-        The row is looked up again there: it may have been deleted, and its rowid reused, meanwhile."""
-        db = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
-        try:
-            db.execute("BEGIN")  # one snapshot for the check and the read
-            row = db.execute("SELECT rowid FROM blob WHERE project=? AND id=?", (project, bid)).fetchone()
-            if not row or row[0] != rowid:
-                return
-            with db.blobopen("blob", "data", rowid, readonly=True) as blob:
-                while piece := blob.read(BLOB_PIECE):
-                    yield piece
-                    await asyncio.sleep(0)  # let live editing through between pieces
-        finally:
-            db.close()
+    def read_blob(self, project: str, bid: str):
+        """A stored file's content, a piece at a time."""
+        return self.files.get(f"{project}/{bid}")
 
 
 class Conn:
@@ -1400,7 +1457,8 @@ class Relay:
             if spool.readinto(memoryview(signed)[len(prefix):]) != size:
                 raise web.HTTPBadRequest(text="short upload")
             data = memoryview(signed)[len(prefix):]
-        if not verify(project, signed, sig, self.store.revoked(project)):
+        # checking the signature reads the whole file: on a worker thread, so live editing carries on
+        if not await asyncio.to_thread(verify, project, signed, sig, self.store.revoked(project)):
             raise web.HTTPForbidden(text="bad signature")
         if project in self.store.deleted:  # deleted while it was uploading
             return web.json_response({"code": "deleted"}, status=410)
@@ -1417,8 +1475,12 @@ class Relay:
         if refused:
             status = {"needs-code": 403, "code-expired": 403, "quota-full": 507, "project-full": 413, "server-full": 507}[refused]
             return web.json_response({"code": refused}, status=status)
-        self.store.put_blob(project, bid, data, kind)
-        return web.Response(status=201)
+        try:
+            stored = await self.store.put_blob(project, bid, data, kind)
+        except (FilesError, OSError):
+            log.exception("storing a file")
+            return web.json_response({"code": "store-failed"}, status=503)
+        return web.Response(status=201 if stored else 200)
 
     async def delete_blob(self, request: web.Request) -> web.Response:
         """Erase stored content. Any writer may erase compiled output (replaced by every compile);
@@ -1449,11 +1511,11 @@ class Relay:
             raise web.HTTPGone()
         if self.denied(project, None):
             raise web.HTTPForbidden()
-        found = self.store.find_blob(project, bid)
-        if found is None:
+        size = self.store.blob_size(project, bid)
+        if size is None:
             raise web.HTTPNotFound()
-        return web.Response(body=self.store.read_blob(found[0], project, bid), content_type="application/octet-stream", headers={
-            "Content-Length": str(found[1]),
+        return web.Response(body=self.store.read_blob(project, bid), content_type="application/octet-stream", headers={
+            "Content-Length": str(size),
             "Cache-Control": "public, max-age=31536000, immutable",
             "Content-Disposition": "attachment",  # ciphertext; never something to render
         })
@@ -1604,8 +1666,8 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
              admin_token: str = "", evict_days: float = 0, texlive: Path | None = None,
              texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None,
              purge_days: float | None = None, lists: bool = True, private: bool = False,
-             codes_url: str = "", min_version: str = "") -> web.Application:
-    relay = Relay(Store(db), limits, codes, lists, private, min_version)
+             codes_url: str = "", min_version: str = "", files: Files | None = None) -> web.Application:
+    relay = Relay(Store(db, files), limits, codes, lists, private, min_version)
     relay.codes_url = codes_url
     if texlive:  # TeX Live files on demand for the in-browser engine
         from .texlive import TexLive
@@ -1615,6 +1677,12 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
         else:
             log.warning("--texlive %s has no index yet: run with --texlive-init first", texlive)
     app = web.Application(middlewares=[headers], client_max_size=MAX_BLOB + 1024)
+
+    async def file_store(_app: web.Application):
+        await relay.store.start()
+        yield
+        await relay.store.files.close()
+    app.cleanup_ctx.append(file_store)
     if admin_token:
         from .admin import Admin
         app.router.add_get("/admin", Admin(relay, admin_token, evict_days, purge_days).page)
@@ -1670,6 +1738,9 @@ def main() -> None:
     p.add_argument("--host", default="127.0.0.1", help="interface to listen on (default: localhost only)")
     p.add_argument("--port", type=int, default=8787)
     p.add_argument("--db", type=Path, default=Path("data/texloom.db"))
+    p.add_argument("--files", default=os.environ.get("TEXLOOM_FILES", ""), metavar="DIR or s3://BUCKET[/PREFIX]",
+                   help="where stored files' content goes (default: a folder 'files' next to --db). For s3://, "
+                        "set TEXLOOM_S3_ENDPOINT, TEXLOOM_S3_REGION, TEXLOOM_S3_KEY_ID and TEXLOOM_S3_SECRET")
     p.add_argument("--static", type=Path, default=Path("web/dist"))
     p.add_argument("--tex-assets", type=Path, default=Path("tex-assets"),
                    help="directory containing busytex/ (in-browser TeX); optional")
@@ -1723,6 +1794,10 @@ def main() -> None:
                    help="TeX Live mirror to use first (…/systems/texlive/tlnet/), e.g. one in your country; "
                         "repeatable. Without it, mirror.ctan.org picks one near the server")
     a = p.parse_args()
+    try:
+        files = open_files(a.files, a.db.parent / "files")
+    except FilesError as e:
+        p.error(str(e))
     if a.texlive_init:
         if not a.texlive:
             sys.exit("--texlive-init needs --texlive DIR")
@@ -1753,13 +1828,14 @@ def main() -> None:
             print(f"{label or a.renew_code}: {size}, {f'valid until {until}' if until else 'no expiry'}")
             return
         codes._load()
-        store = Store(a.db)
+        store = Store(a.db, files)
         if a.purge_code is not None:
             c = CodeBook.normalize(a.purge_code)
             if c in codes.codes and not codes.expired(c):
                 sys.exit(f"{a.purge_code} is still valid{f' (until {codes.until[c]})' if c in codes.until else ''}: "
                          "let it expire, or delete its line, first")
             n, freed, _ = Relay(store, codes=codes).purge(c)
+            asyncio.run(store.empty_trash())
             print(f"purged {n} project(s), {fmt_size(freed)} freed. If the server is running, restart it so its "
                   "storage totals are up to date.")
             return
@@ -1801,7 +1877,7 @@ def main() -> None:
                         admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
                         texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
                         purge_days=a.purge_expired_after, lists=not a.no_project_lists, private=a.private,
-                        min_version=a.min_version), host=a.host, port=a.port,
+                        min_version=a.min_version, files=files), host=a.host, port=a.port,
                 backlog=LISTEN_BACKLOG, shutdown_timeout=SHUTDOWN_WAIT)
 
 

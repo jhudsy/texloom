@@ -307,7 +307,8 @@ def pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> None:
         step("a 2 MB picture, a rename (then an edit to it) and a deletion arrive")
 
         db = sqlite3.connect(server_db)
-        stored = [db.execute(f"SELECT COUNT(*) FROM {t} WHERE project=?", (project,)).fetchone()[0] for t in ("log", "blob")]
+        stored = [db.execute(f"SELECT COUNT(*) FROM {t} WHERE project=?", (project,)).fetchone()[0] for t in ("log", "stored")]
+        stored[1] += len(list((server_db.parent / "files" / project).glob("*")))  # and no content in its file store
         mode = db.execute("SELECT relay FROM mode WHERE project=?", (project,)).fetchone()
         db.close()
         if stored != [0, 0] or not (mode and mode[0]):
@@ -546,7 +547,8 @@ def browser_pairing(name: str, url: str, tmp: Path, server_db: Path, step) -> No
 
         invariants(a, b)
         db = sqlite3.connect(server_db)
-        stored = [db.execute(f"SELECT COUNT(*) FROM {t} WHERE project=?", (project,)).fetchone()[0] for t in ("log", "blob")]
+        stored = [db.execute(f"SELECT COUNT(*) FROM {t} WHERE project=?", (project,)).fetchone()[0] for t in ("log", "stored")]
+        stored[1] += len(list((server_db.parent / "files" / project).glob("*")))  # and no content in its file store
         db.close()
         if stored != [0, 0]:
             raise Failed(f"the server kept something: {stored[0]} changes, {stored[1]} files")

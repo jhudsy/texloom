@@ -412,6 +412,27 @@ database counts as free, because SQLite reuses it before growing the file. Two m
 `--project-max-bytes` (default 200M per project, except for unlimited allowances) and
 `--max-bytes` (total). Without `--codes-file`, every project may be stored.
 
+### Where stored files go
+
+The database (`--db`) holds the edit logs and which files are stored. The files themselves
+(pictures, PDFs, uploads, all encrypted by the apps) go in a folder `files` next to the
+database, or wherever `--files` (or `TEXLOOM_FILES` in `/etc/texloom/env`) says:
+
+- a folder: `--files /srv/texloom-files`;
+- an S3-compatible bucket: `--files s3://BUCKET` or `s3://BUCKET/PREFIX`, with the endpoint and
+  keys in the environment: `TEXLOOM_S3_ENDPOINT` (e.g. `https://s3.example.org`),
+  `TEXLOOM_S3_REGION` (what the store calls its region: `garage` for Garage by default, `auto`
+  for Cloudflare R2), `TEXLOOM_S3_KEY_ID` and `TEXLOOM_S3_SECRET`.
+
+Any S3-compatible store works: [Garage](https://garagehq.deuxfleurs.fr/) or RustFS on your own
+machines, or Cloudflare R2, Backblaze B2 or AWS S3. The store only ever sees encrypted data.
+The server checks it can reach the bucket when it starts, and stops with the reason if not.
+Files kept in the database by older versions move to the store by themselves the first time
+the new version starts. With a bucket, `--min-free` still guards the disk the database is on.
+
+`uv run python scripts/check_files.py` checks the store against a folder and, if `garage` is
+installed, a throwaway Garage; `s3://bucket/prefix` as the argument checks a store of your own.
+
 A refused change is never lost:
 - it still reaches everyone online at that moment;
 - the sender keeps it and retries;
@@ -866,6 +887,7 @@ cd web && npm run dev               # terminal 2 -> http://localhost:5173 (proxi
 | path | what |
 |---|---|
 | `server/relay.py` | relay + encrypted store (aiohttp, SQLite): signatures, storage modes, allowances, limits |
+| `server/files.py` | where stored files' content goes: a folder or an S3-compatible bucket |
 | `texloom/crypto.py` | keys, links, AES-GCM, Ed25519 (mirrors `web/src/crypto.ts`) |
 | `texloom/replica.py` | folder helper's replica: pycrdt document, outbox, peer handshake, blobs |
 | `texloom/folder.py` | two-way folder ⇄ CRDT sync, path safety, locked-down latexmk |
@@ -911,6 +933,7 @@ npm run check-props     # random texts and edits (Windows line endings, emoji): 
 cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for the desktop, and its merge agrees with the web app's
 uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
 uv run --with hypothesis python scripts/check_folder_model.py     # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
+uv run python scripts/check_files.py                              # the server's file store: a folder, and Garage (S3) if installed
 (cd web && npm run check-folder-model)                           # the same for the browser's folder sync, on a fake clock and folder
 ```
 

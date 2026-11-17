@@ -22,13 +22,14 @@ No accounts: a project is shared by sending a link.
                   ├──── updates over WS ────┤
  local daemon    ─┘       ┌────────┐        └─ local daemon (collaborator)
  (Python, folder  ───────▶│ server │
-  sync + latexmk)         │ relay +│  SQLite: opaque ciphertext log + blobs
+  sync + latexmk)         │ relay +│  SQLite: opaque ciphertext log; files: a folder or S3 bucket
                           │ store  │
                           └────────┘
 ```
 
 1. **Server** (`server/`, Python + aiohttp + SQLite). Relays updates between connected
-   peers, appends them to a per-project log, stores encrypted blobs, serves the web
+   peers, appends them to a per-project log, stores encrypted blobs (in a folder or an
+   S3-compatible bucket, `server/files.py`; SQLite only records which exist), serves the web
    app. It never sees keys or plaintext. It verifies write signatures so that holders
    of a read-only link cannot write.
 2. **Web editor** (`web/`, TypeScript + Vite + CodeMirror 6 + Yjs). Full replica in
@@ -207,13 +208,23 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   are remembered, each counting 100 bytes against the allowance, and eviction, purging or
   going relay-only forgets them. An older replay is harmless: updates are idempotent, and
   it counts against the allowance only until the next snapshot.
-- **Erasing:** when a project is evicted, purged, made relay-only or deleted for everyone,
-  its stored files stop counting and can no longer be fetched at once, but their rows are
-  erased 16 MiB at a time between other work (`Store._drop_files`). SQLite reads every page
-  of a row to free it, so erasing hundreds of MB in one go would hold up every connection.
-  An upload of a file waiting to be erased keeps its row instead (ids name the content). A
-  stop part-way is finished at the next start for deleted and relay-only projects; an
-  evicted project's leftovers stay and count again, as its writers may have uploaded since.
+- **Where files are:** the content of stored files is kept outside the database, in a folder
+  (`<files>/<project>/<id>`) or an S3-compatible bucket (`server/files.py`); the table `stored`
+  records each one's size and kind. An upload is written to the store first and recorded
+  after, so a recorded file always has its content; a stop in between leaves at worst an
+  unrecorded copy, which the same upload later overwrites. An upload counts against the
+  allowances from the moment it's accepted (`Store.pending`), so uploads at once can't
+  together pass a limit. Folder reads and writes, and checking an upload's signature, run on
+  worker threads, so a large file doesn't hold up live editing. A database from before this
+  (content in a table `blob`) is moved out, a file at a time, when the server starts.
+- **Erasing:** when a project is evicted, purged, made relay-only or deleted for everyone, or a
+  file is deleted, its stored files stop counting and can no longer be fetched at once: their
+  rows move to the table `trash`, and their content is erased in the background
+  (`Store._reap`), carrying on after a restart. One write or erase of a file's content runs at
+  a time (`Store._holding`), and an upload of content in the trash takes it out, so an erase
+  decided earlier can't remove what that upload wrote. Deleted and relay-only projects' files
+  left by a stop are dropped at the next start; an evicted project's leftovers stay and count
+  again, as its writers may have uploaded since.
 - **Memory:** WebSocket frames are read whole before they can be checked, so they are
   capped at 16 MiB, and large frames being handled are capped server-wide (192 MiB).
   Files go over HTTP (≤ 50 MiB, a few uploads read at a time), or peer to peer
