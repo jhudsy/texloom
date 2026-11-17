@@ -412,6 +412,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     "The server didn't accept that code.": 'Le serveur n’a pas accepté ce code.',
     "Couldn't reach the server: {err}": 'Impossible de joindre le serveur\xa0: {err}',
     'Copies of this list': 'Copies de cette liste',
-    'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': 'Conservée sur plusieurs serveurs, la liste survit à chacun d’eux, et chaque appareil tient toutes les copies à jour. Chaque copie est chiffrée. Le lien de synchronisation fonctionne sur n’importe lequel ; les clés d’accès ne fonctionnent que sur le serveur où elles ont été ajoutées.',
+    'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': 'Conservée sur plusieurs serveurs, la liste survit à chacun d’eux, et chaque appareil tient toutes les copies à jour. Chaque copie est chiffrée. Le lien de synchronisation fonctionne sur n’importe lequel ; les clés d’accès ne fonctionnent que sur le serveur où elles ont été ajoutées.',
     'The list needs at least one copy.': 'La liste doit avoir au moins une copie.',
 }
