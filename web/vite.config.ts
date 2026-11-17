@@ -100,6 +100,13 @@ function licences(): Plugin {
         'Copyright Einar Andreas Rødland. LaTeX Project Public License (LPPL): https://www.latex-project.org/lppl/',
         'http://app.uio.no/ifi/texcount/',
         '',
+        line,
+        'latexdiff 1.4.0 (web/public/vendor/latexdiff.pl: latexdiff-so, with Algorithm::Diff included), unchanged',
+        'Copyright F. J. Tilmann. GNU General Public License, version 3 or later:',
+        'https://www.gnu.org/licenses/gpl-3.0.html. https://ctan.org/pkg/latexdiff',
+        'It includes Algorithm::Diff 1.15, copyright Ned Konz, under the same terms as Perl itself',
+        '(the Artistic License or the GNU General Public License): https://dev.perl.org/licenses/',
+        '',
         ...[...seen].sort(([a], [b]) => a.localeCompare(b)).flatMap(([name, p]) => [
           line, `${name} ${p.version}`, `Licence: ${p.license}`, p.home, '', p.text || '(no licence file in the package)', ''])
       ]
