@@ -17,6 +17,7 @@ import { zoteroAccount } from './zotero'
 import { githubAccount } from './github'
 import { tags } from './tags'
 import { normalServer } from './servers'
+import { APP_HEADER } from './version'
 
 /** The message is a code: needs-code, code-expired, list-full, list-retired, password-taken,
  *  wrong-password, no-prf, passkey-failed, busy or server. */
@@ -61,8 +62,9 @@ export const copyProblems = new Map<string, string>()
 
 // ---- a server -----------------------------------------------------------------------------
 async function pull<T>(key: ListKey, server = location.origin): Promise<{ seq: number; doc: T } | null> {
-  const r = await fetch(`${server}/api/list/${key.id}`, { cache: 'no-store' })
+  const r = await fetch(`${server}/api/list/${key.id}`, { cache: 'no-store', headers: APP_HEADER })
   if (r.status === 404) return null
+  if (r.status === 426) throw new ListError('update-needed')
   if (r.status === 410) throw new ListError('list-retired')
   if (!r.ok) throw new ListError('server')
   const plain = await key.decrypt(new Uint8Array(await r.arrayBuffer()))
@@ -76,8 +78,9 @@ async function push(key: ListKey, seq: number, doc: unknown, server = location.o
 
 /** An entry as stored (encrypted), by id: null if missing, 'retired' if retired. */
 async function getRaw(server: string, id: string): Promise<{ seq: number; data: Uint8Array } | null | 'retired'> {
-  const r = await fetch(`${server}/api/list/${id}`, { cache: 'no-store' })
+  const r = await fetch(`${server}/api/list/${id}`, { cache: 'no-store', headers: APP_HEADER })
   if (r.status === 404) return null
+  if (r.status === 426) throw new ListError('update-needed')
   if (r.status === 410) return 'retired'
   if (!r.ok) throw new ListError('server')
   return { seq: Number(r.headers.get('X-Seq')), data: new Uint8Array(await r.arrayBuffer()) }
@@ -87,7 +90,7 @@ async function getRaw(server: string, id: string): Promise<{ seq: number; data: 
 async function putRaw(server: string, id: string, seq: number, data: Uint8Array, seed: string): Promise<boolean> {
   const head = enc.encode(`list:${id}:${seq}:`), msg = new Uint8Array(head.length + data.length)
   msg.set(head); msg.set(data, head.length)
-  const headers: Record<string, string> = { 'X-Seq': String(seq), 'X-Sig': b64e(ed25519.sign(msg, b64d(seed))), 'Content-Type': 'application/octet-stream' }
+  const headers: Record<string, string> = { ...APP_HEADER, 'X-Seq': String(seq), 'X-Sig': b64e(ed25519.sign(msg, b64d(seed))), 'Content-Type': 'application/octet-stream' }
   const code = creationCode.get(server)
   if (code) headers['X-Create-Code'] = code
   const r = await fetch(`${server}/api/list/${id}`, { method: 'PUT', headers, body: data as BodyInit })
@@ -140,7 +143,7 @@ const exchange = (key: ListKey, local: ListDoc) => replicate<ListDoc>(key, (had,
 /** Delete an entry on one server, keeping its id out of use, given the seed of its signing key. */
 async function retire(id: string, seed: string, server = location.origin) {
   const sig = b64e(ed25519.sign(enc.encode(`listdel:${id}`), b64d(seed)))
-  const r = await fetch(`${server}/api/list/${id}`, { method: 'DELETE', headers: { 'X-Sig': sig } })
+  const r = await fetch(`${server}/api/list/${id}`, { method: 'DELETE', headers: { ...APP_HEADER, 'X-Sig': sig } })
   if (!r.ok && r.status !== 404 && r.status !== 410) throw new ListError('server')
 }
 

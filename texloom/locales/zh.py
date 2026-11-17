@@ -327,4 +327,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Copies of this list': '此列表的副本',
     'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': '列表保存在多台服务器上，就不会因任何一台消失而丢失，每台设备都会保持所有副本最新。每个副本都经过加密。同步链接在其中任何一台上都可使用；通行密钥只在添加它的服务器上有效。',
     'The list needs at least one copy.': '列表至少需要一个副本。',
+    'Update needed': '需要更新',
+    "This project's server needs TeXLoom {version} or later. Update the app (Help ▸ Check for updates…).": '此项目的服务器需要 TeXLoom {version} 或更高版本。请更新应用（帮助 ▸ 检查更新…）。',
+    'This server needs a newer TeXLoom: update the app.': '此服务器需要更新的 TeXLoom：请更新应用。',
 }

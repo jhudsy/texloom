@@ -11,6 +11,7 @@ import { IndexeddbPersistence } from 'y-indexeddb'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import { Keys, b64d, b64e, canonicalPub, revokeMsg, signer } from './crypto'
 import { t } from './i18n'
+import { APP_VERSION } from './version'
 import type { Link } from './versions'
 
 const REMOTE = Symbol('remote')
@@ -133,7 +134,9 @@ export class Replica {
   private refusal: StoreProblem = null // what the server last said
   storeInfo: StoreInfo | null = null
   /** A private server turned this project away: why. Everything here keeps working on this device. */
-  denied: 'needs-code' | 'code-expired' | null = null
+  denied: 'needs-code' | 'code-expired' | 'update-needed' | null = null
+  /** With update-needed: the oldest version the server accepts. */
+  minVersion = ''
   /** When the owner deleted the project for everyone (ms), or null. This copy then stays as it
    *  is, read-only: nothing connects, and nothing is sent. */
   deletedAt: number | null = null
@@ -263,7 +266,7 @@ export class Replica {
     ws.onopen = () => {
       this.backoff = 1000
       const code = this.creationCode()
-      ws.send(JSON.stringify({ t: 'hello', since: this.since, ...(code ? { code } : {}) }))
+      ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, ...(code ? { code } : {}) }))
     }
     ws.onmessage = (ev) => this.handle(JSON.parse(ev.data)).catch((e) => console.error(e))
     ws.onclose = () => {
@@ -365,6 +368,7 @@ export class Replica {
       case 'err':
         if (m.denied) {
           this.denied = m.code
+          this.minVersion = typeof m.min === 'string' ? m.min : ''
           this.onStatus()
         } else if (STORE_PROBLEMS.has(m.code)) {
           // Not stored, but already relayed to anyone online. Keep it in the outbox; retry later.

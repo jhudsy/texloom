@@ -24,6 +24,7 @@ function explain(code: string | null): string {
     case 'no-prf': return t('This browser or passkey can’t encrypt with a passkey (it needs the “PRF” feature).')
     case 'passkey-failed': return t('The passkey didn’t work. Try again.')
     case 'network': return t('Couldn’t reach the server; try again when online.')
+    case 'update-needed': return t('This server needs a newer version of TeXLoom. Reload the page to get it.')
     default: return t('The server refused the list.')
   }
 }

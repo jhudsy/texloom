@@ -74,6 +74,7 @@ const es: Catalog = {
   'Copies of this list': 'Copias de esta lista',
   'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': 'Guardada en más de un servidor, la lista sobrevive a cualquiera de ellos, y cada dispositivo mantiene todas las copias al día. Cada copia está cifrada. El enlace de sincronización funciona en cualquiera de ellos; las llaves de acceso solo funcionan en el servidor donde se añadieron.',
   'Keep a copy there too': 'Guardar también una copia allí',
+  'This server needs a newer version of TeXLoom. Reload the page to get it.': 'Este servidor necesita una versión más reciente de TeXLoom. Recarga la página para obtenerla.',
 }
 
 export default es

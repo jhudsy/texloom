@@ -20,7 +20,7 @@ import aiohttp
 from cryptography.exceptions import InvalidTag
 from pycrdt import Doc, Map, merge_updates
 
-from . import tls
+from . import __version__, tls
 from .crypto import Keys, b64d, b64e, canonical_pub, revoke_msg, signer
 
 log = logging.getLogger("texloom")
@@ -82,7 +82,8 @@ class Replica:
         self.server_mode = "server"  # what the server says: "server" (stores) or "relay"
         self.pending_mode: str | None = None  # storage change not yet sent to the server
         self.store_refusal: str | None = None  # what the server last said
-        self.denied: str | None = None  # a private server turned this project away: why
+        self.denied: str | None = None  # the server turned this project away: why (private server, or update-needed)
+        self.min_version = ""  # with update-needed: the oldest version the server accepts
         self.deleted_at: float | None = None  # the owner deleted the project for everyone (seconds): read-only from then on
         self.refused: str | None = None  # the server's reason for rejecting the last change sent
         self._blob_waiters: dict[str, list[asyncio.Future]] = {}
@@ -623,7 +624,7 @@ class Replica:
                         backoff = 1
                         log.info("connected to %s", self.server)
                         self.connected.set()
-                        hello = {"t": "hello", "since": self.since}
+                        hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__}  # (--min-version)
                         if self.create_code:
                             hello["code"] = self.create_code
                         await ws.send_json(hello)
@@ -733,7 +734,11 @@ class Replica:
         elif t == "err":
             if m.get("denied"):
                 self.denied = str(m.get("code"))
-                if "denied" not in self._warned:
+                self.min_version = str(m.get("min") or "")
+                if self.denied == "update-needed" and "denied" not in self._warned:
+                    self._warned.add("denied")
+                    log.warning("NOT SYNCING: this server needs TeXLoom %s or later. Update the app (Help ▸ Check for updates…).", self.min_version)
+                elif "denied" not in self._warned:
                     self._warned.add("denied")
                     log.warning("NOT SYNCING: this server is private, and this project's creation code has expired or been removed."
                                 if self.denied == "code-expired" else

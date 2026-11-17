@@ -410,6 +410,16 @@ A refused change is never lost:
 - the editor shows a warning that the project isn't saved on the server.
 
 
+### Retiring old app versions
+
+The apps tell the server which version they are when they connect, and the admin page lists the
+apps and versions that connect, with when each was last seen. Once old versions have stopped
+connecting, set the oldest allowed with `--min-version X.Y.Z` (or `TEXLOOM_MIN_VERSION`; with
+`deploy/install.sh`, put `TEXLOOM_MIN_VERSION=X.Y.Z` in `/etc/texloom/env` and restart). Older apps,
+and those too old to say, are then turned away with a request to update: the desktop app shows
+"Update needed", the web app offers to reload (its newest version comes from the server), and
+project lists refuse them too. Support for what only those versions did can then be dropped.
+
 ### Private servers
 
 By default anyone who can reach your server can use it for live projects, though they can't read

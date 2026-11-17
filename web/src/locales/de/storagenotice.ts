@@ -43,6 +43,9 @@ const de: Catalog = {
   'Its encrypted copy and its collaborators’ changes go through that server. This page syncs it from there, whichever server you choose.': 'Seine verschlüsselte Kopie und die Änderungen der Mitwirkenden laufen über diesen Server. Diese Seite synchronisiert es von dort, egal welchen Server Sie wählen.',
   'Another server…': 'Anderer Server…',
   'Continue': 'Weiter',
+  'Not syncing: this server needs a newer version of TeXLoom ({{version}} or later). Reload the page to get it.': 'Keine Synchronisierung: Dieser Server braucht eine neuere TeXLoom-Version ({{version}} oder neuer). Laden Sie die Seite neu, um sie zu erhalten.',
+  'Not syncing: this project’s server needs a newer version of TeXLoom ({{version}} or later) than this server’s web app. Open the project from {{server}} instead.': 'Keine Synchronisierung: Der Server dieses Projekts braucht eine neuere TeXLoom-Version ({{version}} oder neuer) als die Web-App dieses Servers. Öffnen Sie das Projekt stattdessen über {{server}}.',
+  'Reload': 'Neu laden',
 }
 
 export default de

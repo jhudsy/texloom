@@ -109,7 +109,12 @@ function licences(): Plugin {
 }
 
 // In development, the Python relay runs on :8787 and Vite proxies to it.
+/** TeXLoom's version (pyproject.toml, bumped with each release): the web app tells servers which it
+ *  is, so that one can ask older ones to update (--min-version). */
+const appVersion = /^version = "([^"]+)"/m.exec(readFileSync(new URL('../pyproject.toml', import.meta.url), 'utf8'))?.[1] ?? 'dev'
+
 export default defineConfig({
+  define: { __TEXLOOM_VERSION__: JSON.stringify(appVersion) },
   plugins: [pdfjsCmaps(), serviceWorker(), licences()],
   server: {
     port: 5173,

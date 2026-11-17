@@ -97,12 +97,17 @@ export function riskBanner(r: Replica, writable: boolean, openSettings: () => vo
   const render = () => {
     if (r.denied && !dismissed) {
       el.replaceChildren(
-        h('span', {}, h('b', {}, '⚠ '), r.denied === 'code-expired'
+        h('span', {}, h('b', {}, '⚠ '), r.denied === 'update-needed'
+          ? (r.server === location.origin
+            ? t('Not syncing: this server needs a newer version of TeXLoom ({{version}} or later). Reload the page to get it.', { version: r.minVersion || '?' })
+            : t('Not syncing: this project’s server needs a newer version of TeXLoom ({{version}} or later) than this server’s web app. Open the project from {{server}} instead.', { version: r.minVersion || '?', server: serverName(r.server) }))
+          : r.denied === 'code-expired'
           ? t('Not syncing: this server is private, and the creation code this project was created with has expired or been removed. Renewing it restores access.')
           : t('Not syncing: this server is private, and this project needs a creation code from its owner.'),
           ' ' + t('Your copy here is safe and you can keep working, but nobody else gets your changes.')),
         h('span', { class: 'actions' },
-          r.denied === 'needs-code' ? h('button', { class: 'primary', onclick: async () => { if (await askCode(PRIVATE_INTRO())) r.reconnect() } }, t('Enter code')) : '',
+          r.denied === 'needs-code' ? h('button', { class: 'primary', onclick: async () => { if (await askCode(PRIVATE_INTRO(), r.server)) r.reconnect() } }, t('Enter code')) : '',
+          r.denied === 'update-needed' && r.server === location.origin ? h('button', { class: 'primary', onclick: () => location.reload() }, t('Reload')) : '',
           h('button', { title: t('Hide until next time'), 'aria-label': t('Hide this warning'), onclick: () => { dismissed = true; render() } }, '✕')))
       el.hidden = false
       return

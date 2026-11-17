@@ -114,6 +114,12 @@ class Admin:
             f"<tr><td>{e(code_name(c))}</td>{code_cell(c)}{expiry_cell(c)}<td class=n>{_size(r.codes.allowance(c))}</td>"
             f"<td class=n>{_size(st.owner_usage(c))}</td><td class=n>{len(owners.get(c, []))}</td></tr>"
             for c in ["default", *r.codes.codes.keys()])
+        apps = st.db.execute("SELECT app, version, n, seen FROM clients ORDER BY seen DESC").fetchall()
+        mv = ".".join(map(str, r.min_version)) if r.min_version else ""
+        arow = "".join(
+            f"<tr><td>{e(a)}</td><td>{e(v)}</td><td class=n>{n}</td><td>{_ago(seen)}</td>"
+            f"<td>{'refused (below the minimum)' if mv and r.too_old(v) else ''}</td></tr>"
+            for a, v, n, seen in apps)
         lim = r.limits
         body = f"""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width">
 <title>TeXLoom admin</title><style>{STYLE}</style></head><body>
@@ -136,6 +142,11 @@ open anyone's project. To withdraw one, delete its line from the codes file or l
 the default allowance. Purging expired codes' stored copies: {f"after {self.purge_days:g} days" if self.purge_days is not None else "off"}.</p>
 <p class=muted>Add a code: <code>texloom-server --codes-file … --add-code LABEL --allowance 1G --months 12</code>;
 renew one: <code>--renew-code CODE --months 12</code>.</p>
+<h2>Apps connecting</h2>
+<table><tr><th>App</th><th>Version</th><th class=n>Connections</th><th>Last seen</th><th></th></tr>{arow or '<tr><td colspan=5 class=muted>none yet</td></tr>'}</table>
+<p class=muted>{f"Minimum version: <b>{e(mv)}</b>. Older apps (and those too old to say, shown as unknown) are asked to update." if mv else
+"No minimum version: every app may connect."} Set one with <code>--min-version X.Y.Z</code> (or <code>TEXLOOM_MIN_VERSION</code>)
+once the versions you'd turn away no longer connect.</p>
 <h2>Projects (largest first{", first 500" if len(rows) > 500 else ""})</h2>
 <table><tr><th>Project id</th><th>Created with</th><th class=n>Stored</th><th>State</th><th>Created</th><th>Last opened</th><th class=n>Online</th></tr>{prow}</table>
 <p class=muted>Contents and names are end-to-end encrypted: the server can’t see them.</p>

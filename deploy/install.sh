@@ -115,6 +115,8 @@ Wants=network-online.target
 [Service]
 User=texloom
 WorkingDirectory=$APP_DIR
+# settings without editing this file, e.g. TEXLOOM_MIN_VERSION=0.4.30 (then: systemctl restart texloom)
+EnvironmentFile=-/etc/texloom/env
 ExecStart=$APP_DIR/.venv/bin/texloom-server --host 127.0.0.1 --port 8787 --db /var/lib/texloom/texloom.db --static $APP_DIR/web/dist --tex-assets $APP_DIR/tex-assets --codes-file /etc/texloom/codes.txt --admin-token-file /etc/texloom/admin-token --min-free 2G --project-max-bytes 200M --texlive /var/lib/texloom/texlive --texlive-max 3G $MIRROR_ARG
 Restart=on-failure
 UMask=0077

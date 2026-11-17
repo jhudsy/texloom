@@ -413,6 +413,9 @@ class Store:
               PRIMARY KEY (project, h)) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS floor (project TEXT PRIMARY KEY, seq INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS deleted (project TEXT PRIMARY KEY, at REAL NOT NULL, sig BLOB NOT NULL, ts INTEGER NOT NULL);
+            -- the apps that connect (for the admin page, and choosing --min-version): how often, last when
+            CREATE TABLE IF NOT EXISTS clients (app TEXT NOT NULL, version TEXT NOT NULL, n INTEGER NOT NULL,
+              seen REAL NOT NULL, PRIMARY KEY (app, version)) WITHOUT ROWID;
             CREATE INDEX IF NOT EXISTS log_h ON log(project, h);
             """
         )
@@ -791,6 +794,7 @@ class Conn:
         self.transport = None  # to cut off a peer that stops reading (a polite close would wait for it)
         self.code: str | None = None
         self.code_tried = False
+        self.counted = False  # its app and version noted (note_client)
         self.hellos: list[float] = []
         self.recheck = 0.0  # private servers: when to check the project's code again
         self.held = 0  # bytes received and not yet finished with (see Metered)
@@ -889,9 +893,21 @@ class Budget:
                 turn.set_result(None)
 
 
+VERSION_RE = re.compile(r"\d{1,4}(\.\d{1,6}){0,3}")
+APPS = ("desktop", "web")
+
+
+def version_tuple(v: object) -> tuple[int, ...] | None:
+    """"0.4.30" as (0, 4, 30), or None if it isn't a version."""
+    return tuple(int(x) for x in v.split(".")) if isinstance(v, str) and VERSION_RE.fullmatch(v) else None
+
+
 class Relay:
     def __init__(self, store: Store, limits: Limits | None = None, codes: CodeBook | None = None, lists: bool = True,
-                 private: bool = False):
+                 private: bool = False, min_version: str = ""):
+        # the oldest app version allowed (--min-version): older ones, or apps too old to say, are
+        # asked to update, so that support for older data and protocols can be dropped
+        self.min_version = version_tuple(min_version) if min_version else None
         self.codes_url = ""  # where people learn how to get a creation code (/api/info)
         self.store = store
         self.private = private  # only projects created with a valid creation code may use this server
@@ -1206,6 +1222,13 @@ class Relay:
             if not conn.allow_hello():
                 await ws.close(code=1008, message=b"rate limit")
                 return
+            if not conn.counted:  # (once per connection: hellos repeat)
+                conn.counted = True
+                self.note_client(msg.get("app"), msg.get("v"))
+            if self.too_old(msg.get("v")):
+                await ws.send_json({"t": "err", "denied": True, **self.update_needed()})
+                await ws.close(code=1008, message=b"update needed")
+                return
             self.store.touch(project)
             if msg.get("code") and not conn.code_tried:  # one code check per connection
                 conn.code_tried = True
@@ -1435,6 +1458,25 @@ class Relay:
             "Content-Disposition": "attachment",  # ciphertext; never something to render
         })
 
+    def note_client(self, app: object, version: object) -> None:
+        """Count an app connecting, by kind and version (shown on the admin page)."""
+        a = app if app in APPS else "unknown"
+        v = version if version_tuple(version) else "unknown"
+        with self.store.db:
+            self.store.db.execute("INSERT INTO clients(app, version, n, seen) VALUES (?,?,1,?) "
+                                  "ON CONFLICT(app, version) DO UPDATE SET n = n + 1, seen = excluded.seen", (a, v, time.time()))
+
+    def too_old(self, version: object) -> bool:
+        """Below --min-version (an app that doesn't say is older than this check)."""
+        if not self.min_version:
+            return False
+        v = version_tuple(version)
+        return v is None or v < self.min_version
+
+    def update_needed(self) -> dict:
+        m = ".".join(map(str, self.min_version or ()))
+        return {"code": "update-needed", "min": m, "m": f"this server needs TeXLoom {m} or later"}
+
     async def info(self, _request: web.Request) -> web.Response:
         self.codes._load()
         d = self.codes.default if self.codes.path else UNLIMITED
@@ -1446,12 +1488,15 @@ class Relay:
             "projectLists": self.lists is not None,
             "texlive": self.texlive.info() if self.texlive else None,
             **({"codesUrl": self.codes_url} if self.codes_url else {}),
+            **({"minVersion": ".".join(map(str, self.min_version))} if self.min_version else {}),
         })
 
     # --- encrypted project lists (see lists.py) -----------------------------------------
     def _list_request(self, request: web.Request) -> str:
         if not self.lists:
             raise web.HTTPNotFound()
+        if self.min_version and self.too_old(request.headers.get("X-TeXLoom", "").partition("/")[2]):  # app/version
+            raise web.HTTPUpgradeRequired(text=json.dumps(self.update_needed()), content_type="application/json")
         lid = request.match_info["id"]
         if not PROJECT_RE.match(lid):
             raise web.HTTPBadRequest()
@@ -1542,7 +1587,7 @@ async def headers(request: web.Request, handler):
         except web.HTTPException as e:
             resp = e
     resp.headers["Access-Control-Allow-Origin"] = "*"  # sync data is ciphertext; keys never leave the page
-    resp.headers["Access-Control-Allow-Headers"] = "X-Sig, X-Seq, X-Create-Code, X-Kind, X-Only-Output, Content-Type"
+    resp.headers["Access-Control-Allow-Headers"] = "X-Sig, X-Seq, X-Create-Code, X-Kind, X-Only-Output, X-TeXLoom, Content-Type"
     resp.headers["Access-Control-Expose-Headers"] = "X-Seq"  # project lists kept on several servers are read and written from any page
     resp.headers["Access-Control-Allow-Methods"] = "GET, PUT, POST, DELETE, OPTIONS"
     resp.headers["X-Content-Type-Options"] = "nosniff"
@@ -1559,8 +1604,8 @@ def make_app(db: Path, static: Path | None, tex: Path | None = None,
              admin_token: str = "", evict_days: float = 0, texlive: Path | None = None,
              texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None,
              purge_days: float | None = None, lists: bool = True, private: bool = False,
-             codes_url: str = "") -> web.Application:
-    relay = Relay(Store(db), limits, codes, lists, private)
+             codes_url: str = "", min_version: str = "") -> web.Application:
+    relay = Relay(Store(db), limits, codes, lists, private, min_version)
     relay.codes_url = codes_url
     if texlive:  # TeX Live files on demand for the in-browser engine
         from .texlive import TexLive
@@ -1655,6 +1700,9 @@ def main() -> None:
     p.add_argument("--private", action="store_true", default=os.environ.get("TEXLOOM_PRIVATE", "") not in ("", "0"),
                    help="only projects created with a valid creation code may use this server, even without "
                         "storage; people with such a project's link need nothing else (needs --codes-file)")
+    p.add_argument("--min-version", default=os.environ.get("TEXLOOM_MIN_VERSION", ""), metavar="X.Y.Z",
+                   help="the oldest TeXLoom app allowed to connect (or TEXLOOM_MIN_VERSION): older ones, and those "
+                        "too old to say, are asked to update. The admin page shows which versions connect")
     p.add_argument("--codes-url", default=os.environ.get("TEXLOOM_CODES_URL", ""), metavar="URL",
                    help="a web page saying how to get a creation code for this server; the apps link to it where "
                         "they ask for a code (or TEXLOOM_CODES_URL; default: none, and they say to ask whoever runs it)")
@@ -1745,12 +1793,15 @@ def main() -> None:
     log.info("limits: total %s, keep %s free, %s per project; %s",
              fmt_size(limits.max_bytes), fmt_size(limits.min_free), fmt_size(limits.project_max),
              f"allowances from {', '.join(map(str, a.codes_file))}" if codes.path else "no codes file: every project may be stored")
+    if a.min_version and not version_tuple(a.min_version):
+        p.error("--min-version is a version such as 0.4.30")
     if a.codes_url and not re.match(r"https?://", a.codes_url, re.I):
         p.error("--codes-url must be an http:// or https:// address")
     web.run_app(make_app(a.db, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv, codes_url=a.codes_url,
                         admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
                         texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
-                        purge_days=a.purge_expired_after, lists=not a.no_project_lists, private=a.private), host=a.host, port=a.port,
+                        purge_days=a.purge_expired_after, lists=not a.no_project_lists, private=a.private,
+                        min_version=a.min_version), host=a.host, port=a.port,
                 backlog=LISTEN_BACKLOG, shutdown_timeout=SHUTDOWN_WAIT)
 
 

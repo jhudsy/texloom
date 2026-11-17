@@ -48,6 +48,7 @@ def explain(code: str) -> str:
         "code-expired": _("The creation code this list was created with has expired."),
         "list-full": _("The server has no room for another list."),
         "list-retired": _("This list was replaced or deleted. Use its new sync link."),
+        "update-needed": _("This server needs a newer TeXLoom: update the app."),
         "wrong-password": _("That username and password don't open a list on this server."),
     }.get(code, code)
 
@@ -240,7 +241,8 @@ def merge_settings(a: dict, b: dict) -> dict:
 
 def _request(method: str, url: str, data: bytes | None = None, headers: dict | None = None):
     """(status, body, headers)."""
-    req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
+    from . import __version__
+    req = urllib.request.Request(url, data=data, method=method, headers={**(headers or {}), "X-TeXLoom": f"desktop/{__version__}"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT, context=tls.context()) as r:
             return r.status, r.read(), r.headers
@@ -257,6 +259,8 @@ def pull(key: ListKey, server: str) -> tuple[int, dict | None]:
         return 0, None
     if status == 410:
         raise ListError("list-retired")
+    if status == 426:
+        raise ListError("update-needed")
     if status != 200:
         raise ListError(f"server said {status}")
     return int(headers.get("X-Seq", 0)), json.loads(key.decrypt(body))

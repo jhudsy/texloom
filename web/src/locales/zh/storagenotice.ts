@@ -43,6 +43,9 @@ const zh: Catalog = {
   'Its encrypted copy and its collaborators’ changes go through that server. This page syncs it from there, whichever server you choose.': '其加密副本和协作者的更改都经过该服务器。无论您选择哪台服务器，此页面都会从那里同步。',
   'Another server…': '其他服务器…',
   'Continue': '继续',
+  'Not syncing: this server needs a newer version of TeXLoom ({{version}} or later). Reload the page to get it.': '未同步：此服务器需要更新版本的 TeXLoom（{{version}} 或更高）。请重新加载页面以获取。',
+  'Not syncing: this project’s server needs a newer version of TeXLoom ({{version}} or later) than this server’s web app. Open the project from {{server}} instead.': '未同步：此项目的服务器需要比此服务器的网页应用更新的 TeXLoom 版本（{{version}} 或更高）。请改为从 {{server}} 打开该项目。',
+  'Reload': '重新加载',
 }
 
 export default zh

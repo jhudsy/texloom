@@ -327,4 +327,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Copies of this list': 'Copias de esta lista',
     'Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.': 'Guardada en más de un servidor, la lista sobrevive a cualquiera de ellos, y cada dispositivo mantiene todas las copias al día. Cada copia está cifrada. El enlace de sincronización funciona en cualquiera de ellos; las llaves de acceso solo funcionan en el servidor donde se añadieron.',
     'The list needs at least one copy.': 'La lista necesita al menos una copia.',
+    'Update needed': 'Actualización necesaria',
+    "This project's server needs TeXLoom {version} or later. Update the app (Help ▸ Check for updates…).": 'El servidor de este proyecto necesita TeXLoom {version} o posterior. Actualiza la aplicación (Ayuda ▸ Buscar actualizaciones…).',
+    'This server needs a newer TeXLoom: update the app.': 'Este servidor necesita un TeXLoom más reciente: actualiza la aplicación.',
 }

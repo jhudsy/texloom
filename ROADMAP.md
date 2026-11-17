@@ -8,7 +8,8 @@ that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitat
 
 1. **[arXiv / journal-ready export](https://github.com/jhudsy/texloom/issues/2)**: a `.zip` with the
    `.bbl`, without unused or build files, comments optionally stripped, optionally one `.tex`.
-   About a day; the most useful feature for the effort.
+   About a day; the most useful feature for the effort. Web app only: the desktop app syncs
+   folders and isn't an editor or export tool.
 
 ## Later
 
