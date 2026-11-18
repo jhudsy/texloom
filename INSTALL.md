@@ -263,7 +263,10 @@ The apps say which version they are when they connect, and the admin page lists 
 connect, with when each was last seen. Once old versions have stopped connecting, set the oldest
 allowed with `min_version = "X.Y.Z"`. Older apps, and those too old to say, are then turned away
 with a request to update: the desktop app shows "Update needed", the web app offers to reload (its
-newest version comes from the server), and project lists refuse them too.
+newest version comes from the server), and project lists refuse them too. An app too old to say
+its version (before 0.4.30) can't show the request, and would reconnect every second or two: the
+server keeps it connected but hearing nothing for ten minutes at a time instead. It's counted as
+"unknown" on the admin page each time it reconnects, until its user updates it.
 
 ## Idle projects, admin page, arXiv import
 

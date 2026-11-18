@@ -111,7 +111,7 @@ without compiling.
 
 | client → server | meaning |
 |---|---|
-| `{t:"hello", since, app, v, pages?}` | send me everything after sequence number `since`; `pages: 1` = a long log may come in pages (below); `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes. Project lists check `X-TeXLoom: app/version` the same way (426). |
+| `{t:"hello", since, app, v, pages?}` | send me everything after sequence number `since`; `pages: 1` = a long log may come in pages (below); `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes (one without `v` can't understand that, so it is first held for 10 minutes, hearing nothing, rather than letting it reconnect at once). Project lists check `X-TeXLoom: app/version` the same way (426). |
 | `{t:"up", d, s}` | encrypted Yjs update `d` with signature `s`; stored and broadcast |
 | `{t:"snap", upto, d, s}` | compaction: encrypted full state replacing log entries ≤ `upto`; `s` signs `"snap:<upto>:" ‖ d` |
 | `{t:"aw", d}` | ephemeral, encrypted awareness (cursors, names); relayed, never stored |

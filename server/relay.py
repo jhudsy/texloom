@@ -94,6 +94,7 @@ PEER_BUFFER_MAX = 8 * MiB  # bytes waiting to go to one peer: beyond this it isn
 OUT_MAX = 128 * MiB  # bytes waiting to go out on all connections: beyond this, peers holding a lot are cut off
 STALL = 10  # seconds a large reply may make no progress before its reader is cut off
 HELLO_WAIT = 15  # seconds a private server gives a new connection to say who it is
+HOLD_UNVERSIONED = 600  # seconds a refused app too old to say its version is kept (see _hold)
 RECHECK = 60  # seconds between a private server's checks that a connected project's code still counts
 # Memory for big work at once, shared (see Budget): catch-up replies, large frames being handled,
 # uploads being checked and stored, arXiv imports. Work that doesn't fit waits its turn (a large
@@ -808,6 +809,20 @@ class Relay:
                 await self.broadcast(project, {"t": "left", "from": conn.id})
         return ws
 
+    async def _hold(self, project: str, ws, conn: Conn) -> None:
+        """Keep a refused app that's too old to say its version (before 0.4.30) connected, hearing
+        nothing, for a while. It doesn't understand the refusal, and after a connection that opened it
+        waits only a second before the next: closed at once, it would connect every second or two until
+        its user updates it. Its pings are still answered (else it would leave and come straight back)."""
+        self.rooms[project].discard(ws)  # nothing more of the project reaches it
+        try:
+            async with asyncio.timeout(HOLD_UNVERSIONED):
+                async for raw in ws:
+                    if raw.type == WSMsgType.TEXT and not conn.allow(len(raw.data)):
+                        break
+        except TimeoutError:
+            pass
+
     async def handle(self, project: str, ws, conn: Conn, t: str, msg: dict) -> None:
         if await self.store.deleted(project):  # deleted while this connection was closing: nothing more
             return
@@ -821,6 +836,8 @@ class Relay:
                 await self.note_client(msg.get("app"), msg.get("v"))
             if self.too_old(msg.get("v")):
                 await ws.send_json({"t": "err", "denied": True, **self.update_needed()})
+                if version_tuple(msg.get("v")) is None:
+                    await self._hold(project, ws, conn)
                 await ws.close(code=1008, message=b"update needed")
                 return
             await self.store.touch(project)
