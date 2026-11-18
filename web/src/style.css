@@ -488,6 +488,13 @@ dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: cen
 .pdf .annotationLayer .linkAnnotation.hasBorder:hover { background-color: rgb(255 255 0 / .2); }
 .pdf .annotationLayer .popupAnnotation { display: none; } /* a PDF's own comment pop-ups: not shown here */
 .pdfback { white-space: nowrap; }
+.pdf-pending { position: absolute; background: color-mix(in srgb, #ffd400 40%, transparent); border-radius: 2px; pointer-events: none; z-index: 2; } /* text a comment is being written on */
+.pdf-comment { position: fixed; z-index: 50; width: min(380px, calc(100vw - 16px)); box-sizing: border-box; padding: 10px 12px; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgb(0 0 0 / .25); }
+.pdf-comment .review-quote { margin: 6px 0; }
+.pdf-comment .review-quote.error { color: var(--muted); border-left-color: transparent; padding-left: 0; }
+.pdf-comment p { margin: 4px 0; }
+.pdf-comment .row { margin: 0; }
 .pdf-mark { position: absolute; background: color-mix(in srgb, #ffd400 45%, transparent); outline: 2px solid #e6b800; border-radius: 3px; pointer-events: none; animation: pdfmark 2.5s ease-out forwards; }
 @keyframes pdfmark { 0%, 70% { opacity: 1 } 100% { opacity: 0 } }
 

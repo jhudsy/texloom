@@ -39,6 +39,18 @@ const PRINT_DPI = 200, MAX_PRINT_PIXELS = 8e6
 /** A canvas with no pixels (a new one has 300 × 150), standing in for a page not drawn. */
 const emptyCanvas = () => { const c = document.createElement('canvas'); c.width = c.height = 0; return c }
 
+/** A point on a page, in PDF points from its top-left. */
+export interface PdfPoint { page: number; x: number; y: number }
+/** Text selected in the PDF: what it says, where it starts and ends, and the boxes it covers. */
+export interface PdfSelection { text: string; start: PdfPoint; end: PdfPoint; boxes: (PdfPoint & { w: number; h: number })[] }
+/** Where a comment on a selection would go in the source, and how to add it there. */
+export interface CommentTarget {
+  where: string // file:line
+  quote: string // the source text it's on
+  exact: boolean // false: the selected words weren't found, so it's on the line(s) they came from
+  save(text: string): Promise<string | null> // null, or why it couldn't be added
+}
+
 interface Page { wrap: HTMLDivElement; canvas: HTMLCanvasElement; layers: HTMLElement[]; points: number; ratio: number; drawn: number }
 
 /** Web and mail links a PDF may open; anything else (javascript:, file:, …) isn't followed. */
@@ -99,6 +111,10 @@ export class PdfView {
   readonly el: HTMLDivElement
   /** Double-click or “Go to source” on a page: page number (1-based) and position in PDF points from the top-left. */
   onPick: ((page: number, x: number, y: number) => void) | null = null
+  /** Comments on selected text: where in the source one would go (or why it can't). Unset: no commenting. */
+  onComment: ((sel: PdfSelection) => Promise<CommentTarget | string>) | null = null
+  /** Comment boxes open over this view. */
+  private boxes = new Set<{ place: () => void; close: () => void; area: HTMLTextAreaElement }>()
   /** More right-click items, after “Go to source here”. */
   menuExtras: (() => MenuItem[]) | null = null
   /** Where the PDF was last clicked (what “go to source” uses), in PDF points. */
@@ -177,10 +193,17 @@ export class PdfView {
       e.preventDefault()
       this.lastClick = at
       const sel = this.selectedText()
+      const where = sel && this.onComment ? this.selection() : null
       const copy: MenuItem[] = sel ? [[t('Copy'), () => { void navigator.clipboard.writeText(sel).catch(() => {}) }]] : []
-      this.openMenu(e.clientX, e.clientY, [...copy, [t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)], ...(this.menuExtras?.() ?? [])])
+      const comment: MenuItem[] = where ? [[t('Add a comment…'), () => this.commentOn(where)]] : []
+      this.openMenu(e.clientX, e.clientY, [...comment, ...copy, [t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)], ...(this.menuExtras?.() ?? [])])
     })
     this.el.addEventListener('keydown', (e) => {
+      if (e.code === 'KeyM' && e.altKey && (e.metaKey || e.ctrlKey) && this.onComment) { // as in the editor
+        const sel = this.selectedText() && this.selection()
+        if (sel) { e.preventDefault(); this.commentOn(sel) }
+        return
+      }
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || !this.pages.length) return
       const page = this.fitPage ? { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -1, ArrowDown: 1 } : { ArrowLeft: -1, ArrowRight: 1 }
       const d = (page as Record<string, number>)[e.key]
@@ -189,6 +212,7 @@ export class PdfView {
     })
     this.el.addEventListener('scroll', () => {
       this.closeMenu()
+      this.boxes.forEach((b) => b.place())
       this.pageFrame ||= requestAnimationFrame(() => { this.pageFrame = 0; this.showPage(); this.update() })
     }, { passive: true })
     // Ctrl or ⌘ + scroll; a trackpad pinch arrives as Ctrl + scroll
@@ -243,6 +267,100 @@ export class PdfView {
     if (this.before != null) this.el.scrollTop = this.before
     this.before = null
     this.backBtn.hidden = true
+  }
+
+  /** The selection in this PDF, with where it is on its pages. */
+  private selection(): PdfSelection | null {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !sel.anchorNode || !this.el.contains(sel.anchorNode)) return null
+    const boxes: PdfSelection['boxes'] = []
+    for (const r of sel.getRangeAt(0).getClientRects()) {
+      if (r.width < 1 || r.height < 1) continue
+      const i = this.pages.findIndex((p) => { const b = p.wrap.getBoundingClientRect(); return r.left + r.width / 2 >= b.left && r.left + r.width / 2 <= b.right && r.top + r.height / 2 >= b.top && r.top + r.height / 2 <= b.bottom })
+      if (i < 0) continue
+      const b = this.pages[i].wrap.getBoundingClientRect(), s = this.scaleOf(this.pages[i])
+      boxes.push({ page: i + 1, x: (r.left - b.left) / s, y: (r.top - b.top) / s, w: r.width / s, h: r.height / s })
+    }
+    if (!boxes.length) return null
+    const first = boxes[0], last = boxes[boxes.length - 1]
+    return {
+      text: sel.toString(), boxes,
+      start: { page: first.page, x: first.x + 0.5, y: first.y + first.h / 2 },
+      end: { page: last.page, x: last.x + last.w - 0.5, y: last.y + last.h / 2 },
+    }
+  }
+
+  /** A comment box beside the selected text, which stays marked meanwhile: the PDF stays in view. */
+  private commentOn(sel: PdfSelection) {
+    if (!this.onComment) return
+    for (const b of [...this.boxes]) if (!b.area.value.trim()) b.close() // an empty one gives way
+    window.getSelection()?.removeAllRanges()
+    const marks = sel.boxes.map((b) => ({ b, el: h('div', { class: 'pdf-pending' }) as HTMLDivElement }))
+    const quote = h('blockquote', { class: 'review-quote' }, t('Finding the text in the source…'))
+    const note = h('p', { class: 'muted small', hidden: true })
+    const area = h('textarea', { class: 'review-write', rows: 3, placeholder: t('Write your comment…'), 'aria-label': t('Add a comment') }) as HTMLTextAreaElement
+    const add = h('button', { class: 'primary', disabled: true }, t('Add comment')) as HTMLButtonElement
+    const box = h('div', { class: 'pdf-comment', role: 'dialog', 'aria-label': t('Add a comment') },
+      h('b', {}, t('Add a comment')), quote, note, area,
+      h('div', { class: 'row end' }, h('span', { class: 'muted small spacer' }, t('⌘Enter or Ctrl+Enter to save')),
+        h('button', { onclick: () => close() }, t('Cancel')), add)) as HTMLDivElement
+    // beside the text: below it, else above it, else wherever it fits; never covering it if it can help it
+    const place = () => {
+      let top = Infinity, bottom = -Infinity, left = Infinity
+      for (const { b, el } of marks) {
+        const p = this.pages[b.page - 1]
+        if (!p) continue
+        if (el.parentElement !== p.wrap) p.wrap.append(el) // (a recompile makes new pages)
+        const s = this.scaleOf(p)
+        Object.assign(el.style, { left: `${b.x * s}px`, top: `${b.y * s}px`, width: `${b.w * s}px`, height: `${b.h * s}px` })
+        const r = el.getBoundingClientRect()
+        top = Math.min(top, r.top); bottom = Math.max(bottom, r.bottom); left = Math.min(left, r.left)
+      }
+      const view = this.el.getBoundingClientRect(), bw = box.offsetWidth, bh = box.offsetHeight
+      if (!isFinite(top)) { top = bottom = view.top + view.height / 2; left = view.left + 20 }
+      let y = bottom + 8 <= view.bottom - bh ? bottom + 8 : top - 8 - bh >= view.top ? top - 8 - bh : view.bottom - bh - 8
+      y = Math.max(view.top + 4, Math.min(y, innerHeight - bh - 4))
+      const x = Math.max(4, Math.min(left, view.right - bw - 8, innerWidth - bw - 4))
+      Object.assign(box.style, { left: `${x}px`, top: `${y}px` })
+    }
+    const close = () => {
+      marks.forEach(({ el }) => el.remove())
+      box.remove()
+      removeEventListener('resize', place)
+      this.boxes.delete(entry)
+    }
+    const entry = { place, close, area }
+    this.boxes.add(entry)
+    document.body.append(box)
+    addEventListener('resize', place)
+    place()
+    area.focus()
+    let target: CommentTarget | null = null
+    const save = async () => {
+      if (!target || !area.value.trim() || add.disabled) { area.focus(); return }
+      add.disabled = true
+      const why = await target.save(area.value).catch((e) => String(e))
+      if (why) { note.hidden = false; note.textContent = why; add.disabled = false; return }
+      close()
+    }
+    add.onclick = save
+    area.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void save() }
+      else if (e.key === 'Escape' && !area.value.trim()) { e.preventDefault(); close(); this.el.focus({ focusVisible: false } as FocusOptions) }
+    })
+    this.onComment(sel).then((found) => {
+      if (!this.boxes.has(entry)) return
+      if (typeof found === 'string') { quote.textContent = found; quote.classList.add('error'); return }
+      target = found
+      quote.textContent = found.quote.length > 300 ? `${found.quote.slice(0, 300)}…` : found.quote
+      quote.title = found.where
+      if (!found.exact) {
+        note.hidden = false
+        note.textContent = t('These exact words aren’t in the source (generated text, maths or a table, say), so the comment goes on the line they come from ({{where}}).', { where: found.where })
+      }
+      add.disabled = false
+      place()
+    }).catch((e) => { quote.textContent = String(e) })
   }
 
   /** Text selected in this PDF, if any. */
@@ -566,5 +684,6 @@ export class PdfView {
     this.pageTotal.textContent = `/ ${pages.length}`
     this.showPage()
     this.update()
+    this.boxes.forEach((b) => b.place()) // their marks onto the new pages
   }
 }

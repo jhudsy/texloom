@@ -16,6 +16,8 @@ const de: Catalog = {
   'Fit the width or a whole page, or choose a size': 'Breite oder ganze Seite einpassen oder eine Größe wählen',
   'Fit width': 'An Breite anpassen',
   'Fit page': 'Ganze Seite',
+  'Finding the text in the source…': 'Text in der Quelle wird gesucht …',
+  'These exact words aren’t in the source (generated text, maths or a table, say), so the comment goes on the line they come from ({{where}}).': 'Genau diese Wörter stehen nicht in der Quelle (etwa erzeugter Text, Mathematik oder eine Tabelle), daher kommt der Kommentar an die Zeile, aus der sie stammen ({{where}}).',
 }
 
 export default de

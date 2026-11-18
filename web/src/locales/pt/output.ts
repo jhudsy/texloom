@@ -57,6 +57,9 @@ const pt: Catalog = {
   'With a read-only link, compile in this browser (⚙ Settings → Compiling), or with your own TeX in the TeXLoom app: the PDF stays on your computer.': 'Com um link só de leitura, compile neste navegador (⚙ Definições → Compilação) ou com o seu próprio TeX na app TeXLoom: o PDF fica no seu computador.',
   'Pop out': 'Destacar',
   'Open the PDF in a separate window': 'Abrir o PDF numa janela separada',
+  'Couldn’t find where this text is in the source.': 'Não foi possível encontrar onde está este texto na origem.',
+  'Couldn’t add the comment.': 'Não foi possível adicionar o comentário.',
+  'Comment added on {{where}}.': 'Comentário adicionado em {{where}}.',
 }
 
 export default pt

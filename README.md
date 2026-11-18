@@ -280,6 +280,10 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   stays in step if you reload the editor.
 - **Text and links in the PDF:** its text can be selected and copied, and with `hyperref` its links work: citations,
   references and the table of contents scroll to their place (**↩ Back** returns), and web links open in a new tab.
+- **Comments from the PDF:** select text in the PDF (in the app or a popped-out window), then right-click ▸ **Add a comment…**
+  or ⌘⌥M / Ctrl+Alt+M. A box opens beside the text, and the comment goes on those words in the source: SyncTeX gives the
+  lines, and the selected words are found there. Where they aren't in the source as such (maths, tables, generated text),
+  it goes on the line they come from, and the box says so; a bibliography entry is found in the `.bib` file.
 - **PDF zoom and pages:** the zoom percentage offers **Fit width**, **Fit page** (a whole page in view, kept as the window
   changes size) and set sizes, down to 10%. Once the PDF has been clicked, ← and → turn its pages (and ↑ ↓ too in Fit page);
   Home and End go to the first and last.
@@ -777,6 +781,7 @@ python scripts/check_listsync.py
 cd web && npm run check-listsync
 npm run check-versions  # saved versions: every one opens exactly, and storing them stays small
 npm run check-suggest   # suggest mode: random typing and collaborators' edits keep the view and suggestions in step
+npm run check-pdfanchor # comments from the PDF: selected text is found in its LaTeX source
 npm run check-chars     # edits never cut an emoji (or any character outside the BMP) in two
 npm run check-packing   # compressed snapshots: both apps read the same cases (scripts/packing-vectors.json; also scripts/check_packing.py)
 npm run check-submission  # the arXiv / journal .zip: files followed, comments removed, files merged

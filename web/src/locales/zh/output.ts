@@ -57,6 +57,9 @@ const zh: Catalog = {
   'With a read-only link, compile in this browser (⚙ Settings → Compiling), or with your own TeX in the TeXLoom app: the PDF stays on your computer.': '使用只读链接时，请在此浏览器中编译（⚙ 设置 → 编译），或在 TeXLoom 应用中用你自己的 TeX 编译：PDF 留在你的电脑上。',
   'Pop out': '弹出',
   'Open the PDF in a separate window': '在单独的窗口中打开 PDF',
+  'Couldn’t find where this text is in the source.': '找不到这段文字在源码中的位置。',
+  'Couldn’t add the comment.': '无法添加评论。',
+  'Comment added on {{where}}.': '已在 {{where}} 添加评论。',
 }
 
 export default zh

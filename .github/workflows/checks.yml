@@ -41,6 +41,7 @@ jobs:
           npm run check-listsync
           npm run check-versions
           npm run check-suggest
+          npm run check-pdfanchor
           npm run check-xr
           npm run check-packing
           npm run check-chars

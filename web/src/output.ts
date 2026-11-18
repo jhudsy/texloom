@@ -4,7 +4,10 @@ import type { Replica } from './replica'
 import type { Device } from './settings'
 import { h, saveFile, verticalResizer } from './dom'
 import { icon } from './icons'
-import { PdfView } from './pdfview'
+import { PdfView, type CommentTarget, type PdfSelection } from './pdfview'
+import { anchorInSource, findAnywhere } from './pdfanchor'
+import { addItem } from './review'
+import * as Y from 'yjs'
 import { pdfWindowLink } from './pdfwindow'
 import { compileInBrowser, defaultEngine, browserCompileAvailable, type Progress, CompileStopped, stopBrowserCompile } from './compile'
 import { allFiles, fileBase, mainFile, isDocument } from './projectfiles'
@@ -35,7 +38,8 @@ export interface Output {
 export function createOutput(r: Replica, writable: boolean, device: () => Device, userName: () => string,
   goto: (file: string, line: number, flash?: boolean) => void, selected: () => string | null): Output {
   const pdfView = new PdfView()
-  const pdfWindow = pdfWindowLink(r.keys.project, () => String(r.meta.get('name') ?? ''), (at) => pdfView.onPick?.(at.page, at.x, at.y))
+  const pdfWindow = pdfWindowLink(r.keys.project, () => String(r.meta.get('name') ?? ''), (at) => pdfView.onPick?.(at.page, at.x, at.y),
+    writable ? (sel) => commentTarget(sel) : null)
   const info = h('div', { class: 'pdfinfo muted' }, t('No PDF yet.'))
   const progress = h('div', { class: 'progress', hidden: true }, h('div', { class: 'bar' }), h('span', {}))
   const logPre = h('pre', { class: 'log', hidden: true })
@@ -108,6 +112,44 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     if (hit) goto(hit.file, hit.line, true)
     else info.textContent = st ? t('No source line for that spot.') : t('Compile first: the PDF has no SyncTeX data yet.')
   }
+  if (writable) pdfView.onComment = (sel) => commentTarget(sel)
+
+  /** Where a comment on text selected in the PDF goes: SyncTeX's lines, then the selected words
+   *  near them; failing that, those lines; for text SyncTeX can't place (a bibliography from a .bib
+   *  file), the file that has the words. */
+  async function commentTarget(sel: PdfSelection): Promise<CommentTarget | string> {
+    const st = await syncTex()
+    const texts = () => [...r.files.entries()].map(([name, yt]) => ({ name, text: yt.toString() }))
+    const a = st?.toSource(sel.start.page, sel.start.x, sel.start.y)
+    const b = st?.toSource(sel.end.page, sel.end.x, sel.end.y)
+    let at: { file: string; from: number; to: number; exact: boolean } | null = null
+    if (a && r.files.has(a.file)) {
+      const m = anchorInSource(r.files.get(a.file)!.toString(), a.line, b?.file === a.file ? b.line : a.line, sel.text)
+      at = { file: a.file, ...m }
+    }
+    if (!at?.exact) {
+      const found = findAnywhere(texts(), sel.text)
+      if (found) at = { ...found, exact: true }
+    }
+    if (!at) return st ? t('Couldn’t find where this text is in the source.') : t('Compile first: the PDF has no SyncTeX data yet.')
+    const { file, from, to, exact } = at
+    const yt = r.files.get(file)!
+    const src = yt.toString()
+    const where = `${file}:${src.slice(0, from).split('\n').length}`
+    // positions that follow the text as people keep editing while the comment is written
+    const start = Y.createRelativePositionFromTypeIndex(yt, from), end = Y.createRelativePositionFromTypeIndex(yt, to, -1)
+    return {
+      where, quote: src.slice(from, to), exact,
+      async save(text: string) {
+        const x = Y.createAbsolutePositionFromRelativePosition(start, r.doc), y = Y.createAbsolutePositionFromRelativePosition(end, r.doc)
+        if (!x || !y || x.type !== yt || y.type !== yt || y.index <= x.index) return t('The text you selected has since been removed.')
+        if (!addItem(r, 'comment', file, x.index, y.index, text, userName())) return t('Couldn’t add the comment.')
+        info.textContent = t('Comment added on {{where}}.', { where })
+        return null
+      },
+    }
+  }
+
   async function syncTex(): Promise<SyncTex | null> {
     if (!synctex && synctexBytes) synctex = await SyncTex.load(synctexBytes, allFiles(r)).catch(() => null)
     return synctex

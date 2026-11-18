@@ -11,6 +11,7 @@
     "check-versions": "node scripts/check-versions.mjs",
     "download-tex": "texlyre-busytex download-assets ../tex-assets",
     "check-suggest": "node scripts/check-suggest.mjs",
+    "check-pdfanchor": "node scripts/check-pdfanchor.mjs",
     "check-xr": "node scripts/check-xr.mjs",
     "check-chars": "node scripts/check-chars.mjs",
     "check-props": "node scripts/check-props.mjs",

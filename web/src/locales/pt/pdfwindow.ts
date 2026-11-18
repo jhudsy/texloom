@@ -5,6 +5,8 @@ const pt: Catalog = {
   'The editor has closed, so this PDF is no longer updating.': 'O editor foi fechado, então este PDF não está mais sendo atualizado.',
   'Open the PDF in a separate window, for example on another screen. It updates when you compile.': 'Abrir o PDF em uma janela separada, por exemplo em outra tela. Ele é atualizado quando você compila.',
   'Your browser blocked the new window: allow pop-ups for this site and try again.': 'Seu navegador bloqueou a nova janela: permita pop-ups neste site e tente novamente.',
+  'The editor was reloaded: select the text again.': 'O editor foi recarregado: selecione o texto novamente.',
+  'Couldn’t reach the editor.': 'Não foi possível contactar o editor.',
 }
 
 export default pt

@@ -16,6 +16,8 @@ const pt: Catalog = {
   'Fit the width or a whole page, or choose a size': 'Ajustar à largura ou à página inteira, ou escolher um tamanho',
   'Fit width': 'Ajustar à largura',
   'Fit page': 'Página inteira',
+  'Finding the text in the source…': 'A procurar o texto na origem…',
+  'These exact words aren’t in the source (generated text, maths or a table, say), so the comment goes on the line they come from ({{where}}).': 'Estas palavras exatas não estão na origem (texto gerado, matemática ou uma tabela, por exemplo), por isso o comentário fica na linha de onde vêm ({{where}}).',
 }
 
 export default pt
