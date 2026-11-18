@@ -10,5 +10,6 @@ const es: Catalog = {
   "That doesn’t look like a GitHub token.": "Eso no parece un token de GitHub.",
   "The repository has too many files for TeXLoom to keep in step.": "El repositorio tiene demasiados archivos para que TeXLoom lo mantenga sincronizado.",
   "This project isn’t linked to GitHub.": "Este proyecto no está vinculado a GitHub.",
+  "This browser hasn’t approved syncing the project’s GitHub link.": "Este navegador no ha aprobado sincronizar el vínculo del proyecto con GitHub.",
 }
 export default es

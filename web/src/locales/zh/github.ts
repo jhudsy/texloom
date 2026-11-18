@@ -10,5 +10,6 @@ const zh: Catalog = {
   "That doesn’t look like a GitHub token.": "这看起来不像 GitHub 令牌。",
   "The repository has too many files for TeXLoom to keep in step.": "该仓库文件太多，TeXLoom 无法保持同步。",
   "This project isn’t linked to GitHub.": "此项目未关联到 GitHub。",
+  "This browser hasn’t approved syncing the project’s GitHub link.": "此浏览器尚未批准同步项目的 GitHub 关联。",
 }
 export default zh

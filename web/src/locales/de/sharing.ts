@@ -18,7 +18,7 @@ const de: Catalog = {
   'Name, e.g. Alice': 'Name, z. B. Alice',
   'Name for the personal link': 'Name für den persönlichen Link',
   'Start of this link’s key: tells apart people with the same name': 'Anfang des Schlüssels dieses Links: unterscheidet Personen mit gleichem Namen',
-  'revoked {{date}}': 'widerrufen {{date}}',
+  'revoked': 'widerrufen',
   'since {{date}}': 'seit {{date}}',
   'Copy {{name}}’s edit link': 'Bearbeitungslink von {{name}} kopieren',
   'Copy link': 'Link kopieren',

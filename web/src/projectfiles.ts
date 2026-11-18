@@ -16,7 +16,7 @@ export const IMAGE_RE = /\.(png|jpe?g|gif|svg|webp|pdf|eps|ps|bmp|tiff?)$/i
 // whose contents tools act on (.git hooks/config, editor settings): never part of a project,
 // whatever a collaborator or an imported archive puts there.
 const UNSAFE_NAMES = new Set(['latexmkrc', '.latexmkrc', 'texmf.cnf', '.texmf.cnf', 'mktexlsr', 'ls-r'])
-const PROTECTED_DIRS = new Set(['.texloom', '.git', '.vscode', '.idea'])
+const PROTECTED_DIRS = new Set(['.texloom', '.git', '.hg', '.jj', '.sl', '.bzr', '.svn', '.vscode', '.idea'])
 
 /** Normalise and validate a project-relative path; returns null if unacceptable. Every path
  *  that reaches a disk (folder sync, import) passes through here. */

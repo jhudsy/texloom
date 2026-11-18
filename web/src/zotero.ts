@@ -9,6 +9,7 @@ import * as Y from 'yjs'
 import type { Replica } from './replica'
 import { applyText } from './diff'
 import { t } from './i18n'
+import { cleanPath } from './projectfiles'
 
 const API = 'https://api.zotero.org'
 const STORE = 'texloom.zotero'
@@ -18,7 +19,28 @@ export interface Account { key: string; userID: number; username: string }
 export interface Library { id: string; name: string } // id: users/<n> or groups/<n>
 export interface Collection { key: string; name: string } // name includes its parents: "Thesis / Chapter 2"
 /** A link, kept in the project's settings under `zotero`, by file. */
-export interface Link { lib: string; libName: string; coll: string | null; collName: string; format: 'biblatex' | 'bibtex'; by: string; at: number }
+export interface Link { lib: string; libName: string; coll: string | null; collName: string; format: Format; by: string; at: number }
+export const FORMATS = ['biblatex', 'bibtex'] as const
+export type Format = (typeof FORMATS)[number]
+
+// A link is in the project's shared settings, which any collaborator can write, and is fetched
+// with the refresher's own key: only a well-formed library, collection and format go into a URL.
+const LIB = /^(users|groups)\/\d{1,15}$/
+const COLL = /^[A-Z0-9]{8}$/
+
+/** Whether a link (from the shared settings) is well formed, and for a .bib file it can write. */
+export function validLink(file: string, link: Partial<Link> | null | undefined): link is Link {
+  return !!link && typeof link === 'object' && typeof link.lib === 'string' && LIB.test(link.lib) &&
+    (link.coll == null || link.coll === '' || (typeof link.coll === 'string' && COLL.test(link.coll))) &&
+    (FORMATS as readonly unknown[]).includes(link.format) && cleanPath(file) === file && /\.bib$/i.test(file)
+}
+
+/** A library's path in the API: /users/<n> or /groups/<n>. */
+function libPath(lib: string): string {
+  if (!LIB.test(lib)) throw new Error(t('This Zotero link isn’t valid. Unlink it and link the collection again.'))
+  const [kind, id] = lib.split('/')
+  return `/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`
+}
 
 /** This browser's Zotero account, and when it was set (so the latest follows the project list). */
 export const zoteroAccount = {
@@ -75,7 +97,7 @@ export async function libraries(a: Account): Promise<Library[]> {
 
 /** A library's collections, with their parents' names, in order. */
 export async function collections(a: Account, lib: string): Promise<Collection[]> {
-  const list = await all<{ key: string; data: { name: string; parentCollection: string | false } }>(`/${lib}/collections`, a.key)
+  const list = await all<{ key: string; data: { name: string; parentCollection: string | false } }>(`${libPath(lib)}/collections`, a.key)
   const byKey = new Map(list.map((c) => [c.key, c]))
   const path = (c: (typeof list)[number], depth = 0): string => {
     const parent = c.data.parentCollection && byKey.get(c.data.parentCollection)
@@ -86,15 +108,17 @@ export async function collections(a: Account, lib: string): Promise<Collection[]
 
 /** The collection (or whole library) as BibTeX or BibLaTeX, with Zotero's own citation keys. */
 export async function exportBib(a: Account, link: Pick<Link, 'lib' | 'coll' | 'format'>): Promise<string> {
-  const where = link.coll ? `/${link.lib}/collections/${encodeURIComponent(link.coll)}/items/top` : `/${link.lib}/items/top`
-  const pages = await all<string>(`${where}?format=${link.format}`, a.key, 'text/plain')
+  if (!(FORMATS as readonly string[]).includes(link.format) || (link.coll && !COLL.test(link.coll))) throw new Error(t('This Zotero link isn’t valid. Unlink it and link the collection again.'))
+  const where = link.coll ? `${libPath(link.lib)}/collections/${encodeURIComponent(link.coll)}/items/top` : `${libPath(link.lib)}/items/top`
+  const pages = await all<string>(`${where}?format=${encodeURIComponent(link.format)}`, a.key, 'text/plain')
   return pages.map((p) => p.trim()).filter(Boolean).join('\n\n') + '\n'
 }
 
 /** The project's links: file → collection. */
 export function links(r: Replica): Record<string, Link> {
   const v = r.meta.get('zotero')
-  return v && typeof v === 'object' ? { ...(v as Record<string, Link>) } : {}
+  if (!v || typeof v !== 'object') return {}
+  return Object.fromEntries(Object.entries(v as Record<string, Link>).filter(([, l]) => l && typeof l === 'object'))
 }
 
 export function setLink(r: Replica, file: string, link: Link | null) {
@@ -109,6 +133,9 @@ export async function refresh(r: Replica, file: string, by: string): Promise<boo
   if (!a) throw new Error(t('Connect your Zotero account first (⚙ Settings on the start page, or here).'))
   const link = links(r)[file]
   if (!link) throw new Error(t('{{file}} isn’t linked to Zotero.', { file }))
+  if (!validLink(file, link)) throw new Error(t('This Zotero link isn’t valid. Unlink it and link the collection again.'))
+  // Only a library this key is meant for: a collaborator can't make it fetch from (or reveal) another
+  if (!(await libraries(a)).some((l) => l.id === link.lib)) throw new Error(t('{{file}} is linked to a Zotero library your key can’t read.', { file }))
   const text = await exportBib(a, link)
   let changed = false
   r.doc.transact(() => {

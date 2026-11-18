@@ -35,5 +35,8 @@ const fr: Catalog = {
   "The token can read {{repo}} but not write to it.": "Le jeton peut lire {{repo}} mais pas y écrire.",
   "Linked.": "Lié.",
   "Linked; {{n}} files came in from GitHub.": ["Lié ; {{n}} fichier est arrivé de GitHub.", "Lié ; {{n}} fichiers sont arrivés de GitHub."],
+  "A collaborator linked this project to {{repo}}. This browser doesn’t sync it until you approve: syncing uses your GitHub token, so it brings that repository’s files into the project and sends the project’s changes to it.": "Un collaborateur a lié ce projet à {{repo}}. Ce navigateur ne le synchronise pas tant que vous ne l’approuvez pas : la synchronisation utilise votre jeton GitHub, elle amène donc les fichiers de ce dépôt dans le projet et y envoie les modifications du projet.",
+  "Sync this project with {{repo}} (branch {{branch}}) using your GitHub token?": "Synchroniser ce projet avec {{repo}} (branche {{branch}}) en utilisant votre jeton GitHub ?",
+  "Approve and sync": "Approuver et synchroniser",
 }
 export default fr

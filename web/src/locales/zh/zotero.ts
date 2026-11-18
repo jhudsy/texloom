@@ -10,6 +10,8 @@ const zh: Catalog = {
   "My Library": "我的文献库",
   "Connect your Zotero account first (⚙ Settings on the start page, or here).": "请先连接你的 Zotero 账户（起始页的 ⚙ 设置，或在这里）。",
   "{{file}} isn’t linked to Zotero.": "{{file}} 未与 Zotero 关联。",
+  "This Zotero link isn’t valid. Unlink it and link the collection again.": "此 Zotero 链接无效。请取消链接后重新链接该收藏集。",
+  "{{file}} is linked to a Zotero library your key can’t read.": "{{file}} 链接到的 Zotero 文库是您的密钥无法读取的。",
 }
 
 export default zh

@@ -10,6 +10,8 @@ const fr: Catalog = {
   "My Library": "Ma bibliothèque",
   "Connect your Zotero account first (⚙ Settings on the start page, or here).": "Connectez d’abord votre compte Zotero (⚙ Réglages sur la page d’accueil, ou ici).",
   "{{file}} isn’t linked to Zotero.": "{{file}} n’est pas lié à Zotero.",
+  "This Zotero link isn’t valid. Unlink it and link the collection again.": "Ce lien Zotero n’est pas valide. Supprimez-le et liez à nouveau la collection.",
+  "{{file}} is linked to a Zotero library your key can’t read.": "{{file}} est lié à une bibliothèque Zotero que votre clé ne peut pas lire.",
 }
 
 export default fr

@@ -116,7 +116,7 @@ export class Replica {
   readonly dirs = this.doc.getMap<boolean>('dirs') // explicit (possibly empty) folders
   readonly versions = this.doc.getArray<any>('versions') // saved versions: {at, by, label, auto, link}
   readonly versionChain = this.doc.getArray<Link>('versionChain') // what those versions are built from (versions.ts)
-  readonly members = this.doc.getMap<any>('members') // personal links: public key -> {name, at, by, revoked?}
+  readonly members = this.doc.getMap<any>('members') // personal links: public key -> {name, at, by, g}
   /** This personal link was revoked by the owner. */
   withdrawn = false
   readonly clients = this.doc.getMap<string>('clients') // Yjs client id -> display name (for "who wrote this")

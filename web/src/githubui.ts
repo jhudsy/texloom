@@ -3,7 +3,7 @@
 import type { Replica } from './replica'
 import { dialog, h } from './dom'
 import { t, tn } from './i18n'
-import { connect, githubAccount, GitHubError, linkOf, linkRepo, pull, push, repoInfo, repoName, setLink, startGitHub } from './github'
+import { approve, approved, connect, githubAccount, GitHubError, linkOf, linkRepo, pull, push, repoInfo, repoName, setLink, startGitHub } from './github'
 
 const NEW_TOKEN = 'https://github.com/settings/personal-access-tokens/new'
 const ago = (at: number) => new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -60,7 +60,8 @@ export function githubSection(r: Replica, me: () => string, writable: boolean): 
   const render = () => {
     if (!box.isConnected && shown) { listeners.delete(render); return } // the dialog closed
     const a = githubAccount.get(), l = linkOf(r), st = engine?.state
-    const now = JSON.stringify([!!a, l, st?.role, st?.holder, st?.error, st?.busy])
+    const ok = approved(r, l) // this browser syncs only a link its user made or approved
+    const now = JSON.stringify([!!a, l, ok, st?.role, st?.holder, st?.error, st?.busy])
     if (now === shown) return // nothing to redraw (and a token being typed stays)
     shown = now
     if (!l) {
@@ -74,12 +75,13 @@ export function githubSection(r: Replica, me: () => string, writable: boolean): 
     const where = h('div', {}, h('b', {}, l.repo), h('span', { class: 'muted' }, ` · ${l.branch}${l.dir ? ` · ${l.dir}/` : ''}`))
     const role = !a ? t('Connect your GitHub account to sync it from this browser.')
       : !writable ? t('Read-only link: this browser doesn’t sync it.')
+      : !ok ? t('A collaborator linked this project to {{repo}}. This browser doesn’t sync it until you approve: syncing uses your GitHub token, so it brings that repository’s files into the project and sends the project’s changes to it.', { repo: l.repo })
       : st?.role === 'syncing' ? t('This browser keeps it in step: it brings commits in every minute, and sends changes once the project has been quiet for two minutes.')
       : st?.role === 'standby' ? t('{{name}} keeps it in step now (another browser, or the TeXLoom app). This browser takes over if they stop.', { name: st.holder ?? '?' })
       : t('Waiting to sync (offline, or catching up).')
     const blocked = l.blocked ? h('div', { class: 'risk' },
       h('span', {}, h('b', {}, '⚠ '), t('GitHub has changes that clash with the project’s in {{files}}. Nothing was brought in. Make one side match the other, or keep the project’s version where they clash.', { files: (l.clash ?? []).join(', ') || '?' })),
-      writable && a ? h('span', { class: 'actions' }, h('button', { onclick: async (e: Event) => {
+      writable && a && ok ? h('span', { class: 'actions' }, h('button', { onclick: async (e: Event) => {
         const b = e.currentTarget as HTMLButtonElement
         if (!confirm(t('Bring in GitHub’s changes, keeping the project’s version where the two clash? The project’s version then goes to GitHub.'))) return
         b.disabled = true; note(t('Syncing…'))
@@ -93,14 +95,21 @@ export function githubSection(r: Replica, me: () => string, writable: boolean): 
       st?.error ? h('p', { class: 'small err' }, st.error) : null,
       msg,
       writable ? h('div', { class: 'row' },
-        a && st?.role !== 'standby' ? h('button', { class: 'small', disabled: st?.busy, onclick: async () => {
+        a && !ok ? h('button', { class: 'small primary', onclick: async () => {
+          const cur = linkOf(r)
+          if (!cur || !confirm(t('Sync this project with {{repo}} (branch {{branch}}) using your GitHub token?', { repo: cur.repo, branch: cur.branch }))) return
+          approve(r, cur); note(t('Syncing…'))
+          try { await engine?.now(); note(engine?.state.error ?? '') } catch (err) { note(say(err), true) }
+          render()
+        } }, t('Approve and sync')) : null,
+        a && ok && st?.role !== 'standby' ? h('button', { class: 'small', disabled: st?.busy, onclick: async () => {
           note(t('Syncing…'))
           try { await engine?.now(); note(engine?.state.error ?? (engine?.state.role === 'syncing' && !linkOf(r)?.blocked ? t('Done.') : '')) } catch (err) { note(say(err), true) }
           render()
         } }, t('Sync now')) : null,
         h('button', { class: 'small', onclick: () => {
           if (!confirm(t('Stop keeping this project in step with {{repo}}? Both stay as they are.', { repo: l.repo }))) return
-          setLink(r, null); r.meta.delete('githubLease'); render()
+          setLink(r, null); r.meta.delete('githubLease'); approve(r, null); render()
         } }, t('Unlink'))) : null,
       a ? null : githubAccountBox(render),
     ].filter((x): x is HTMLElement => !!x))

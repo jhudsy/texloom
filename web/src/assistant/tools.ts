@@ -32,6 +32,9 @@ export interface ToolDef {
 
 class ToolError extends Error {}
 
+const SEARCH_LINE = 2000 // characters of each line the search tool looks at
+const SEARCH_MS = 500 // how long the search tool may run
+
 const textOf = (r: Replica, path: string): Y.Text => {
   const t = r.files.get(path)
   if (t) return t
@@ -135,16 +138,28 @@ export const TOOLS: ToolDef[] = [
       let re: RegExp | null = null
       if (regex) {
         if (pattern.length > 200) throw new ToolError('Regex too long (max 200 characters).')
+        // A quantified group that itself repeats ("(a+)+", "(x*)*") can backtrack for ages on
+        // the main thread: refuse those.
+        if (/\([^()]*[+*}][^()]*\)[+*{]/.test(pattern)) throw new ToolError('Regex has a repeated group containing a repeat (like (a+)+), which can run for ages. Simplify it.')
         try { re = new RegExp(pattern) } catch (e) { throw new ToolError(`Bad regex: ${e}`) }
       }
+      // The pattern comes from the model and runs here, on the page: only the first SEARCH_LINE
+      // characters of each line are searched, and the search stops after SEARCH_MS.
       const hits: string[] = []
       const paths = path ? [validPath(path)] : [...r.files.keys()].sort()
-      for (const p of paths) {
-        textOf(r, p).toString().split('\n').forEach((l, i) => {
-          if (hits.length < 100 && (re ? re.test(l) : l.includes(pattern))) hits.push(`${p}:${i + 1}: ${l}`)
-        })
+      const until = performance.now() + SEARCH_MS
+      let cut = false
+      search: for (const p of paths) {
+        const lines = textOf(r, p).toString().split('\n')
+        for (let i = 0; i < lines.length && hits.length < 100; i++) {
+          if (performance.now() > until) { cut = true; break search }
+          const l = lines[i].length > SEARCH_LINE ? lines[i].slice(0, SEARCH_LINE) : lines[i]
+          if (re ? re.test(l) : l.includes(pattern)) hits.push(`${p}:${i + 1}: ${l}`)
+        }
       }
-      return hits.length ? hits.join('\n') + (hits.length === 100 ? '\n… (stopped at 100 matches)' : '') : 'No matches.'
+      const more = cut ? '\n… (search cut short after 0.5 s; narrow it with path or a simpler pattern)'
+        : hits.length === 100 ? '\n… (stopped at 100 matches)' : ''
+      return hits.length ? hits.join('\n') + more : cut ? 'No matches before the search was cut short (after 0.5 s); narrow it with path or a simpler pattern.' : 'No matches.'
     },
   },
   {

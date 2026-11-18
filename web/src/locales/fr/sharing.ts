@@ -28,7 +28,7 @@ const fr: Catalog = {
   'Name for the personal link': 'Nom pour le lien personnel',
   'Start of this link’s key: tells apart people with the same name':
     'Début de la clé de ce lien : permet de distinguer des personnes portant le même nom',
-  'revoked {{date}}': 'révoqué le {{date}}',
+  'revoked': 'révoqué',
   'since {{date}}': 'depuis le {{date}}',
   'Copy {{name}}’s edit link': 'Copier le lien de modification de {{name}}',
   'Copy link': 'Copier le lien',

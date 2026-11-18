@@ -18,7 +18,7 @@ const zh: Catalog = {
   'Name, e.g. Alice': '姓名，例如 Alice',
   'Name for the personal link': '个人链接的名称',
   'Start of this link’s key: tells apart people with the same name': '此链接密钥的开头：用于区分同名的人',
-  'revoked {{date}}': '已于 {{date}} 撤销',
+  'revoked': '已撤销',
   'since {{date}}': '自 {{date}} 起',
   'Copy {{name}}’s edit link': '复制 {{name}} 的编辑链接',
   'Copy link': '复制链接',

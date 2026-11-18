@@ -35,5 +35,8 @@ const es: Catalog = {
   "The token can read {{repo}} but not write to it.": "El token puede leer {{repo}} pero no escribir en él.",
   "Linked.": "Vinculado.",
   "Linked; {{n}} files came in from GitHub.": ["Vinculado; llegó {{n}} archivo de GitHub.", "Vinculado; llegaron {{n}} archivos de GitHub."],
+  "A collaborator linked this project to {{repo}}. This browser doesn’t sync it until you approve: syncing uses your GitHub token, so it brings that repository’s files into the project and sends the project’s changes to it.": "Un colaborador ha vinculado este proyecto a {{repo}}. Este navegador no lo sincroniza hasta que lo apruebes: la sincronización usa tu token de GitHub, así que trae los archivos de ese repositorio al proyecto y envía allí los cambios del proyecto.",
+  "Sync this project with {{repo}} (branch {{branch}}) using your GitHub token?": "¿Sincronizar este proyecto con {{repo}} (rama {{branch}}) usando tu token de GitHub?",
+  "Approve and sync": "Aprobar y sincronizar",
 }
 export default es

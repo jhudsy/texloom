@@ -258,6 +258,23 @@ export async function importEntries(r: Replica, entries: Record<string, Uint8Arr
   return { added: files.length, skipped }
 }
 
+// An archive may claim to unpack to far more than it holds (a zip bomb): what it says it holds
+// is checked before anything is unpacked, and unpacking never makes more than that.
+const MAX_UNZIPPED = 512 * 1024 * 1024
+const MAX_ENTRIES = 20000
+
+/** Unpack a .zip, refusing one that unpacks to over MAX_UNZIPPED bytes or MAX_ENTRIES files. */
+export function unzipCapped(data: Uint8Array): Record<string, Uint8Array> {
+  let total = 0, count = 0
+  return unzipSync(data, {
+    filter: (f) => {
+      total += f.originalSize
+      if (++count > MAX_ENTRIES || total > MAX_UNZIPPED) throw new Error(t('That archive is too large once unpacked (over 512 MB or 20,000 files).'))
+      return true
+    },
+  })
+}
+
 export function arxivId(input: string): string | null {
   const m = /(?:arxiv\.org\/(?:abs|pdf|e-print)\/|arxiv:\s*|^)((?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?)(?:\.pdf)?\/?$/i.exec(input.trim())
   return m ? m[1] : null
@@ -303,7 +320,7 @@ export function importDialog(r: Replica, opts: { onDone?: () => void; fresh?: bo
     if (f.size > 200 * 1024 * 1024) return fail(t('That file is over 200 MB.'))
     busy(true); msg.className = 'muted small'; msg.textContent = t('Reading {{name}}…', { name: f.name })
     try {
-      const entries = unzipSync(new Uint8Array(await f.arrayBuffer()))
+      const entries = unzipCapped(new Uint8Array(await f.arrayBuffer()))
       const added = await importEntries(r, entries, { replaceAll: replace.checked })
       if (added) finish(added, f.name); else msg.textContent = ''
     } catch (e) { fail(e instanceof Error && /invalid zip|unexpected EOF/i.test(e.message) ? t('That isn’t a readable .zip file.') : e) } finally { busy(false) }
@@ -313,7 +330,7 @@ export function importDialog(r: Replica, opts: { onDone?: () => void; fresh?: bo
     if (!id) return fail(t('That doesn’t look like an arXiv id (e.g. 1706.03762 or hep-th/9901001).'))
     busy(true); msg.className = 'muted small'; msg.textContent = t('Fetching arXiv:{{id}}…', { id })
     try {
-      const entries = unzipSync(await fetchArxivZip(id))
+      const entries = unzipCapped(await fetchArxivZip(id))
       const added = await importEntries(r, entries, { replaceAll: replace.checked })
       if (!added) { msg.textContent = ''; return }
       finish(added, `arXiv:${id}`)

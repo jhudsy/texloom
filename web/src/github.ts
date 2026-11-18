@@ -147,9 +147,39 @@ export async function gitSha(d: Uint8Array): Promise<string> {
 
 export function linkOf(r: Replica): Link | null {
   const v = r.meta.get('github') as Link | undefined
-  return v && typeof v === 'object' && typeof v.repo === 'string' && typeof v.branch === 'string' ? { ...v, dir: v.dir ?? '' } : null
+  return v && typeof v === 'object' && typeof v.repo === 'string' && typeof v.branch === 'string' ? { ...v, dir: typeof v.dir === 'string' ? v.dir : '' } : null
 }
 export function setLink(r: Replica, l: Link | null) { if (l) r.meta.set('github', l); else r.meta.delete('github') }
+
+// The link is in the project's shared settings, which any collaborator can write, and syncing uses
+// this browser's own token: a collaborator could point it at a private repository of yours (bringing
+// it into the project) or at any repository the token can write to. So a browser syncs only a link
+// its user made or approved here: the repository, branch and folder approved, by project.
+type Target = Pick<Link, 'repo' | 'branch' | 'dir'>
+const approvedKey = (r: Replica) => `texloom.githubApproved.${r.keys.project}`
+
+/** What this browser's user approved syncing for this project, if anything. */
+export function approvedTarget(r: Replica): Target | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(approvedKey(r)) || 'null')
+    return v && typeof v.repo === 'string' && typeof v.branch === 'string' && typeof v.dir === 'string' ? v : null
+  } catch { return null }
+}
+
+/** Approve syncing this repository, branch and folder from this browser (null: none). */
+export function approve(r: Replica, l: Target | null) {
+  try {
+    if (l) localStorage.setItem(approvedKey(r), JSON.stringify({ repo: l.repo, branch: l.branch, dir: l.dir ?? '' }))
+    else localStorage.removeItem(approvedKey(r))
+  } catch {}
+}
+
+/** Whether this browser's user approved the project's link (as it is now). */
+export function approved(r: Replica, l: Link | null = linkOf(r)): boolean {
+  const ok = approvedTarget(r)
+  return !!l && !!ok && ok.repo === l.repo && ok.branch === l.branch && ok.dir === l.dir
+}
+const notApproved = () => new GitHubError(t('This browser hasn’t approved syncing the project’s GitHub link.'))
 
 const inDir = (l: Link, path: string) => (l.dir ? (path.startsWith(l.dir + '/') ? path.slice(l.dir.length + 1) : null) : path)
 const toRepo = (l: Link, p: string) => (l.dir ? `${l.dir}/${p}` : p)
@@ -199,6 +229,7 @@ export interface PullResult { commit: string | null; files: string[]; clash: str
 export async function pull(r: Replica, a: Account, by: string, oursWins = false, still: () => boolean = () => true): Promise<PullResult> {
   const link = linkOf(r)
   if (!link) throw new GitHubError(t('This project isn’t linked to GitHub.'))
+  if (!approved(r, link)) throw notApproved()
   const c = await headOf(a, link.repo, link.branch)
   if (!c || c === link.head) return { commit: c, files: [], clash: [] }
   if (c === link.blocked && !oursWins) return { commit: c, files: [], clash: link.clash ?? [] }
@@ -288,6 +319,7 @@ export async function pull(r: Replica, a: Account, by: string, oursWins = false,
 export async function push(r: Replica, a: Account, by: string, still: () => boolean = () => true): Promise<{ commit: string; files: string[] } | null> {
   const link = linkOf(r)
   if (!link) throw new GitHubError(t('This project isn’t linked to GitHub.'))
+  if (!approved(r, link)) throw notApproved()
   const repo = `/repos/${enc(link.repo)}`
   const base = link.head ? await filesAt(a, link.repo, link.head) : { tree: '', files: new Map<string, Entry>() }
   const cache = shaCache(r)
@@ -321,6 +353,7 @@ export async function push(r: Replica, a: Account, by: string, still: () => bool
 /** An empty repository takes no commits through the git API: its first has to go through the
  *  contents API, one file at a time. This sends the main file (the rest follows with push). */
 export async function firstCommit(r: Replica, a: Account, l: Link): Promise<string> {
+  if (!approved(r, l)) throw notApproved()
   const mine = [...projectFiles(r, l)].filter(([, f]) => 'text' in f)
   const [path, f] = mine.find(([p]) => p.endsWith('main.tex')) ?? mine[0] ?? [toRepo(l, 'README.md'), { text: '' }]
   const j = await call(a, 'PUT', `/repos/${enc(l.repo)}/contents/${enc(path)}`, {
@@ -333,6 +366,7 @@ export async function firstCommit(r: Replica, a: Account, l: Link): Promise<stri
  *  says whose stays ('project': it goes up with the first send). Returns how many files came in. */
 export async function linkRepo(r: Replica, a: Account, by: string, repo: string, branch: string, dir: string, prefer: 'repo' | 'project'): Promise<number> {
   const l: Link = { repo, branch, dir, head: null, by, at: Date.now(), blocked: null, clash: [] }
+  approve(r, l) // linking it is approving it
   const c = await headOf(a, repo, branch)
   if (!c) { setLink(r, l); return 0 } // an empty repository or a new branch: the project goes up on the first send
   const theirs = await filesAt(a, repo, c)
@@ -396,7 +430,8 @@ export function startGitHub(r: Replica, me: () => string, onChange: () => void) 
 
   async function round(force = false) {
     const a = githubAccount.get(), link = linkOf(r)
-    if (!a || !link || !r.keys.writable || r.deletedAt) { if (mine()) r.meta.delete('githubLease'); set({ role: 'off', holder: null }); return }
+    // a link this browser's user didn't make or approve isn't synced from here (see approved())
+    if (!a || !link || !approved(r, link) || !r.keys.writable || r.deletedAt) { if (mine()) r.meta.delete('githubLease'); set({ role: 'off', holder: null }); return }
     const l = lease()
     if (!mine()) {
       if (l && Date.now() - seen < EXPIRE) { set({ role: 'standby', holder: l.by }); return } // never taken from a live holder, even on Sync now

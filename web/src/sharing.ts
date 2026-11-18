@@ -58,25 +58,27 @@ function saveIssued(project: string, v: Issued) {
   try { localStorage.setItem(issuedKey(project), JSON.stringify(v)) } catch {}
 }
 
-interface Person { pub: string; name: string; at: number; revoked?: number; verified: boolean; link?: string }
+interface Person { pub: string; name: string; at: number; revoked?: boolean; verified: boolean; link?: string }
 
 /** Everyone holding a personal link, from what can be trusted: entries with a valid grant
- *  (shown with their granted name), this browser's own record, and keys seen signing edits. */
+ *  (shown with their granted name), this browser's own record, and keys seen signing edits.
+ *  Whether one is revoked comes only from the owner-signed list the server relays (keys.revoked):
+ *  the shared `members` map can be edited by any collaborator. */
 function people(r: Replica): Person[] {
   const keys = r.keys, out = new Map<string, Person>()
   const add = (pub: string, p: Omit<Person, 'pub'>) => {
     const c = canonicalPub(pub)
     if (!c) return
     const old = out.get(c)
-    out.set(c, { ...old, ...p, pub: c, verified: p.verified || !!old?.verified, revoked: p.revoked ?? old?.revoked, at: Math.min(old?.at ?? Infinity, p.at), link: p.link ?? old?.link })
+    out.set(c, { ...old, ...p, pub: c, verified: p.verified || !!old?.verified, at: Math.min(old?.at ?? Infinity, p.at), link: p.link ?? old?.link })
   }
   for (const [pub, m] of r.members.entries()) {
     const name = String(m?.name ?? '')
-    if (keys.grantValid(pub, name, m?.g)) add(pub, { name, at: Number(m?.at) || 0, revoked: Number(m?.revoked) || undefined, verified: true })
+    if (keys.grantValid(pub, name, m?.g)) add(pub, { name, at: Number(m?.at) || 0, verified: true })
   }
   for (const [pub, m] of Object.entries(loadIssued(keys.project))) add(pub, { name: m.name, at: m.at, verified: true, link: typeof m.link === 'string' ? m.link : undefined })
   for (const [pub, name] of keys.signers) add(pub, { name, at: out.get(canonicalPub(pub) ?? '')?.at ?? Date.now(), verified: true })
-  for (const p of out.values()) if (keys.revoked.has(p.pub)) p.revoked ??= p.at
+  for (const p of out.values()) p.revoked = keys.revoked.has(p.pub)
   return [...out.values()].sort((a, b) => a.at - b.at)
 }
 
@@ -94,7 +96,7 @@ export function shareDialog(r: Replica, server: string, me: string) {
     list.replaceChildren(...(rows.length ? rows.map((p) => h('li', { class: p.revoked ? 'revoked' : '' },
       h('span', { class: 'mname' }, p.name.slice(0, 60)),
       h('code', { class: 'muted small', title: t('Start of this link’s key: tells apart people with the same name') }, ` ${p.pub.slice(0, 6)}`),
-      h('span', { class: 'muted small' }, p.revoked ? ' ' + t('revoked {{date}}', { date: when(p.revoked) }) : p.at ? ' ' + t('since {{date}}', { date: when(p.at) }) : ''),
+      h('span', { class: 'muted small' }, p.revoked ? ' ' + t('revoked') : p.at ? ' ' + t('since {{date}}', { date: when(p.at) }) : ''),
       h('span', { class: 'spacer' }),
       keys.owner && !p.revoked && p.link ? h('button', { title: t('Copy {{name}}’s edit link', { name: p.name }), onclick: (e: any) => { navigator.clipboard.writeText(p.link!); e.target.textContent = t('Copied') } }, t('Copy link')) : null,
       keys.owner && !p.revoked && p.link ? h('a', { class: 'button mail', href: mailto(invitation(r, p.link, 'edit', me, p.name)), title: t('Opens your own email app with the link filled in') }, t('Email…')) : null,
@@ -116,9 +118,8 @@ export function shareDialog(r: Replica, server: string, me: string) {
 
   function revoke(pub: string, name: string) {
     if (!confirm(t('Revoke {{name}}’s edit link?\n\nThe server will refuse their changes from now on, and so will everyone’s browsers. Edits they already made stay.', { name }))) return
+    // Shown as revoked once the server relays the owner-signed revocation back (keys.revoked)
     if (!r.revoke(pub)) return alert(t('You’re offline: connect first so the server can be told.'))
-    const m = r.members.get(pub)
-    if (m) r.members.set(pub, { ...m, revoked: Date.now() })
     if (away) alert(t('{{name}} can no longer edit, but their link still lets them read new changes. To stop that, open the project on {{server}} and move it to new keys there.', { name, server: serverName(away) }))
     else if (confirm(t('{{name}} can no longer edit, but their link still lets them read new changes.\n\nMove the project to new keys so they can’t? Everyone else then needs a new link from you.', { name }))) {
       dlg.close()

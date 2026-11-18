@@ -160,7 +160,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     let n = 0
     const want = new Set<string>(), programs: ProgramLine[] = []
     for (const [p, yt] of r.files) {
-      if (!cleanPath(p) || BUILD.test(p)) continue
+      if (cleanPath(p) !== p || BUILD.test(p)) continue
       want.add(p)
       if (unread.has(p)) continue // an editor's save is there: it's read first
       const text = yt.toString(), data = new TextEncoder().encode(known[p]?.c ? text.replace(/\r?\n/g, '\r\n') : text)
@@ -174,7 +174,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     }
     if (programs.length) sync.onPrograms?.(programs)
     for (const [p, b] of r.bin) {
-      if (!cleanPath(p) || BUILD.test(p) || !b?.h) continue
+      if (cleanPath(p) !== p || BUILD.test(p) || !b?.h) continue
       want.add(p)
       if (unread.has(p)) continue
       if (known[p]?.h === b.h) continue
@@ -183,7 +183,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     }
     const dirs = new Set([...r.dirs.keys()])
     for (const d of dirs) { // explicit (possibly empty) folders
-      if (!knownDirs.has(d) && cleanPath(d)) {
+      if (!knownDirs.has(d) && cleanPath(d) === d) {
         try { let h = root; for (const x of d.split('/')) h = await h.getDirectoryHandle(x, { create: true }); knownDirs.add(d); n++ } catch {}
       }
     }
@@ -254,7 +254,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     const diskDirs = new Set<string>()
     const disk = await walk(root, '', new Map(), diskDirs)
     let n = 0
-    const addDirs = [...diskDirs].filter((d) => cleanPath(d) && !knownDirs.has(d) && !r.dirs.has(d))
+    const addDirs = [...diskDirs].filter((d) => cleanPath(d) === d && !knownDirs.has(d) && !r.dirs.has(d))
     const goneDirs = [...knownDirs].filter((d) => !diskDirs.has(d))
     if (addDirs.length || goneDirs.length) {
       r.doc.transact(() => {

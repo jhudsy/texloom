@@ -35,5 +35,8 @@ const de: Catalog = {
   "The token can read {{repo}} but not write to it.": "Das Token kann {{repo}} lesen, aber nicht hineinschreiben.",
   "Linked.": "Verknüpft.",
   "Linked; {{n}} files came in from GitHub.": ["Verknüpft; {{n}} Datei kam von GitHub.", "Verknüpft; {{n}} Dateien kamen von GitHub."],
+  "A collaborator linked this project to {{repo}}. This browser doesn’t sync it until you approve: syncing uses your GitHub token, so it brings that repository’s files into the project and sends the project’s changes to it.": "Jemand im Projekt hat es mit {{repo}} verknüpft. Dieser Browser gleicht es erst ab, wenn Sie zustimmen: Der Abgleich nutzt Ihr GitHub-Token, holt also die Dateien dieses Repositorys ins Projekt und sendet die Änderungen des Projekts dorthin.",
+  "Sync this project with {{repo}} (branch {{branch}}) using your GitHub token?": "Dieses Projekt mit Ihrem GitHub-Token mit {{repo}} (Branch {{branch}}) abgleichen?",
+  "Approve and sync": "Zustimmen und abgleichen",
 }
 export default de

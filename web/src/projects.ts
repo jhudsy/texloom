@@ -2,7 +2,7 @@
 // can't read projects, so it can't list them for you (listsync.ts can keep an encrypted copy).
 import { chats } from './assistant/chats'
 import { forgetLocalCopy } from './replica'
-import { b64d } from './crypto'
+import { Keys, b64d, b64e } from './crypto'
 import { rememberFolder } from './foldersync'
 import { t, locale } from './i18n'
 import type { ListDoc, ListEntry } from './listcore'
@@ -43,6 +43,25 @@ const write = (list: Recent[], quietly = false) => {
 const readGone = (): Record<string, number> => { try { return JSON.parse(localStorage.getItem(GONE) || '{}') } catch { return {} } }
 const writeGone = (gone: Record<string, number>) => { try { localStorage.setItem(GONE, JSON.stringify(gone)) } catch {} }
 
+/** How much a link's keys give: 0 to read, 1 a personal edit link, 2 the owner's; null if they're no keys. */
+function access(fragment: string): { level: number; keys: Keys } | null {
+  try { const k = Keys.fromFragment(fragment); return k && { level: k.owner ? 2 : k.writable ? 1 : 0, keys: k } } catch { return null }
+}
+
+/** Whether two links hold the same project's keys (whatever access each gives). */
+export function sameKeys(a: string, b: string): boolean {
+  const x = access(a), y = access(b)
+  return !!x && !!y && x.keys.project === y.keys.project && b64e(x.keys.key) === b64e(y.keys.key)
+}
+
+/** Whether `next` is the same project's keys as `stored`, giving more access (read → edit → owner). */
+export function moreAccess(stored: string, next: string): boolean {
+  const a = access(stored), b = access(next)
+  if (!b) return false
+  if (!a) return true // what's stored isn't usable keys
+  return sameKeys(stored, next) && b.level > a.level
+}
+
 /** Short, readable project code derived from its id, e.g. "K7P2-QX4M" (Crockford
  *  base32: no lookalike letters, no '-' or '_' from the base64 id). */
 export function projectCode(id: string): string {
@@ -60,18 +79,22 @@ export const projects = {
     return read().sort((a, b) => b.at - a.at)
   },
 
-  /** Insert or merge. An edit link is never downgraded by later opening a read-only one. */
+  /** Insert or merge. For a project already in the list, opening a link (someone else's, maybe)
+   *  never changes its server, and its keys change only for ones giving more access to the same
+   *  project: an edit link is never downgraded, nor replaced by a link that doesn't match it. */
   update(project: string, patch: Partial<Recent>) {
     const list = read()
     let r = list.find((x) => x.project === project)
     if (!r) {
       if (!patch.fragment) return
-      r = { project, fragment: patch.fragment, name: '', at: Date.now(), created: Date.now(), writable: !!patch.writable }
+      r = { project, fragment: patch.fragment, name: '', at: Date.now(), created: Date.now(), writable: !!patch.writable, server: patch.server }
       list.push(r)
+    } else {
+      patch = { ...patch, server: undefined }
+      if (patch.fragment !== undefined && patch.fragment !== r.fragment && !moreAccess(r.fragment, patch.fragment)) patch = { ...patch, fragment: undefined, writable: undefined }
+      if (r.writable && patch.writable === false) patch = { ...patch, writable: undefined } // don't lose the edit link
     }
-    const keep = r.writable && patch.writable === false ? r.fragment : null // don't lose the edit link
     Object.assign(r, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)))
-    if (keep) { r.writable = true; r.fragment = keep }
     write(list)
   },
 

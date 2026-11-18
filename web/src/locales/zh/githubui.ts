@@ -35,5 +35,8 @@ const zh: Catalog = {
   "The token can read {{repo}} but not write to it.": "该令牌可以读取 {{repo}}，但无法写入。",
   "Linked.": "已关联。",
   "Linked; {{n}} files came in from GitHub.": {"other": "已关联；从 GitHub 拉取了 {{n}} 个文件。"},
+  "A collaborator linked this project to {{repo}}. This browser doesn’t sync it until you approve: syncing uses your GitHub token, so it brings that repository’s files into the project and sends the project’s changes to it.": "有协作者将此项目关联到了 {{repo}}。在您批准之前，此浏览器不会同步它：同步使用您的 GitHub 令牌，会把该仓库的文件带入项目，并把项目的更改发送到该仓库。",
+  "Sync this project with {{repo}} (branch {{branch}}) using your GitHub token?": "使用您的 GitHub 令牌将此项目与 {{repo}}（分支 {{branch}}）同步？",
+  "Approve and sync": "批准并同步",
 }
 export default zh

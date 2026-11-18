@@ -3,7 +3,8 @@
 import type { Replica } from './replica'
 import { dialog, h } from './dom'
 import { t } from './i18n'
-import { collections, connect, libraries, links, refresh, setLink, zoteroAccount, type Collection, type Library, type Link } from './zotero'
+import { collections, connect, libraries, links, refresh, setLink, validLink, zoteroAccount, type Collection, type Library, type Link } from './zotero'
+import { cleanPath } from './projectfiles'
 
 const NEW_KEY = 'https://www.zotero.org/settings/keys/new'
 const ago = (at: number) => new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -49,11 +50,11 @@ export function zoteroSection(r: Replica, me: () => string, writable: boolean): 
     const rows = linked.map(([file, l]) => {
       const msg = h('span', { class: 'small', role: 'status' })
       return h('div', { class: 'zlink' },
-        h('div', {}, h('code', {}, file), ' ← ', h('b', {}, l.collName), h('span', { class: 'muted' }, ` (${l.libName}, ${l.format === 'biblatex' ? 'BibLaTeX' : 'BibTeX'})`)),
+        h('div', {}, h('code', {}, file), ' ← ', h('b', {}, String(l.collName ?? '')), h('span', { class: 'muted' }, ` (${String(l.libName ?? '')}, ${l.format === 'biblatex' ? 'BibLaTeX' : 'BibTeX'})`)),
         h('div', { class: 'row' },
           h('span', { class: 'muted small spacer' }, t('Refreshed {{when}} by {{name}}.', { when: ago(l.at), name: l.by || '?' })),
           msg,
-          writable && mine ? h('button', { class: 'small', onclick: async (e: Event) => {
+          writable && mine && validLink(file, l) ? h('button', { class: 'small', onclick: async (e: Event) => {
             const b = e.currentTarget as HTMLButtonElement
             b.disabled = true; msg.className = 'small muted'; msg.textContent = t('Fetching…')
             try { msg.textContent = (await refresh(r, file, me())) ? t('Updated.') : t('Already up to date.'); render() }
@@ -119,7 +120,7 @@ function linkDialog(r: Replica, me: () => string, done: () => void) {
   })()
   async function run() {
     const path = file.value.trim().replace(/^\/+/, '')
-    if (!/^[^\\:*?"<>|]+\.bib$/i.test(path) || path.split('/').some((s) => s === '..' || s === '.')) { say(t('Choose a .bib file name, such as zotero.bib.'), true); return }
+    if (!/\.bib$/i.test(path) || cleanPath(path) !== path) { say(t('Choose a .bib file name, such as zotero.bib.'), true); return }
     if (r.files.has(path) && !confirm(t('{{file}} already exists. Replace its contents with the collection’s entries?', { file: path }))) return
     const chosen = colls.find((c) => c.key === coll.value)
     const link: Link = { lib: lib.value, libName: libs.find((l) => l.id === lib.value)?.name ?? lib.value, coll: chosen?.key ?? null,

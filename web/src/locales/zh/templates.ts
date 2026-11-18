@@ -39,6 +39,7 @@ const zh: Catalog = {
   "A folder you already have, kept in sync with the project by the TeXLoom app.": "使用你已有的文件夹，由 TeXLoom 应用与项目保持同步。",
   "Start from a template": "从模板开始",
   "Or bring your own": "或使用你自己的",
+  "That archive is too large once unpacked (over 512 MB or 20,000 files).": "该压缩包解压后过大（超过 512 MB 或 20,000 个文件）。",
 }
 
 export default zh

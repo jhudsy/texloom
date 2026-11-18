@@ -39,6 +39,7 @@ const es: Catalog = {
   "A folder you already have, kept in sync with the project by the TeXLoom app.": "Una carpeta que ya tiene, sincronizada con el proyecto por la aplicación TeXLoom.",
   "Start from a template": "Empezar con una plantilla",
   "Or bring your own": "O traiga el suyo",
+  "That archive is too large once unpacked (over 512 MB or 20,000 files).": "Ese archivo es demasiado grande una vez descomprimido (más de 512 MB o 20.000 archivos).",
 }
 
 export default es
