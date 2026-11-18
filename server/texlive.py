@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import io
 import json
 import logging
 import lzma
@@ -30,6 +29,7 @@ import re
 import shutil
 import sqlite3
 import tarfile
+import tempfile
 import time
 from pathlib import Path
 
@@ -46,6 +46,8 @@ HISTORIC = [  # where a past year's final repository lives
 NAME_RE = re.compile(r"^[A-Za-z0-9._+-]{1,255}$")
 MAX_PACKAGE = 300 * 1024 * 1024  # bigger containers (a few font collections) aren't fetched
 WAIT = 25  # seconds a request waits for an install (the engine gives up after 30)
+FAILED_WAIT = 600  # seconds a package that couldn't be fetched isn't tried again (each try asks every mirror)
+TOUCH_EVERY = 3600  # seconds between recordings of a package's last use (for eviction)
 
 # kpathsea format number -> (default suffixes, folders under texmf-dist in search order).
 # Numbers follow kpse_file_format_type in kpathsea/types.h.
@@ -127,7 +129,9 @@ class TexLive:
         self.jobs: dict[str, asyncio.Task] = {}
         self.slots = asyncio.Semaphore(3)  # packages downloading at once
         self.refreshed = 0.0
-        self.used = 0
+        self.used = 0  # bytes of installed packages' files on disk (what max_bytes caps)
+        self.last_used: dict[str, float] = {}  # package -> when a file of it was last served
+        self.failed: dict[str, float] = {}  # package -> when fetching it last failed
         self._forget_other_release()
         self._open()
 
@@ -150,7 +154,26 @@ class TexLive:
             return
         self.db = sqlite3.connect(db, check_same_thread=False)
         self.meta = json.loads((self.root / "repo.json").read_text())
-        self.used = self.db.execute("SELECT COALESCE(SUM(size), 0) FROM pkgs WHERE installed=1").fetchone()[0]
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(pkgs)")}
+        with self.db:
+            if "bytes" not in cols:  # an index from before the cache was counted on disk
+                self.db.execute("ALTER TABLE pkgs ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0")
+            if "used" not in cols:
+                self.db.execute("ALTER TABLE pkgs ADD COLUMN used REAL NOT NULL DEFAULT 0")
+            for (pkg,) in self.db.execute("SELECT name FROM pkgs WHERE installed=1 AND bytes=0").fetchall():
+                self.db.execute("UPDATE pkgs SET bytes=? WHERE name=?", (self._on_disk(pkg), pkg))
+        self.used = self.db.execute("SELECT COALESCE(SUM(bytes), 0) FROM pkgs WHERE installed=1").fetchone()[0]
+        self.last_used = dict(self.db.execute("SELECT name, used FROM pkgs WHERE installed=1"))
+
+    def _on_disk(self, pkg: str) -> int:
+        """Bytes a package's files take on disk now."""
+        n = 0
+        for (path,) in self.db.execute("SELECT path FROM files WHERE pkg=?", (pkg,)):
+            try:
+                n += (self.files / path).stat().st_size
+            except OSError:
+                pass
+        return n
 
     @property
     def ready(self) -> bool:
@@ -224,15 +247,18 @@ class TexLive:
         db = sqlite3.connect(new)
         db.executescript("""
             CREATE TABLE pkgs (name TEXT PRIMARY KEY, sha TEXT NOT NULL, size INTEGER NOT NULL,
-                               installed INTEGER NOT NULL DEFAULT 0);
+                               installed INTEGER NOT NULL DEFAULT 0,
+                               bytes INTEGER NOT NULL DEFAULT 0,  -- its files on disk, once installed
+                               used REAL NOT NULL DEFAULT 0);     -- when last served (for eviction)
             CREATE TABLE files (base TEXT NOT NULL, path TEXT NOT NULL, pkg TEXT NOT NULL);
         """)
-        old = {}
+        old: dict[str, tuple[int, float]] = {}
         if self.db is not None:  # keep what is installed already
-            old = dict(self.db.execute("SELECT name, 1 FROM pkgs WHERE installed=1"))
+            old = {r[0]: (r[1], r[2]) for r in self.db.execute("SELECT name, bytes, used FROM pkgs WHERE installed=1")}
         n = 0
         for name, sha, size, run in parse_tlpdb(text):
-            db.execute("INSERT INTO pkgs VALUES (?,?,?,?)", (name, sha, size, int(name in old)))
+            had = old.get(name)
+            db.execute("INSERT INTO pkgs VALUES (?,?,?,?,?,?)", (name, sha, size, int(had is not None), *(had or (0, 0.0))))
             db.executemany("INSERT INTO files VALUES (?,?,?)", [(p.rsplit("/", 1)[-1], p, name) for p in run])
             n += len(run)
         db.execute("CREATE INDEX files_base ON files(base)")
@@ -276,29 +302,90 @@ class TexLive:
             sha, size, _ = row
             if size > MAX_PACKAGE:
                 raise RuntimeError(f"{pkg} is too large to fetch on demand ({size >> 20} MB)")
-            if self.used + size > self.max_bytes or shutil.disk_usage(self.root).free - 3 * size < self.min_free:
-                raise RuntimeError("the TeX Live cache is full")
-            async with self.slots:
-                data = await self._fetch_container(pkg, sha, size)
+            if time.time() - self.failed.get(pkg, 0) < FAILED_WAIT:
+                raise RuntimeError(f"couldn't fetch {pkg} a few minutes ago: try again later")
+            if shutil.disk_usage(self.root).free - 4 * size < self.min_free:
+                raise RuntimeError("the server is short of disk")
             files = {p for (p,) in self.db.execute("SELECT path FROM files WHERE pkg=?", (pkg,))}
-            await asyncio.get_running_loop().run_in_executor(None, self._unpack, data, files)
+            loop = asyncio.get_running_loop()
+            with tempfile.NamedTemporaryFile(dir=self.root, suffix=".tar.xz") as tmp:
+                try:
+                    async with self.slots:
+                        await self._fetch_container(pkg, sha, size, Path(tmp.name))
+                except RuntimeError:
+                    if len(self.failed) > 1000:
+                        self.failed = {k: v for k, v in self.failed.items() if time.time() - v < FAILED_WAIT}
+                    self.failed[pkg] = time.time()
+                    raise
+                need = await loop.run_in_executor(None, self._unpacked_size, Path(tmp.name), files)
+                self._make_room(need, pkg)
+                await loop.run_in_executor(None, self._unpack, Path(tmp.name), files)
+            now = time.time()
             with self.db:
-                self.db.execute("UPDATE pkgs SET installed=1 WHERE name=?", (pkg,))
-            self.used += size
-            log.info("installed %s (%s KB)", pkg, size >> 10)
+                self.db.execute("UPDATE pkgs SET installed=1, bytes=?, used=? WHERE name=?", (need, now, pkg))
+            self.used += need
+            self.last_used[pkg] = now
+            log.info("installed %s (%s KB)", pkg, need >> 10)
 
-    async def _fetch_container(self, pkg: str, sha: str, size: int) -> bytes:
+    def _make_room(self, need: int, pkg: str) -> None:
+        """Remove the least recently served packages until `need` more bytes fit under max_bytes."""
+        if need > self.max_bytes:
+            raise RuntimeError(f"{pkg} is larger than the whole TeX Live cache")
+        while self.used + need > self.max_bytes:
+            row = self.db.execute("SELECT name, bytes FROM pkgs WHERE installed=1 AND name<>? "
+                                  "ORDER BY used LIMIT 1", (pkg,)).fetchone()
+            if row is None:
+                raise RuntimeError("the TeX Live cache is full")
+            old, n = row
+            for (path,) in self.db.execute("SELECT path FROM files WHERE pkg=?", (old,)).fetchall():
+                (self.files / path).unlink(missing_ok=True)  # (one being served stays readable until closed)
+            with self.db:
+                self.db.execute("UPDATE pkgs SET installed=0, bytes=0 WHERE name=?", (old,))
+            self.used -= n
+            self.last_used.pop(old, None)
+            log.info("removed %s from the TeX Live cache (%s KB, least recently used)", old, n >> 10)
+
+    def _touch(self, pkg: str) -> None:
+        """Note that a package's file was served (written to the index at most hourly)."""
+        now = time.time()
+        if now - self.last_used.get(pkg, 0) < TOUCH_EVERY:
+            return
+        self.last_used[pkg] = now
+        with self.db:
+            self.db.execute("UPDATE pkgs SET used=? WHERE name=?", (now, pkg))
+
+    @staticmethod
+    async def _download_to(session: ClientSession, url: str, limit: int, dest: Path) -> str:
+        """Write the body to `dest` (it never sits whole in memory); its SHA-512."""
+        h = hashlib.sha512()
+        async with session.get(url, allow_redirects=True) as r:
+            if r.status != 200:
+                raise ClientError(f"HTTP {r.status}")
+            if (r.content_length or 0) > limit:
+                raise ClientError("too large")
+            n = 0
+            with open(dest, "wb") as out:  # noqa: ASYNC230 - small writes to local disk, between network reads
+                async for chunk in r.content.iter_chunked(1 << 16):
+                    n += len(chunk)
+                    if n > limit:
+                        raise ClientError("too large")
+                    h.update(chunk)
+                    out.write(chunk)
+        return h.hexdigest()
+
+    async def _fetch_container(self, pkg: str, sha: str, size: int, dest: Path) -> None:
+        """Download the package's container to `dest`, checked against the index."""
         mismatched = 0
         tried = []
         async with ClientSession(timeout=ClientTimeout(total=120)) as s:
             for base in self.mirrors():
                 try:
-                    data, _ = await self._download(s, f"{base}archive/{pkg}.tar.xz", max(size * 2, 1 << 20))
-                except (ClientError, asyncio.TimeoutError) as e:
+                    got = await self._download_to(s, f"{base}archive/{pkg}.tar.xz", max(size * 2, 1 << 20), dest)
+                except (ClientError, asyncio.TimeoutError, OSError) as e:
                     tried.append(f"{base}: {e}")
                     continue  # this mirror is down or slow: the next one
-                if hashlib.sha512(data).hexdigest() == sha:
-                    return data
+                if got == sha:
+                    return
                 mismatched += 1
                 tried.append(f"{base}: different version")
         # every mirror that answered has another version: the package changed since the index
@@ -308,15 +395,27 @@ class TexLive:
             await self.build_index(self.index_sources())
             row = self.db.execute("SELECT sha, size FROM pkgs WHERE name=?", (pkg,)).fetchone()
             if row and (row[0] != sha or self.meta.get("mirror") != was):  # a new version, or a new place to look
-                return await self._fetch_container(pkg, row[0], row[1])
+                return await self._fetch_container(pkg, row[0], row[1], dest)
         raise RuntimeError(f"couldn't fetch {pkg}: " + "; ".join(tried))
 
-    def _unpack(self, data: bytes, allowed: set[str]) -> None:
+    @staticmethod
+    def _wanted(m: tarfile.TarInfo, allowed: set[str]) -> str | None:
+        """The path under texmf/ of a container member to install, or None."""
+        name = m.name[11:] if m.name.startswith("texmf-dist/") else m.name
+        if not m.isfile() or name not in allowed or name.startswith("/") or ".." in name.split("/"):
+            return None
+        return name
+
+    def _unpacked_size(self, archive: Path, allowed: set[str]) -> int:
+        with tarfile.open(archive, mode="r:xz") as tar:
+            return sum(m.size for m in tar.getmembers() if self._wanted(m, allowed))
+
+    def _unpack(self, archive: Path, allowed: set[str]) -> None:
         """Write the package's run files (only those the index lists for it) under texmf/."""
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:xz") as tar:
+        with tarfile.open(archive, mode="r:xz") as tar:
             for m in tar.getmembers():
-                name = m.name[11:] if m.name.startswith("texmf-dist/") else m.name
-                if not m.isfile() or name not in allowed or name.startswith("/") or ".." in name.split("/"):
+                name = self._wanted(m, allowed)
+                if name is None:
                     continue
                 dest = self.files / name
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -348,6 +447,7 @@ class TexLive:
                 return web.Response(status=503, text=str(e)[:200], headers={"Cache-Control": "no-store"})
             if not f.is_file():
                 return self._miss()
+        self._touch(pkg)
         return web.FileResponse(f, headers={
             "Cache-Control": "public, max-age=31536000, immutable",  # the URL names the release
             "Content-Type": "application/octet-stream",

@@ -101,7 +101,7 @@ without compiling.
 
 | client → server | meaning |
 |---|---|
-| `{t:"hello", since, app, v}` | send me everything after sequence number `since`; `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes. Project lists check `X-TeXLoom: app/version` the same way (426). |
+| `{t:"hello", since, app, v, pages?}` | send me everything after sequence number `since`; `pages: 1` = a long log may come in pages (below); `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes. Project lists check `X-TeXLoom: app/version` the same way (426). |
 | `{t:"up", d, s}` | encrypted Yjs update `d` with signature `s`; stored and broadcast |
 | `{t:"snap", upto, d, s}` | compaction: encrypted full state replacing log entries ≤ `upto`; `s` signs `"snap:<upto>:" ‖ d` |
 | `{t:"aw", d}` | ephemeral, encrypted awareness (cursors, names); relayed, never stored |
@@ -112,7 +112,8 @@ without compiling.
 
 | server → client | meaning |
 |---|---|
-| `{t:"log", entries:[{q,d,s}], head, floor, mode, you, peers, store, rv}` | catch-up reply to `hello` (a snapshot, if any, comes first); `you` = this connection's peer id; `floor` = entries up to here were evicted; `rv` = revocations |
+| `{t:"log", entries:[{q,d,s}], head, floor, mode, you, peers, store, rv, more?}` | catch-up reply to `hello` (a snapshot, if any, comes first); `you` = this connection's peer id; `floor` = entries up to here were evicted; `rv` = revocations; `more` = the rest follows as `logmore` |
+| `{t:"logmore", entries, more?}` | the next page of a catch-up, to an app whose `hello` had `pages: 1`; the last has no `more` |
 | `{t:"up", q, d, s}` | someone else's update |
 | `{t:"ack", q}` | your update was stored at sequence `q` |
 | `{t:"aw", d, from}` | someone's awareness |
@@ -127,7 +128,10 @@ Ciphertext = `iv(12 bytes) ‖ AES-256-GCM(plaintext)`.
 **Offline:** each replica keeps an outbox of local updates (merged with
 `Y.mergeUpdates`) that the server hasn't acknowledged yet, plus the last sequence
 number it has seen. On reconnect it sends `hello`, applies what it missed, then
-flushes the outbox. Yjs updates are idempotent and commutative, so order and
+flushes the outbox. A log over 8 MiB goes to apps that take pages a page at a time (about
+8 MiB of stored entries each, at least one entry), so a catch-up needs a page's memory on the
+server whatever the log's size; the app applies each page as it comes and does what follows a
+catch-up (moving `since`, flushing the outbox, compacting) only after the last. Yjs updates are idempotent and commutative, so order and
 duplicates don't matter.
 
 **Restarts:** when the server stops it refuses new connections and closes every open one at
@@ -231,7 +235,8 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   replay? may it be stored? store it; a snapshot's range check and the snapshot; mode changes,
   deletion, an upload's quota check and reservation) from interleaving with another message for
   it; different projects go on at once. What every message consults is also kept in memory:
-  usage per project and owner, owners, deletions, storage modes, revocations, last-seen times.
+  usage per project and owner, owners, revocations, last-seen times, and the deletion and
+  storage mode of the 20,000 projects used most recently (the rest are read when needed).
   That's right for one server; several at once need them shared (ROADMAP.md).
 - **Erasing:** when a project is evicted, purged, made relay-only or deleted for everyone, or a
   file is deleted, its stored files stop counting and can no longer be fetched at once: their
@@ -241,9 +246,13 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   decided earlier can't remove what that upload wrote. Deleted and relay-only projects' files
   left by a stop are dropped at the next start; an evicted project's leftovers stay and count
   again, as its writers may have uploaded since.
-- **Memory:** WebSocket frames are read whole before they can be checked, so they are
-  capped at 16 MiB, and large frames being handled are capped server-wide (192 MiB).
-  Files go over HTTP (≤ 50 MiB, a few uploads read at a time), or peer to peer
+- **Memory:** big work shares one budget, 512 MiB unless set (`memory`, `Budget`): catch-up replies (about 4×
+  their stored size, or a page's), large frames being handled (4× their size), uploads being
+  checked and stored, and arXiv imports. Work that doesn't fit waits its turn, except a large
+  frame, which is answered "server busy" (the client tries again). With frames still arriving
+  (128 MiB), replies waiting to go out (128 MiB) and the arXiv cache (32 MiB), this keeps the
+  service under its `MemoryMax` (1G in `deploy/install.sh`). WebSocket frames are read whole
+  before they can be checked, so they are capped at 16 MiB. Files go over HTTP (≤ 50 MiB, a few uploads read at a time), or peer to peer
   (≤ 50 MiB) in relay-only projects. Clients keep their own frames small: pending updates
   are merged into `up`s of at most 6 MiB, and a `p2p` payload over 4 MiB (a whole project
   for a peer catching up, a file) goes as encrypted `part`s of 4 MiB that the receiver puts
@@ -398,10 +407,14 @@ related-work section"`. Edits appear live in collaborators' browsers.
    remembers). The server keeps TeX Live's package index (`texlive.tlpdb`, ~187,000 run
    files) in SQLite, maps the request to a path the way kpathsea would (per-format folders
    and suffixes), and the first time a file is wanted downloads its package from a mirror,
-   checks it against the index's SHA-512, and unpacks only that package's run files under
-   `/var/lib/texloom/texlive` (capped by `--texlive-max`). Files are served with a one-year
-   immutable cache (the URL names the release), and the service worker keeps them for
-   offline use. The year must be the engine's: its formats are built from that release, so
+   checks it against the index's SHA-512 as it streams to disk, and unpacks only that
+   package's run files under `/var/lib/texloom/texlive`. The cache stays under `--texlive-max`:
+   to make room, the packages used least recently go first (last use is recorded hourly). A
+   package that couldn't be fetched isn't tried again for 10 minutes, and nginx limits each
+   address: past 400 requests in quick succession (a first compile asks for many, one at a
+   time) it slows them to 20 a second rather than refusing them, as the engine takes only a
+   404 as a miss. Files are served with a one-year immutable cache (the URL names the
+   release), and the service worker keeps them for offline use. The year must be the engine's: its formats are built from that release, so
    the index comes from that year's repository (the live tlnet while current, the
    historic `tlnet-final` afterwards). **Mirrors:** one is pinned when the index is built;
    if it fails or holds another version of a package (checksum mismatch), the CTAN
@@ -666,7 +679,9 @@ one to the projects it names.
 - `GET /api/list/<id>` returns the blob and `X-Seq`. `PUT` carries `X-Seq` (must be the current
   value + 1, otherwise 409 and the client merges and retries) and `X-Sig`, a signature over
   `list:<id>:<seq>:` + blob. `DELETE` is signed over `listdel:<id>`. A new list needs what a new
-  project needs (`X-Create-Code`) and belongs to that code, so purging the code removes it.
+  project needs (`X-Create-Code`) and belongs to that code, so purging the code removes it. Its
+  size counts against that code's allowance and the server's limits like a project's; a write
+  that would pass them is refused with 507 `list-full` (at most 256 KiB a list in any case).
 - Document: `{"v":1,"projects":{"<id>":{"f":fragment,"n":name,"at":ms,"w":bool,"s"?,"nick"?,"t"?,"by"?,"c"?:ms,"m"?:ms}},"gone":{"<id>":ms}}`.
   `s` is the project's server (an origin) when it isn't the one keeping the list.
   `c` is when the project joined the list and `m` when a device last saw its files change (the

@@ -28,6 +28,7 @@ codes_file = ["/etc/texloom/codes.txt"]  # creation codes and allowances (TEXLOO
 min_free = "2G"                       # stop storing when the disk of "data" has less free
 project_max_bytes = "200M"            # most one project may store (except unlimited allowances)
 # max_bytes = "unlimited"             # most the server stores in all
+# memory = "512M"                     # for big work at once; the process needs ~500M more (systemd's MemoryMax)
 # evict_idle_days = 0                 # drop stored copies of projects unopened this long (0 = never)
 # purge_expired_after = 30            # drop stored copies of projects whose code expired this many days ago
 # min_version = "0.4.30"              # the oldest app allowed to connect

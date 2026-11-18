@@ -119,16 +119,6 @@ install -d -o texloom -g texloom -m 750 /var/lib/texloom/texlive
 runuser -u texloom -- .venv/bin/texloom-server --config /etc/texloom/texloom.toml --texlive-init \
   || echo "    couldn't refresh the TeX Live index; keeping the one there is (if any)"
 
-# a database from before PostgreSQL (SQLite): copied in once, then kept aside as texloom.db.imported
-if [ -f /var/lib/texloom/texloom.db ]; then
-  echo "    copying the SQLite database into PostgreSQL"
-  systemctl stop texloom 2>/dev/null || true
-  runuser -u texloom -- .venv/bin/texloom-server --config /etc/texloom/texloom.toml --import-sqlite /var/lib/texloom/texloom.db
-  for f in texloom.db texloom.db-wal texloom.db-shm; do
-    [ ! -f "/var/lib/texloom/$f" ] || mv "/var/lib/texloom/$f" "/var/lib/texloom/${f/texloom.db/texloom.db.imported}"
-  done
-fi
-
 # systemd service
 cat > /etc/systemd/system/texloom.service <<UNIT
 [Unit]
@@ -144,7 +134,7 @@ EnvironmentFile=-/etc/texloom/env
 ExecStart=$APP_DIR/.venv/bin/texloom-server --config /etc/texloom/texloom.toml --host 127.0.0.1 --port 8787
 Restart=on-failure
 UMask=0077
-MemoryMax=768M
+MemoryMax=1G
 LimitNOFILE=8192
 TasksMax=128
 NoNewPrivileges=true
@@ -183,6 +173,7 @@ if [ ! -f "$SITE" ]; then
 # Rate limits (http context; names prefixed to avoid clashing with other sites)
 limit_req_zone \$binary_remote_addr zone=texloom_code:1m rate=6r/m;
 limit_req_zone \$binary_remote_addr zone=texloom_list:1m rate=1r/s;
+limit_req_zone \$binary_remote_addr zone=texloom_texlive:1m rate=20r/s;
 map \$request_method \$texloom_put_key { PUT \$binary_remote_addr; default ""; }
 limit_req_zone \$texloom_put_key zone=texloom_upload:10m rate=10r/s;
 limit_conn_zone \$binary_remote_addr zone=texloom_ws:10m;
@@ -249,6 +240,7 @@ server {
     }
     # TeX Live files on demand (a package is fetched from a mirror the first time)
     location /texlive/ {
+        limit_req zone=texloom_texlive burst=1000 delay=400;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
         proxy_read_timeout 60s;
@@ -314,6 +306,7 @@ blocks = {
 """,
     "location /texlive/": """    # TeX Live files on demand (a package is fetched from a mirror the first time)
     location /texlive/ {
+        limit_req zone=texloom_texlive burst=1000 delay=400;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host $host;
         proxy_read_timeout 60s;
@@ -338,6 +331,11 @@ if "zone=texloom_list:" not in site:
     zone = "limit_req_zone $binary_remote_addr zone=texloom_list:1m rate=1r/s;\n"
     code_zone = site.index("limit_req_zone $binary_remote_addr zone=texloom_code:")
     site = site[:code_zone] + zone + site[code_zone:]
+    open(path, "w").write(site)
+if "zone=texloom_texlive:" not in site:  # TeX Live files: anyone can ask, each first ask fetches a package
+    at = site.index("limit_req_zone $binary_remote_addr zone=texloom_code:")
+    site = site[:at] + "limit_req_zone $binary_remote_addr zone=texloom_texlive:1m rate=20r/s;\n" + site[at:]
+    site = site.replace("    location /texlive/ {\n", "    location /texlive/ {\n        limit_req zone=texloom_texlive burst=1000 delay=400;\n", 1)
     open(path, "w").write(site)
 if "zone=texloom_blob:" not in site:
     at = site.index("limit_conn_zone $binary_remote_addr zone=texloom_ws:")

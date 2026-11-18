@@ -8,7 +8,7 @@ for everyone, the owner's signed tombstone. The server can read none of the proj
 Edits to one project are numbered in the database (`head`, updated and read back in the same
 transaction as the log row), so the numbering stays right with several servers. Within this
 server, `lock(project)` keeps one project's check-then-write steps (is it a replay? may it be
-stored? store it) from interleaving, as they did when this was synchronous code on SQLite.
+stored? store it) from interleaving.
 
 Some things are also kept in memory, because they're consulted on every message: how much each
 project and owner stores, owners, deletions, last-seen times, storage modes and revocations.
@@ -18,19 +18,18 @@ They're right for one server; several at once need them shared (see ROADMAP.md).
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import hashlib
 import logging
 import os
 import shutil
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from pathlib import Path
 
 import asyncpg
 
-from texloom.crypto import canonical_pub
+from texloom.crypto import b64e, canonical_pub
 
 from .files import Files, FilesError, FolderFiles
 
@@ -47,6 +46,7 @@ GONE_COST = 100  # bytes a remembered edit counts for
 # so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
 META_RATE, META_BURST = 1.0, 600
 POOL_MAX = 10  # database connections
+FACTS_KEPT = 20_000  # projects whose deletion and storage mode are kept in memory (see Store._facts)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS log (
@@ -91,7 +91,6 @@ CREATE TABLE IF NOT EXISTS lists (
 CREATE INDEX IF NOT EXISTS lists_owner ON lists (owner, seq);
 CREATE INDEX IF NOT EXISTS lists_seen ON lists (seen);
 """
-TABLES = ("log", "head", "mode", "stored", "trash", "revoked", "projects", "gone", "floor", "deleted", "clients", "lists")
 
 
 def changed(status: str) -> int:
@@ -102,10 +101,6 @@ def changed(status: str) -> int:
         return 0
 
 
-def b64e(b: bytes) -> str:
-    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
-
-
 class Store:
     """Open with `await Store.open(dsn, ...)`; close with `await store.close()`."""
 
@@ -114,12 +109,15 @@ class Store:
         self.files = files
         self.dir = data  # this server's own disk: uploads are spooled here, and it must keep room
         self._revoked: dict[str, dict[str, bytes]] = {}
-        self._modes: dict[str, bool] = {}  # project -> relay-only, for projects that have a mode
         self.usage: dict[str, int] = defaultdict(int)
         self.total = 0
         self.owners: dict[str, str] = {}
-        self.deleted: dict[str, dict] = {}  # project -> the message telling clients, signed by the owner
+        # Per project: its owner-signed deletion (the message telling clients) and its storage mode
+        # (None: none set), for the projects in use. Anyone can add these rows, a few a second, so
+        # they stay in the database, not all in memory (FACTS_KEPT at most).
+        self._facts: OrderedDict[str, tuple[dict | None, bool | None]] = OrderedDict()
         self.owner_bytes: dict[str, int] = defaultdict(int)  # checked on every stored edit: kept, not added up
+        self.list_bytes: dict[str, int] = defaultdict(int)  # bytes of project lists, by owner
         self.seen: dict[str, float] = {}
         self.meta_tokens, self.meta_at = float(META_BURST), time.monotonic()
         self.pending: dict[str, int] = defaultdict(int)  # bytes of uploads under way (see put_blob)
@@ -149,12 +147,11 @@ class Store:
                       f"SELECT project, COUNT(*) * {GONE_COST} FROM gone GROUP BY project"):
                 for project, n in await c.fetch(q):
                     self.usage[project] += int(n or 0)
-            self.total = sum(self.usage.values())
+            self.list_bytes = defaultdict(int, {r["owner"]: int(r["n"]) for r in await c.fetch(
+                "SELECT owner, SUM(octet_length(data)) AS n FROM lists GROUP BY owner")})
+            self.total = sum(self.usage.values()) + sum(self.list_bytes.values())
             self.owners = {r["project"]: r["owner"] for r in await c.fetch("SELECT project, owner FROM projects")}
-            self.deleted = {r["project"]: self._deleted_msg(r["at"], r["ts"], r["sig"])
-                            for r in await c.fetch("SELECT project, at, ts, sig FROM deleted")}
             self.seen = {r["project"]: max(r["seen"], r["created"]) for r in await c.fetch("SELECT project, seen, created FROM projects")}
-            self._modes = {r["project"]: r["relay"] for r in await c.fetch("SELECT project, relay FROM mode")}
         for project, n in self.usage.items():
             if project in self.owners:
                 self.owner_bytes[self.owners[project]] += n
@@ -270,7 +267,13 @@ class Store:
         return freed
 
     def owner_usage(self, owner: str) -> int:
-        return self.owner_bytes.get(owner, 0)
+        """What an owner (a creation code, or "default") stores: projects and project lists."""
+        return self.owner_bytes.get(owner, 0) + self.list_bytes.get(owner, 0)
+
+    def lists_grew(self, owner: str, n: int) -> None:
+        """Project-list entries of `owner` now take `n` more bytes (see lists.py)."""
+        self.list_bytes[owner] += n
+        self.total += n
 
     def stored_by(self, owner: str) -> list[str]:
         """Projects registered to this owner that have something stored."""
@@ -285,10 +288,6 @@ class Store:
 
     def free_disk(self) -> int:
         return shutil.disk_usage(self.dir).free
-
-    def free_for_data(self) -> int:
-        """Room for new data on this server's disk."""
-        return self.free_disk()
 
     # --- log ---------------------------------------------------------------------
     async def head(self, project: str) -> int:
@@ -337,23 +336,46 @@ class Store:
                             project, upto, data, sig, hashlib.sha256(data).digest())
         await self._recount(project)
 
-    async def _since_start(self, project: str, since: int) -> int:
+    async def catch_up_start(self, project: str, since: int) -> int:
+        """Where a catch-up from `since` begins: before the last snapshot, if `since` is behind it
+        (the snapshot is then sent too)."""
         snap = await self.last_snapshot(project)
-        return snap - 1 if snap and since < snap else since  # behind the snapshot: send it too
+        return snap - 1 if snap and since < snap else since
 
-    async def since_size(self, project: str, since: int) -> int:
+    async def since_size(self, project: str, start: int) -> int:
         """Bytes that since() would return."""
         return int(await self.pool.fetchval(
             "SELECT COALESCE(SUM(octet_length(data) + octet_length(sig)), 0) FROM log WHERE project=$1 AND seq>$2",
-            project, await self._since_start(project, since)))
+            project, start))
 
-    async def since(self, project: str, since: int) -> list[dict]:
-        rows = await self.pool.fetch("SELECT seq, snap, data, sig FROM log WHERE project=$1 AND seq>$2 ORDER BY seq",
-                                     project, await self._since_start(project, since))
-        return [{"q": r["seq"], "snap": r["snap"], "d": b64e(r["data"]), "s": b64e(r["sig"])} for r in rows]
+    async def since(self, project: str, start: int, limit: int | None = None) -> tuple[list[dict], int, bool]:
+        """Entries after `start`, in order: (entries, the last one's seq, whether that's all). With
+        `limit`, about that many bytes at most (always at least one entry): the sizes are read
+        first, then only that page's rows, so a long log goes out without ever being in memory whole."""
+        upto, done = None, True
+        if limit:
+            sizes = await self.pool.fetch("SELECT seq, octet_length(data) + octet_length(sig) AS n FROM log"
+                                          " WHERE project=$1 AND seq>$2 ORDER BY seq LIMIT 4096", project, start)
+            size, done = 0, len(sizes) < 4096
+            for r in sizes:
+                if upto is not None and size + r["n"] > limit:
+                    done = False
+                    break
+                size, upto = size + r["n"], r["seq"]
+            if upto is None:
+                return [], start, True
+        rows = await self.pool.fetch("SELECT seq, snap, data, sig FROM log WHERE project=$1 AND seq>$2 AND seq<=$3 ORDER BY seq",
+                                     project, start, upto if upto is not None else 2**62)
+        out = [{"q": r["seq"], "snap": r["snap"], "d": b64e(r["data"]), "s": b64e(r["sig"])} for r in rows]
+        return out, (rows[-1]["seq"] if rows else start), done
 
-    async def count(self, project: str) -> int:
-        return await self.pool.fetchval("SELECT COUNT(*) FROM log WHERE project=$1", project)
+    async def log_state(self, project: str) -> tuple[int, int, int]:
+        """The log's head, floor and number of entries, in one query."""
+        r = await self.pool.fetchrow(
+            "SELECT COALESCE((SELECT seq FROM head WHERE project=$1), 0) AS head,"
+            " COALESCE((SELECT seq FROM floor WHERE project=$1), 0) AS floor,"
+            " (SELECT COUNT(*) FROM log WHERE project=$1) AS count", project)
+        return r["head"], r["floor"], r["count"]
 
     # --- storage mode & revocations ---------------------------------------------------
     async def revoked(self, project: str) -> dict[str, bytes]:
@@ -377,11 +399,36 @@ class Store:
         self._revoked.pop(project, None)
         return True
 
-    def relay_only(self, project: str) -> bool:
-        return self._modes.get(project, False)
+    async def _fact(self, project: str) -> tuple[dict | None, bool | None]:
+        """(its deletion message or None, its storage mode or None), cached."""
+        if project in self._facts:
+            self._facts.move_to_end(project)
+            return self._facts[project]
+        r = await self.pool.fetchrow(
+            "SELECT d.at, d.ts, d.sig, (SELECT relay FROM mode WHERE project=$1) AS relay "
+            "FROM (SELECT 1) one LEFT JOIN deleted d ON d.project=$1", project)
+        fact = (self._deleted_msg(r["at"], r["ts"], r["sig"]) if r["sig"] is not None else None, r["relay"])
+        self._remember(project, fact)
+        return fact
 
-    def has_mode(self, project: str) -> bool:
-        return project in self._modes
+    def _remember(self, project: str, fact: tuple[dict | None, bool | None]) -> None:
+        self._facts[project] = fact
+        self._facts.move_to_end(project)
+        while len(self._facts) > FACTS_KEPT:
+            self._facts.popitem(last=False)
+
+    async def deleted(self, project: str) -> dict | None:
+        """The owner-signed message saying the project was deleted for everyone, if it was."""
+        return (await self._fact(project))[0]
+
+    async def relay_only(self, project: str) -> bool:
+        return bool((await self._fact(project))[1])
+
+    async def has_mode(self, project: str) -> bool:
+        return (await self._fact(project))[1] is not None
+
+    async def deleted_count(self) -> int:
+        return await self.pool.fetchval("SELECT COUNT(*) FROM deleted")
 
     async def set_mode(self, project: str, relay_only: bool) -> None:
         async with self.tx() as c:
@@ -394,7 +441,7 @@ class Store:
                 # validly signed change or snapshot, should the project go back to server storage)
                 await c.execute("INSERT INTO floor(project, seq) SELECT $1, COALESCE((SELECT seq FROM head WHERE project=$1), 0) "
                                 "ON CONFLICT (project) DO UPDATE SET seq=excluded.seq", project)
-        self._modes[project] = relay_only
+        self._remember(project, ((await self._fact(project))[0], relay_only))
         if relay_only:
             await self._drop_files(project)
         else:
@@ -414,8 +461,9 @@ class Store:
             # the tombstone above is all that's kept: its registration (owner, dates) goes too
             for table in ("log", "gone", "head", "floor", "mode", "projects"):
                 await c.execute(f"DELETE FROM {table} WHERE project=$1", project)
-        msg = self.deleted.setdefault(project, self._deleted_msg(at, ts, sig))  # a second deletion keeps the first
-        self._modes.pop(project, None)
+        self._facts.pop(project, None)
+        msg = await self.deleted(project)  # the first deletion's, if there were two
+        assert msg is not None
         await self._drop_files(project)
         self.owners.pop(project, None)  # its bytes came off its owner in _recount
         self.usage.pop(project, None)
@@ -585,41 +633,3 @@ def redact(dsn: str) -> str:
     """A database address fit for logs: without its password."""
     import re
     return re.sub(r"(://[^:/@]*:)[^@]*@", r"\1***@", dsn)
-
-
-async def import_sqlite(path: Path, dsn: str) -> dict[str, int]:
-    """Copy a database from before PostgreSQL (SQLite, with stored files already moved out of it)
-    into an empty PostgreSQL database. Returns the rows copied per table."""
-    import sqlite3
-    if not Path(path).is_file():
-        raise SystemExit(f"no such database: {path}")
-    src = sqlite3.connect(path)  # (only read; run this with the old server stopped)
-    have = {r[0] for r in src.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    if "blob" in have:
-        raise SystemExit(f"{path} still holds stored files: start a TeXLoom server from before PostgreSQL on it once, "
-                         "which moves them out to the file store, then import it")
-    store = await Store.open(dsn, FolderFiles(Path("/nonexistent")), Path(path).parent)  # (only the schema is used)
-    try:
-        async with store.tx() as c:
-            for t in TABLES:
-                if await c.fetchval(f"SELECT EXISTS (SELECT 1 FROM {t})"):
-                    raise SystemExit(f"the database already has data (table {t}): import only into an empty one")
-            counts = {}
-            for t in TABLES:
-                if t not in have:
-                    continue
-                theirs = {r["column_name"] for r in await c.fetch(
-                    "SELECT column_name FROM information_schema.columns WHERE table_name=$1", t)}
-                cols = [r[1] for r in src.execute(f"PRAGMA table_info({t})") if r[1] in theirs]  # (old columns left behind)
-                rows = src.execute(f"SELECT {', '.join(cols)} FROM {t}").fetchall()
-                if t == "log":
-                    rows = [tuple(bool(v) if col == "snap" else v for col, v in zip(cols, r)) for r in rows]
-                elif t == "mode":
-                    rows = [tuple(bool(v) if col == "relay" else v for col, v in zip(cols, r)) for r in rows]
-                if rows:
-                    await c.copy_records_to_table(t, records=rows, columns=cols)
-                counts[t] = len(rows)
-        return counts
-    finally:
-        await store.pool.close()
-        src.close()

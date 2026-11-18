@@ -41,7 +41,7 @@ It works alongside other sites on the machine and only adds things:
 | the app and its Python environment | `/var/www/texloom` (`TEXLOOM_DIR=…` for elsewhere) |
 | stored files, TeX Live packages fetched on demand | `/var/lib/texloom` |
 | settings, creation codes, the admin password | `/etc/texloom/texloom.toml`, `codes.txt`, `admin-token` |
-| a sandboxed systemd service on 127.0.0.1:8787 | `texloom.service` |
+| a sandboxed systemd service on 127.0.0.1:8787, using at most 1 GB of memory (`MemoryMax`) | `texloom.service` |
 | an nginx site with rate limits and security headers, and a Let's Encrypt certificate | `/etc/nginx/sites-available/<domain>` |
 
 The first run prints the owner's creation code (unlimited storage) and where the admin page is.
@@ -129,6 +129,7 @@ min_free = "2G"
 | `codes_file` | none | creation codes and allowances ([Creation codes](#creation-codes)); a list. `TEXLOOM_CODES_FILES` adds files to it |
 | `min_free` | `2G` | refuse to store anything when the disk of `data` has less free |
 | `project_max_bytes` | `200M` | most one project may store (except with an unlimited allowance) |
+| `memory` | `512M` | memory for big work at once (catch-ups, large messages, uploads, arXiv imports); more waits its turn. The process needs about 500M on top, so raise `MemoryMax` in `texloom.service` with it |
 | `max_bytes` | unlimited | most the server stores in all |
 | `private` | `false` | only projects created with a creation code may use the server ([Private servers](#private-servers)) |
 | `min_version` | none | the oldest app allowed ([Retiring old app versions](#retiring-old-app-versions)) |
@@ -137,7 +138,7 @@ min_free = "2G"
 | `purge_expired_after` | never | drop the stored copies of projects whose code expired this many days ago |
 | `admin_token` or `admin_token_file` | none | the password for `/admin` |
 | `no_project_lists`, `no_arxiv` | `false` | turn off storing project lists, or importing from arXiv |
-| `texlive`, `texlive_max`, `texlive_mirror` | none, `4G`, none | TeX Live packages on demand: the cache folder, its size, mirrors to try first (a list) |
+| `texlive`, `texlive_max`, `texlive_mirror` | none, `4G`, none | TeX Live packages on demand: the cache folder, its size (the packages used least recently make room), mirrors to try first (a list) |
 
 Secrets (the database password, the S3 secret key, the admin token) belong in the settings file,
 readable only by the server's user (the install script makes it `root:texloom`, mode 640), or in
@@ -152,14 +153,6 @@ the environment. On the command line they'd show in `ps`.
 - `postgresql://texloom:PASSWORD@db.example.org:5432/texloom?sslmode=require`: elsewhere.
 
 The server creates its tables when it starts. It uses up to 10 connections.
-
-**From a server that used SQLite** (`texloom.db`): stop it, then copy the database into an empty
-PostgreSQL database once. The install script does this by itself, then renames the old file to
-`texloom.db.imported`.
-
-```bash
-texloom-server --config /etc/texloom/texloom.toml --import-sqlite /var/lib/texloom/texloom.db
-```
 
 ## Stored files
 

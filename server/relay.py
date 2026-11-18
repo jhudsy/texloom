@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
 import binascii
 import datetime as dt
 import hmac
@@ -59,11 +58,12 @@ from pathlib import Path
 from aiohttp import WSCloseCode, WSMsgType, web
 
 from texloom import __version__
-from texloom.crypto import canonical_pub, revoke_msg, signer
+from texloom.crypto import b64d as _b64d
+from texloom.crypto import b64e, canonical_pub, revoke_msg, signer
 
 from .files import Files, FilesError, open_files
 from .lists import MAX_LIST, RETIRED, Lists
-from .store import Store, import_sqlite, redact
+from .store import Store, redact
 
 log = logging.getLogger("texloom.relay")
 
@@ -81,7 +81,6 @@ MAX_FRAME = 16 * MiB
 P2P_FRAME = 6 * MiB
 FRAME_LIMITS = {"hello": 4 * KiB, "aw": 64 * KiB, "mode": 4 * KiB, "delete": 4 * KiB, "up": MAX_UPDATE * 4 // 3 + KiB,
                 "snap": MAX_SNAPSHOT * 4 // 3 + KiB, "p2p": P2P_FRAME, "revoke": 4 * KiB}
-UPLOADS_AT_ONCE = 3  # uploads read into memory and checked at once (each up to MAX_BLOB)
 RATE_WINDOW, RATE_MSGS, RATE_BYTES = 10.0, 600, 160 * MiB  # per connection
 HELLOS_PER_WINDOW = 5  # a log reply can be large: don't let one connection ask for it in a loop
 MAX_CONNECTIONS = 2000
@@ -92,29 +91,33 @@ PURGE_PAUSE = 0.01  # seconds between deleted projects: lets live editing throug
 MODE_SKEW = 600  # seconds a signed mode-change command stays valid
 SEND_TIMEOUT = 20  # seconds; a peer that doesn't read is disconnected rather than holding up others
 PEER_BUFFER_MAX = 8 * MiB  # bytes waiting to go to one peer: beyond this it isn't reading, and is cut off
-OUT_MAX = 256 * MiB  # bytes waiting to go out on all connections: beyond this, peers holding a lot are cut off
+OUT_MAX = 128 * MiB  # bytes waiting to go out on all connections: beyond this, peers holding a lot are cut off
 STALL = 10  # seconds a large reply may make no progress before its reader is cut off
 HELLO_WAIT = 15  # seconds a private server gives a new connection to say who it is
 RECHECK = 60  # seconds between a private server's checks that a connected project's code still counts
-# A catch-up reply is built whole, for each person. Big ones take turns: together they may use
-# about this much memory. Building and sending one takes about four times its stored size.
-CATCHUP_MEMORY, CATCHUP_OVERHEAD = 192 * MiB, 4
-CATCHUP_TIMEOUT = 120  # seconds to send one; it can be large, and phones can be slow
+# Memory for big work at once, shared (see Budget): catch-up replies, large frames being handled,
+# uploads being checked and stored, arXiv imports. Work that doesn't fit waits its turn (a large
+# frame is answered "server busy" instead). With HELD_MAX, OUT_MAX, the arXiv cache and the
+# process itself (about 120 MB), the default stays under the service's MemoryMax
+# (deploy/install.sh: 1G); `--memory` (setting `memory`) changes it, and MemoryMax with it.
+MEMORY = 512 * MiB
+# Building and sending a catch-up reply holds the rows, their base64 and the JSON text: measured at
+# about 2.6 times its stored size (Python's own count, 12 MB snapshots); 4 leaves room for buffers.
+CATCHUP_OVERHEAD = 4
+FRAME_OVERHEAD = 4  # a frame handled: the raw text, the parsed text, the decoded bytes, the signed message
+CATCHUP_TIMEOUT = 120  # seconds to send one (or one page); it can be large, and phones can be slow
+PAGE = 8 * MiB  # stored bytes per page of a catch-up, for apps that take pages
 UPLOAD_TIME = 600  # seconds an upload may take; slow ones use only a connection and a temporary file
 # Bytes that connections have sent and the server hasn't finished with, across all connections:
 # a WebSocket frame is held whole until it's complete, and anyone can start one.
-HELD_MAX = 192 * MiB
-INFLIGHT_MAX = 192 * MiB  # bytes of large frames being handled at once, server-wide
+HELD_MAX = 128 * MiB
 
 
 def b64d(s: object) -> bytes:
+    """Base64url from a client: anything but text is refused."""
     if not isinstance(s, str):
         raise ValueError("expected base64 text")
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
-
-
-def b64e(b: bytes) -> str:
-    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+    return _b64d(s)
 
 
 def verify(project: str, msg: bytes, sig: bytes, revoked: Container[str] = frozenset()) -> bool:
@@ -174,6 +177,7 @@ class Limits:
     max_bytes: float = UNLIMITED
     min_free: float = 2 * GiB
     project_max: float = 200 * MiB
+    memory: float = MEMORY  # see MEMORY
 
 
 class CodeBook:
@@ -462,7 +466,16 @@ class Budget:
                 self.give(n)
             raise
 
+    def try_take(self, n: int) -> bool:
+        """Take n now if it fits (and nothing is waiting); False if not."""
+        if n and (self.queue or not self._fits(n)):
+            return False
+        self.used += n
+        return True
+
     def give(self, n: int) -> None:
+        if not n:
+            return
         self.used -= n
         while self.queue and self._fits(self.queue[0][0]):
             n, turn = self.queue.popleft()
@@ -499,15 +512,13 @@ class Relay:
         self.conns: dict[web.WebSocketResponse, Conn] = {}
         self._next_id = 1
         self.texlive = None  # TexLive, when serving TeX Live files on demand
-        self.inflight = 0  # bytes of large frames being handled right now
-        self.catchup = Budget(CATCHUP_MEMORY)
-        self.uploads = asyncio.Semaphore(UPLOADS_AT_ONCE)  # see put_blob
+        self.memory = Budget(int(self.limits.memory))  # big work at once (see MEMORY)
         self.held = 0  # bytes held for connections, see Metered
         self.stopping = False
 
     def attach(self, store: Store) -> None:
         self.store = store
-        self.lists = Lists(store.pool) if self.want_lists else None
+        self.lists = Lists(store.pool, store.lists_grew) if self.want_lists else None
 
     # --- private servers -----------------------------------------------------------
     async def denied(self, project: str, code: object, claim: bool = True) -> str | None:
@@ -574,7 +585,7 @@ class Relay:
                 return "quota-full" if self.store.owner(project) or owner != "default" else "needs-code"
             if allowance != UNLIMITED and self.store.usage[project] + nbytes > self.limits.project_max:
                 return "project-full"
-            if self.store.total + nbytes > self.limits.max_bytes or self.store.free_for_data() - nbytes < self.limits.min_free:
+            if self.store.total + nbytes > self.limits.max_bytes or self.store.free_disk() - nbytes < self.limits.min_free:
                 return "server-full"
         if self.store.owner(project) is None:
             await self.store.register(project, owner, self.codes.label(owner) if code else "default")
@@ -585,21 +596,21 @@ class Relay:
         idle eviction does. Writers' re-uploads are refused while the code is expired or
         removed, so the projects carry on relay-only, on people's devices. Projects someone
         has open are skipped (and picked up next time). Returns (purged, bytes freed, skipped)."""
-        tally = [0, 0, 0]
-        await self._purging(owner, tally)
-        return tally[0], tally[1], tally[2]
+        return await self._purging(owner)
 
-    async def _purging(self, owner: str, tally: list[int], pause: float = 0) -> None:
-        """Purge a code's projects one at a time, pausing after each. `tally`: purged, freed, skipped."""
+    async def _purging(self, owner: str, pause: float = 0) -> tuple[int, int, int]:
+        """Purge a code's projects one at a time, pausing after each. Returns (purged, freed, skipped)."""
         if self.lists:
             await self.lists.purge_owner(owner)
+        purged = freed = skipped = 0
         for p in self.store.stored_by(owner):
             if self.rooms.get(p):
-                tally[2] += 1
+                skipped += 1
                 continue
-            tally[1] += await self.store.evict(p)
-            tally[0] += 1
+            freed += await self.store.evict(p)
+            purged += 1
             await asyncio.sleep(pause)
+        return purged, freed, skipped
 
     async def purge_expired(self, after_days: float) -> None:
         """Purge the projects of codes that expired more than `after_days` ago, letting live
@@ -609,9 +620,7 @@ class Relay:
             days = self.codes.lapsed_since(c)
             if days is None or days <= after_days or not (self.store.stored_by(c) or (self.lists and await self.lists.count(c))):
                 continue
-            tally = [0, 0, 0]
-            await self._purging(c, tally, PURGE_PAUSE)
-            n, freed, skipped = tally
+            n, freed, skipped = await self._purging(c, PURGE_PAUSE)
             log.info("purged %d project(s) of code %s… (%s), expired %d day(s) ago%s", n, c[:4],
                      fmt_size(freed), days, f"; {skipped} open, left for later" if skipped else "")
 
@@ -733,7 +742,7 @@ class Relay:
         if request.transport:
             conn.transport = request.transport
             request.transport.set_protocol(Metered(request.transport.get_protocol(), self, conn, request.transport))
-        gone = self.store.deleted.get(project)
+        gone = await self.store.deleted(project)
         if gone is not None:  # the owner deleted it for everyone: say so, and nothing more
             self.conns.pop(ws, None)
             await ws.send_json(gone)
@@ -768,11 +777,10 @@ class Relay:
                     if why:
                         await self._refuse(ws, why)
                         break
-                size = len(raw.data) if len(raw.data) > MiB else 0
-                if size and self.inflight + size > INFLIGHT_MAX:  # the server is busy with big frames
+                cost = len(raw.data) * FRAME_OVERHEAD if len(raw.data) > MiB else 0
+                if cost and not self.memory.try_take(cost):  # the server is busy with big work
                     await ws.send_json({"t": "err", "m": "server busy: try again"})
                     continue
-                self.inflight += size
                 try:
                     msg = json.loads(raw.data)
                     if not isinstance(msg, dict):
@@ -786,7 +794,7 @@ class Relay:
                 except Exception:
                     log.exception("error handling message")
                 finally:
-                    self.inflight -= size
+                    self.memory.give(cost)
                     del raw
         finally:
             room.discard(ws)
@@ -799,9 +807,9 @@ class Relay:
         return ws
 
     async def handle(self, project: str, ws, conn: Conn, t: str, msg: dict) -> None:
-        if project in self.store.deleted:  # deleted while this connection was closing: nothing more
+        if await self.store.deleted(project):  # deleted while this connection was closing: nothing more
             return
-        relay_only = self.store.relay_only(project)
+        relay_only = await self.store.relay_only(project)
         if t == "hello":
             if not conn.allow_hello():
                 await ws.close(code=1008, message=b"rate limit")
@@ -818,21 +826,32 @@ class Relay:
                 conn.code_tried = True
                 conn.code = self.codes.check(field(msg, "code", str))
             since = max(0, min(field(msg, "since", int, 0), 2**62))
-            size = await self.store.since_size(project, since)
-            cost = size * CATCHUP_OVERHEAD if size >= MiB else 0
-            await self.catchup.take(cost)
+            start = await self.store.catch_up_start(project, since)
+            size = await self.store.since_size(project, start)
+            # An app that takes pages ("pages" in its hello) gets a long log a page at a time, so a
+            # catch-up needs a page's memory whatever the log's size; others get it whole.
+            paged = msg.get("pages") == 1 and size > PAGE
+            # (a page is one entry at least, and a snapshot can be bigger than a page)
+            cost = (max(PAGE, MAX_SNAPSHOT) if paged else size) * CATCHUP_OVERHEAD if size >= MiB else 0
+            await self.memory.take(cost)
             try:
-                entries = await self.store.since(project, since)
+                entries, last, done = await self.store.since(project, start, PAGE if paged else None)
+                head, floor, count = await self.store.log_state(project)
                 await asyncio.wait_for(self.send_large(ws,
-                    {"t": "log", "entries": entries, "head": await self.store.head(project),
-                     "floor": await self.store.floor(project), "count": await self.store.count(project), "you": conn.id,
+                    {"t": "log", "entries": entries, "head": head, "floor": floor, "count": count, "you": conn.id,
                      "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
                      "store": self.store_status(project, conn),
-                     "rv": [{"p": p, "s": b64e(sig)} for p, sig in (await self.store.revoked(project)).items()]}), CATCHUP_TIMEOUT)
+                     "rv": [{"p": p, "s": b64e(sig)} for p, sig in (await self.store.revoked(project)).items()],
+                     **({} if done else {"more": True})}), CATCHUP_TIMEOUT)
+                while not done:
+                    del entries
+                    entries, last, done = await self.store.since(project, last, PAGE)
+                    await asyncio.wait_for(self.send_large(ws, {"t": "logmore", "entries": entries, **({} if done else {"more": True})}),
+                                           CATCHUP_TIMEOUT)
             except (asyncio.TimeoutError, ConnectionError, RuntimeError):  # too slow, or it has gone
                 self.cut_off(ws, "was too slow to catch up")
             finally:
-                self.catchup.give(cost)
+                self.memory.give(cost)
         elif t == "up":
             d, s = field(msg, "d", str), field(msg, "s", str)
             data, sig = b64d(d), b64d(s)
@@ -911,7 +930,7 @@ class Relay:
                     or who in await self.store.revoked(project) or (mode == "relay" and who != "owner")):
                 await ws.send_json({"t": "err", "code": "mode-rejected", "m": "rejected mode change"})
                 return
-            if self.store.owner(project) is None and not self.store.has_mode(project) and not self.store.meta_budget():
+            if self.store.owner(project) is None and not await self.store.has_mode(project) and not self.store.meta_budget():
                 await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
                 return
             async with self.store.lock(project):
@@ -925,7 +944,7 @@ class Relay:
                 return
             # a project this server has never held anything for costs a permanent row: from the
             # same budget as other rows that store nothing, so ids can't be minted to fill the disk
-            known = self.store.owner(project) is not None or self.store.has_mode(project) or await self.store.head(project) > 0
+            known = self.store.owner(project) is not None or await self.store.has_mode(project) or await self.store.head(project) > 0
             if not known and not self.store.meta_budget():
                 await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
                 return
@@ -941,7 +960,7 @@ class Relay:
             if pub is None or signer(project, revoke_msg(pub), sig) != "owner":
                 await ws.send_json({"t": "err", "m": "rejected revocation"})
                 return
-            known = self.store.owner(project) is not None or self.store.has_mode(project)
+            known = self.store.owner(project) is not None or await self.store.has_mode(project)
             if not known and not self.store.meta_budget() or not await self.store.revoke(project, pub, sig):
                 await ws.send_json({"t": "err", "m": "rejected revocation: too many"})
                 return
@@ -957,7 +976,7 @@ class Relay:
             raise web.HTTPBadRequest()
         if (request.content_length or 0) > MAX_BLOB:
             raise web.HTTPRequestEntityTooLarge(max_size=MAX_BLOB, actual_size=request.content_length or 0)
-        if project in self.store.deleted:
+        if await self.store.deleted(project):
             return web.json_response({"code": "deleted"}, status=410)
         # before reading a large body; the project is bound to the code only once the upload is signed
         why = await self.denied(project, request.headers.get("X-Create-Code"), claim=False)
@@ -969,9 +988,9 @@ class Relay:
             raise web.HTTPForbidden(text="bad signature")
         if not (len(sig) == 64 or 162 <= len(sig) <= 417):  # an owner or personal-link signature
             raise web.HTTPForbidden(text="bad signature")
-        # Read to a temporary file, so a slow or stalled upload holds up nobody else. Only a few are
-        # then read into memory and checked at once (UPLOADS_AT_ONCE): anyone can send uploads,
-        # signed or not, and the signature can only be checked once the whole file is in memory.
+        # Read to a temporary file, so a slow or stalled upload holds up nobody else. Then it takes
+        # its turn in memory (see MEMORY): anyone can send uploads, signed or not, and the signature
+        # can only be checked once the whole file is in memory.
         size = 0
         with tempfile.SpooledTemporaryFile(max_size=MiB, dir=self.store.dir) as spool:
             try:
@@ -985,11 +1004,14 @@ class Relay:
                         spool.write(piece)
             except TimeoutError:
                 raise web.HTTPRequestTimeout() from None
-            async with self.uploads:
+            await self.memory.take(size)
+            try:
                 return await self._store_upload(request, project, bid, sig, spool, size)
+            finally:
+                self.memory.give(size)
 
     async def _store_upload(self, request: web.Request, project: str, bid: str, sig: bytes, spool, size: int) -> web.Response:
-        """The rest of put_blob, with the file read to `spool` and an upload slot held."""
+        """The rest of put_blob, with the file read to `spool` and its memory taken."""
         # one copy in memory: the signed message (prefix + file), with the file a view into it
         prefix = f"blob:{bid}:".encode()
         signed = bytearray(len(prefix) + size)
@@ -1003,11 +1025,11 @@ class Relay:
         # checking the signature reads the whole file: on a worker thread, so live editing carries on
         if not await asyncio.to_thread(verify, project, signed, sig, await self.store.revoked(project)):
             return web.Response(status=403, text="bad signature")
-        if project in self.store.deleted:  # deleted while it was uploading
+        if await self.store.deleted(project):  # deleted while it was uploading
             return web.json_response({"code": "deleted"}, status=410)
         if await self.denied(project, request.headers.get("X-Create-Code")):  # a genuine upload: now it may claim
             return web.json_response({"code": "needs-code"}, status=403)
-        if self.store.relay_only(project):
+        if await self.store.relay_only(project):
             return web.Response(status=409, text="project is relay-only: blobs are exchanged peer to peer")
         kind = "output" if request.headers.get("X-Kind") == "output" else "file"
         async with self.store.lock(project):  # the check and the reservation; not the (maybe slow) write
@@ -1052,7 +1074,7 @@ class Relay:
         project, bid = request.match_info["project"], request.match_info["id"]
         if not PROJECT_RE.match(project) or not BLOB_RE.match(bid):
             raise web.HTTPBadRequest()
-        if project in self.store.deleted:
+        if await self.store.deleted(project):
             raise web.HTTPGone()
         if await self.denied(project, None):
             raise web.HTTPForbidden()
@@ -1148,7 +1170,12 @@ class Relay:
         owner = row[1] if row else (self.codes.check(request.headers.get("X-Create-Code")) or "default")
         if self.codes.allowance(owner) <= 0 or (self.private and owner == "default"):
             return web.json_response({"code": "code-expired" if self.codes.lapsed(owner) else "needs-code"}, status=403)
-        if self.store.free_for_data() - len(data) < self.limits.min_free or (not row and not await self.lists.room_for(owner)):
+        more = len(data) - (row[2] if row else 0)  # what this version adds
+        allowance = self.codes.allowance(owner)
+        if allowance != UNLIMITED and more > 0 and self.store.owner_usage(owner) + more > allowance:
+            return web.json_response({"code": "list-full"}, status=507)  # (the apps know this one)
+        if (self.store.free_disk() - len(data) < self.limits.min_free or self.store.total + more > self.limits.max_bytes
+                or (not row and not await self.lists.room_for(owner))):
             return web.json_response({"code": "list-full"}, status=507)
         if not await self.lists.put(lid, seq, data, owner):  # another update got there first (another server, say)
             now = await self.lists.meta(lid)
@@ -1267,7 +1294,6 @@ def make_app(database: str, static: Path | None, tex: Path | None = None,
     app.router.add_put("/blob/{project}/{id}", relay.put_blob)
     app.router.add_get("/blob/{project}/{id}", relay.get_blob)
     app.router.add_delete("/blob/{project}/{id}", relay.delete_blob)
-    app.router.add_route("OPTIONS", "/blob/{project}/{id}", lambda r: web.Response())
     app.router.add_get("/api/info", relay.info)
     app.router.add_get("/api/list/{id}", relay.get_list)
     app.router.add_put("/api/list/{id}", relay.put_list)
@@ -1277,7 +1303,7 @@ def make_app(database: str, static: Path | None, tex: Path | None = None,
     app.router.add_post("/api/code", relay.check_code)
     if arxiv:  # importing a paper's source (arXiv has no CORS, so the relay fetches it)
         from .arxiv import ArxivFetcher
-        app.router.add_get("/api/arxiv/{id}", ArxivFetcher().handle)
+        app.router.add_get("/api/arxiv/{id}", ArxivFetcher(relay.memory).handle)
     if tex and (tex / "busytex").is_dir():  # WebAssembly TeX Live for in-browser compiles
         app.router.add_static("/core", tex)
     if static and static.is_dir():
@@ -1314,6 +1340,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-bytes", type=parse_size, default=UNLIMITED, help="total storage cap, e.g. 20G")
     p.add_argument("--min-free", type=parse_size, default=2 * GiB, help="keep this much disk free, e.g. 2G")
     p.add_argument("--project-max-bytes", type=parse_size, default=200 * MiB, help="per-project cap, e.g. 200M")
+    p.add_argument("--memory", type=parse_size, default=MEMORY,
+                   help="memory for big work at once (catch-ups, large messages, uploads, arXiv imports; default 512M); "
+                        "the process needs about 500M more, so keep systemd's MemoryMax that far above it")
     p.add_argument("--codes-file", type=Path, action="append",
                    help="storage allowances per creation code (see above); repeatable. TEXLOOM_CODES_FILES adds "
                         "more (separated by ':'). --add-code writes to the first")
@@ -1336,8 +1365,6 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--files-restore", type=Path, metavar="DIR",
                    help="put back into the file store every stored file it lacks, from DIR (a restored backup, "
                         "or the folder when moving to a bucket), then exit")
-    p.add_argument("--import-sqlite", type=Path, metavar="FILE",
-                   help="copy a database from an older server (SQLite) into the empty --database, then exit")
     p.add_argument("--purge-expired-after", type=float, metavar="DAYS", default=None,
                    help="delete the stored copies of projects whose creation code expired more than DAYS days "
                         "ago (checked hourly; default: never). Their files stay on people's devices")
@@ -1446,10 +1473,6 @@ def main() -> None:
     if a.files_for_backup is not None or a.files_restore is not None:
         asyncio.run(_files_command(a, files))
         return
-    if a.import_sqlite:
-        counts = asyncio.run(import_sqlite(a.import_sqlite, a.database))
-        print("copied " + ", ".join(f"{n} {t}" for t, n in counts.items() if n) + f" into {redact(a.database)}")
-        return
     codes = CodeBook(a.codes_file or None)
     if a.until and a.months:
         sys.exit("give --until or --months, not both")
@@ -1478,13 +1501,13 @@ def main() -> None:
         sys.exit("the admin token must be at least 16 characters")
     if a.private and not codes.path:
         sys.exit("--private needs --codes-file: it's the creation codes that decide who may use the server")
-    limits = Limits(a.max_bytes, a.min_free, a.project_max_bytes)
+    limits = Limits(a.max_bytes, a.min_free, a.project_max_bytes, a.memory)
     if a.config:
         log.info("settings from %s", a.config)
     if a.private:
         log.info("private server: only projects with a valid creation code may connect")
-    log.info("limits: total %s, keep %s free, %s per project; %s",
-             fmt_size(limits.max_bytes), fmt_size(limits.min_free), fmt_size(limits.project_max),
+    log.info("limits: total %s, keep %s free, %s per project, %s of memory for big work; %s",
+             fmt_size(limits.max_bytes), fmt_size(limits.min_free), fmt_size(limits.project_max), fmt_size(limits.memory),
              f"allowances from {', '.join(map(str, a.codes_file))}" if codes.path else "no codes file: every project may be stored")
     if a.min_version and not version_tuple(a.min_version):
         p.error("--min-version is a version such as 0.4.30")

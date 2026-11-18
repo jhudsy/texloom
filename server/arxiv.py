@@ -25,6 +25,9 @@ ARXIV_ID = re.compile(r"^(\d{4}\.\d{4,5}|[a-z-]+(\.[A-Z]{2})?/\d{7})(v\d{1,3})?$
 MAX_DOWNLOAD = 50 * 1024 * 1024
 MAX_UNPACKED = 150 * 1024 * 1024
 MAX_FILES = 3000
+# What one import may use at once: the download, its copy, what it unpacks to, the zip made of it.
+IMPORT_MEMORY = 2 * MAX_DOWNLOAD + 2 * MAX_UNPACKED
+CACHE_MAX = 32 * 1024 * 1024  # recent imports kept, so that a retry doesn't download again
 MIN_GAP = 3.0  # seconds between requests to arXiv
 PER_IP = 10  # imports per address per hour
 UA = "TeXLoom/0.1 (self-hosted LaTeX editor; imports a paper's source on a user's request)"
@@ -40,7 +43,7 @@ def safe_name(name: str) -> str | None:
     return joined if safe_rel(joined) else None  # e.g. no latexmkrc (latexmk runs it as Perl)
 
 
-def to_zip(data: bytes, arxiv_id: str) -> bytes:
+def to_zip(data: bytes) -> bytes:
     """arXiv e-print (tar.gz, gzipped single file, or plain tar) -> zip. Raises ValueError."""
     if data.startswith(b"%PDF"):
         raise ValueError("arXiv has no LaTeX source for this paper (PDF only).")
@@ -80,7 +83,8 @@ def to_zip(data: bytes, arxiv_id: str) -> bytes:
 
 
 class ArxivFetcher:
-    def __init__(self) -> None:
+    def __init__(self, memory=None) -> None:
+        self.memory = memory  # the relay's Budget: an import takes IMPORT_MEMORY of it while it runs
         self.lock = asyncio.Lock()
         self.last = 0.0
         self.recent: dict[str, deque[float]] = defaultdict(deque)
@@ -111,21 +115,28 @@ class ArxivFetcher:
             ip = request.headers.get("X-Real-IP") or ip
         if not self._allow(ip):
             raise web.HTTPTooManyRequests(text="too many imports; try again later")
-        async with self.lock:
-            wait = self.last + MIN_GAP - time.monotonic()
-            if wait > 0:
-                await asyncio.sleep(wait)
-            try:
-                data = await self._download(aid)
-            finally:
-                self.last = time.monotonic()
+        if self.memory:
+            await self.memory.take(IMPORT_MEMORY)
         try:
-            z = await asyncio.get_running_loop().run_in_executor(None, to_zip, data, aid)  # off the event loop
-        except (ValueError, OSError, EOFError, zlib.error, gzip.BadGzipFile, tarfile.TarError) as e:
-            msg = str(e) if isinstance(e, ValueError) else "Couldn’t read the source archive."
-            raise web.HTTPUnprocessableEntity(text=msg)
+            async with self.lock:
+                wait = self.last + MIN_GAP - time.monotonic()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                try:
+                    data = await self._download(aid)
+                finally:
+                    self.last = time.monotonic()
+            try:
+                z = await asyncio.get_running_loop().run_in_executor(None, to_zip, data)  # off the event loop
+            except (ValueError, OSError, EOFError, zlib.error, gzip.BadGzipFile, tarfile.TarError) as e:
+                msg = str(e) if isinstance(e, ValueError) else "Couldn’t read the source archive."
+                return web.Response(status=422, text=msg)  # (returned, not raised: see the relay's middleware)
+            del data
+        finally:
+            if self.memory:
+                self.memory.give(IMPORT_MEMORY)
         self.cache[aid] = z
-        while sum(len(v) for v in self.cache.values()) > 100 * 1024 * 1024:
+        while sum(len(v) for v in self.cache.values()) > CACHE_MAX:
             self.cache.popitem(last=False)
         return self._zip(z)
 
