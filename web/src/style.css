@@ -158,7 +158,8 @@ aside .hint { font-size: 12px; padding: 8px 10px; }
   .print-sheets img:last-child { break-after: auto; }
 }
 .pdfzoom button { min-width: 26px; padding-left: 4px; padding-right: 4px; }
-.pdfzoom .pct { min-width: 46px; font-variant-numeric: tabular-nums; }
+.pdfzoom .pct { min-width: 46px; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 2px; }
+.pdfzoom .pct svg { width: 12px; height: 12px; opacity: .7; }
 /* compile log, below the PDF */
 .logbox { display: flex; flex-direction: column; min-height: 60px; flex: none; }
 .logbox[hidden] { display: none; }

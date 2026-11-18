@@ -463,7 +463,7 @@ export class PdfView {
   private printDone: () => void = () => {}
 
   private showZoom() {
-    this.zoomReset.textContent = `${Math.round(this.zoom * 100)}%`
+    this.zoomReset.replaceChildren(`${Math.round(this.zoom * 100)}%`, icon('chevron')) // ▾: it opens a menu (Fit width, Fit page)
     this.zoomReset.classList.toggle('fit-page', this.fitPage)
     this.zoomOut.disabled = this.zoom <= MIN_ZOOM
     this.zoomIn.disabled = this.zoom >= MAX_ZOOM
