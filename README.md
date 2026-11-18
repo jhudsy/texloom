@@ -280,6 +280,10 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   stays in step if you reload the editor.
 - **Text and links in the PDF:** its text can be selected and copied, and with `hyperref` its links work: citations,
   references and the table of contents scroll to their place (**↩ Back** returns), and web links open in a new tab.
+- **PDF zoom and pages:** the zoom percentage offers **Fit width**, **Fit page** (a whole page in view, kept as the window
+  changes size) and set sizes, down to 10%. Once the PDF has been clicked, ← and → turn its pages (and ↑ ↓ too in Fit page);
+  Home and End go to the first and last.
+- **Keyboard shortcuts:** press **?** (outside a text field), or **Keyboard shortcuts** in ⚙ Settings, for the list.
 - **Word counts:** the Outline tab counts the document and each section; selecting text shows its count
   in the corner of the editor. LaTeX commands, citations, maths and comments aren't counted. Chinese and
   Japanese are counted by the character.

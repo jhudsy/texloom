@@ -15,12 +15,16 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 export { pdfjs }
 const openPdf = (data: Uint8Array) => pdfjs.getDocument({ data: data.slice(), cMapUrl: new URL('/cmaps/', location.href).href, cMapPacked: true })
 
-const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3] // 1 fits the page to the pane
+// 1 fits the page's width to the pane; well below that, for a whole page (or several) on a big screen
+const ZOOM_STEPS = [0.1, 0.15, 0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
 const MIN_ZOOM = ZOOM_STEPS[0], MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1]
 const ZOOM_KEY = 'texloom.pdfZoom'
-const savedZoom = () => {
+/** The zoom last chosen: a number, or 'page' (a whole page in view, whatever the pane's size). */
+const savedZoom = (): number | 'page' => {
   try {
-    const z = Number(localStorage.getItem(ZOOM_KEY))
+    const v = localStorage.getItem(ZOOM_KEY)
+    if (v === 'page') return v
+    const z = Number(v)
     return z >= MIN_ZOOM && z <= MAX_ZOOM ? z : 1
   } catch { return 1 }
 }
@@ -109,7 +113,9 @@ export class PdfView {
   private zoomOut: HTMLButtonElement
   private zoomReset: HTMLButtonElement
   private zoomIn: HTMLButtonElement
-  private zoom = savedZoom()
+  private zoom = 1
+  /** Fit a whole page in view: the zoom follows the pane's size (and the page's shape). */
+  private fitPage = false
   private zoomTimer: ReturnType<typeof setTimeout> | undefined
   private pages: Page[] = []
   private gen = 0
@@ -126,11 +132,19 @@ export class PdfView {
   constructor() {
     this.el = document.createElement('div')
     this.el.className = 'pdf'
+    this.el.tabIndex = 0 // so that, once clicked, the arrow keys turn its pages
+    const saved = savedZoom()
+    if (saved === 'page') this.fitPage = true; else this.zoom = saved
     // Re-render at the new width after the pane is resized (canvases scale via CSS meanwhile).
     let timer: ReturnType<typeof setTimeout> | undefined
     new ResizeObserver(() => {
       const w = this.el.clientWidth
-      if (!this.pages.length || !w || Math.abs(w - this.renderedWidth) < 24) return
+      if (!this.pages.length || !w) return
+      if (this.fitPage) { // a taller or shorter pane changes the zoom that fits a page
+        const z = this.pageFitZoom()
+        if (Math.abs(z - this.zoom) > 0.0005) { this.zoom = z; this.showZoom(); this.layout(); clearTimeout(timer); timer = setTimeout(() => this.update(), 250) }
+      }
+      if (Math.abs(w - this.renderedWidth) < 24) return
       this.renderedWidth = w
       this.layout()
       clearTimeout(timer)
@@ -166,6 +180,13 @@ export class PdfView {
       const copy: MenuItem[] = sel ? [[t('Copy'), () => { void navigator.clipboard.writeText(sel).catch(() => {}) }]] : []
       this.openMenu(e.clientX, e.clientY, [...copy, [t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)], ...(this.menuExtras?.() ?? [])])
     })
+    this.el.addEventListener('keydown', (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || !this.pages.length) return
+      const page = this.fitPage ? { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -1, ArrowDown: 1 } : { ArrowLeft: -1, ArrowRight: 1 }
+      const d = (page as Record<string, number>)[e.key]
+      if (d) { e.preventDefault(); this.turn(d) }
+      else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); this.goToPage(e.key === 'Home' ? 1 : this.pages.length) }
+    })
     this.el.addEventListener('scroll', () => {
       this.closeMenu()
       this.pageFrame ||= requestAnimationFrame(() => { this.pageFrame = 0; this.showPage(); this.update() })
@@ -178,7 +199,14 @@ export class PdfView {
       this.setZoom(this.zoom * Math.exp(-e.deltaY * 0.01), e.clientX - box.left, e.clientY - box.top)
     }, { passive: false })
     this.zoomOut = h('button', { title: t('Zoom out'), 'aria-label': t('Zoom out'), onclick: () => this.step(-1) }, '−')
-    this.zoomReset = h('button', { class: 'pct', title: t('Back to normal size'), onclick: () => this.setZoom(1) })
+    this.zoomReset = h('button', { class: 'pct', title: t('Fit the width or a whole page, or choose a size'), 'aria-haspopup': 'menu', onclick: () => {
+      const r = this.zoomReset.getBoundingClientRect()
+      this.openMenu(r.left, r.bottom + 2, [
+        [t('Fit width'), () => this.setZoom(1)],
+        [t('Fit page'), () => this.setFitPage()],
+        ...[0.25, 0.5, 0.75, 1.5, 2].map((z): MenuItem => [`${Math.round(z * 100)}%`, () => this.setZoom(z)]),
+      ])
+    } })
     this.zoomIn = h('button', { title: t('Zoom in'), 'aria-label': t('Zoom in'), onclick: () => this.step(1) }, '+')
     this.pageBox = h('input', {
       class: 'pagebox', inputmode: 'numeric', autocomplete: 'off', title: t('Go to page'), 'aria-label': t('Go to page'),
@@ -222,6 +250,34 @@ export class PdfView {
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed || !sel.anchorNode || !this.el.contains(sel.anchorNode)) return ''
     return sel.toString()
+  }
+
+  /** The previous or next page; back first to the top of this one if that's out of view. */
+  private turn(d: number) {
+    const i = this.currentPage() - 1
+    const above = this.pages[i].wrap.getBoundingClientRect().top < this.el.getBoundingClientRect().top - 4
+    this.goToPage((d < 0 && above ? i : i + d) + 1)
+  }
+
+  /** The zoom at which the page in view (else the first) fits the pane whole. Never past the width. */
+  private pageFitZoom(): number {
+    const p = this.pages[Math.max(0, this.currentPage() - 1)] ?? this.pages[0]
+    const across = Math.max(160, this.el.clientWidth - 24)
+    const z = (this.el.clientHeight - 2 * GAP) / (across * (p?.ratio ?? 1.414))
+    return Math.min(1, Math.max(MIN_ZOOM, z))
+  }
+
+  private setFitPage() {
+    // the page under the middle of the view; when it's in a gap or past the end (zoomed far out,
+    // every page in view), the first one in view
+    const view = this.el.getBoundingClientRect(), mid = view.top + view.height / 2
+    const under = this.pages.findIndex((p) => { const r = p.wrap.getBoundingClientRect(); return r.top <= mid && r.bottom >= mid })
+    const page = (under >= 0 ? under : Math.max(0, this.pages.findIndex((p) => p.wrap.getBoundingClientRect().bottom > view.top))) + 1
+    this.setZoom(this.pageFitZoom())
+    this.fitPage = true
+    try { localStorage.setItem(ZOOM_KEY, 'page') } catch {}
+    this.showZoom()
+    this.goToPage(page)
   }
 
   /** The page in the middle of the view. */
@@ -290,6 +346,7 @@ export class PdfView {
 
   private showZoom() {
     this.zoomReset.textContent = `${Math.round(this.zoom * 100)}%`
+    this.zoomReset.classList.toggle('fit-page', this.fitPage)
     this.zoomOut.disabled = this.zoom <= MIN_ZOOM
     this.zoomIn.disabled = this.zoom >= MAX_ZOOM
     this.el.classList.toggle('zoomed', this.zoom > 1) // wider than the pane: scrolls sideways
@@ -306,6 +363,7 @@ export class PdfView {
   /** Resize what's on show at once, keeping (x, y) in the pane where it is, and draw it sharply a moment later. */
   private setZoom(zoom: number, x = this.el.clientWidth / 2, y = this.el.clientHeight / 2) {
     this.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
+    this.fitPage = false
     try { localStorage.setItem(ZOOM_KEY, String(this.zoom)) } catch {}
     const across = (this.el.scrollLeft + x) / Math.max(1, this.el.scrollWidth)
     const down = (this.el.scrollTop + y) / Math.max(1, this.el.scrollHeight)
@@ -473,6 +531,11 @@ export class PdfView {
     const scrollFrac = this.el.scrollTop / Math.max(1, this.el.scrollHeight)
     const scrollAcross = this.el.scrollLeft / Math.max(1, this.el.scrollWidth)
     this.renderedWidth = this.el.clientWidth
+    if (this.fitPage && sizes.length) {
+      const z = (this.el.clientHeight - 2 * GAP) / (Math.max(160, this.el.clientWidth - 24) * sizes[Math.min(sizes.length - 1, Math.max(0, this.currentPage() - 1))].ratio)
+      this.zoom = Math.min(1, Math.max(MIN_ZOOM, z))
+      this.showZoom()
+    }
     const width = this.pageWidth()
     const pages: Page[] = sizes.map(({ points, ratio }) => {
       const canvas = emptyCanvas()

@@ -1,5 +1,6 @@
 // TeXLoom web app entry: the start page and the project view, wired from modules.
 import { warmUp } from './compile'
+import { listenForShortcutsKey } from './shortcuts'
 import * as Y from 'yjs'
 import { Keys } from './crypto'
 import { Replica } from './replica'
@@ -823,6 +824,7 @@ async function openProject(keys: Keys, server: string) {
   if (savedTab && savedTab in panes && savedTab !== 'pdf') showTab(savedTab)
   tree.start()
 
+  listenForShortcutsKey() // ? lists them all
   // ⌘S / Ctrl+S compiles from anywhere (the editor handles it itself when focused)
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {

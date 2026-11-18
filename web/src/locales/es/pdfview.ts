@@ -9,11 +9,13 @@ const es: Catalog = {
   'Couldn’t prepare the PDF for printing: {{error}}': 'No se pudo preparar el PDF para imprimir: {{error}}',
   'Preparing… ({{done}} of {{total}})': 'Preparando… ({{done}} de {{total}})',
   'Zoom in': 'Ampliar',
-  'Back to normal size': 'Volver al tamaño normal',
   'PDF zoom': 'Zoom del PDF',
   'Link not followed: {{url}}': 'Enlace no abierto: {{url}}',
   'Back to where you were before following a link': 'Volver adonde estabas antes de seguir un enlace',
   '↩ Back': '↩ Volver',
+  'Fit the width or a whole page, or choose a size': 'Ajustar al ancho o a la página entera, o elegir un tamaño',
+  'Fit width': 'Ajustar al ancho',
+  'Fit page': 'Página entera',
 }
 
 export default es

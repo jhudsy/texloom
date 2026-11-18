@@ -1,4 +1,5 @@
 // Per-device settings, the first-open setup dialog and the settings dialog.
+import { showShortcuts } from './shortcuts'
 import { DOWNLOAD_APP, openInApp, sourceNote } from './openinapp'
 import type { Replica, StorageMode, SyncMode } from './replica'
 import { engineCached, clearEngineCache } from './compile'
@@ -263,7 +264,9 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
   dlg = dialog('settings tabbed',
     h('h3', {}, t('Settings')),
     h('div', { class: 'tabbox' }, h('div', { class: 'tablist', role: 'tablist', 'aria-orientation': 'vertical' }, ...buttons), panel),
-    h('div', { class: 'row end foot' }, sourceNote(), h('span', { class: 'spacer' }), h('button', { class: 'primary', onclick: () => dlg.close() }, t('Done'))),
+    h('div', { class: 'row end foot' }, sourceNote(), h('span', { class: 'spacer' }),
+      h('button', { onclick: () => { dlg.close(); showShortcuts() } }, t('Keyboard shortcuts')),
+      h('button', { class: 'primary', onclick: () => dlg.close() }, t('Done'))),
   )
   show(current)
 

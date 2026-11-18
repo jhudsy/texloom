@@ -76,7 +76,8 @@ export function openPdfWindow(project: string) {
       title.textContent = name
       document.title = `${name} — ${t('PDF')}`
       status.textContent = ''
-      view.show(m.data).catch((err) => { status.textContent = t('PDF error: {{error}}', { error: err }) })
+      view.show(m.data).then(() => { if (document.activeElement === document.body) view.el.focus({ focusVisible: false } as FocusOptions) }) // the arrow keys turn pages at once
+        .catch((err) => { status.textContent = t('PDF error: {{error}}', { error: err }) })
     } else if (m.t === 'mark') view.highlight(m.page, m.x, m.y, m.w, m.h)
     else if (m.t === 'ready') say({ t: 'ask' })
     else if (m.t === 'closed') status.textContent = t('The editor has closed, so this PDF is no longer updating.')
