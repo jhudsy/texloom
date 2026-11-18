@@ -21,7 +21,7 @@ def _strip_comments(text: str) -> str:
     return "\n".join(code_part(line) for line in text.split("\n"))
 
 
-def _resolve(dir: str, name: str) -> str | None:
+def resolve(dir: str, name: str) -> str | None:
     """A project path joined and tidied ('a/../b' is 'b'); None if it leaves the project."""
     if not name or name.startswith("/"):
         return None
@@ -52,7 +52,7 @@ def _sources(files: Mapping[str, str], doc: str) -> list[str]:
     seen, todo = [doc], [doc]
     while todo:
         for m in INPUT.finditer(_strip_comments(files.get(todo.pop(), ""))):
-            p = _resolve(_dir(doc), m.group(1).strip())
+            p = resolve(_dir(doc), m.group(1).strip())
             hit = next((q for q in (p, f"{p}.tex") if p and q in files), None)
             if hit and hit not in seen:
                 seen.append(hit)
@@ -66,7 +66,7 @@ def external_documents(files: Mapping[str, str], doc: str) -> list[tuple[str, st
     out: dict[str, str] = {}
     for src in _sources(files, doc):
         for m in EXTERNAL.finditer(_strip_comments(files.get(src, ""))):
-            base = _resolve(_dir(doc), m.group(1).strip())
+            base = resolve(_dir(doc), m.group(1).strip())
             if base and f"{base}.tex" != doc and _is_document(files, f"{base}.tex"):
                 out[f"{base}.aux"] = f"{base}.tex"
     return list(out.items())

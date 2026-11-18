@@ -18,8 +18,15 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .paths import safe_rel
+
+if TYPE_CHECKING:
+    from pycrdt import Map
 
 # In TeX code (outside comments).
 SHELL = [
@@ -95,6 +102,12 @@ def scan_text(path: str, text: str) -> list[Finding]:
 
 def scan(files: dict[str, str]) -> list[Finding]:
     return [f for p, t in sorted(files.items()) for f in scan_text(p, t)]
+
+
+def shell_lines(files: Mapping[str, object] | Map) -> list[Finding]:
+    """The lines that run programs with shell escape on, in the project's texts (CRDT texts or
+    strings) under names collaborators' apps accept: what `texloom allow` approves."""
+    return [f for f in scan({p: str(t) for p, t in files.items() if safe_rel(p)}) if f.kind == "shell"]
 
 
 def added(path: str, old: str | None, new: str) -> list[Finding]:

@@ -18,6 +18,7 @@ import posixpath
 import shutil
 import time
 import zlib
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
 from pycrdt import Map, Text
@@ -28,14 +29,13 @@ from .anchors import assoc_of, fresh_anchor, index_in
 from .textpos import U16, Char, length_u16, u16_of
 from .invariants import broken, checking, first_difference, well_formed
 from .replica import BLOB_RE, Replica
+from .confine import OUTSIDE_NOTE, forget_reads, outside_reads, sandboxed
+from .scan import SCANNED, added, allowed, shell_lines
+from .xr import compile_order, external_documents
+from .paths import PROTECTED_DIRS, STATE, latexmk_command, main_file, safe_rel, tex_env, tex_names_refused
 
 log = logging.getLogger("texloom")
 
-from .confine import OUTSIDE_NOTE, forget_reads, outside_reads, sandboxed
-from .scan import SCANNED, added, allowed, scan
-from .xr import compile_order, external_documents
-from .paths import (PROTECTED_DIRS, STATE, UNSAFE_NAMES, WIN_RESERVED, latexmk_command, main_file,  # noqa: F401
-                    safe_rel, tex_env, tex_names_refused)
 SETTLE = 0.2  # seconds a changed file must stay unchanged before it is read (see FolderSync._settle)
 SETTLE_DOUBT = 2.0  # the same, for a file that became empty or disappeared (rarely meant; editors can take a while to write it again)
 SETTLE_BIG = 1.0  # the same, for a big file (BIG bytes or more): copying one in can pause for a moment
@@ -78,28 +78,38 @@ def not_project_file(rel: str, main: str = "main.tex") -> bool:
     return rel == main[:-4] + ".pdf"
 
 
+def walk(root: Path) -> Iterator[tuple[str, bool]]:
+    """The files and folders under `root` that syncing could take, as (project path, is a folder):
+    nothing in the folders it leaves alone (IGNORE_DIRS), and no symlinks. A link could lead outside
+    the project (a git clone can bring them in), and the sync never writes through one either.
+    (os.walk doesn't go into linked folders, but lists them.)"""
+    for dirpath, dirnames, filenames in os.walk(root):
+        here = Path(dirpath)
+        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not (here / d).is_symlink()]
+        at = here.relative_to(root).as_posix()
+        for name in dirnames:
+            yield name if at == "." else f"{at}/{name}", True
+        for name in filenames:
+            if not (here / name).is_symlink():
+                yield name if at == "." else f"{at}/{name}", False
+
+
+def synced_folder(rel: str) -> bool:
+    """Whether a folder is on the project's folder list (empty ones too): not a dot folder, or in one."""
+    return safe_rel(rel) is not None and not any(seg.startswith(".") for seg in rel.split("/"))
+
+
 def project_files(root: Path, main: str = "main.tex") -> list[str]:
     """What is on disk that syncing would treat as this project's files."""
-    out = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
-        for f in filenames:
-            rel = (Path(dirpath) / f).relative_to(root).as_posix()
-            if not not_project_file(rel, main) and safe_rel(rel) and not (Path(dirpath) / f).is_symlink():
-                out.append(rel)
-    return out
+    return [rel for rel, is_dir in walk(root) if not is_dir and not not_project_file(rel, main) and safe_rel(rel)]
 
 
 def copy_project_files(src: Path, dst: Path, main: str = "main.tex") -> None:
     """Copy a project's files and folders, as new files: not its state, or LaTeX's working files."""
     dst.mkdir(parents=True, exist_ok=True)
-    for dirpath, dirnames, _files in os.walk(src):
-        here = Path(dirpath)
-        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith(".") and not (here / d).is_symlink()]
-        for d in dirnames:
-            rel = (here / d).relative_to(src).as_posix()
-            if safe_rel(rel):
-                (dst / rel).mkdir(parents=True, exist_ok=True)
+    for rel, is_dir in walk(src):
+        if is_dir and synced_folder(rel):
+            (dst / rel).mkdir(parents=True, exist_ok=True)
     for rel in project_files(src, main):
         (dst / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src / rel, dst / rel)
@@ -108,7 +118,7 @@ def copy_project_files(src: Path, dst: Path, main: str = "main.tex") -> None:
 TEXT_SUFFIXES = {
     ".tex", ".bib", ".sty", ".cls", ".bst", ".bbx", ".cbx", ".lbx", ".dtx", ".ins", ".cfg",
     ".def", ".clo", ".ltx", ".txt", ".md", ".csv", ".dat", ".tsv", ".tikz", ".pgf", ".py",
-    ".json", ".yaml", ".yml", ".latexmkrc", ".gitignore",
+    ".json", ".yaml", ".yml", ".gitignore",
 }
 MAX_TEXT = 4 * 1024 * 1024
 MAX_FILE = 50 * 1024 * 1024
@@ -396,6 +406,59 @@ class CompileRefused(Exception):
     """The document can't be compiled here; the message says why."""
 
 
+async def latexmk(cmd: list[str], project: Path, out: Path, cwd: Path, confine: bool = True,
+                  timeout: float | None = None, capture: bool = False) -> tuple[int | None, bytes]:
+    """Run a latexmk command (latexmk_command) that writes into `out`: confined to `project`
+    (confine.py) unless `confine` is off. Its exit code and, with `capture`, what it printed.
+    Stopped if cancelled, or after `timeout` seconds (TimeoutError)."""
+    proc = await asyncio.create_subprocess_exec(
+        *(sandboxed(cmd, project, out) if confine else cmd), cwd=cwd, env=tex_env(TEXMFOUTPUT=str(out)),
+        stdout=asyncio.subprocess.PIPE if capture else asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.STDOUT if capture else asyncio.subprocess.DEVNULL,
+    )
+    try:
+        printed, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    except (asyncio.CancelledError, TimeoutError):
+        proc.kill()
+        raise
+    return proc.returncode, printed or b""
+
+
+async def compile_externals(project: Path, files: Mapping[str, str], main: str, path_of: Callable[[str], Path | None],
+                            build: Path, engine: object, bib: object, extra: list[str], confine: bool = True,
+                            timeout: float | None = None) -> list[str]:
+    """Compile the documents `main` takes labels from (\\externaldocument) first, each in
+    its own folder under `build`, and copy each .aux to where the compile that reads it
+    looks first: its output folder (for `main`, `build`). In a cycle (a paper and its
+    supplement citing each other), the document that closes it gets the other's .aux from its
+    last compile, so repeated compiles settle. `path_of` gives a document's file on disk.
+    Returns the documents that had errors."""
+    order = compile_order(files, main)
+    if not order:
+        return []
+    out = {doc: build / "xr" / Path(doc).with_suffix("") for doc in order} | {main: build}
+    built = {doc: out[doc] / f"{Path(doc).stem}.aux" for doc in [*order, main]}
+    failed = []
+    for doc in [*order, main]:
+        out[doc].mkdir(parents=True, exist_ok=True)
+        for aux, tex in external_documents(files, doc):
+            rel = posixpath.relpath(aux, posixpath.dirname(doc) or ".")
+            if built[tex].is_file() and not rel.startswith("../"):  # TeX may not read "../" here anyway
+                (out[doc] / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(built[tex], out[doc] / rel)
+        path = path_of(doc)
+        if doc == main or path is None or not path.is_file():
+            continue
+        try:
+            code, _ = await latexmk(latexmk_command(engine, bib, path.name, f"-outdir={out[doc]}", *extra),
+                                    project, out[doc], path.parent, confine, timeout)
+        except TimeoutError:
+            code = None
+        if code != 0:
+            failed.append(doc)
+    return failed
+
+
 class FolderSync:
     def __init__(self, root: Path, replica: Replica, compile_: bool = False,
                  compile_opts: dict | None = None):
@@ -487,19 +550,7 @@ class FolderSync:
         return not_project_file(rel, str(self.r.meta.get("main", "main.tex")))
 
     def disk_files(self) -> list[str]:
-        """The files in the folder, not through symlinks: one could lead outside the project
-        (a clone can bring them in), and the sync never writes through them either."""
-        out = []
-        for dirpath, dirnames, filenames in os.walk(self.root):
-            here = Path(dirpath)
-            dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not (here / d).is_symlink()]
-            for f in filenames:
-                if (here / f).is_symlink():
-                    continue
-                rel = (here / f).relative_to(self.root).as_posix()
-                if not self.ignored(rel):
-                    out.append(rel)
-        return out
+        return [rel for rel, is_dir in walk(self.root) if not is_dir and not self.ignored(rel)]
 
     def linked(self, rel: str) -> bool:
         """Whether the file, or a folder on its way from the project folder, is a symlink."""
@@ -539,15 +590,7 @@ class FolderSync:
             log.debug("couldn't keep the synced texts: %s", e)
 
     def disk_dirs(self) -> set[str]:
-        out = set()
-        for dirpath, dirnames, _ in os.walk(self.root):
-            dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith(".")]
-            dirnames[:] = [d for d in dirnames if not (Path(dirpath) / d).is_symlink()]
-            for d in dirnames:
-                rel = (Path(dirpath) / d).relative_to(self.root).as_posix()
-                if safe_rel(rel) and not self.ignored(rel + "/x"):
-                    out.add(rel)
-        return out
+        return {rel for rel, is_dir in walk(self.root) if is_dir and synced_folder(rel) and not self.ignored(rel + "/x")}
 
     def ingest_dirs(self) -> bool:
         """Folders made or deleted on disk -> the project's folder list."""
@@ -573,6 +616,17 @@ class FolderSync:
         for d in sorted(removed):
             log.info("- %s/", d)
         self.save_known()
+        return True
+
+    def _deleted_here(self, rel: str) -> bool:
+        """A file the sync knew is gone from disk: deleted or renamed here, and not taken in yet (a
+        file that disappears is given a moment, SETTLE_DOUBT). It's looked at again, which takes the
+        deletion or the move to the project, with any edit made elsewhere meanwhile going to the new
+        name; written again first, a change arriving from elsewhere in that moment would bring
+        back every file just deleted. A read-only copy can't share a deletion: there it's restored."""
+        if rel not in self.known or not self.r.can_write or (self.root / rel).exists():
+            return False
+        self._later({rel})
         return True
 
     def _unread(self, rel: str) -> bool:
@@ -895,7 +949,7 @@ class FolderSync:
             if self.known.get(rel, {}).get("h") == h and (self.root / rel).exists():
                 self.base[rel] = text  # what disk holds, as the project has it
                 continue
-            if self._unread(rel):
+            if self._deleted_here(rel) or self._unread(rel):
                 continue
 
             def put(rel=rel, data=data, h=h, text=text):
@@ -916,7 +970,7 @@ class FolderSync:
             wanted.add(rel)
             if self.known.get(rel, {}).get("h") == bid and (self.root / rel).exists():
                 continue
-            if self._unread(rel):
+            if self._deleted_here(rel) or self._unread(rel):
                 continue
             cached = self.r.dir / "blobs" / bid
             if cached.exists():
@@ -1167,12 +1221,9 @@ class FolderSync:
         extra = list(self.opts["latexmk_args"])
         # Collaborators write the document, so by default TeX may not run programs
         # (-no-shell-escape), may not write outside the project (openout "paranoid") or read
-        # outside it (texloom/confine.py), and latexmk ignores rc files (-norc; latexmkrc is Perl). An rc you
-        # trust can be named in .texloom/config.json as "latexmk_rc".
+        # outside it (texloom/confine.py), and latexmk ignores rc files (-norc; latexmkrc is Perl).
         shell, note = self.shell_mode()
         extra.append(shell)
-        if self.opts.get("latexmk_rc"):
-            extra += ["-r", str(Path(self.opts["latexmk_rc"]).expanduser())]
         build = self.root / STATE / "build"
         if self._clean_build:  # compile from scratch: drop the last run's .aux, .bbl, …
             self._clean_build = False
@@ -1189,22 +1240,15 @@ class FolderSync:
         notes = [note] if note else []
         confine = self.opts.get("confine", True)
         forget_reads(build)
-        notes += await self._compile_externals(files, main, engine, build, extra, confine)
-        cmd = latexmk_command(engine, self.r.meta.get("bib"), main_path.name, "-synctex=1", f"-outdir={build}", *extra)
-        proc = await asyncio.create_subprocess_exec(
-            *(sandboxed(cmd, self.root, build) if confine else cmd),
-            cwd=main_path.parent, env=tex_env(TEXMFOUTPUT=str(build)),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        )
-        try:
-            out, _ = await proc.communicate()
-        except asyncio.CancelledError:
-            proc.kill()
-            raise
+        bib = self.r.meta.get("bib")
+        for doc in await compile_externals(self.root, files, main, self.target, build, engine, bib, extra, confine):
+            notes.append(f"{doc}, which {main} takes labels from (\\externaldocument), has errors: compile it on its own to see them.")
+        cmd = latexmk_command(engine, bib, main_path.name, "-synctex=1", f"-outdir={build}", *extra)
+        code, out = await latexmk(cmd, self.root, build, main_path.parent, confine, capture=True)
         stem = Path(main).stem
         pdf = build / f"{stem}.pdf"
         logf = build / f"{stem}.log"
-        ok = proc.returncode == 0 and pdf.exists()
+        ok = code == 0 and pdf.exists()
         log_text = logf.read_bytes() if logf.exists() else out
         if notes:  # collaborators see why minted & co. didn't run, or labels are missing
             log_text = "".join(f"texloom: {n}\n" for n in notes).encode() + b"\n" + log_text
@@ -1245,44 +1289,6 @@ class FolderSync:
                 if old and old not in new and old not in stored:
                     await self.r.drop_output(old)
 
-    async def _compile_externals(self, files: dict[str, str], main: str, engine: str, build: Path, extra: list[str],
-                                 confine: bool) -> list[str]:
-        """Compile the documents `main` takes labels from (\\externaldocument) first, each in
-        its own folder under `build`, and copy each .aux to where the compile that reads it
-        looks first: its output folder. In a cycle (a paper and its supplement citing each
-        other), the document that closes it gets the other's .aux from its last compile, so
-        repeated compiles settle. Returns notes for the log."""
-        order = compile_order(files, main)
-        if not order:
-            return []
-        out = {doc: build / "xr" / Path(doc).with_suffix("") for doc in order} | {main: build}
-        built = {doc: out[doc] / f"{Path(doc).stem}.aux" for doc in [*order, main]}
-        notes = []
-        for doc in [*order, main]:
-            out[doc].mkdir(parents=True, exist_ok=True)
-            for aux, tex in external_documents(files, doc):
-                rel = posixpath.relpath(aux, posixpath.dirname(doc) or ".")
-                if built[tex].is_file() and not rel.startswith("../"):  # TeX may not read "../" here anyway
-                    (out[doc] / rel).parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(built[tex], out[doc] / rel)
-            path = self.target(doc)
-            if doc == main or path is None or not path.is_file():
-                continue
-            cmd = latexmk_command(engine, self.r.meta.get("bib"), path.name, f"-outdir={out[doc]}", *extra)
-            proc = await asyncio.create_subprocess_exec(
-                *(sandboxed(cmd, self.root, out[doc]) if confine else cmd),
-                cwd=path.parent, env=tex_env(TEXMFOUTPUT=str(out[doc])),
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-            )
-            try:
-                await proc.wait()
-            except asyncio.CancelledError:
-                proc.kill()
-                raise
-            if proc.returncode != 0:
-                notes.append(f"{doc}, which {main} takes labels from (\\externaldocument), has errors: compile it on its own to see them.")
-        return notes
-
     def shell_mode(self) -> tuple[str, str]:
         """The latexmk shell-escape flag for this compile, and a note for the log.
 
@@ -1293,8 +1299,7 @@ class FolderSync:
             return "-shell-restricted", ""
         if not mode:
             return "-no-shell-escape", ""
-        files = {p: str(t) for p, t in self.r.files.items() if self.target(p) is not None}
-        new = [f for f in scan(files) if f.kind == "shell" and f.key not in allowed(self.root)]
+        new = [f for f in shell_lines(self.r.files) if f.key not in allowed(self.root)]
         if not new:
             return "-shell-escape", ""
         keys = frozenset(f.key for f in new)

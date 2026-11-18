@@ -21,7 +21,7 @@ from cryptography.exceptions import InvalidTag
 from pycrdt import Doc, Map, merge_updates
 
 from . import __version__, tls
-from .crypto import Keys, b64d, b64e, canonical_pub, revoke_msg, signer
+from .crypto import Keys, b64d, b64e, canonical_pub, revoke_msg
 from .packing import unpack
 
 log = logging.getLogger("texloom")
@@ -30,7 +30,6 @@ COMPACT_AFTER = 300  # log entries before a writer uploads a snapshot
 BLOB_RE = re.compile(r"^[0-9a-f]{32}$")  # blob ids are HMAC hex digests, never paths
 # Keep in sync with server/relay.py: frames are at most 16 MiB (base64 adds a third).
 MAX_SNAPSHOT = 12 * 1024 * 1024
-MAX_UPDATE = 8 * 1024 * 1024  # one change, after encryption
 UPDATE_BATCH = 6 * 1024 * 1024  # pending changes are merged up to this much per message
 # A bigger change (a whole project, say) or snapshot goes to the server as an encrypted upload,
 # like a file, and what's sent is a small reference to it: REF + {"b": upload id}. The server
@@ -92,6 +91,7 @@ class Replica:
         self.lock = asyncio.Lock()  # serialises remote applies with local folder ingests
         self.connected = asyncio.Event()
         self.synced = asyncio.Event()  # first catch-up complete
+        self._log_pending: tuple[int, int, bool] | None = None  # a catch-up whose later pages are still coming: (head, count, lost)
         self._caught_up = False  # this connection's log (and revocation list) has been applied
         self._revocations: list[dict] = []  # owner-signed, kept in state.json
         self.load()
@@ -168,12 +168,6 @@ class Replica:
             self._ref_sent[uid] = ref
             update = REF + json.dumps({"b": ref}).encode()
         data = self.keys.encrypt(update)
-        if len(data) > MAX_UPDATE:  # the server would refuse it on every try
-            self.refused = f"a change of {len(data) >> 20} MB is more than the server takes at once (8 MB)"
-            if "too-big" not in self._warned:
-                self._warned.add("too-big")
-                log.warning("NOT SENT: %s", self.refused)
-            return
         sig = self.keys.sign(b"upd:" + data)
         try:
             await self.ws.send_json({"t": "up", "id": uid, "d": b64e(data), "s": b64e(sig)})
@@ -229,16 +223,13 @@ class Replica:
             await self._send_update(uid, u)
 
     # --- remote changes ------------------------------------------------------
-    def _verify(self, prefix: bytes, data: bytes, sig: bytes, fresh: bool = False) -> bool:
-        return self.keys.verify(prefix + data, sig, fresh)
-
     def _revoked(self, items: list, save: bool = True) -> None:
         """Personal keys the owner revoked (each signed by the owner); remembered across restarts."""
         added = False
         for it in items or []:
             try:
                 pub, sig = canonical_pub(str(it["p"])), b64d(str(it["s"]))
-                if pub is None or pub in self.keys.revoked or signer(self.keys.project, revoke_msg(pub), sig) != "owner":
+                if pub is None or pub in self.keys.revoked or not self.keys.owner_signed(revoke_msg(pub), sig):
                     continue
                 if pub == self.keys.member_pub:
                     log.warning("the owner has revoked this personal edit link: your changes are no longer accepted")
@@ -280,7 +271,7 @@ class Replica:
             except (KeyError, TypeError, ValueError, AttributeError):
                 log.warning("dropping a malformed update")
                 continue
-            if not self._verify(prefix, data, sig):
+            if not self.keys.verify(prefix + data, sig):
                 log.warning("dropping update %s with bad signature", q)
                 continue
             try:
@@ -531,7 +522,7 @@ class Replica:
         elif k == "upd":
             if not self._caught_up:
                 return  # not before the server's revocation list is in; peers resend after our sv1
-            if "s" not in m or not self._verify(b"p2p:", data, b64d(m["s"]), fresh=True):
+            if "s" not in m or not self.keys.verify(b"p2p:" + data, b64d(m["s"]), fresh=True):
                 log.warning("ignoring unsigned peer update")
                 return
             try:
@@ -645,11 +636,12 @@ class Replica:
                     async with http.ws_connect(ws_url, heartbeat=30, max_msg_size=64 * 1024 * 1024) as ws:
                         self.ws = ws
                         self._caught_up = False
+                        self._log_pending = None
                         self._resync = 0 if self._resync == 1 else self._resync
                         backoff = 1
                         log.info("connected to %s", self.server)
                         self.connected.set()
-                        hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__}  # (--min-version)
+                        hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__, "pages": 1}  # (--min-version)
                         if self.create_code:
                             hello["code"] = self.create_code
                         await ws.send_json(hello)
@@ -672,12 +664,39 @@ class Replica:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30)
 
+    async def _on_caught_up(self) -> None:
+        """The last page of a catch-up is in: what follows from being up to date."""
+        assert self._log_pending is not None
+        head, count, lost = self._log_pending
+        self._log_pending = None
+        if lost and self.keys.writable:
+            log.info("the server has no copy of this project any more: re-uploading it")
+            pending = self.dir / "blobs-pending"
+            pending.mkdir(exist_ok=True)
+            for info in self.bin.values():
+                bid = info.get("h") if isinstance(info, dict) else None
+                if isinstance(bid, str) and BLOB_RE.match(bid) and (self.dir / "blobs" / bid).exists():
+                    (pending / bid).touch()
+            uid = secrets.token_hex(8)
+            self.outbox[uid] = self.doc.get_update()
+        if self.keys.writable and self.pending_mode:  # setting changed while offline
+            await self.send_mode(self.pending_mode)
+        await self.upload_pending()  # blobs first, so peers can fetch what updates reference
+        self.since = head if lost else max(self.since, head)
+        self._seen = {q for q in self._seen if q > self.since}
+        self._mark_seen(self.since)
+        await self.flush_outbox()
+        self._caught_up = True
+        await self.p2p({"k": "sv1", "sv": b64e(self.doc.get_state())})
+        self.synced.set()
+        await self._maybe_compact(count)
+
     async def _handle(self, m: dict) -> None:
         t = m.get("t")
         if t == "deleted":  # the owner deleted the project for everyone: only if the owner signed it
             ts, sig = m.get("ts"), m.get("s")
             try:
-                ok = isinstance(ts, int) and isinstance(sig, str) and signer(self.keys.project, f"delete:{ts}".encode(), b64d(sig)) == "owner"
+                ok = isinstance(ts, int) and isinstance(sig, str) and self.keys.owner_signed(f"delete:{ts}".encode(), b64d(sig))
             except (ValueError, TypeError):
                 ok = False
             if not ok:
@@ -699,32 +718,25 @@ class Replica:
             floor = m.get("floor") or 0
             lost = m.get("mode") != "relay" and (m["head"] < self.since or 0 < self.since <= floor)
             if lost:
-                self.since, self._seen = m["head"], set()
+                self._seen = set()  # numbered afresh; `since` moves back once every page is in
             await self._apply_entries(m["entries"])
             if self._resync == 1:
                 await self._catch_up_again()
                 return
-            if lost and self.keys.writable:
-                log.info("the server has no copy of this project any more: re-uploading it")
-                pending = self.dir / "blobs-pending"
-                pending.mkdir(exist_ok=True)
-                for info in self.bin.values():
-                    bid = info.get("h") if isinstance(info, dict) else None
-                    if isinstance(bid, str) and BLOB_RE.match(bid) and (self.dir / "blobs" / bid).exists():
-                        (pending / bid).touch()
-                uid = secrets.token_hex(8)
-                self.outbox[uid] = self.doc.get_update()
-            if self.keys.writable and self.pending_mode:  # setting changed while offline
-                await self.send_mode(self.pending_mode)
-            await self.upload_pending()  # blobs first, so peers can fetch what updates reference
-            self.since = max(self.since, m["head"])
-            self._seen = {q for q in self._seen if q > self.since}
-            self._mark_seen(self.since)
-            await self.flush_outbox()
-            self._caught_up = True
-            await self.p2p({"k": "sv1", "sv": b64e(self.doc.get_state())})
-            self.synced.set()
-            await self._maybe_compact(m.get("count", 0))
+            # a long log comes in pages ("pages" in the hello): the rest follow as `logmore`
+            self._log_pending = (m["head"], m.get("count", 0), lost)
+            if not m.get("more"):
+                await self._on_caught_up()
+        elif t == "logmore":
+            if self._log_pending is None:
+                return
+            await self._apply_entries(m["entries"])
+            if self._resync == 1:
+                self._log_pending = None
+                await self._catch_up_again()
+                return
+            if not m.get("more"):
+                await self._on_caught_up()
         elif t == "up":
             await self._apply_entries([m])
             if self._resync == 1:

@@ -27,6 +27,16 @@ def b64d(s: str) -> bytes:
 MEMBER_TAG = 0x4D
 
 
+def seal(key: bytes, plaintext: bytes) -> bytes:
+    """AES-GCM with a random 12-byte iv, sent in front: iv ‖ ciphertext (as web/src/crypto.ts)."""
+    iv = os.urandom(12)
+    return iv + AESGCM(key).encrypt(iv, plaintext, None)
+
+
+def unseal(key: bytes, data: bytes) -> bytes:
+    return AESGCM(key).decrypt(data[:12], data[12:], None)
+
+
 def canonical_pub(p: str) -> str | None:
     """The one spelling of a 32-byte public key (base64 decoders accept variants, e.g. a changed
     last character), so a revocation always matches the key signer() reports."""
@@ -156,11 +166,10 @@ class Keys:
 
     # --- crypto ----------------------------------------------------------
     def encrypt(self, plaintext: bytes) -> bytes:
-        iv = os.urandom(12)
-        return iv + AESGCM(self.key).encrypt(iv, plaintext, None)
+        return seal(self.key, plaintext)
 
     def decrypt(self, ciphertext: bytes) -> bytes:
-        return AESGCM(self.key).decrypt(ciphertext[:12], ciphertext[12:], None)
+        return unseal(self.key, ciphertext)
 
     def sign(self, msg: bytes) -> bytes:
         if self.seed is not None:
@@ -177,6 +186,10 @@ class Keys:
         """Signed by the owner or a personal key; `fresh` also refuses revoked keys."""
         who = signer(self.project, msg, sig)
         return who is not None and not (fresh and who in self.revoked)
+
+    def owner_signed(self, msg: bytes, sig: bytes) -> bool:
+        """Signed by the owner's own key (deleting the project, revoking a personal key)."""
+        return signer(self.project, msg, sig) == "owner"
 
     @property
     def code(self) -> str:

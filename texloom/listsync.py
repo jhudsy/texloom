@@ -9,6 +9,7 @@ stores something it can't read and can't change. See server/lists.py.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import hmac
 import json
@@ -24,11 +25,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from . import registry, tls
-from .crypto import b64d, b64e
+from .crypto import b64d, b64e, seal, unseal
 from .i18n import _
 
 log = logging.getLogger(__name__)
@@ -51,6 +51,11 @@ def explain(code: str) -> str:
         "update-needed": _("This server needs a newer TeXLoom: update the app."),
         "wrong-password": _("That username and password don't open a list on this server."),
     }.get(code, code)
+
+
+def derive(secret: bytes, label: bytes) -> bytes:
+    """A key for one purpose, from a list's secret."""
+    return hmac.new(secret, label, hashlib.sha256).digest()
 
 
 class ListError(Exception):
@@ -83,20 +88,24 @@ class ListKey:
     def link(self, server: str) -> str:
         return f"{server.rstrip('/')}/#sync={b64e(self.secret)}"
 
-    @property
+    # worked out once per key (frozen dataclasses can still cache: cached_property writes __dict__ directly)
+    @functools.cached_property
     def _signer(self) -> Ed25519PrivateKey:
-        return Ed25519PrivateKey.from_private_bytes(hmac.new(self.secret, SIGN_LABEL, hashlib.sha256).digest())
+        return Ed25519PrivateKey.from_private_bytes(derive(self.secret, SIGN_LABEL))
 
-    @property
+    @functools.cached_property
     def id(self) -> str:
         return b64e(self._signer.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
 
+    @functools.cached_property
+    def _crypt_key(self) -> bytes:
+        return derive(self.secret, CRYPT_LABEL)
+
     def encrypt(self, plain: bytes) -> bytes:
-        iv = os.urandom(12)
-        return iv + AESGCM(hmac.new(self.secret, CRYPT_LABEL, hashlib.sha256).digest()).encrypt(iv, plain, None)
+        return seal(self._crypt_key, plain)
 
     def decrypt(self, data: bytes) -> bytes:
-        return AESGCM(hmac.new(self.secret, CRYPT_LABEL, hashlib.sha256).digest()).decrypt(data[:12], data[12:], None)
+        return unseal(self._crypt_key, data)
 
     def sign_put(self, seq: int, data: bytes) -> str:
         return b64e(self._signer.sign(f"list:{self.id}:{seq}:".encode() + data))
@@ -394,7 +403,7 @@ def sync_tags(key: ListKey, server: str, local: dict, listed: set[str], code: st
     """Merge `local` with the tags kept beside the list (an entry of their own, so that clients which
     don't know about tags can't lose them). A new entry needs a creation code; without one, none is
     made until there is something to put in it."""
-    entry = ListKey(hmac.new(key.secret, TAGS_LABEL, hashlib.sha256).digest())
+    entry = ListKey(derive(key.secret, TAGS_LABEL))
     def blank(s: str) -> dict | None:
         return None if ((code if s == server.rstrip("/") else None) or code_for(s)) else empty_tags()
     return _replicate(entry, server, lambda had, known: tidy_tags(merge_tags(had or empty_tags(), known), listed), local, blank, code)
@@ -404,7 +413,7 @@ def sync_settings(key: ListKey, server: str, local: dict, code: str | None = Non
     """Merge `local` with the settings kept beside the list, such as the creation codes and the
     copies (an entry of their own, like tags). A missing entry isn't made until there is something
     to put in it."""
-    entry = ListKey(hmac.new(key.secret, SETTINGS_LABEL, hashlib.sha256).digest())
+    entry = ListKey(derive(key.secret, SETTINGS_LABEL))
     return _replicate(entry, server, lambda had, known: merge_settings(had or empty_settings(), known), local,
                       lambda _s: empty_settings(), code)
 
@@ -486,7 +495,6 @@ def remember_name(name: str, at: int | None = None) -> None:
 
 def _origin(s: str) -> str | None:
     """A server address as an origin (scheme://host[:port]), or None: https, or http on this computer."""
-    from urllib.parse import urlsplit
     try:
         u = urlsplit(s)
     except ValueError:

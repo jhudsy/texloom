@@ -25,10 +25,10 @@ from pathlib import Path
 
 from . import __version__
 from .crypto import Keys
-from .folder import STATE, FolderSync
+from .folder import FolderSync
 from . import registry, tls
 from .daemon import CURRENT, FolderProblem, FolderTag, lock_folder
-from .paths import safe_rel
+from .paths import STATE
 from .replica import Replica
 
 log = logging.getLogger("texloom")
@@ -172,20 +172,15 @@ async def refuse_if_private(server: str, code: str) -> dict:
     can't be asked, carry on: the server still decides when the project connects. Returns
     what the server says about itself ({} if it couldn't be asked)."""
     import aiohttp
-    base = server.rstrip("/")
-    info: dict = {}
+    info = await server_info(server)
+    if not info.get("private"):
+        return info
     try:
-        async with aiohttp.ClientSession(connector=tls.connector(), timeout=aiohttp.ClientTimeout(total=10)) as http:
-            async with http.get(f"{base}/api/info") as r:
-                info = (await r.json()) if r.ok else {}
-                if not isinstance(info, dict) or not info.get("private"):
-                    return info if isinstance(info, dict) else {}
-            async with http.post(f"{base}/api/code", json={"code": code}) as r:
-                if (await r.json()).get("ok"):
-                    return info
+        if await code_ok(server, code):
+            return info
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
         return info
-    raise FolderProblem(f"{base} is a private server: a new project needs a valid creation code from its owner")
+    raise FolderProblem(f"{server.rstrip('/')} is a private server: a new project needs a valid creation code from its owner")
 
 
 async def server_info(server: str) -> dict:
@@ -280,10 +275,10 @@ def list_folders() -> None:
 
 def allow_programs(d: Path, yes: bool) -> None:
     """Show every line that asks to run programs; on confirmation, allow exactly those."""
-    from .scan import allow, allowed, scan
+    from .scan import allow, allowed, shell_lines
     keys, server = load(d)
     r = Replica(d / STATE, keys, server)  # the local copy, as last synced
-    found = [f for f in scan({p: str(t) for p, t in r.files.items() if safe_rel(p)}) if f.kind == "shell"]
+    found = shell_lines(r.files)
     if not found:
         allow(d, set())
         print("No lines in this project ask to run programs.")

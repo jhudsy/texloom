@@ -29,13 +29,12 @@ from pycrdt import Array, Assoc, Map, Text
 
 from . import __version__
 from .anchors import index_in
-from .confine import outside_reads, sandboxed
+from .confine import outside_reads
 from .crypto import Keys, b64e
-from .folder import apply_text
-from .paths import latexmk_command, main_file, safe_rel, tex_env, tex_names_refused
+from .folder import apply_text, compile_externals, latexmk
+from .paths import STATE, latexmk_command, main_file, safe_rel, tex_names_refused
 from .replica import Replica
 from .textpos import Char, char_of_u16, u16_of
-from .xr import compile_order
 
 log = logging.getLogger("texloom")
 
@@ -332,7 +331,7 @@ class Project:
         if refused:
             return f"Not compiled: {refused}"
         with tempfile.TemporaryDirectory(prefix="texloom-mcp-") as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             for p in self.r.files.keys():
                 if safe_rel(p):
                     (root / p).parent.mkdir(parents=True, exist_ok=True)
@@ -350,35 +349,22 @@ class Project:
             mp = (root / main).resolve()
             if not mp.is_relative_to(root.resolve()) or not mp.is_file():
                 return f"The main file {main!r} isn't usable."
-            # documents main takes labels from (\externaldocument) first: their .aux lands where xr reads it
-            failed = []
-            for doc in compile_order(texts, main):
-                dp = root / doc
-                proc = await asyncio.create_subprocess_exec(
-                    *sandboxed(latexmk_command(self.r.meta.get("engine"), self.r.meta.get("bib"), dp.name), root, root),
-                    cwd=dp.parent, env=tex_env(), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-                try:
-                    await asyncio.wait_for(proc.wait(), 300)
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.wait()
-                if proc.returncode != 0:
-                    failed.append(doc)
-            proc = await asyncio.create_subprocess_exec(
-                *sandboxed(latexmk_command(self.r.meta.get("engine"), self.r.meta.get("bib"), mp.name), root, root),
-                cwd=mp.parent, env=tex_env(),
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            # documents main takes labels from (\externaldocument) first, as a synced folder compiles (folder.py)
+            build = root / STATE / "build"
+            build.mkdir(parents=True)
+            engine, bib = self.r.meta.get("engine"), self.r.meta.get("bib")
+            failed = await compile_externals(root, texts, main, lambda doc: root / doc, build, engine, bib, [], timeout=300)
             try:
-                out, _ = await asyncio.wait_for(proc.communicate(), 300)
-            except asyncio.TimeoutError:
-                proc.kill()
+                code, out = await latexmk(latexmk_command(engine, bib, mp.name, f"-outdir={build}"), root, build, mp.parent,
+                                          timeout=300, capture=True)
+            except TimeoutError:
                 return "Compile timed out after 5 minutes."
-            if outside_reads(root, root):  # the log could carry what was read
+            if outside_reads(root, build):  # the log could carry what was read
                 return ("The compile read files outside the project, so its log isn't shown (it could contain them). "
                         "Documents may only use the project's files, TeX's and fonts.")
-            logf = mp.with_suffix(".log")
+            logf, pdf = build / f"{Path(main).stem}.log", build / f"{Path(main).stem}.pdf"
             text = logf.read_text("utf-8", "replace") if logf.exists() else out.decode("utf-8", "replace")
-            ok = proc.returncode == 0 and mp.with_suffix(".pdf").exists()
+            ok = code == 0 and pdf.exists()
             pages = re.search(r"Output written on .*?\((\d+) pages?", text)
             gone = f"\n\nNot available, so compiled without: {', '.join(missing)}." if missing else ""
             if failed:

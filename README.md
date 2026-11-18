@@ -448,7 +448,7 @@ Per-folder options are in `<dir>/.texloom/config.json`, which only you can read.
 never shared:
 
 ```json
-{ "compile": false, "engine": null, "latexmk_args": [], "shell_escape": false, "confine": true, "latexmk_rc": null, "label": "", "create_code": "" }
+{ "compile": false, "engine": null, "latexmk_args": [], "shell_escape": false, "confine": true, "label": "", "create_code": "" }
 ```
 
 Collaborators write the document, so compiling is locked down by default:
@@ -467,7 +467,6 @@ Collaborators write the document, so compiling is locked down by default:
 
   `"confine": false` turns both off, for projects whose collaborators you trust.
 - **No rc files:** latexmk ignores rc files (`-norc`), because a `latexmkrc` is Perl.
-  Name one you trust with `latexmk_rc`.
 - **Unsafe files aren't written:** neither the helper nor the browser's folder sync
   writes files such as `latexmkrc` or `texmf.cnf`, anything in `.git`, `.vscode` or
   `.idea` (however it's capitalised), nor any path outside the folder.
@@ -777,6 +776,7 @@ npm run check-props     # random texts and edits (Windows line endings, emoji): 
 cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for the desktop, and its merge agrees with the web app's
 uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
 uv run --with hypothesis python scripts/check_folder_model.py     # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
+uv run python scripts/check_folder_deletions.py                   # a file deleted or renamed in the folder isn't brought back by a change arriving just then
 uv run --extra server python scripts/check_files.py               # the server's file store: a folder, and Garage (S3) if installed
 uv run --extra server python scripts/check_config.py              # texloom.example.toml lists every server setting, and parses
 (cd web && npm run check-folder-model)                           # the same for the browser's folder sync, on a fake clock and folder
