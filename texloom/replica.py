@@ -256,34 +256,52 @@ class Replica:
         async with self.lock:
             await self._apply_locked(entries)
 
+    def _apply_remote(self, update: bytes) -> str | None:
+        """Apply someone else's change; None, or why it couldn't be (it is then left out)."""
+        try:
+            with self.doc.transaction(origin="remote"):
+                self.doc.apply_update(update)
+            return None
+        except ValueError as err:
+            return str(err)
+        except BaseException as err:  # a panic in pycrdt's Rust is a BaseException: not this one change's undoing of the sync
+            if type(err).__name__ != "PanicException":
+                raise
+            return f"pycrdt: {err}"
+
     async def _apply_locked(self, entries: list[dict]) -> None:
         if self.before_remote:
             await self.before_remote()
+        # One bad entry is skipped, as in web/src/replica.ts: stopping there would stop every catch-up at it.
         for e in entries:
-            data, sig = b64d(e["d"]), b64d(e["s"])
-            prefix = f"snap:{e['q']}:".encode() if e.get("snap") else b"upd:"
+            try:
+                q, data, sig = e["q"], b64d(e["d"]), b64d(e["s"])
+                prefix = f"snap:{q}:".encode() if e.get("snap") else b"upd:"
+            except (KeyError, TypeError, ValueError, AttributeError):
+                log.warning("dropping a malformed update")
+                continue
             if not self._verify(prefix, data, sig):
-                log.warning("dropping update %s with bad signature", e["q"])
+                log.warning("dropping update %s with bad signature", q)
                 continue
             try:
                 update = self.keys.decrypt(data)
-            except InvalidTag:
-                log.warning("dropping update %s that fails to decrypt", e["q"])
+            except (InvalidTag, ValueError):
+                log.warning("dropping update %s that fails to decrypt", q)
                 continue
             if update.startswith(REF):
                 ref = update
                 update = await self._fetch_ref(ref)
                 if update is None:
-                    log.warning("couldn't fetch the upload change %s refers to", e["q"])
+                    log.warning("couldn't fetch the upload change %s refers to", q)
                     self._resync = self._resync or 1
                     continue
                 try:
-                    self.refs[e["q"]] = json.loads(ref[len(REF):])["b"]
+                    self.refs[q] = json.loads(ref[len(REF):])["b"]
                 except (ValueError, KeyError):
                     pass
             update = unpack(update)  # a compressed snapshot or change (packing.py)
-            with self.doc.transaction(origin="remote"):
-                self.doc.apply_update(update)
+            if (why := self._apply_remote(update)) is not None:
+                log.warning("dropping update %s that isn't a readable change (%s)", q, why)
         self.save()
         if self.on_remote:
             await self.on_remote()
@@ -516,11 +534,16 @@ class Replica:
             if "s" not in m or not self._verify(b"p2p:", data, b64d(m["s"]), fresh=True):
                 log.warning("ignoring unsigned peer update")
                 return
+            try:
+                update = unpack(b64d(p["u"]))
+            except (KeyError, TypeError, ValueError, AttributeError):
+                return
             async with self.lock:
                 if self.before_remote:
                     await self.before_remote()
-                with self.doc.transaction(origin="remote"):
-                    self.doc.apply_update(unpack(b64d(p["u"])))
+                if (why := self._apply_remote(update)) is not None:
+                    log.warning("ignoring a peer update that isn't a readable change (%s)", why)
+                    return
                 self.save()
                 if self.on_remote:
                     await self.on_remote()

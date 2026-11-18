@@ -32,7 +32,7 @@ from .anchors import index_in
 from .confine import outside_reads, sandboxed
 from .crypto import Keys, b64e
 from .folder import apply_text
-from .paths import latexmk_command, main_file, safe_rel, tex_env
+from .paths import latexmk_command, main_file, safe_rel, tex_env, tex_names_refused
 from .replica import Replica
 from .textpos import Char, char_of_u16, u16_of
 from .xr import compile_order
@@ -327,6 +327,10 @@ class Project:
         main = self.main_file()
         if not main:
             return "No main .tex file found."
+        texts = {p: str(self.r.files[p]) for p in self.r.files.keys() if safe_rel(p)}
+        refused = tex_names_refused(texts, main)
+        if refused:
+            return f"Not compiled: {refused}"
         with tempfile.TemporaryDirectory(prefix="texloom-mcp-") as tmp:
             root = Path(tmp)
             for p in self.r.files.keys():
@@ -347,7 +351,6 @@ class Project:
             if not mp.is_relative_to(root.resolve()) or not mp.is_file():
                 return f"The main file {main!r} isn't usable."
             # documents main takes labels from (\externaldocument) first: their .aux lands where xr reads it
-            texts = {p: str(self.r.files[p]) for p in self.r.files.keys() if safe_rel(p)}
             failed = []
             for doc in compile_order(texts, main):
                 dp = root / doc

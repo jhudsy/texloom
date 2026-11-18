@@ -68,6 +68,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Yours only: don’t pass it on. For others, ask the project’s owner for a link.': '仅供你使用：请勿转交。如需为他人提供链接，请联系项目所有者。',
     'Join a project': '加入项目',
     'A web page asked TeXLoom to add this project. Join only if you expected it.': '某个网页请求 TeXLoom 添加此项目。请仅在你预期此操作时加入。',
+    'A web page asked TeXLoom to make a new project from a folder. Go on only if you expected it, and check the server it goes to.': '某个网页请求 TeXLoom 用一个文件夹创建新项目。请仅在你预期此操作时继续，并检查项目将存放到哪个服务器。',
     'Project link (from the Share dialog, or an email):': '项目链接（来自“共享”对话框或邮件）：',
     'Check': '检查',
     'Folder on this computer:': '这台电脑上的文件夹：',

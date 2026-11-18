@@ -68,6 +68,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Yours only: don’t pass it on. For others, ask the project’s owner for a link.': 'Solo para ti: no lo pases a nadie. Para otras personas, pide un enlace al propietario del proyecto.',
     'Join a project': 'Unirse a un proyecto',
     'A web page asked TeXLoom to add this project. Join only if you expected it.': 'Una página web ha pedido a TeXLoom que añada este proyecto. Únete solo si lo esperabas.',
+    'A web page asked TeXLoom to make a new project from a folder. Go on only if you expected it, and check the server it goes to.': 'Una página web ha pedido a TeXLoom que cree un proyecto nuevo a partir de una carpeta. Continúa solo si lo esperabas y comprueba a qué servidor va.',
     'Project link (from the Share dialog, or an email):': 'Enlace del proyecto (del cuadro Compartir o de un correo):',
     'Check': 'Comprobación',
     'Folder on this computer:': 'Carpeta de este ordenador:',

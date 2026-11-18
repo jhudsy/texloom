@@ -710,11 +710,13 @@ class JoinDialog(Dialog):
             self.what.setText(red(str(err)))
             return
         self.info = info
-        access = ((_("edit access as {member}", member=info["member"]) if info["member"] else _("edit access"))
+        # the name and member come from collaborators, the server from the link: shown as text, never as markup
+        access = ((_("edit access as {member}", member=html.escape(info["member"])) if info["member"] else _("edit access"))
                   if info["writable"] else _("read-only"))
         self.what.setText(ngettext(info["files"], "<b>“{name}”</b> — {access}, {n} file(s), on {server}",
                                    "<b>“{name}”</b> — {access}, {n} file(s), on {server}",
-                                   name=info["name"] or _("Untitled"), access=access, n=info["files"], server=info["server"]))
+                                   name=html.escape(info["name"] or _("Untitled")), access=access, n=info["files"],
+                                   server=html.escape(info["server"])))
         if not self.folder.text():
             self.folder.setText(str(default_parent() / slug(info["name"] or "project")))
         self.join.setEnabled(True)
@@ -818,14 +820,22 @@ def ask_code(parent, engine: Engine, server: str, title: str, text: str, code: s
 class ShareFolderDialog(Dialog):
     """Share an existing folder as a new project (`texloom new`)."""
 
-    def __init__(self, engine: Engine, parent=None, server: str = "", code: str = "") -> None:
+    def __init__(self, engine: Engine, parent=None, server: str = "", code: str = "", from_web: bool = False) -> None:
         """`server` and `code` come from the web app (texloom://new), to fill in."""
         super().__init__(parent)
         self.engine = engine
+        # a server named by a web page is used for this project only: it doesn't become the default
+        self.web_server = server.rstrip("/") if from_web else ""
         self.setWindowTitle(_("New project from a folder"))
         self.setMinimumWidth(560)
         lay = QtWidgets.QFormLayout(self)
         lay.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)  # macOS keeps fields narrow otherwise
+        if from_web:
+            warn = QtWidgets.QLabel(_("A web page asked TeXLoom to make a new project from a folder. Go on only if you "
+                                      "expected it, and check the server it goes to."))
+            warn.setWordWrap(True)
+            warn.setStyleSheet(f"color: {AMBER}")
+            lay.addRow(warn)
         intro = QtWidgets.QLabel(_("The folder’s files are uploaded, encrypted, and the folder stays in step with the "
                                    "project from then on. You can invite people once it’s made."))
         intro.setWordWrap(True)
@@ -908,7 +918,8 @@ class ShareFolderDialog(Dialog):
             return
         if code and code != listsync.code_for(server):  # a new code: keep it, and it follows your project list
             listsync.remember_code(server, code)
-        listsync.remember_server(server)  # the default next time
+        if server != self.web_server:
+            listsync.remember_server(server)  # the default next time
         self.made = d.resolve()
         self.engine.call(self.engine.daemon.poke)
         self.accept()
@@ -2275,6 +2286,7 @@ class Window(QtWidgets.QMainWindow):
         lay = QtWidgets.QVBoxLayout(w)
         lay.setContentsMargins(16, 8, 12, 8)
         self.title = QtWidgets.QLabel()
+        self.title.setTextFormat(Qt.PlainText)  # a project's name is chosen by collaborators
         f = self.title.font()
         f.setPointSize(f.pointSize() + 6)
         f.setBold(True)
@@ -2528,7 +2540,7 @@ class Window(QtWidgets.QMainWindow):
         """`from_web`: asked for by the web app (Create project ▸ From a folder), so the new project
         is opened there too, which puts it on that browser's list of projects."""
         self.show_window()
-        dlg = ShareFolderDialog(self.engine, self, server, code)
+        dlg = ShareFolderDialog(self.engine, self, server, code, from_web)
         if not dlg.exec():
             return
         self.find.clear()
@@ -2556,7 +2568,10 @@ class Window(QtWidgets.QMainWindow):
             len(fs), "Stop syncing {n} folder?\n\n{names}\n\nThe folder and its files stay where they are; you can delete it yourself.",
             "Stop syncing {n} folders?\n\n{names}\n\nThe folders and their files stay where they are; you can delete them yourself.",
             n=len(fs), names="\n".join(project_name(d, self.engine) for d in fs))
-        if QtWidgets.QMessageBox.question(self, _("Leave"), ask) != QtWidgets.QMessageBox.Yes:
+        box = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Question, _("Leave"), ask,
+                                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, self)
+        box.setTextFormat(Qt.PlainText)  # project names are chosen by collaborators
+        if box.exec() != QtWidgets.QMessageBox.Yes:
             return
         for d in fs:
             registry.remove(d)
@@ -2810,6 +2825,41 @@ class DockFollowsWindows(QtCore.QObject):
             mac_dock(show)
 
 
+def instance_socket() -> str:
+    """Where the running app listens for what a second launch hands over (texloom:// links, which
+    hold project keys). It must be somewhere no one else on the computer can listen first: a
+    socket in a folder only this user can open; on Windows, a pipe whose name only this user knows
+    (another user could otherwise create one of the same name)."""
+    if sys.platform == "win32":
+        f = registry.config_dir() / "instance"
+        try:
+            token = f.read_text().strip()
+        except OSError:
+            token = ""
+        if not re.fullmatch(r"[0-9a-f]{32}", token):
+            import secrets
+            token = secrets.token_hex(16)
+            try:
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text(token)
+            except OSError as e:
+                log.warning("couldn't keep the app's pipe name: %s", e)
+        return f"{SOCKET}-{token}"
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    d = Path(runtime) / "texloom" if runtime else registry.config_dir() / "run"
+    if len(str(d / "app.sock").encode()) > 100:  # longer than a socket's path may be (104 bytes on a Mac)
+        import hashlib
+        import tempfile
+        mine = hashlib.sha256(str(registry.config_dir()).encode()).hexdigest()[:12]  # one per TEXLOOM_HOME
+        d = Path(tempfile.gettempdir()) / f"texloom-{os.getuid()}-{mine}"
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    st = os.lstat(d)
+    if st.st_uid != os.getuid() or not os.path.isdir(d) or os.path.islink(d):
+        raise OSError(f"{d} belongs to someone else")  # made first by another user: don't listen there
+    os.chmod(d, 0o700)
+    return str(d / "app.sock")
+
+
 def main(argv: list[str] | None = None) -> None:
     use_tex_on_path()  # opened from the Finder, Dock or Start menu: TeX isn't on PATH otherwise
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -2823,9 +2873,13 @@ def main(argv: list[str] | None = None) -> None:
 
     # One copy per user: a second launch (e.g. from a texloom:// link) hands over and exits.
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
+    try:
+        name, why = instance_socket(), ""
+    except OSError as e:  # carry on without: links opened while the app runs then start another copy
+        name, why = "", str(e)
     sock = QLocalSocket()
-    sock.connectToServer(SOCKET)
-    if sock.waitForConnected(300):
+    sock.connectToServer(name)
+    if name and sock.waitForConnected(300):
         if sys.platform == "win32":  # Windows lets only the app just started take the foreground: pass that on
             try:
                 import ctypes
@@ -2836,9 +2890,10 @@ def main(argv: list[str] | None = None) -> None:
         sock.waitForBytesWritten(1000)
         sock.disconnectFromServer()
         return
-    QLocalServer.removeServer(SOCKET)
+    QLocalServer.removeServer(name)
     server = QLocalServer()
-    server.listen(SOCKET)
+    server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
+    listening = bool(name) and server.listen(name)
 
     global bridge
     bridge = Bridge()
@@ -2851,6 +2906,8 @@ def main(argv: list[str] | None = None) -> None:
         h.addFilter(FolderTag())
     logging.getLogger("watchfiles").setLevel(logging.WARNING)
     FOLDER.set("")
+    if not listening:  # this copy works on; links opened while it runs start another copy instead
+        log.warning("can't take links from other launches of the app (%s): %s", name, why or server.errorString())
 
     engine = Engine()
     win = Window(engine, activity)

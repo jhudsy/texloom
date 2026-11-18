@@ -295,6 +295,13 @@ The resolved path must stay inside the project folder (no writing through symlin
   document's folder (`-bibfudge-`, so `\bibliography{../refs}` is found) with `openout_any=a`
   for it alone, since paranoid mode refuses its .bbl/.blg in `.texloom/build` (a dot folder)
   and it writes no other files.
+- **No shell for names a document gives:** latexmk runs some programs through the shell with file
+  names in double quotes, where `` ` `` and `$( )` still run commands, and the names come from
+  collaborators. So the main document, and those it takes labels from, must have names of letters,
+  digits, spaces and `. _ - + / ( )` (`tex_names_refused`, or nothing is compiled); makeindex,
+  xdvipdfmx, dvips, dvipdf and ps2pdf run as argument lists (`texloom_exec` in the Perl hook); and
+  latexmk's `kpsewhich`, which it asks about the names in `\bibliography{…}` and the like through
+  the shell, isn't asked about a name containing `` ` `` `$` `"` `\` or a control character.
 - **Lines that run programs** (`texloom/scan.py`, `programRequests` in `texscan.ts`):
   `\write18`, `\ShellEscape`, `\input|`, Lua `os.execute`/`io.popen`, packages such as
   minted or pythontex, TikZ externalisation ("shell"), and arara directives or editor
@@ -746,6 +753,11 @@ from the browser. As for Zotero, the **account** (a token and its login) is the 
 project's: `meta.github = {repo, branch, dir, head, by, at, blocked, clash}`, where `head` is
 the commit last brought in or sent, the base for the next three-way merge, whoever syncs.
 
+Any collaborator can change the link, and syncing uses the browser's own token, so a browser syncs
+only a link its user made or approved there (`texloom.githubApproved.<project>` in `localStorage`:
+repository, branch and folder). A link someone else set shows "Approve and sync" instead; until
+then nothing is fetched from or sent to GitHub with this browser's token.
+
 - **Bringing in** (every minute): for each kept file GitHub changed between `head` and the
   branch's commit: if the project has GitHub's version already, nothing; if the project still
   has `head`'s version, GitHub's; if both changed a text file, `merge3Strict` (diff.ts: null
@@ -785,7 +797,10 @@ project from elsewhere syncs with its own server straight from the page (`web/sr
 - Inside the app a project from another server is opened as `#s=<origin>&p=…&k=…`; pasting another
   server's link (`https://other/#p=…`) turns into that. Share still gives the project's own links,
   on its own server. The list keeps the server per project (`s`), and so does the desktop app,
-  whose folders always had their own servers.
+  whose folders always had their own servers. A link can't change the server of a project already
+  in the list (anyone with its read link could make one naming their own server): it asks, and a
+  different server is used for that tab only; nor can it replace the list's keys, except with more
+  access to the same project.
 - A server must be `https` (`http` only on this computer, for testing, or when the app itself is
   on `http`), and nothing but encrypted data goes to it: the same as for the home server. The relay
   already answers any origin (CORS `*`), and the page's policy allows `https:`/`wss:` connections.

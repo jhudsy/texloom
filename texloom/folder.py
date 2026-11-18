@@ -34,7 +34,8 @@ log = logging.getLogger("texloom")
 from .confine import OUTSIDE_NOTE, forget_reads, outside_reads, sandboxed
 from .scan import SCANNED, added, allowed, scan
 from .xr import compile_order, external_documents
-from .paths import PROTECTED_DIRS, STATE, UNSAFE_NAMES, WIN_RESERVED, latexmk_command, main_file, safe_rel, tex_env  # noqa: F401
+from .paths import (PROTECTED_DIRS, STATE, UNSAFE_NAMES, WIN_RESERVED, latexmk_command, main_file,  # noqa: F401
+                    safe_rel, tex_env, tex_names_refused)
 SETTLE = 0.2  # seconds a changed file must stay unchanged before it is read (see FolderSync._settle)
 SETTLE_DOUBT = 2.0  # the same, for a file that became empty or disappeared (rarely meant; editors can take a while to write it again)
 SETTLE_BIG = 1.0  # the same, for a big file (BIG bytes or more): copying one in can pause for a moment
@@ -57,7 +58,7 @@ def settle_for(size: int, times: int) -> float:
 
 
 SOURCES = (".tex", ".bib", ".sty", ".cls", ".bst", ".ltx", ".dtx", ".ins", ".bbx", ".cbx")  # never counted as compile output
-IGNORE_DIRS = {STATE, ".git", ".svn", "node_modules", "__pycache__", ".idea", ".vscode"}
+IGNORE_DIRS = {*PROTECTED_DIRS, "node_modules", "__pycache__"}  # never synced, so nothing there is ever written
 IGNORE_NAMES = {".DS_Store", "Thumbs.db"}
 IGNORE_SUFFIXES = (
     ".aux", ".log", ".out", ".toc", ".lof", ".lot", ".fls", ".fdb_latexmk", ".synctex.gz",
@@ -391,6 +392,10 @@ def move_file(r: Replica, review: Map, a: str, b: str) -> None:
         r.meta["main"] = b
 
 
+class CompileRefused(Exception):
+    """The document can't be compiled here; the message says why."""
+
+
 class FolderSync:
     def __init__(self, root: Path, replica: Replica, compile_: bool = False,
                  compile_opts: dict | None = None):
@@ -482,14 +487,28 @@ class FolderSync:
         return not_project_file(rel, str(self.r.meta.get("main", "main.tex")))
 
     def disk_files(self) -> list[str]:
+        """The files in the folder, not through symlinks: one could lead outside the project
+        (a clone can bring them in), and the sync never writes through them either."""
         out = []
         for dirpath, dirnames, filenames in os.walk(self.root):
-            dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
+            here = Path(dirpath)
+            dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not (here / d).is_symlink()]
             for f in filenames:
-                rel = self.rel(Path(dirpath) / f)
+                if (here / f).is_symlink():
+                    continue
+                rel = (here / f).relative_to(self.root).as_posix()
                 if not self.ignored(rel):
                     out.append(rel)
         return out
+
+    def linked(self, rel: str) -> bool:
+        """Whether the file, or a folder on its way from the project folder, is a symlink."""
+        p = self.root
+        for seg in rel.split("/"):
+            p = p / seg
+            if p.is_symlink():
+                return True
+        return False
 
     def save_known(self) -> None:
         self._known_file.write_text(json.dumps(self.known))
@@ -611,7 +630,7 @@ class FolderSync:
         deletion and an addition, maybe in different batches: a file gone from disk whose last
         synced content is now in a file the project doesn't have yet has moved there."""
         def usable(rel: str) -> bool:
-            return not self.ignored(rel) and safe_rel(rel) is not None
+            return not self.ignored(rel) and safe_rel(rel) is not None and not self.linked(rel)
         gone = [rel for rel in sorted(paths) if rel in self.known and usable(rel) and not (self.root / rel).is_file()]
         if not gone:
             return {}
@@ -749,6 +768,11 @@ class FolderSync:
                 if rel not in self._refused:
                     self._refused.add(rel)
                     log.warning("not sharing %s: collaborators' helpers never accept this file name", rel)
+                continue
+            if self.linked(rel):  # it could be a file from outside the project: not read, and not taken as deleted
+                if rel not in self._refused:
+                    self._refused.add(rel)
+                    log.warning("not sharing %s: it is, or is in, a symlink", rel)
                 continue
             full = self.root / rel
             if not full.is_file():
@@ -1116,6 +1140,8 @@ class FolderSync:
         except asyncio.CancelledError:
             self._asked |= asked  # stopped (the folder is closing): nothing to answer with
             raise
+        except CompileRefused as e:
+            await self._compile_failed(asked, str(e))
         except FileNotFoundError as e:
             await self._compile_failed(asked, "latexmk wasn't found on this computer, so it can't compile here. "
                                        "Install TeX Live (MacTeX on a Mac, TeX Live or MiKTeX on Windows), which includes it.", e)
@@ -1128,8 +1154,8 @@ class FolderSync:
                 self._again = False
                 self._start(1.5)
 
-    async def _compile_failed(self, asked: set, why: str, e: BaseException) -> None:
-        log.error("can't compile: %s (%s)", why, e)
+    async def _compile_failed(self, asked: set, why: str, e: BaseException | None = None) -> None:
+        log.error("can't compile: %s%s", why, f" ({e})" if e else "")
         for frm in asked:
             await self.r.p2p({"k": "cerr", "by": self.opts["label"], "why": why}, frm)
 
@@ -1156,10 +1182,14 @@ class FolderSync:
         main_path = self.target(main)
         if main_path is None or not main_path.is_file():
             return
+        files = {p: str(t) for p, t in self.r.files.items() if self.target(p) is not None}
+        refused = tex_names_refused(files, main)
+        if refused:
+            raise CompileRefused(refused)
         notes = [note] if note else []
         confine = self.opts.get("confine", True)
         forget_reads(build)
-        notes += await self._compile_externals(main, engine, build, extra, confine)
+        notes += await self._compile_externals(files, main, engine, build, extra, confine)
         cmd = latexmk_command(engine, self.r.meta.get("bib"), main_path.name, "-synctex=1", f"-outdir={build}", *extra)
         proc = await asyncio.create_subprocess_exec(
             *(sandboxed(cmd, self.root, build) if confine else cmd),
@@ -1209,19 +1239,19 @@ class FolderSync:
         # drop the output this replaces (browsers also tidy up older ones, using the history)
         if isinstance(prev, dict):
             new = {pdf_id, log_id, stx_id}
-            files = {v.get("h") for v in self.r.bin.values() if isinstance(v, dict)}
+            stored = {v.get("h") for v in self.r.bin.values() if isinstance(v, dict)}
             for k in ("pdf", "log", "synctex"):
                 old = prev.get(k)
-                if old and old not in new and old not in files:
+                if old and old not in new and old not in stored:
                     await self.r.drop_output(old)
 
-    async def _compile_externals(self, main: str, engine: str, build: Path, extra: list[str], confine: bool) -> list[str]:
+    async def _compile_externals(self, files: dict[str, str], main: str, engine: str, build: Path, extra: list[str],
+                                 confine: bool) -> list[str]:
         """Compile the documents `main` takes labels from (\\externaldocument) first, each in
         its own folder under `build`, and copy each .aux to where the compile that reads it
         looks first: its output folder. In a cycle (a paper and its supplement citing each
         other), the document that closes it gets the other's .aux from its last compile, so
         repeated compiles settle. Returns notes for the log."""
-        files = {p: str(t) for p, t in self.r.files.items() if self.target(p) is not None}
         order = compile_order(files, main)
         if not order:
             return []

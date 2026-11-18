@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import unicodedata
+from collections.abc import Mapping
 from pathlib import Path
 
 STATE = ".texloom"
@@ -17,9 +18,9 @@ STATE = ".texloom"
 # Files that TeX tools read as configuration or execute (latexmk runs latexmkrc as Perl).
 # They are never written from, or sent to, the shared project.
 UNSAFE_NAMES = {"latexmkrc", ".latexmkrc", "texmf.cnf", ".texmf.cnf", "mktexlsr", "ls-r"}
-# Folders whose contents tools act on (git hooks and config, editor settings). Keep these
-# rules in sync with cleanPath() in web/src/projectfiles.ts.
-PROTECTED_DIRS = {STATE, ".git", ".vscode", ".idea"}
+# Folders whose contents tools act on (version control hooks and config, which can name programs
+# to run, and editor settings). Keep these rules in sync with cleanPath() in web/src/projectfiles.ts.
+PROTECTED_DIRS = {STATE, ".git", ".hg", ".jj", ".sl", ".bzr", ".svn", ".vscode", ".idea"}
 WIN_RESERVED = {"con", "prn", "aux", "nul", "conin$", "conout$",
                 *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 
@@ -62,6 +63,25 @@ def main_file(files: object, meta: object) -> str | None:
     return None
 
 
+def tex_safe_name(rel: str) -> bool:
+    """Whether latexmk may be given this path (the document to compile, or one it takes labels from).
+    latexmk runs some programs (kpsewhich, and any an rc file names) through the shell with the file
+    name in double quotes, where ` and $( ) still run commands: only letters, digits, spaces and
+    . _ - + / ( ) are let through."""
+    return bool(rel) and all(c.isalnum() or c in " ._-+/()" or unicodedata.category(c).startswith("M") for c in rel)
+
+
+def tex_names_refused(files: Mapping[str, str], main: str) -> str | None:
+    """Why `main` mustn't be compiled because of a file name (its own, or that of a document it
+    takes labels from, which is compiled first), or None."""
+    from .xr import compile_order
+    bad = [p for p in [main, *compile_order(files, main)] if not tex_safe_name(p)]
+    if not bad:
+        return None
+    return (f"{bad[0]!r} has characters in its name or folder that LaTeX's tools could take as a command. "
+            "Only letters, digits, spaces and . _ - + / ( ) are let through: rename it to compile.")
+
+
 ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualatex"}
 
 # Each TeX, BibTeX and biber run appends what it read (its .fls or .blg, after a PWD line) to
@@ -71,6 +91,10 @@ ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualate
 # named relative to the document (\bibliography{../refs}) isn't found: it runs from the document's
 # folder instead (-bibfudge-), and then writes its .bbl and .blg through the path .texloom/build,
 # which paranoid openout refuses (a dot folder). BibTeX writes no other files, so it alone may.
+# latexmk runs its other programs through the shell, the file names in double quotes, where ` and
+# $( ) still run commands: they too run as lists (texloom_exec), with no shell. kpsewhich, which
+# latexmk runs through the shell for the names a document gives (\bibliography{$(…)}), isn't
+# asked about a name the shell would act on: such a file is then only not watched for changes.
 RECORD = (
     "use Cwd; sub texloom_run { my ($ext, $base, @cmd) = @_; "
     "local $ENV{openout_any} = q(a) if $cmd[0] eq q(bibtex); my $r = system(@cmd); "
@@ -78,6 +102,14 @@ RECORD = (
     "{ print $out q(PWD ), getcwd(), qq(\\n), <$in>; close $out } return $r } "
     + " ".join(f"${p} = q(internal texloom_run {ext} %Y%R {p} %O %S);"
                for p, ext in (("pdflatex", "fls"), ("xelatex", "fls"), ("lualatex", "fls"), ("bibtex", "blg"), ("biber", "blg")))
+    + " sub texloom_exec { return system(@_) } "
+    + " ".join(f"${p} = q(internal texloom_exec {cmd});" for p, cmd in (
+        ("makeindex", "makeindex %O -o %D %S"), ("xdvipdfmx", "xdvipdfmx -E -o %D %O %S"),
+        ("dvipdf", "dvipdf -dALLOWPSTRANSPARENCY %O %S %D"), ("dvips", "dvips %O -o %D %S"),
+        ("ps2pdf", "ps2pdf -dALLOWPSTRANSPARENCY %O %S %D")))
+    + r""" { no warnings q(redefine); my $k = \&kpsewhich; """
+    r"""my $bad = $^O eq q(MSWin32) ? qr/["%\x00-\x1f]/ : qr/[`\$"\\\x00-\x1f]/; """
+    r"""*kpsewhich = sub { my @a = grep { !/$bad/ } @_; return () unless grep { !/^-/ } @a; return $k->(@a) } }"""
 )
 
 

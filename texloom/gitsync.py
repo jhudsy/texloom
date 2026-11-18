@@ -28,7 +28,7 @@ import re
 import time
 from pathlib import Path
 
-from .folder import FolderSync
+from .folder import IGNORE_DIRS, FolderSync
 from .paths import safe_rel
 from .scan import SCANNED, added
 
@@ -179,6 +179,15 @@ class GitBridge:
         if target == self._blocked:
             return False
         before = (await self.git("rev-parse", "HEAD")).strip()
+        unsafe = await self.unsafe_incoming(target)
+        if unsafe:
+            self._blocked = target
+            log.warning("git: %s changes files the sync never writes itself, so it isn't merged and the project is "
+                        "unchanged: %s. Merging them could make the next compile run programs (git writes over "
+                        "ignored files such as .texloom/config.json). Only a project's own files, with no symlinks "
+                        "or submodules, can come in from git: take these out upstream and push.",
+                        upstream, ", ".join(unsafe[:5]) + (f" and {len(unsafe) - 5} more" if len(unsafe) > 5 else ""))
+            return False
         try:
             await self.git("merge", "--no-edit", "-q", upstream)
         except GitError as e:
@@ -206,6 +215,20 @@ class GitBridge:
         await self.note_program_lines(before)
         log.info("git: merged %s", upstream)
         return True
+
+    async def unsafe_incoming(self, target: str) -> list[str]:
+        """The paths merging `target` would change that must not come in: names collaborators'
+        apps refuse, anything in the folders the sync leaves alone (.texloom holds the compile
+        settings, .git and the like hooks and config), symlinks and submodules."""
+        base = (await self.git("merge-base", "HEAD", target, check=False)).strip() or "HEAD"
+        items = (await self.git("diff", "--raw", "-z", "--no-renames", base, target)).split("\0")
+        out = []
+        for info, path in zip(items[0::2], items[1::2]):  # ":old-mode new-mode old-id new-id status", path
+            fields = info.split()
+            mode = fields[1] if len(fields) > 1 else ""
+            if not safe_rel(path) or any(d in IGNORE_DIRS for d in path.split("/")[:-1]) or mode in ("120000", "160000"):
+                out.append(path)
+        return out
 
     async def conflict_markers(self, before: str) -> list[str]:
         """Project files changed since `before` that contain conflict markers."""

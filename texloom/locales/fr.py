@@ -111,6 +111,8 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     "Join a project": "Rejoindre un projet",
     "A web page asked TeXLoom to add this project. Join only if you expected it.":
         "Une page web a demandé à TeXLoom d’ajouter ce projet. Ne le rejoignez que si vous vous y attendiez.",
+    'A web page asked TeXLoom to make a new project from a folder. Go on only if you expected it, and check the server it goes to.':
+        'Une page web a demandé à TeXLoom de créer un nouveau projet à partir d’un dossier. Ne continuez que si vous vous y attendiez, et vérifiez le serveur où il sera placé.',
     "Project link (from the Share dialog, or an email):": "Lien du projet (depuis la fenêtre Partager ou un e-mail) :",
     "Check": "Vérifier",
     "Folder on this computer:": "Dossier sur cet ordinateur :",
