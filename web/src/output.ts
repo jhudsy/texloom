@@ -82,9 +82,10 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     compileBtn.classList.toggle('primary', !stop)
     compileBtn.classList.toggle('danger', !!stop)
   }
-  const windowBtn = h('button', { class: 'to-window wide-only iconbtn', title: t('Open the PDF in a separate window, for example on another screen. It updates when you compile.'), 'aria-label': t('New window'), onclick: () => {
+  const windowBtn = h('button', { class: 'to-window wide-only iconbtn', title: t('Open the PDF in a separate window, for example on another screen. It updates when you compile.'), onclick: () => popOut() }, icon('window'), t('Pop out')) // labelled: as an icon alone, people didn't find it
+  const popOut = () => {
     if (!pdfWindow.open()) info.textContent = t('Your browser blocked the new window: allow pop-ups for this site and try again.')
-  } }, icon('window'))
+  }
   compileBtn.addEventListener('pointerenter', () => { // says which file, when it isn't the main one
     if (stopRunning || device().compile === 'local') return
     const file = target()
@@ -100,7 +101,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   setLogOpen(localStorage.getItem(LOG_KEY) === '1')
 
   // double-click or right-click → “Go to source” in the PDF: jump to the source line
-  pdfView.menuExtras = () => [[t('Download the PDF'), () => dlBtn.click()], [t('Compile'), () => { compile() }]]
+  pdfView.menuExtras = () => [[t('Open the PDF in a separate window'), popOut], [t('Download the PDF'), () => dlBtn.click()], [t('Compile'), () => { compile() }]]
   pdfView.onPick = async (page, x, y) => {
     const st = await syncTex()
     const hit = st?.toSource(page, x, y)

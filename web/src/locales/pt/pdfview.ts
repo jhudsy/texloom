@@ -11,6 +11,9 @@ const pt: Catalog = {
   'Zoom in': 'Ampliar',
   'Back to normal size': 'Voltar ao tamanho normal',
   'PDF zoom': 'Zoom do PDF',
+  'Link not followed: {{url}}': 'Ligação não seguida: {{url}}',
+  'Back to where you were before following a link': 'Voltar ao sítio onde estava antes de seguir uma ligação',
+  '↩ Back': '↩ Voltar',
 }
 
 export default pt

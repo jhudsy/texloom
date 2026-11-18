@@ -275,9 +275,11 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   there (you're asked first if files would be replaced, or if it's a very large amount).
 - **Panes:** drag the dividers between the file list, the editor and the PDF/assistant
   panel; ☰ and ▥ hide the side panes.
-- **PDF in its own window:** the window button above the PDF opens it in a separate window, for example
+- **PDF in its own window:** **Pop out** above the PDF (or right-click the PDF) opens it in a separate window, for example
   on another screen. It updates when you compile, double-clicking it jumps to the source, and it
   stays in step if you reload the editor.
+- **Text and links in the PDF:** its text can be selected and copied, and with `hyperref` its links work: citations,
+  references and the table of contents scroll to their place (**↩ Back** returns), and web links open in a new tab.
 - **Word counts:** the Outline tab counts the document and each section; selecting text shows its count
   in the corner of the editor. LaTeX commands, citations, maths and comments aren't counted. Chinese and
   Japanese are counted by the character.

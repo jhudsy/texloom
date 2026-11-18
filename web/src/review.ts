@@ -208,11 +208,14 @@ const decoField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 })
 
-/** The text a comment is being written about. */
-const pending = new WeakMap<Replica, { file: string; start: Y.RelativePosition; end: Y.RelativePosition }>()
+/** The text comments are being written about (several can be half-written at once). */
+type Pending = { file: string; start: Y.RelativePosition; end: Y.RelativePosition }
+const pending = new WeakMap<Replica, Set<Pending>>()
 const pendingWatchers = new Set<() => void>()
-function setPending(r: Replica, p: { file: string; start: Y.RelativePosition; end: Y.RelativePosition } | null) {
-  if (p) pending.set(r, p); else pending.delete(r)
+function setPending(r: Replica, p: Pending, on: boolean) {
+  const all = pending.get(r) ?? new Set<Pending>()
+  if (on) all.add(p); else all.delete(p)
+  pending.set(r, all)
   pendingWatchers.forEach((f) => f())
 }
 
@@ -261,8 +264,8 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
         ins(to, i.text)
       }
     }
-    const p = pending.get(r)
-    if (p?.file === file) {
+    for (const p of pending.get(r) ?? []) {
+      if (p.file !== file) continue
       const a = Y.createAbsolutePositionFromRelativePosition(p.start, r.doc), b = Y.createAbsolutePositionFromRelativePosition(p.end, r.doc)
       const pa = a && at(sharedPos(a.index)), pb = b && at(sharedPos(b.index)) // Yjs positions, shown in the view
       if (pa != null && pb != null && pb > pa) ranges.push(Decoration.mark({ class: 'cm-review-pending' }).range(pa, pb))
@@ -360,7 +363,7 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   let focused: string | null = null
   const list = h('div', { class: 'review-list' })
   const composer = h('div', { class: 'rcompose', hidden: true })
-  let draft: { area: HTMLTextAreaElement } | null = null
+  const drafts = new Set<{ area: HTMLTextAreaElement; close: () => void }>() // comments being written, newest first
   const replies = new Map<string, string>() // half-written replies: the list is redrawn whenever anyone comments
   const resolvedChk = h('input', { type: 'checkbox', 'aria-label': t('Show resolved'), onchange: (e: any) => { showResolved = e.target.checked; render() } })
   const modeBtn = h('button', { class: 'suggest-mode', title: t('Suggest mode: what you type in the editor becomes suggestions for others to accept or reject (⌘⌥E / Ctrl+Alt+E)'),
@@ -396,14 +399,23 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
 
   /** A comment is written here rather than in a dialog, so that the editor stays visible and usable.
    *  The text it's about stays highlighted, and can move or go as people keep editing. (Changes are
-   *  suggested by typing, in suggest mode.) */
+   *  suggested by typing, in suggest mode.) Starting another comment keeps any half-written one: the
+   *  new one opens above it. An empty one gives way. */
   function write(sel: { file: string; from: number; to: number; text: string }) {
-    if (draft && draft.area.value.trim()) { draft.area.focus(); return } // don't lose what's been written
     const yt = r.files.get(sel.file)
     if (!yt) return
+    for (const d of [...drafts]) if (!d.area.value.trim()) d.close()
     const start = Y.createRelativePositionFromTypeIndex(yt, sel.from), end = Y.createRelativePositionFromTypeIndex(yt, sel.to, -1)
+    const range: Pending = { file: sel.file, start, end }
     const area = h('textarea', { class: 'review-write', rows: 4, placeholder: t('Write your comment…'), 'aria-label': t('Add a comment') }) as HTMLTextAreaElement
-    const close = () => { draft = null; composer.hidden = true; composer.replaceChildren(); setPending(r, null) }
+    const box = h('div', { class: 'rdraft' })
+    const close = () => {
+      drafts.delete(entry)
+      box.remove()
+      composer.hidden = !drafts.size
+      setPending(r, range, false)
+    }
+    const entry = { area, close }
     const save = () => {
       const text = area.value
       if (!text.trim()) { area.focus(); return }
@@ -422,7 +434,7 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
       if (a && b && a.type === yt) host.reveal(sel.file, sharedPos(a.index), sharedPos(b.index)) // Yjs positions
     }
     const quote = sel.text.length > 400 ? `${sel.text.slice(0, 400)}…` : sel.text
-    composer.replaceChildren(
+    box.append(
       h('b', {}, t('Add a comment')),
       h('blockquote', { class: 'review-quote', title: t('Show in the editor'), onclick: show }, quote),
       area,
@@ -430,9 +442,11 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
         h('span', { class: 'muted small spacer' }, t('⌘Enter or Ctrl+Enter to save')),
         h('button', { onclick: close }, t('Cancel')),
         h('button', { class: 'primary', onclick: save }, t('Add comment'))))
+    composer.prepend(box)
     composer.hidden = false
-    draft = { area }
-    setPending(r, { file: sel.file, start, end })
+    drafts.add(entry)
+    setPending(r, range, true)
+    composer.scrollTop = 0
     area.focus()
   }
 

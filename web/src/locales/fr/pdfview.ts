@@ -10,5 +10,8 @@ const fr: Catalog = {
   'Zoom in': 'Zoom avant',
   'Back to normal size': 'Revenir à la taille normale',
   'PDF zoom': 'Zoom du PDF',
+  'Link not followed: {{url}}': 'Lien non suivi : {{url}}',
+  'Back to where you were before following a link': 'Revenir là où vous étiez avant de suivre un lien',
+  '↩ Back': '↩ Retour',
 }
 export default fr

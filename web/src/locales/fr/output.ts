@@ -55,5 +55,7 @@ const fr: Catalog = {
   "Compiling again when this compile finishes…": "Nouvelle compilation à la fin de celle-ci…",
   "Gathering the project’s files…": "Rassemblement des fichiers du projet…",
   'With a read-only link, compile in this browser (⚙ Settings → Compiling), or with your own TeX in the TeXLoom app: the PDF stays on your computer.': 'Avec un lien en lecture seule, compilez dans ce navigateur (⚙ Réglages → Compilation) ou avec votre propre TeX dans l’app TeXLoom : le PDF reste sur votre ordinateur.',
+  'Pop out': 'Détacher',
+  'Open the PDF in a separate window': 'Ouvrir le PDF dans une fenêtre séparée',
 }
 export default fr

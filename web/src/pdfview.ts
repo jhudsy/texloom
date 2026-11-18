@@ -1,7 +1,9 @@
 // Renders a PDF into a scrollable stack of pages with PDF.js. Every page has its place and size,
 // but only those on or near the screen are drawn (a 200-page thesis at full sharpness wouldn't fit
 // in memory), and the document stays open between redraws. Keeps the scroll position across
-// recompiles, so they don't jump you back to page 1.
+// recompiles, so they don't jump you back to page 1. Over each drawn page lie PDF.js's text layer
+// (invisible text in place, to select and copy) and its link layer (hyperref's citations,
+// references and URLs), with a link service of our own that scrolls this view.
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { t } from './i18n'
@@ -33,7 +35,61 @@ const PRINT_DPI = 200, MAX_PRINT_PIXELS = 8e6
 /** A canvas with no pixels (a new one has 300 × 150), standing in for a page not drawn. */
 const emptyCanvas = () => { const c = document.createElement('canvas'); c.width = c.height = 0; return c }
 
-interface Page { wrap: HTMLDivElement; canvas: HTMLCanvasElement; points: number; ratio: number; drawn: number }
+interface Page { wrap: HTMLDivElement; canvas: HTMLCanvasElement; layers: HTMLElement[]; points: number; ratio: number; drawn: number }
+
+/** Web and mail links a PDF may open; anything else (javascript:, file:, …) isn't followed. */
+const SAFE_LINK = /^(https?:|mailto:)/i
+
+/** What PDF.js's link layer asks of the viewer it sits in (its own PDFLinkService drives its own
+ *  viewer): where an internal link goes, and how an external one opens. */
+class PdfLinks {
+  readonly eventBus = null // no forms or scripting here, so nothing listens
+  doc: pdfjs.PDFDocumentProxy | null = null
+  constructor(private go: (page: number, top: number | null) => void, private pages: () => number) {}
+
+  addLinkAttributes(link: HTMLAnchorElement, url: string) {
+    if (SAFE_LINK.test(url)) {
+      link.href = url
+      link.title = url
+      link.target = '_blank' // never in place of the app
+      link.rel = 'noopener noreferrer nofollow'
+    } else {
+      link.removeAttribute('href')
+      link.title = t('Link not followed: {{url}}', { url })
+    }
+  }
+  // An internal link's address would be this page's with a #fragment, which here holds the
+  // project's key: they get none (the click is handled, and a copied address leaks nothing).
+  getDestinationHash() { return '#' }
+  getAnchorUrl() { return '#' }
+
+  async goToDestination(dest: string | unknown[] | Promise<unknown[]>) {
+    const doc = this.doc
+    if (!doc) return
+    const explicit = typeof dest === 'string' ? await doc.getDestination(dest) : await dest
+    if (!Array.isArray(explicit)) return
+    const [ref, kind] = explicit as [unknown, { name?: string } | undefined, ...(number | null)[]]
+    let page: number
+    try {
+      page = Number.isInteger(ref) ? (ref as number) + 1 : (await doc.getPageIndex(ref as never)) + 1
+    } catch { return }
+    if (page < 1 || page > this.pages()) return
+    // the destination's top edge, in PDF points from the page's bottom (none: the top of the page)
+    const name = kind?.name
+    const top = name === 'XYZ' ? explicit[3] : name === 'FitH' || name === 'FitBH' ? explicit[2] : name === 'FitR' ? explicit[5] : null
+    this.go(page, typeof top === 'number' ? top : null)
+  }
+
+  executeNamedAction(action: string) {
+    const n = this.pages()
+    const now = this.current()
+    const to = action === 'NextPage' ? now + 1 : action === 'PrevPage' ? now - 1 : action === 'FirstPage' ? 1 : action === 'LastPage' ? n : 0
+    if (to >= 1 && to <= n) this.go(to, null)
+  }
+  current: () => number = () => 1
+  executeSetOCGState() {}
+  async getAttachmentContent() { return null }
+}
 
 export class PdfView {
   readonly el: HTMLDivElement
@@ -63,6 +119,10 @@ export class PdfView {
   private width = 0 // the pages' width now, in CSS pixels
   private drawing = false
   private renderedWidth = 0
+  private links = new PdfLinks((page, top) => this.jumpTo(page, top), () => this.pages.length)
+  /** Where the view was before following a link inside the PDF (Back returns there). */
+  private before: number | null = null
+  private backBtn: HTMLButtonElement
   constructor() {
     this.el = document.createElement('div')
     this.el.className = 'pdf'
@@ -76,7 +136,22 @@ export class PdfView {
       clearTimeout(timer)
       timer = setTimeout(() => this.update(), 250)
     }).observe(this.el)
-    this.el.addEventListener('pointerdown', (e) => { if (e.button === 0) this.lastClick = this.pointAt(e) ?? this.lastClick })
+    this.el.addEventListener('pointerdown', (e) => {
+      if (e.button === 0) this.lastClick = this.pointAt(e) ?? this.lastClick
+      // while text is being selected, the layer's end marker covers the page (as in PDF.js's own
+      // viewer), so dragging past the last line doesn't select the whole page
+      const layer = (e.target as HTMLElement).closest?.('.textLayer')
+      if (layer) {
+        layer.classList.add('selecting')
+        window.addEventListener('pointerup', () => layer.classList.remove('selecting'), { once: true })
+      }
+    })
+    // a link inside the PDF is followed by the link layer; its address (#) must never become the
+    // page's, whose #fragment holds the project's key
+    this.el.addEventListener('click', (e) => {
+      const a = (e.target as HTMLElement).closest?.('a')
+      if (a && this.el.contains(a) && !a.href.match(SAFE_LINK)) e.preventDefault()
+    }, true)
     this.el.addEventListener('dblclick', (e) => {
       const at = this.pointAt(e)
       if (at) this.onPick?.(at.page, at.x, at.y)
@@ -87,7 +162,9 @@ export class PdfView {
       if (!at || !this.onPick) return
       e.preventDefault()
       this.lastClick = at
-      this.openMenu(e.clientX, e.clientY, [[t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)], ...(this.menuExtras?.() ?? [])])
+      const sel = this.selectedText()
+      const copy: MenuItem[] = sel ? [[t('Copy'), () => { void navigator.clipboard.writeText(sel).catch(() => {}) }]] : []
+      this.openMenu(e.clientX, e.clientY, [...copy, [t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)], ...(this.menuExtras?.() ?? [])])
     })
     this.el.addEventListener('scroll', () => {
       this.closeMenu()
@@ -113,12 +190,38 @@ export class PdfView {
       },
     })
     this.pageTotal = h('span', { class: 'muted' })
+    this.backBtn = h('button', { class: 'pdfback', hidden: true, title: t('Back to where you were before following a link'), onclick: () => this.back() }, t('↩ Back'))
+    this.links.current = () => this.currentPage()
     this.printBtn = h('button', { class: 'iconbtn', title: t('Print the PDF'), 'aria-label': t('Print'), onclick: () => { this.print().catch((e) => { this.printDone(); alert(t('Couldn’t prepare the PDF for printing: {{error}}', { error: e })) }) } }, icon('print'))
     this.controls = h('span', { class: 'pdfcontrols', hidden: true },
+      this.backBtn,
       h('span', { class: 'pdfpage' }, this.pageBox, this.pageTotal),
       h('span', { class: 'pdfzoom', role: 'group', 'aria-label': t('PDF zoom') }, this.zoomOut, this.zoomReset, this.zoomIn),
       this.printBtn)
     this.showZoom()
+  }
+
+  /** Follow a link inside the PDF: to `top` (PDF points from the page's bottom) on `page`, or its top. */
+  private jumpTo(page: number, top: number | null) {
+    const p = this.pages[page - 1]
+    if (!p) return
+    this.before = this.el.scrollTop
+    this.backBtn.hidden = false
+    const y = top == null ? 0 : Math.max(0, p.points * p.ratio - top) * this.scaleOf(p)
+    this.el.scrollTop += p.wrap.getBoundingClientRect().top - this.el.getBoundingClientRect().top + y - GAP
+  }
+
+  private back() {
+    if (this.before != null) this.el.scrollTop = this.before
+    this.before = null
+    this.backBtn.hidden = true
+  }
+
+  /** Text selected in this PDF, if any. */
+  private selectedText(): string {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || !sel.anchorNode || !this.el.contains(sel.anchorNode)) return ''
+    return sel.toString()
   }
 
   /** The page in the middle of the view. */
@@ -222,6 +325,7 @@ export class PdfView {
       p.wrap.style.width = `${Math.floor(this.width)}px`
       p.wrap.style.height = `${Math.floor(this.width * p.ratio)}px`
       p.canvas.style.width = `${Math.floor(this.width)}px`
+      p.wrap.style.setProperty('--total-scale-factor', String(this.width / p.points)) // the text and link layers follow
     }
   }
 
@@ -253,6 +357,8 @@ export class PdfView {
     p.canvas.replaceWith(blank)
     p.canvas.width = p.canvas.height = 0
     p.canvas = blank
+    p.layers.forEach((l) => l.remove())
+    p.layers = []
     p.drawn = 0
     p.wrap.classList.add('blank')
   }
@@ -269,12 +375,32 @@ export class PdfView {
     canvas.height = Math.floor(vp.height * dpr)
     canvas.style.width = `${Math.floor(width)}px`
     await page.render({ canvas, viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined }).promise
+    const layers = await this.layersFor(page, vp).catch(() => [])
     if (!this.pages.includes(p)) { canvas.width = canvas.height = 0; return } // a newer document came meanwhile
     p.canvas.replaceWith(canvas)
     p.canvas.width = p.canvas.height = 0
     p.canvas = canvas
+    p.layers.forEach((l) => l.remove())
+    p.layers = layers
+    p.wrap.style.setProperty('--total-scale-factor', String(this.width / p.points))
+    p.wrap.append(...layers)
     p.drawn = width
     p.wrap.classList.remove('blank')
+  }
+
+  /** The page's text, to select, and its links, to follow, laid over the drawn page. */
+  private async layersFor(page: pdfjs.PDFPageProxy, vp: pdfjs.PageViewport): Promise<HTMLElement[]> {
+    const text = h('div', { class: 'textLayer' }) as HTMLDivElement
+    await new pdfjs.TextLayer({ textContentSource: page.streamTextContent({ includeMarkedContent: true, disableNormalization: true }), container: text, viewport: vp }).render()
+    text.append(h('div', { class: 'endOfContent' }))
+    const annotations = await page.getAnnotations({ intent: 'display' })
+    if (!annotations.length) return [text]
+    const links = h('div', { class: 'annotationLayer' }) as HTMLDivElement
+    const layer = new pdfjs.AnnotationLayer({ div: links, page, viewport: vp.clone({ dontFlip: true }), linkService: this.links,
+      accessibilityManager: null, annotationCanvasMap: null, annotationEditorUIManager: null, structTreeLayer: null, commentManager: null } as never)
+    // no form fields or scripts: a LaTeX PDF's are its links (anything else stays as drawn)
+    await layer.render({ annotations, renderForms: false, enableScripting: false, hasJSActions: false, imageResourcesPath: '', linkService: this.links } as never)
+    return [text, links]
   }
 
   /** The page and PDF-point position under a mouse event, if it's on a page. */
@@ -351,11 +477,12 @@ export class PdfView {
     const pages: Page[] = sizes.map(({ points, ratio }) => {
       const canvas = emptyCanvas()
       const wrap = h('div', { class: 'page blank' }, canvas) as HTMLDivElement
-      return { wrap, canvas, points, ratio, drawn: 0 }
+      return { wrap, canvas, layers: [], points, ratio, drawn: 0 }
     })
     // draw what will be on screen before showing the new document, so nothing flashes blank
     const old = { doc: this.doc, task: this.task, pages: this.pages }
     this.doc = doc; this.task = task; this.pages = pages; this.width = width
+    this.links.doc = doc // (Back still returns to the same place: the scroll position is kept across recompiles)
     let y = GAP
     const tops = pages.map((p) => { const top = y; y += Math.floor(width * p.ratio) + GAP; return top })
     const top = scrollFrac * (y + GAP), height = this.el.clientHeight || 800
