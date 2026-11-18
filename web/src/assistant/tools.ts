@@ -42,11 +42,10 @@ const textOf = (r: Replica, path: string): Y.Text => {
   throw new ToolError(`No file named ${path}. Use list_files to see what exists.`)
 }
 
+// cleanPath also refuses files TeX tools run or read as configuration (latexmkrc is Perl)
 const validPath = (p: string) => {
   const clean = cleanPath(p)
-  // files TeX tools execute or treat as configuration are off-limits (latexmkrc is Perl)
-  if (!clean || clean.split('/').some((s) => /^(\.?latexmkrc|.*\.latexmkrc|texmf\.cnf)$/i.test(s)))
-    throw new ToolError(`Invalid path: ${p}`)
+  if (!clean) throw new ToolError(`Invalid path: ${p}`)
   return clean
 }
 

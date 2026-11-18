@@ -8,7 +8,7 @@ import { build } from 'vite'
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const out = path.join(web, 'node_modules/.cache/check-listsync')
 await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/listcore.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'listcore.mjs' } } } })
-const { ListKey, canon, emptyTags, mergeLists, mergeSettings, mergeTags, passwordSecret, tagColour, tidyTags } = await import(pathToFileURL(path.join(out, 'listcore.mjs')).href)
+const { ListKey, canon, emptyTags, mergeLists, mergeSettings, mergeTags, passwordSecret, signPut, tagColour, tidyTags } = await import(pathToFileURL(path.join(out, 'listcore.mjs')).href)
 const v = JSON.parse(fs.readFileSync(path.join(web, '../scripts/listsync-vectors.json'), 'utf8'))
 const b64d = (s) => new Uint8Array(Buffer.from(s, 'base64url'))
 const b64e = (b) => Buffer.from(b).toString('base64url')
@@ -17,7 +17,7 @@ const check = (what, got, want) => { if (got !== want) bad.push(`${what}: got ${
 for (const k of v.keys) {
   const key = await ListKey.of(b64d(k.secret))
   check('id', key.id, k.id)
-  check('signature', key.signPut(k.seq, b64d(k.data)), k.signature)
+  check('signature', signPut(key.signingSeed, key.id, k.seq, b64d(k.data)), k.signature)
   check('decrypt', new TextDecoder().decode(await key.decrypt(b64d(k.ciphertext))), k.plain)
 }
 for (const p of v.passwords) check(`password ${p.username}`, b64e(await passwordSecret(p.username, p.password)), p.secret)

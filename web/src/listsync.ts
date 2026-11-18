@@ -9,12 +9,13 @@
 // records those entries' signing keys, so that they can be removed.
 import { ed25519 } from '@noble/curves/ed25519.js'
 import { b64d, b64e } from './crypto'
-import { canon, emptyList, emptySettings, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeSettings, mergeTags, passwordSecret, tidyTags, type ListDoc, type SettingsDoc, type TagDoc } from './listcore'
+import { canon, emptyList, emptySettings, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeSettings, mergeTags, passwordSecret, signPut, tidyTags, type ListDoc, type SettingsDoc, type TagDoc } from './listcore'
 import { projects } from './projects'
 import { creationCode } from './replica'
 import { myName, NAME_CHANGED } from './myname'
 import { zoteroAccount } from './zotero'
 import { githubAccount } from './github'
+import type { AccountStore } from './accounts'
 import { tags } from './tags'
 import { normalServer } from './servers'
 import { APP_HEADER } from './version'
@@ -62,13 +63,9 @@ export const copyProblems = new Map<string, string>()
 
 // ---- a server -----------------------------------------------------------------------------
 async function pull<T>(key: ListKey, server = location.origin): Promise<{ seq: number; doc: T } | null> {
-  const r = await fetch(`${server}/api/list/${key.id}`, { cache: 'no-store', headers: APP_HEADER })
-  if (r.status === 404) return null
-  if (r.status === 426) throw new ListError('update-needed')
-  if (r.status === 410) throw new ListError('list-retired')
-  if (!r.ok) throw new ListError('server')
-  const plain = await key.decrypt(new Uint8Array(await r.arrayBuffer()))
-  return { seq: Number(r.headers.get('X-Seq')), doc: JSON.parse(dec.decode(plain)) as T }
+  const got = await getRaw(server, key.id)
+  if (got === 'retired') throw new ListError('list-retired')
+  return got && { seq: got.seq, doc: JSON.parse(dec.decode(await key.decrypt(got.data))) as T }
 }
 
 /** False if someone else got there first. */
@@ -86,11 +83,9 @@ async function getRaw(server: string, id: string): Promise<{ seq: number; data: 
   return { seq: Number(r.headers.get('X-Seq')), data: new Uint8Array(await r.arrayBuffer()) }
 }
 
-/** Write an entry as stored, signed with the seed of its signing key (`ListKey.signPut`). */
+/** Write an entry as stored, signed with the seed of its signing key (`signPut`). */
 async function putRaw(server: string, id: string, seq: number, data: Uint8Array, seed: string): Promise<boolean> {
-  const head = enc.encode(`list:${id}:${seq}:`), msg = new Uint8Array(head.length + data.length)
-  msg.set(head); msg.set(data, head.length)
-  const headers: Record<string, string> = { ...APP_HEADER, 'X-Seq': String(seq), 'X-Sig': b64e(ed25519.sign(msg, b64d(seed))), 'Content-Type': 'application/octet-stream' }
+  const headers: Record<string, string> = { ...APP_HEADER, 'X-Seq': String(seq), 'X-Sig': signPut(seed, id, seq, data), 'Content-Type': 'application/octet-stream' }
   const code = creationCode.get(server)
   if (code) headers['X-Create-Code'] = code
   const r = await fetch(`${server}/api/list/${id}`, { method: 'PUT', headers, body: data as BodyInit })
@@ -172,18 +167,17 @@ const settingsKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 
 
 /** Settings that follow the list: your name, and Zotero and GitHub accounts, each with when
  *  it was set (one from before that was recorded counts as older than any that was). */
+/** An account (accounts.ts) as a setting: JSON, '' for none. */
+const accountSetting = (s: AccountStore<object>) => ({
+  get: () => { const a = s.get(); return a ? JSON.stringify(a) : '' },
+  at: () => s.at(),
+  set: (v: string, at: number) => { try { s.set(v ? JSON.parse(v) : null, at) } catch {} },
+})
+
 const SETTINGS: Record<string, { get(): string; at(): number; set(v: string, at: number): void }> = {
   name: { get: () => myName.get(), at: () => myName.at(), set: (v, at) => myName.set(v, at, true) },
-  zotero: {
-    get: () => { const a = zoteroAccount.get(); return a ? JSON.stringify(a) : '' },
-    at: () => zoteroAccount.at(),
-    set: (v, at) => { try { zoteroAccount.set(v ? JSON.parse(v) : null, at) } catch {} },
-  },
-  github: {
-    get: () => { const a = githubAccount.get(); return a ? JSON.stringify(a) : '' },
-    at: () => githubAccount.at(),
-    set: (v, at) => { try { githubAccount.set(v ? JSON.parse(v) : null, at) } catch {} },
-  },
+  zotero: accountSetting(zoteroAccount),
+  github: accountSetting(githubAccount),
 }
 
 /** SETTINGS, with a code:<server> entry for each server whose creation code this browser holds or

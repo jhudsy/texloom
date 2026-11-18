@@ -10,10 +10,9 @@ import type { Replica } from './replica'
 import { applyText } from './diff'
 import { t } from './i18n'
 import { cleanPath } from './projectfiles'
+import { accountStore } from './accounts'
 
 const API = 'https://api.zotero.org'
-const STORE = 'texloom.zotero'
-const STORE_AT = 'texloom.zoteroAt'
 
 export interface Account { key: string; userID: number; username: string }
 export interface Library { id: string; name: string } // id: users/<n> or groups/<n>
@@ -43,18 +42,7 @@ function libPath(lib: string): string {
 }
 
 /** This browser's Zotero account, and when it was set (so the latest follows the project list). */
-export const zoteroAccount = {
-  get(): Account | null {
-    try { const a = JSON.parse(localStorage.getItem(STORE) || 'null'); return a && typeof a.key === 'string' ? a : null } catch { return null }
-  },
-  at(): number { try { return Number(localStorage.getItem(STORE_AT)) || 0 } catch { return 0 } },
-  set(a: Account | null, at = Date.now()) {
-    try {
-      if (a) localStorage.setItem(STORE, JSON.stringify(a)); else localStorage.removeItem(STORE)
-      localStorage.setItem(STORE_AT, String(at))
-    } catch {}
-  },
-}
+export const zoteroAccount = accountStore<Account>('texloom.zotero', (a) => typeof a.key === 'string')
 
 async function call(path: string, key: string | null, accept = 'application/json'): Promise<Response> {
   const res = await fetch(API + path, { headers: { 'Zotero-API-Version': '3', Accept: accept, ...(key ? { 'Zotero-API-Key': key } : {}) } })

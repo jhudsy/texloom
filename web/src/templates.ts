@@ -6,6 +6,7 @@ import type { Replica } from './replica'
 import { dialog, h } from './dom'
 import { cleanPath, confirmAdding, detectMain, isText, putBinary, putText } from './projectfiles'
 import { latexTitle } from './projects'
+import { latexOutput } from './texscan'
 import { t, tn } from './i18n'
 
 export interface Template { id: string; name: string; info: string; main: string; files: Record<string, string> }
@@ -206,7 +207,7 @@ export function applyTemplate(r: Replica, tpl: Template, by: string) {
 // ---------------------------------------------------------------------------
 const JUNK = /(^|\/)(__MACOSX|\.DS_Store|Thumbs\.db|\.git|\.svn|\.texloom)(\/|$)|(^|\/)\._/
 // Like the folder-sync list, but keeps .bbl: arXiv sources often ship one instead of a .bib.
-const BUILD = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex\.gz|synctex|blg|bcf|run\.xml|nav|snm|vrb|xdv|dvi)$/i
+const BUILD = latexOutput()
 const TEXTISH = /\.(tex|bib|bbl|sty|cls|bst|cfg|def|clo|ltx|txt|md|dtx|ins|tikz|pgf|csv|dat)$/i
 
 /** Things a folder or archive holds that aren't part of a LaTeX project. */

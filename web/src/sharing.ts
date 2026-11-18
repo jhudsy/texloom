@@ -184,7 +184,6 @@ export async function rotateKeys(old: Replica, server: string) {
       fresh.members.clear() // old personal links don't apply to the new keys
       fresh.out.delete('latest') // refers to old blobs; the next compile republishes
       for (const k of ['movedAt', 'storage']) fresh.meta.delete(k)
-      fresh.meta.set('rotatedFrom', old.keys.project.slice(0, 8))
     })
     // let it reach the server (or stay in this browser if offline: it syncs when opened)
     for (let i = 0; i < 60 && (fresh.status !== 'online' || fresh.pending); i++) await new Promise((res) => setTimeout(res, 250))

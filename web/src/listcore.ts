@@ -3,7 +3,7 @@
 // against scripts/listsync-vectors.json, as scripts/check_listsync.py does for the Python.
 import { ed25519 } from '@noble/curves/ed25519.js'
 import { scryptAsync } from '@noble/hashes/scrypt.js'
-import { b64e } from './crypto'
+import { b64d, b64e, concat, seal, unseal } from './crypto'
 
 /** s: the project's server (a project lives on one server; the list may be kept on several). An entry
  *  from before 0.4.29 may lack it: its project is on the server that kept the list then. */
@@ -26,27 +26,15 @@ export class ListKey {
     return new ListKey(secret, b64e(ed25519.getPublicKey(seed)), seed, aes)
   }
 
-  async encrypt(plain: Uint8Array): Promise<Uint8Array> {
-    const iv = crypto.getRandomValues(new Uint8Array(12))
-    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, this.aes, plain as BufferSource))
-    const out = new Uint8Array(12 + ct.length)
-    out.set(iv); out.set(ct, 12)
-    return out
-  }
-
-  async decrypt(data: Uint8Array): Promise<Uint8Array> {
-    return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.subarray(0, 12) as BufferSource }, this.aes, data.subarray(12) as BufferSource))
-  }
+  encrypt(plain: Uint8Array): Promise<Uint8Array> { return seal(this.aes, plain) }
+  decrypt(data: Uint8Array): Promise<Uint8Array> { return unseal(this.aes, data) }
 
   get signingSeed(): string { return b64e(this.seed) }
-
-  signPut(seq: number, data: Uint8Array): string {
-    const head = enc.encode(`list:${this.id}:${seq}:`)
-    const msg = new Uint8Array(head.length + data.length)
-    msg.set(head); msg.set(data, head.length)
-    return b64e(ed25519.sign(msg, this.seed))
-  }
 }
+
+/** The signature on writing entry `id` as `seq` (stored data `data`), with its signing seed (ListKey.signingSeed). */
+export const signPut = (seed: string, id: string, seq: number, data: Uint8Array): string =>
+  b64e(ed25519.sign(concat(enc.encode(`list:${id}:${seq}:`), data), b64d(seed)))
 
 // ---- merging -------------------------------------------------------------------------------
 export const emptyList = (): ListDoc => ({ v: 1, projects: {}, gone: {} })

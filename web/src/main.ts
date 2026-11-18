@@ -31,7 +31,7 @@ import { manageTags, pickTags } from './tagdialogs'
 import { newProjectInApp, openInApp, sourceNote } from './openinapp'
 import { links as zoteroLinks, refresh as zoteroRefresh, zoteroAccount } from './zotero'
 import { zoteroAccountBox } from './zoteroui'
-import { createEditorPane } from './editor'
+import { COLORS, createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
 import { SyncTex } from './synctex'
@@ -64,7 +64,6 @@ const inAppKey = (project: string) => `texloom.inApp.${project}`
 const keptByApp = (project: string) => { try { return !!localStorage.getItem(inAppKey(project)) } catch { return false } }
 
 const APP = 'TeXLoom'
-const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#469990', '#9a6324']
 const UNTITLED = 'Untitled project' // stored in the shared document (and compared in templates.ts): kept in English
 const brand = () => h('span', { class: 'logo', 'aria-label': APP }, 'T', h('span', { class: 'e' }, 'e'), 'XLoom')
 
@@ -1004,7 +1003,7 @@ async function openProject(keys: Keys, server: string) {
       const where = typeof s.file === 'string' ? ` · ${String(s.file).slice(0, 100)}` : ''
       let b = peerButtons.get(id)
       if (!b) peerButtons.set(id, (b = h('button', { class: 'peer', onclick: () => jumpTo(id) })))
-      b.style.background = /^#[0-9a-f]{6}$/i.test(s.user.color) ? s.user.color : '#888'
+      b.style.background = s.user.color || '#888' // a colour: replica.ts cleaned it
       b.dataset.tip = t('{{name}}{{where}} — click to go to where they are', { name, where }) // shown at once (style.css)
       b.setAttribute('aria-label', t('Go to {{name}}', { name }))
       b.textContent = name.slice(0, 2)

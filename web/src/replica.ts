@@ -9,7 +9,7 @@
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as awarenessProtocol from 'y-protocols/awareness'
-import { Keys, b64d, b64e, canonicalPub, revokeMsg, signer } from './crypto'
+import { Keys, b64d, b64e, canonicalPub, revokeMsg } from './crypto'
 import { unpack } from './packing'
 import { t } from './i18n'
 import { APP_VERSION } from './version'
@@ -23,10 +23,10 @@ const UPDATE_BATCH = 6 * 1024 * 1024 // pending changes are merged up to this mu
 // A bigger change (a whole project, say) or snapshot goes to the server as an encrypted upload,
 // like a file, and what's sent is a small reference to it: REF + {"b": upload id}. Uploads go as
 // "output", so the writer whose snapshot replaces them may delete them. As in texloom/replica.py.
-const REF = enc0('\x00texloom-ref\x00')
-function enc0(s: string) { return new TextEncoder().encode(s) }
+const enc = new TextEncoder(), dec = new TextDecoder()
+const REF = enc.encode('\x00texloom-ref\x00')
 const isRef = (u: Uint8Array) => u.length > REF.length && REF.every((b, i) => u[i] === b)
-const refTo = (id: string) => { const j = enc0(JSON.stringify({ b: id })), u = new Uint8Array(REF.length + j.length); u.set(REF); u.set(j, REF.length); return u }
+const refTo = (id: string) => { const j = enc.encode(JSON.stringify({ b: id })), u = new Uint8Array(REF.length + j.length); u.set(REF); u.set(j, REF.length); return u }
 const P2P_BLOB = 50 * 1024 * 1024 // files sent peer to peer (relay-only projects): as big as any synced file
 // A peer-to-peer message bigger than this (a whole project for a peer catching up, a file) goes
 // in pieces: the server takes frames of at most 16 MiB. As in texloom/replica.py.
@@ -66,7 +66,6 @@ const idbPut = (db: IDBDatabase, s: Store, k: string, v: unknown) => tx(db, s, '
 const idbDel = (db: IDBDatabase, s: Store, k: string) => tx(db, s, 'readwrite', (o) => o.delete(k))
 const idbKeys = (db: IDBDatabase, s: Store) => tx<IDBValidKey[]>(db, s, 'readonly', (o) => o.getAllKeys())
 
-const enc = new TextEncoder(), dec = new TextDecoder()
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** Delete this browser's copy of a project (document, outbox, cached files).
@@ -164,6 +163,9 @@ export class Replica {
   private backoff = 1000
   private closed = false
   private manualDone: (() => void) | null = null
+  /** A catch-up whose later pages are still coming. */
+  private logPending: { head: number; count: number; lost: boolean } | null = null
+  private pages: Promise<void> = Promise.resolve()
 
   constructor(readonly keys: Keys, readonly server: string, public syncMode: SyncMode = 'live') {}
 
@@ -171,9 +173,10 @@ export class Replica {
   isRemote(origin: unknown): boolean { return origin === REMOTE }
 
   /** A transaction made changes here (not received, and not this browser's copy loading). */
+  isLocal(origin: unknown): boolean { return origin !== REMOTE && origin !== this.persistence }
+
   /** The creation code to show this project's server: the one for that server (servers.ts). */
   private creationCode(): string { return creationCode.get(this.server) }
-  isLocal(origin: unknown): boolean { return origin !== REMOTE && origin !== this.persistence }
 
   /** Changes made now don't reach anyone yet: offline, still catching up, or sync-only with nobody else online. */
   get apart(): boolean { return !this.synced || (this.storage === 'relay' && this.peers === 0) }
@@ -267,9 +270,15 @@ export class Replica {
     ws.onopen = () => {
       this.backoff = 1000
       const code = this.creationCode()
-      ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, ...(code ? { code } : {}) }))
+      this.logPending = null
+      ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ...(code ? { code } : {}) }))
     }
-    ws.onmessage = (ev) => this.handle(JSON.parse(ev.data)).catch((e) => console.error(e))
+    ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data), run = () => this.handle(m)
+      // a catch-up's pages are applied one after another, in order (other messages don't wait)
+      const done = m.t === 'log' || m.t === 'logmore' ? (this.pages = this.pages.then(run, run)) : run()
+      done.catch((e) => console.error(e))
+    }
     ws.onclose = () => {
       this.ws = null
       this.parts.clear()
@@ -283,6 +292,25 @@ export class Replica {
     }
   }
 
+  /** The last page of a catch-up is in: what follows from being up to date. */
+  private async onCaughtUp(head: number, count: number, lost: boolean) {
+    this.since = lost ? head : Math.max(this.since, head)
+    if (lost && this.keys.writable) await this.reseed()
+    for (const q of this.seen) if (q <= this.since) this.seen.delete(q)
+    this.markSeen(this.since)
+    this.synced = true
+    this.status = 'online'; this.onStatus()
+    const pendingMode = await idbGet<StorageMode>(this.db, 'kv', 'pendingMode')
+    if (this.keys.writable && pendingMode) await this.sendMode(pendingMode) // changed while offline
+    await this.uploadPending()
+    await this.flushOutbox()
+    await this.p2p({ k: 'sv1', sv: b64e(Y.encodeStateVector(this.doc)) })
+    this.awareness.setLocalState(this.awareness.getLocalState()) // a newer clock, so it counts as news to everyone; sent by the listener above
+    if (count >= COMPACT_AFTER) await this.compact()
+    setTimeout(() => this.pruneOutputs().catch(() => {}), 5000)
+    this.manualDone?.(); this.manualDone = null
+  }
+
   private async handle(m: any) {
     switch (m.t) {
       case 'log':
@@ -294,25 +322,23 @@ export class Replica {
         if (this.storeInfo?.registered && this.refusal === 'needs-code') this.refusal = null
         // the server dropped its copy (idle eviction): everything up to `floor` is gone
         const lost = m.mode !== 'relay' && (m.head < this.since || (this.since > 0 && this.since <= (m.floor ?? 0)))
-        if (lost) { this.since = m.head; this.seen.clear(); idbPut(this.db, 'kv', 'since', this.since) }
+        if (lost) this.seen.clear() // numbered afresh; `since` moves back once every page is in
         await this.apply(m.entries)
         if (this.resync === 1) { await this.catchUpAgain(); break }
-        this.since = Math.max(this.since, m.head)
-        if (lost && this.keys.writable) await this.reseed()
-        for (const q of this.seen) if (q <= this.since) this.seen.delete(q)
-        this.markSeen(this.since)
-        this.synced = true
-        this.status = 'online'; this.onStatus()
-        const pendingMode = await idbGet<StorageMode>(this.db, 'kv', 'pendingMode')
-        if (this.keys.writable && pendingMode) await this.sendMode(pendingMode) // changed while offline
-        await this.uploadPending()
-        await this.flushOutbox()
-        await this.p2p({ k: 'sv1', sv: b64e(Y.encodeStateVector(this.doc)) })
-        this.awareness.setLocalState(this.awareness.getLocalState()) // a newer clock, so it counts as news to everyone; sent by the listener above
-        if (m.count >= COMPACT_AFTER) await this.compact()
-        setTimeout(() => this.pruneOutputs().catch(() => {}), 5000)
-        this.manualDone?.(); this.manualDone = null
+        // a long log comes in pages ("pages" in the hello): the rest follow as `logmore`
+        if (m.more) { this.logPending = { head: m.head, count: m.count, lost }; break }
+        await this.onCaughtUp(m.head, m.count, lost)
         break
+      case 'logmore': {
+        const pending = this.logPending
+        if (!pending) break
+        await this.apply(m.entries)
+        if (this.resync === 1) { this.logPending = null; await this.catchUpAgain(); break }
+        if (m.more) break
+        this.logPending = null
+        await this.onCaughtUp(pending.head, pending.count, pending.lost)
+        break
+      }
       case 'up':
         await this.apply([m])
         if (this.resync === 1) { await this.catchUpAgain(); break }
@@ -351,9 +377,7 @@ export class Replica {
         this.learnRevoked([m])
         break
       case 'deleted': { // the owner deleted the project for everyone: only if the owner signed it
-        let signed = false
-        try { signed = Number.isInteger(m.ts) && typeof m.s === 'string' && !!(signer(this.keys.project, new TextEncoder().encode(`delete:${m.ts}`), b64d(m.s)) as { owner?: true } | null)?.owner } catch {}
-        if (!signed) { console.warn('ignored a deletion notice without the owner’s signature'); break }
+        if (!Number.isInteger(m.ts) || !this.keys.signedByOwner(enc.encode(`delete:${m.ts}`), m.s)) { console.warn('ignored a deletion notice without the owner’s signature'); break }
         this.deletedAt = Number(m.at) || Date.now()
         await idbPut(this.db, 'kv', 'deleted', this.deletedAt)
         this.deleteAck?.(null)
@@ -683,8 +707,7 @@ export class Replica {
       try {
         const pub = canonicalPub(it?.p)
         if (!pub || this.keys.revoked.has(pub) || typeof it.s !== 'string') continue
-        const who = signer(this.keys.project, revokeMsg(pub), b64d(it.s))
-        if (!who || !('owner' in who)) continue
+        if (!this.keys.signedByOwner(revokeMsg(pub), it.s)) continue
         this.keys.revoked.add(pub)
         this.revocations.push({ p: pub, s: it.s })
         added = true

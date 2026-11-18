@@ -1,6 +1,11 @@
 // Small LaTeX scanning helpers shared by editor features (outline, spelling, references,
 // package detection), so they agree on what is a comment.
 
+/** What LaTeX writes while compiling, by extension: never source. `more` adds extensions
+ *  ("|bbl"), `tail` other alternatives after the extension's "$". */
+export const latexOutput = (more = '', tail = '') =>
+  new RegExp(String.raw`\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex\.gz|synctex|blg|bcf|run\.xml|nav|snm|vrb|xdv|dvi${more})$${tail}`, 'i')
+
 /** A comment: '%' to the end of the line, unless the '%' is escaped by an odd number of
  *  backslashes ("\%" is a percent sign; "\\%" is a line break followed by a comment).
  *  The match starts at the '%'. */

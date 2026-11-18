@@ -2,7 +2,7 @@
 // its own commands), the compiled bibliography (.bbl) instead of the .bib, optionally without
 // comments and optionally merged into one .tex. Pure functions, checked by
 // scripts/check-submission.mjs; the dialog is in submitdialog.ts.
-import { stripComments } from './texscan'
+import { latexOutput, stripComments } from './texscan'
 
 export type Files = Map<string, string | Uint8Array>
 export interface Options { stripComments: boolean; oneFile: boolean }
@@ -33,7 +33,7 @@ const stem = (p: string) => { const i = p.lastIndexOf('.'); return i > p.lastInd
 /** Files TeX reads as code, so the files they name are followed too. */
 const SCANNED = /\.(tex|ltx|sty|cls|def|cfg|clo|fd|bbx|cbx|lbx|tikz|pgf)$/i
 /** What LaTeX writes while compiling: never part of a submission. */
-const BUILD = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex|synctex\.gz|synctex\(busy\)|blg|bcf|run\.xml|xdv|dvi|nav|snm|vrb|ilg|brf|bbl)$/i
+const BUILD = latexOutput(String.raw`|synctex\(busy\)|ilg|brf|bbl`)
 /** arXiv's instructions to its own build (which file is the main one, and so on). */
 const ARXIV = /^00README(\.XXX|\.json|\.yaml)?$/i
 /** Commands that name a bibliography: with one, the submission needs a .bbl. */

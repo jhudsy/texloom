@@ -387,7 +387,7 @@ export function suggestSession(r: Replica, file: string, yt: Y.Text, by: () => s
         const a = where(st.cursor.anchor), b = where(st.cursor.head)
         if (a === null || b === null) continue
         const user = st.user ?? {}
-        const color = typeof user.color === 'string' ? user.color : '#888', light = typeof user.colorLight === 'string' ? user.colorLight : `${color}33`
+        const color = user.color ?? '#888', light = user.colorLight ?? `${color}33` // colours: replica.ts cleaned them
         if (a !== b) out.push(Decoration.mark({ class: 'cm-ySelection', attributes: { style: `background-color: ${light}` } }).range(Math.min(a, b), Math.max(a, b)))
         out.push(Decoration.widget({ widget: new Caret(color, String(user.name ?? '').slice(0, 64)), side: b > a ? -1 : 1 }).range(b))
       }

@@ -67,9 +67,7 @@ function combine(parts: Y.Snapshot[]): Y.Snapshot {
   return Y.createSnapshot(Y.mergeDeleteSets(parts.map((p) => p.ds)), clocks)
 }
 
-/** The whole snapshot at a link: everything from there back to a link that needs no base. */
-function rebuild(links: Map<string, Link>, id: string): Y.Snapshot { return rebuildAt(links, id).snap }
-
+/** The whole snapshot at a link (everything from there back to a link that needs no base), and how many bases back that went. */
 function rebuildAt(links: Map<string, Link>, id: string): { snap: Y.Snapshot; depth: number } {
   const parts: Y.Snapshot[] = [], seen = new Set<string>()
   for (let at: string | null = id; at !== null;) {
@@ -135,5 +133,5 @@ export function saveVersion(r: Saved, by: string, label?: string, auto = false) 
 
 /** The project as it was at a version (a read-only Y.Doc). */
 export function docAt(r: Saved, v: Version): Y.Doc {
-  return Y.createDocFromSnapshot(r.doc, rebuild(indexOf(r.versionChain), v.link))
+  return Y.createDocFromSnapshot(r.doc, rebuildAt(indexOf(r.versionChain), v.link).snap)
 }

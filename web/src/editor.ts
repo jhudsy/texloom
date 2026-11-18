@@ -49,6 +49,9 @@ export interface EditorPane {
   /** Suggest mode: typing makes suggestions instead of changing the file. */
 }
 
+/** People's colours: their cursor, and the "who wrote this" gutter. */
+export const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#469990', '#9a6324']
+
 // A line briefly highlighted after jumping to it (from the PDF, say).
 const setFlash = StateEffect.define<number>()
 const flashField = StateField.define<DecorationSet>({
@@ -114,7 +117,6 @@ export function createEditorPane(r: Replica, writable: boolean, index: ProjectIn
   }
 
   // "Who wrote this": a gutter with the author of most of each line.
-  const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#469990', '#9a6324']
   class AuthorMarker extends GutterMarker {
     constructor(readonly name: string, readonly color: string) { super() }
     eq(o: AuthorMarker) { return o.name === this.name && o.color === this.color }

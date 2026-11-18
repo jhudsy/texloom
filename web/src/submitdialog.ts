@@ -3,7 +3,7 @@ import { zipSync, type Zippable } from 'fflate'
 import { browserCompileAvailable, compileInBrowser, defaultEngine } from './compile'
 import { dialog, h, saveFile } from './dom'
 import { t, tn } from './i18n'
-import { cleanPath, fileBase, mainFile } from './projectfiles'
+import { cleanPath, fileBase, mainFile, zipOpts } from './projectfiles'
 import type { Replica } from './replica'
 import { needsBbl, submission, usedFiles, type Files } from './submission'
 
@@ -83,7 +83,7 @@ export function submissionDialog(r: Replica) {
       for (const [p, v] of s.files) {
         const path = cleanPath(p) // never "../x" or "/abs" entries
         if (!path) { missing.push(p); continue }
-        tree[path] = [typeof v === 'string' ? new TextEncoder().encode(v) : v, { level: /\.(png|jpe?g|gif|pdf|zip|gz)$/i.test(path) ? 0 : 6 }]
+        tree[path] = [typeof v === 'string' ? new TextEncoder().encode(v) : v, zipOpts(path)]
       }
       saveFile(`${fileBase(r)}-submission.zip`, zipSync(tree), 'application/zip')
       if (missing.length) notes.push(t('These files weren’t included because their content isn’t available yet (offline, and no collaborator online has them):\n\n{{files}}', { files: missing.join('\n') }))

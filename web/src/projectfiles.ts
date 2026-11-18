@@ -175,13 +175,16 @@ export function deletePath(r: Replica, path: string): number {
 }
 
 /** Zip of the whole project. Files whose content isn't available (offline, no peer) are listed in `missing`. */
+/** How a file goes into a .zip: stored as it is if it's compressed already. */
+export const zipOpts = (path: string) => ({ level: /\.(png|jpe?g|gif|pdf|zip|gz)$/i.test(path) ? 0 as const : 6 as const })
+
 export async function projectZip(r: Replica): Promise<{ zip: Uint8Array; missing: string[] }> {
   const enc = new TextEncoder()
   const tree: Zippable = {}
   const missing: string[] = []
   const put = (path: string, data: Uint8Array) => {
     const p = cleanPath(path) // never "../x" or "/abs" entries, whatever a collaborator named it
-    if (p) tree[p] = [data, { level: /\.(png|jpe?g|gif|pdf|zip|gz)$/i.test(p) ? 0 : 6 }]
+    if (p) tree[p] = [data, zipOpts(p)]
     else missing.push(path)
   }
   r.files.forEach((t, p) => put(p, enc.encode(t.toString())))

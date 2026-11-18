@@ -24,8 +24,8 @@ import { applyText, merge3, merge3Strict } from './diff'
 import { BUILD } from './foldersync'
 import { cleanPath, isText } from './projectfiles'
 import { t } from './i18n'
+import { accountStore } from './accounts'
 
-const STORE = 'texloom.github', STORE_AT = 'texloom.githubAt'
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 export const RENEW = 30_000, EXPIRE = 100_000 // ms
 const PULL_EVERY = 60_000, QUIET = 120_000, TICK = 5000 // ms
@@ -51,18 +51,7 @@ export interface Link {
 export interface Lease { id: string; by: string; n: number }
 
 /** This browser's GitHub account, and when it was set (so the latest follows the project list). */
-export const githubAccount = {
-  get(): Account | null {
-    try { const a = JSON.parse(localStorage.getItem(STORE) || 'null'); return a && typeof a.token === 'string' ? a : null } catch { return null }
-  },
-  at(): number { try { return Number(localStorage.getItem(STORE_AT)) || 0 } catch { return 0 } },
-  set(a: Account | null, at = Date.now()) {
-    try {
-      if (a) localStorage.setItem(STORE, JSON.stringify(a)); else localStorage.removeItem(STORE)
-      localStorage.setItem(STORE_AT, String(at))
-    } catch {}
-  },
-}
+export const githubAccount = accountStore<Account>('texloom.github', (a) => typeof a.token === 'string')
 
 export class GitHubError extends Error { constructor(msg: string, readonly status = 0) { super(msg) } }
 

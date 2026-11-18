@@ -4,13 +4,13 @@
 import type { Replica } from './replica'
 import { cleanPath, isText, mainFile, movePath, putBinary, putText } from './projectfiles'
 import { applyText, merge3 } from './diff'
-import { addedProgramLines, type ProgramLine } from './texscan'
+import { addedProgramLines, latexOutput, type ProgramLine } from './texscan'
 import { tn, t, locale } from './i18n'
 
 const DB = 'texloom-folders'
 const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycache__', '.idea', '.vscode'])
 // Build output and editor droppings: never synced. Same list as IGNORE_* in texloom/folder.py.
-export const BUILD = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|synctex\.gz|synctex|bbl|blg|bcf|run\.xml|nav|snm|vrb|idx|ilg|ind|xdv|dvi|swp|swx|tmp)$|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$/i
+export const BUILD = latexOutput('|bbl|idx|ilg|ind|swp|swx|tmp', String.raw`|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$`)
 const MAX = 50 * 1024 * 1024
 const SETTLE = 200, SETTLE_DOUBT = 2000, SETTLE_BIG = 1000, BIG = 1_000_000 // ms a changed file must stay unchanged before it's read; for one that became empty or went missing; for a big one (settleFor below)
 const sameBytes = (a: Uint8Array | null, b: Uint8Array) => !!a && a.length === b.length && a.every((x, i) => x === b[i])

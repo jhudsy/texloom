@@ -13,10 +13,19 @@ export const b64d = (s: string): Uint8Array => {
   return out
 }
 const enc = new TextEncoder()
-const concat = (a: Uint8Array, b: Uint8Array) => {
+export const concat = (a: Uint8Array, b: Uint8Array) => {
   const o = new Uint8Array(a.length + b.length)
   o.set(a); o.set(b, a.length)
   return o
+}
+
+/** AES-GCM with a fresh iv, kept as iv (12 bytes) ‖ ciphertext. */
+export async function seal(key: CryptoKey, plain: Uint8Array): Promise<Uint8Array> {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  return concat(iv, new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain as BufferSource)))
+}
+export async function unseal(key: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.subarray(0, 12) as BufferSource }, key, data.subarray(12) as BufferSource))
 }
 
 // Personal edit links: the owner (holder of the project's signing key) grants a person
@@ -131,8 +140,10 @@ export class Keys {
     if (!this.seed) throw new Error('owner only')
     return b64e(ed25519.sign(enc.encode(`owner:${text}`), this.seed))
   }
-  ownerSigned(text: string, sig: unknown): boolean {
-    try { return typeof sig === 'string' && verifySig(b64d(sig), enc.encode(`owner:${text}`), b64d(this.project)) } catch { return false }
+  ownerSigned(text: string, sig: unknown): boolean { return this.signedByOwner(enc.encode(`owner:${text}`), sig) }
+  /** Whether `sig` (base64url) is the owner's signature of `msg`. */
+  signedByOwner(msg: Uint8Array, sig: unknown): boolean {
+    try { return typeof sig === 'string' && verifySig(b64d(sig), msg, b64d(this.project)) } catch { return false }
   }
 
   link(origin: string, write = true) { return `${origin}/#${this.fragment(write)}` }
@@ -141,16 +152,8 @@ export class Keys {
     return (this.aes ??= await crypto.subtle.importKey('raw', this.key as BufferSource, 'AES-GCM', false, ['encrypt', 'decrypt']))
   }
 
-  async encrypt(plain: Uint8Array): Promise<Uint8Array> {
-    const iv = crypto.getRandomValues(new Uint8Array(12))
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await this.aesKey(), plain as BufferSource)
-    return concat(iv, new Uint8Array(ct))
-  }
-
-  async decrypt(data: Uint8Array): Promise<Uint8Array> {
-    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.subarray(0, 12) as BufferSource }, await this.aesKey(), data.subarray(12) as BufferSource)
-    return new Uint8Array(pt)
-  }
+  async encrypt(plain: Uint8Array): Promise<Uint8Array> { return seal(await this.aesKey(), plain) }
+  async decrypt(data: Uint8Array): Promise<Uint8Array> { return unseal(await this.aesKey(), data) }
 
   sign(prefix: string, data: Uint8Array): Uint8Array {
     const msg = concat(enc.encode(prefix), data)
