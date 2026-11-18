@@ -27,6 +27,7 @@ const enc = new TextEncoder(), dec = new TextDecoder()
 const REF = enc.encode('\x00texloom-ref\x00')
 const isRef = (u: Uint8Array) => u.length > REF.length && REF.every((b, i) => u[i] === b)
 const refTo = (id: string) => { const j = enc.encode(JSON.stringify({ b: id })), u = new Uint8Array(REF.length + j.length); u.set(REF); u.set(j, REF.length); return u }
+const SIGNED_P2P = new Set(['upd', 'creq']) // peer-to-peer messages that carry the sender's signature (the desktop signs cack, cerr)
 const ANSWER_EVERY = 30_000 // ms: how often one connection's request for what it lacks is answered (onP2p)
 const P2P_BLOB = 50 * 1024 * 1024 // files sent peer to peer (relay-only projects): as big as any synced file
 // A peer-to-peer message bigger than this (a whole project for a peer catching up, a file) goes
@@ -116,6 +117,9 @@ export class Replica {
   readonly dirs = this.doc.getMap<boolean>('dirs') // explicit (possibly empty) folders
   readonly versions = this.doc.getArray<any>('versions') // saved versions: {at, by, label, auto, link}
   readonly versionChain = this.doc.getArray<Link>('versionChain') // what those versions are built from (versions.ts)
+  // The owner's revocations, in the document too (pub -> signature): a server that holds them back
+  // can't keep them from anyone who syncs the document, peer to peer included. As in replica.py.
+  readonly revokedDoc = this.doc.getMap<string>('revoked')
   readonly members = this.doc.getMap<any>('members') // personal links: public key -> {name, at, by, g}
   /** This personal link was revoked by the owner. */
   withdrawn = false
@@ -190,7 +194,21 @@ export class Replica {
   /** Everything made here has reached the server (or, sync-only, the others online), and theirs is in. */
   get exchanged(): boolean { return !this.apart && this.pending === 0 }
 
-  get storage(): StorageMode { return this.meta.get('storage') === 'relay' ? 'relay' : 'server' }
+  /** Where the project lives, as its owner set it: `meta.storage` is {m, at, s}, signed by the
+   *  owner, so an editor can't change it for everyone. Without a valid one (a project from
+   *  before 0.4.35, or an editor overwrote it), what the server last said it does decides, as
+   *  the server is the one that knows whether it keeps a copy; failing that, the plain value. */
+  get storage(): StorageMode {
+    const v = this.meta.get('storage')
+    if (v && typeof v === 'object' && (v.m === 'relay' || v.m === 'server') && this.keys.ownerSigned(`storage:${v.m}:${v.at}`, v.s)) return v.m
+    return this.heardMode ?? (v === 'relay' ? 'relay' : 'server')
+  }
+  private heardMode: StorageMode | null = null // what the server last said it does with this project (kept)
+  private heard(mode: unknown) {
+    if (mode !== 'relay' && mode !== 'server') return
+    this.serverMode = mode
+    if (mode !== this.heardMode) { this.heardMode = mode; idbPut(this.db, 'kv', 'heardMode', mode) }
+  }
 
   async open(): Promise<void> {
     this.db = await openDb(`texloom-${this.keys.project}`)
@@ -200,8 +218,12 @@ export class Replica {
     this.refs = (await idbGet<Record<number, string>>(this.db, 'kv', 'refs')) ?? {}
     // revocations learned earlier, before anything arrives from peers
     this.learnRevoked((await idbGet<{ p: string; s: string }[]>(this.db, 'kv', 'revoked')) ?? [], false)
+    const fromDoc = () => this.learnRevoked([...this.revokedDoc.entries()].map(([p, s]) => ({ p, s })))
+    fromDoc()
+    this.revokedDoc.observe(fromDoc)
     this.pending = (await idbKeys(this.db, 'outbox')).length
     this.deletedAt = (await idbGet<number>(this.db, 'kv', 'deleted')) ?? null
+    this.heardMode = (await idbGet<StorageMode>(this.db, 'kv', 'heardMode')) ?? null
     navigator.storage?.persist?.()
 
     this.doc.on('update', (update: Uint8Array, origin: unknown) => {
@@ -309,7 +331,10 @@ export class Replica {
     this.synced = true
     this.status = 'online'; this.onStatus()
     const pendingMode = await idbGet<StorageMode>(this.db, 'kv', 'pendingMode')
-    if (this.keys.writable && pendingMode) await this.sendMode(pendingMode) // changed while offline
+    if (this.keys.owner && pendingMode) await this.sendMode(pendingMode) // changed while offline
+    // A project from before 0.4.35 has a plain, unsigned value: its owner signs what the server does.
+    const v = this.meta.get('storage')
+    if (this.keys.owner && !pendingMode && v !== undefined && typeof v !== 'object') this.signStorage(this.serverMode)
     await this.uploadPending()
     await this.flushOutbox()
     await this.p2p({ k: 'sv1', sv: b64e(Y.encodeStateVector(this.doc)) })
@@ -323,7 +348,7 @@ export class Replica {
     switch (m.t) {
       case 'log':
         this.denied = null
-        this.serverMode = m.mode
+        this.heard(m.mode)
         this.peers = m.peers ?? 0
         this.storeInfo = m.store ?? null
         this.learnRevoked(m.rv ?? [])
@@ -395,7 +420,7 @@ export class Replica {
         break
       }
       case 'mode':
-        this.serverMode = m.m
+        this.heard(m.m)
         if (m.m === 'relay') { this.refusal = null; this.modeAck?.(null) } // not storing is the point
         this.onStatus()
         break
@@ -608,7 +633,8 @@ export class Replica {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
     const data = await this.keys.encrypt(enc.encode(JSON.stringify(payload)))
     const d = b64e(data)
-    const s = payload.k === 'upd' ? b64e(this.keys.sign('p2p:', data)) : undefined
+    // signed: changes, and compile requests (only writers may ask another computer to compile)
+    const s = SIGNED_P2P.has(String(payload.k)) && this.keys.writable ? b64e(this.keys.sign('p2p:', data)) : undefined
     if (d.length <= P2P_PIECE) { await this.sendP2p(d, s, to); return }
     const id = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('')
     const n = Math.ceil(d.length / P2P_PIECE)
@@ -797,7 +823,9 @@ export class Replica {
   /** Owner only: withdraw a personal edit link. */
   revoke(pub: string): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
-    this.ws.send(JSON.stringify({ t: 'revoke', ...this.keys.revocation(pub) }))
+    const rv = this.keys.revocation(pub)
+    this.ws.send(JSON.stringify({ t: 'revoke', ...rv }))
+    this.revokedDoc.set(rv.p, rv.s) // in the document too, for anyone the server doesn't tell
     return true
   }
 
@@ -868,11 +896,15 @@ export class Replica {
     await done
   }
 
-  /** Change where the project lives. 'relay' deletes the server's copy. */
+  private signStorage(mode: StorageMode) {
+    const at = Date.now()
+    this.meta.set('storage', { m: mode, at, s: this.keys.ownerSign(`storage:${mode}:${at}`) })
+  }
+
+  /** Change where the project lives (the owner only). 'relay' deletes the server's copy. */
   async setStorage(mode: StorageMode) {
-    if (!this.keys.writable) throw new Error(t('read-only'))
-    if (mode === 'relay' && !this.keys.owner) throw new Error(t('only the owner can remove the server’s copy'))
-    this.meta.set('storage', mode)
+    if (!this.keys.owner) throw new Error(t('Only the owner can change where the project is kept.'))
+    this.signStorage(mode)
     await idbPut(this.db, 'kv', 'pendingMode', mode)
     await this.sendMode(mode)
   }

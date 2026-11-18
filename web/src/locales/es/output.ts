@@ -54,6 +54,7 @@ const es: Catalog = {
   "Your computer didn’t finish compiling within 60 seconds. It may still be working: the PDF appears here when it’s done.": "Su ordenador no terminó de compilar en 60 segundos. Puede que siga trabajando: el PDF aparecerá aquí cuando termine.",
   "Compiling again when this compile finishes…": "Se compilará de nuevo cuando termine esta compilación…",
   "Gathering the project’s files…": "Reuniendo los archivos del proyecto…",
+  'With a read-only link, compile in this browser (⚙ Settings → Compiling), or with your own TeX in the TeXLoom app: the PDF stays on your computer.': 'Con un enlace de solo lectura, compila en este navegador (⚙ Ajustes → Compilación) o con tu propio TeX en la app TeXLoom: el PDF se queda en tu ordenador.',
 }
 
 export default es

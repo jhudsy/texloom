@@ -45,7 +45,6 @@ const pt: Catalog = {
   'Collaborators get your changes even if you’re never online at the same time. The server can’t read it.': 'Os colaboradores recebem suas alterações mesmo que vocês nunca estejam on-line ao mesmo tempo. O servidor não consegue lê-las.',
   'Don’t store anything on the server': 'Não armazenar nada no servidor',
   'The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.': 'O servidor apenas repassa alterações entre pessoas on-line ao mesmo tempo. Escolher isto exclui a cópia do servidor.',
-  'Only the project’s owner can delete the server’s copy.': 'Somente o proprietário do projeto pode excluir a cópia do servidor.',
   'Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.': 'Excluir a cópia criptografada do servidor? As alterações só chegarão aos colaboradores enquanto vocês estiverem on-line ao mesmo tempo.',
   'Cleared': 'Limpo',
   'Remove downloaded TeX engine': 'Remover o mecanismo TeX baixado',
@@ -118,6 +117,7 @@ const pt: Catalog = {
   "You": "Você",
   "Yours, in every project in this browser.": "Suas, em todos os projetos neste navegador.",
   "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "Visível para colaboradores: ao lado do seu cursor, em comentários e sugestões, e em “Quem escreveu isto”.",
+  'Only the project’s owner can change this.': 'Só o proprietário do projeto pode alterar isto.',
 }
 
 export default pt

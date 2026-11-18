@@ -45,7 +45,6 @@ const de: Catalog = {
   'Collaborators get your changes even if you’re never online at the same time. The server can’t read it.': 'Mitwirkende erhalten Ihre Änderungen auch, wenn Sie nie gleichzeitig online sind. Der Server kann sie nicht lesen.',
   'Don’t store anything on the server': 'Nichts auf dem Server speichern',
   'The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.': 'Der Server leitet Änderungen nur zwischen Personen weiter, die gleichzeitig online sind. Diese Wahl löscht die Serverkopie.',
-  'Only the project’s owner can delete the server’s copy.': 'Nur der Eigentümer des Projekts kann die Serverkopie löschen.',
   'Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.': 'Verschlüsselte Serverkopie löschen? Änderungen erreichen Mitwirkende dann nur, solange beide gleichzeitig online sind.',
   'Cleared': 'Gelöscht',
   'Remove downloaded TeX engine': 'Heruntergeladene TeX-Engine entfernen',
@@ -118,6 +117,7 @@ const de: Catalog = {
   "You": "Sie",
   "Yours, in every project in this browser.": "Ihre, in jedem Projekt in diesem Browser.",
   "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "Für Mitarbeitende sichtbar: neben Ihrem Cursor, bei Kommentaren und Vorschlägen und in „Wer hat das geschrieben“.",
+  'Only the project’s owner can change this.': 'Nur der Eigentümer des Projekts kann dies ändern.',
 }
 
 export default de

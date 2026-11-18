@@ -47,6 +47,9 @@ const de: Catalog = {
   "⚠ Check merge": "⚠ Zusammenführung prüfen",
   "{{me}} and {{others}} both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} und {{others}} haben diesen Absatz getrennt voneinander geändert, und die Änderungen wurden zusammengeführt. Prüfen Sie, ob er sich wie beabsichtigt liest.",
   "{{me}} and someone else both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} und jemand anderes haben diesen Absatz getrennt voneinander geändert, und die Änderungen wurden zusammengeführt. Prüfen Sie, ob er sich wie beabsichtigt liest.",
+  'A name anyone with an edit link could type: not checked.': 'Ein Name, den jeder mit einem Bearbeitungslink eingeben könnte: nicht geprüft.',
+  'Signed with {{name}}’s personal link.': 'Mit dem persönlichen Link von {{name}} signiert.',
+  'Written as “{{by}}”, with {{name}}’s personal link.': 'Geschrieben als „{{by}}“, mit dem persönlichen Link von {{name}}.',
 }
 
 export default de

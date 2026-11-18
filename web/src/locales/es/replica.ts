@@ -12,6 +12,7 @@ const es: Catalog = {
   'Someone': 'Alguien',
   "the server refused to delete it": "el servidor se negó a eliminarlo",
   "only the owner can delete the project for everyone": "solo el propietario puede eliminar el proyecto para todos",
+  'Only the owner can change where the project is kept.': 'Solo el propietario puede cambiar dónde se guarda el proyecto.',
 }
 
 export default es

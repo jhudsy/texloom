@@ -6,6 +6,7 @@ import * as Y from 'yjs'
 import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import type { Replica } from './replica'
+import { b64d, b64e, signer } from './crypto'
 import { h } from './dom'
 import { t, locale } from './i18n'
 import { applyChange, placeOf } from './suggestcore'
@@ -14,7 +15,9 @@ import { isWordChar, refine, wordDiff, type DiffOp } from './worddiff'
 export type Kind = 'comment' | 'suggestion'
 export interface Item {
   id: string; kind: Kind; file: string; quote: string; text: string; by: string; at: number
-  resolved: boolean; outcome?: 'accepted' | 'rejected'; replies: { by: string; at: number; text: string }[]
+  resolved: boolean; outcome?: 'accepted' | 'rejected'; replies: { by: string; at: number; text: string; signed: string | null }[]
+  /** The name its signature vouches for (see signedName), or null. */
+  signed: string | null
   conflict?: boolean // someone changed the text it replaces while it was being typed (suggest mode)
   merge?: string[] // a note to check a paragraph changed by `by` and these people while apart (merges.ts)
 }
@@ -32,6 +35,41 @@ export function mergeText(me: string, others: string[]): string {
 let flushTyped = () => {}
 export const onFlushTyped = (f: () => void) => { flushTyped = f }
 
+// Who wrote an item or reply is signed: its id (or the item's id and the reply's time) with the
+// name typed for it, so a signature can't be moved to another one. What it says isn't: changing
+// that is an edit of the document like any other. As in texloom/mcp.py.
+const enc = new TextEncoder()
+const itemMsg = (id: string, by: string) => enc.encode(`${id}\n${by}`)
+const replyMsg = (id: string, at: number, by: string) => enc.encode(`${id}\n${at}\n${by}`)
+const signIt = (r: Replica, prefix: string, msg: Uint8Array) => (r.keys.writable ? b64e(r.keys.sign(prefix, msg)) : undefined)
+
+/** The name a signature vouches for: a personal link's, as the owner granted it (its `members`
+ *  entry; else the one the link carries). Null if unsigned, or signed with the owner's key, which
+ *  the shared edit link holds too, so it names no one. */
+const checked = new Map<string, ReturnType<typeof signer>>() // signature and message -> who signed
+function signedName(r: Replica, prefix: string, msg: Uint8Array, s: unknown): string | null {
+  if (typeof s !== 'string') return null
+  // (items are read on every keystroke, for the editor's marks: each signature is checked once)
+  const key = `${prefix}${s}\n${new TextDecoder().decode(msg)}`
+  let who = checked.get(key)
+  if (who === undefined) {
+    try { who = signer(r.keys.project, new Uint8Array([...enc.encode(prefix), ...msg]), b64d(s)) } catch { who = null }
+    if (checked.size > 5000) checked.clear()
+    checked.set(key, who)
+  }
+  if (!who || !('pub' in who)) return null
+  const m = r.members.get(who.pub)
+  const name = m && r.keys.grantValid(who.pub, String(m.name ?? ''), m.g) ? String(m.name) : who.name
+  return name ? name.slice(0, 64) : null
+}
+
+/** An author's name: with ✓ when a personal link's signature vouches for it. */
+function author(by: string, signed: string | null): HTMLElement {
+  if (!signed) return h('span', { title: t('A name anyone with an edit link could type: not checked.') }, by)
+  return h('span', { class: 'signed', title: signed === by ? t('Signed with {{name}}’s personal link.', { name: signed })
+    : t('Written as “{{by}}”, with {{name}}’s personal link.', { by, name: signed }) }, `${by} ✓`)
+}
+
 export function addItem(r: Replica, kind: Kind, file: string, from: number, to: number, text: string, by: string): string | null {
   const yt = r.files.get(file)
   if (!yt || to < from) return null
@@ -43,6 +81,8 @@ export function addItem(r: Replica, kind: Kind, file: string, from: number, to: 
     m.set('start', Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(yt, from)))
     m.set('end', Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(yt, to, -1)))
     m.set('replies', new Y.Array())
+    const s = signIt(r, 'review:', itemMsg(id, by))
+    if (s) m.set('s', s)
     r.review.set(id, m)
   })
   return id
@@ -52,12 +92,15 @@ export function itemOf(r: Replica, id: string): Item | null {
   const m = r.review.get(id)
   if (!(m instanceof Y.Map)) return null
   const replies = m.get('replies')
+  const by = String(m.get('by') ?? '?').slice(0, 64)
   return {
     id, kind: m.get('kind') === 'suggestion' ? 'suggestion' : 'comment', file: String(m.get('file') ?? ''),
-    quote: String(m.get('quote') ?? ''), text: String(m.get('text') ?? ''), by: String(m.get('by') ?? '?').slice(0, 64),
+    quote: String(m.get('quote') ?? ''), text: String(m.get('text') ?? ''), by,
+    signed: signedName(r, 'review:', itemMsg(id, String(m.get('by') ?? '')), m.get('s')),
     at: Number(m.get('at')) || 0, resolved: !!m.get('resolved'), outcome: m.get('outcome'), conflict: !!m.get('conflict'),
     merge: Array.isArray(m.get('merge')) ? (m.get('merge') as unknown[]).filter((x): x is string => typeof x === 'string').map((x) => x.slice(0, 64)).slice(0, 20) : undefined,
-    replies: replies instanceof Y.Array ? replies.toArray().filter((x: any) => x && typeof x.text === 'string') : [],
+    replies: replies instanceof Y.Array ? replies.toArray().filter((x: any) => x && typeof x.text === 'string')
+      .map((x: any) => ({ by: String(x.by ?? '?'), at: Number(x.at) || 0, text: x.text, signed: signedName(r, 'reply:', replyMsg(id, Number(x.at) || 0, String(x.by ?? '')), x.s) })) : [],
   }
 }
 
@@ -87,7 +130,9 @@ export function rangeOf(r: Replica, id: string): { from: SharedPos; to: SharedPo
 export function reply(r: Replica, id: string, text: string, by: string) {
   const m = r.review.get(id)
   const arr = m?.get('replies')
-  if (arr instanceof Y.Array && text.trim()) arr.push([{ by, at: Date.now(), text: text.trim().slice(0, 20000) }])
+  if (!(arr instanceof Y.Array) || !text.trim()) return
+  const at = Date.now(), s = signIt(r, 'reply:', replyMsg(id, at, by))
+  arr.push([{ by, at, text: text.trim().slice(0, 20000), ...(s ? { s } : {}) }])
 }
 
 export function setResolved(r: Replica, id: string, resolved: boolean, outcome?: 'accepted' | 'rejected') {
@@ -418,12 +463,12 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     return h('div', { class: `rcard ${it.kind}${it.merge ? ' merge' : ''} ${it.resolved ? 'resolved' : ''} ${it.id === focused ? 'focused' : ''}`, 'data-id': it.id },
       h('div', { class: 'rhead', onclick: go, title: rg ? t('Show in the editor') : t('The text it referred to was deleted') },
         h('span', { class: 'rkind' }, it.merge ? t('⚠ Check merge') : it.kind === 'comment' ? t('💬 Comment') : t('✎ Suggestion')),
-        h('span', { class: 'rloc' }, it.file), h('span', { class: 'muted small' }, ` · ${it.by} · ${when(it.at)}`)),
+        h('span', { class: 'rloc' }, it.file), h('span', { class: 'muted small' }, ' · ', author(it.by, it.signed), ` · ${when(it.at)}`)),
       it.kind === 'comment'
         ? h('div', {}, h('div', { class: 'rquote' }, it.quote.slice(0, 300)), h('div', { class: 'rtext' }, it.merge ? mergeText(it.by, it.merge) : it.text))
         : suggestionDiff(it.quote, it.text),
       it.resolved ? h('div', { class: 'muted small' }, it.outcome ? (it.outcome === 'accepted' ? t('Suggestion accepted') : t('Suggestion rejected')) : t('Resolved')) : null,
-      ...it.replies.map((rp) => h('div', { class: 'rreply' }, h('b', {}, String(rp.by).slice(0, 64)), ` ${rp.text}`, h('span', { class: 'muted small' }, ` · ${when(rp.at)}`))),
+      ...it.replies.map((rp) => h('div', { class: 'rreply' }, h('b', {}, author(String(rp.by).slice(0, 64), rp.signed)), ` ${rp.text}`, h('span', { class: 'muted small' }, ` · ${when(rp.at)}`))),
       host.writable ? h('div', { class: 'ractions' },
         it.resolved ? h('button', { onclick: () => setResolved(r, it.id, false) }, t('Reopen')) : replyIn,
         !it.resolved && it.kind === 'suggestion' ? h('button', { class: 'primary', onclick: () => { const m = accept(r, it.id); if (m) alert(m) } }, t('Accept')) : null,

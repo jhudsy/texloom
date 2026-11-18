@@ -70,7 +70,7 @@ function people(r: Replica): Person[] {
     const c = canonicalPub(pub)
     if (!c) return
     const old = out.get(c)
-    out.set(c, { ...old, ...p, pub: c, verified: p.verified || !!old?.verified, at: Math.min(old?.at ?? Infinity, p.at), link: p.link ?? old?.link })
+    out.set(c, { ...old, ...p, name: p.name || old?.name || '', pub: c, verified: p.verified || !!old?.verified, at: Math.min(old?.at ?? Infinity, p.at), link: p.link ?? old?.link })
   }
   for (const [pub, m] of r.members.entries()) {
     const name = String(m?.name ?? '')
@@ -107,8 +107,8 @@ export function shareDialog(r: Replica, server: string, me: string) {
   function create() {
     const name = nameIn.value.trim()
     if (!name) return nameIn.focus()
-    const { pub, grant, keys: personal } = keys.personal(name)
-    const at = Date.now(), granted = personal.member!.name
+    const { pub, grant, name: granted, keys: personal } = keys.personal(name)
+    const at = Date.now()
     r.members.set(pub, { name: granted, at, by: me, g: grant }) // g: the owner's grant, so the entry can be checked
     const link = personal.link(server, true)
     saveIssued(keys.project, { ...loadIssued(keys.project), [pub]: { name: granted, at, link } })

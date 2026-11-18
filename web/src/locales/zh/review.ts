@@ -47,6 +47,9 @@ const zh: Catalog = {
   "⚠ Check merge": "⚠ 检查合并",
   "{{me}} and {{others}} both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} 和 {{others}} 在彼此未同步时都修改了这一段，修改已被合并。请检查这段文字是否符合原意。",
   "{{me}} and someone else both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} 和另一个人在彼此未同步时都修改了这一段，修改已被合并。请检查这段文字是否符合原意。",
+  'A name anyone with an edit link could type: not checked.': '任何拥有编辑链接的人都能输入的名字：未经核实。',
+  'Signed with {{name}}’s personal link.': '已用 {{name}} 的个人链接签名。',
+  'Written as “{{by}}”, with {{name}}’s personal link.': '以“{{by}}”的名义撰写，使用 {{name}} 的个人链接。',
 }
 
 export default zh

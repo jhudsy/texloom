@@ -137,21 +137,16 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
   let noStorage = r.storeProblem === 'needs-code' || (!!info && !info.registered && !info.canCreate)
   const storageBox = h('div', {})
   let codeRow: HTMLElement | null = null
+  const own = w && r.keys.owner // only the owner chooses where the project is kept
   const storageRadios = () => radios('storage', r.storage, [
     ['server', t('Keep an encrypted copy on the server'),
       noStorage ? t('Not available yet: this server stores new projects only with a creation code. Until one is entered, your changes are kept here and reach collaborators who are online.')
         : r.storeProblem ? t('Collaborators get your changes even if you’re never online at the same time. Right now the server isn’t taking more ({{reason}}): your changes are kept here and sent later.', { reason: problemText(r.storeProblem) })
           : t('Collaborators get your changes even if you’re never online at the same time. The server can’t read it.'),
-      !w || noStorage],
-    ['relay', t('Don’t store anything on the server'), t('The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.'), !w],
+      !own || noStorage],
+    ['relay', t('Don’t store anything on the server'), t('The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.'), !own],
   ], async (v: StorageMode) => {
-    if (!w) return
-    if (v === 'relay' && !r.keys.owner) {
-      alert(t('Only the project’s owner can delete the server’s copy.'))
-      const keep = document.querySelector<HTMLInputElement>('input[name="storage"][value="server"]')
-      if (keep) keep.checked = true
-      return
-    }
+    if (!own) return // (only the owner can change it: the radios are disabled)
     if (v === 'relay' && !confirm(t('Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.'))) return
     await r.setStorage(v)
   })
@@ -208,6 +203,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
         ['manual', t('Manual sync'), t('Changes stay here until you press Sync (e.g. to finish a thought, or save bandwidth).')],
       ], (v) => { d.sync = v; saveDevice() }),
       h('h4', {}, t('Server storage'), h('small', { class: 'muted' }, ' — ' + t('shared with everyone in the project'))),
+      own ? null : whose(t('Only the project’s owner can change this.')),
       storageBox,
       codeRow = noStorage ? h('div', { class: 'row' },
         h('button', { onclick: async () => {

@@ -54,6 +54,7 @@ const zh: Catalog = {
   "Your computer didn’t finish compiling within 60 seconds. It may still be working: the PDF appears here when it’s done.": "你的电脑在 60 秒内没有完成编译。它可能仍在处理：完成后 PDF 会显示在这里。",
   "Compiling again when this compile finishes…": "本次编译完成后将再次编译…",
   "Gathering the project’s files…": "正在收集项目文件…",
+  'With a read-only link, compile in this browser (⚙ Settings → Compiling), or with your own TeX in the TeXLoom app: the PDF stays on your computer.': '使用只读链接时，请在此浏览器中编译（⚙ 设置 → 编译），或在 TeXLoom 应用中用你自己的 TeX 编译：PDF 留在你的电脑上。',
 }
 
 export default zh

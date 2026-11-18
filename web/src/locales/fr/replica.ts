@@ -11,5 +11,6 @@ const fr: Catalog = {
   'Someone': 'Quelqu’un',
   "the server refused to delete it": "le serveur a refusé de le supprimer",
   "only the owner can delete the project for everyone": "seul le propriétaire peut supprimer le projet pour tout le monde",
+  'Only the owner can change where the project is kept.': 'Seul le propriétaire peut changer l’endroit où le projet est conservé.',
 }
 export default fr

@@ -50,7 +50,8 @@ No accounts: a project is shared by sending a link.
 | `versions`: Y.Array | saved versions: `{at, by, label?, auto?, link}` |
 | `versionChain`: Y.Array | what versions are built from: `{id, base, snap}`, see History |
 | `clients`: Y.Map  | Yjs client id → display name (for "who wrote this")             |
-| `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, resolved, outcome?, replies: Y.Array, typed?, conflict?}`; `start`/`end` are encoded Yjs relative positions, so they follow edits; `typed` and `conflict` come from suggest mode (see below). Moving a file makes a new `Y.Text`, so `movePath` re-anchors its items at the same places in the copy and updates `file` |
+| `review`: Y.Map   | id → Y.Map `{kind: comment\|suggestion, file, start, end, quote, text, by, at, s?, resolved, outcome?, replies: Y.Array, typed?, conflict?}`; `s` signs `"review:" ‖ id ‖ "\n" ‖ by`, and a reply `{by, at, text, s?}` signs `"reply:" ‖ id ‖ "\n" ‖ at ‖ "\n" ‖ by`: the Review tab marks a name ✓ when a personal link's signature vouches for it (with the name the owner granted), and others as typed by anyone with an edit link. What a comment says isn't signed: changing it is an edit like any other. `start`/`end` are encoded Yjs relative positions, so they follow edits; `typed` and `conflict` come from suggest mode (see below). Moving a file makes a new `Y.Text`, so `movePath` re-anchors its items at the same places in the copy and updates `file` |
+| `revoked`: Y.Map  | personal key → the owner's revocation (as below), so everyone who syncs the document learns it, whatever the server sends |
 | `members`: Y.Map  | personal edit links the owner issued: public key → `{name, at, by, g, revoked?}`, `g` = the owner's grant. Any editor can write this map, so the share dialog only trusts entries whose grant verifies, the owner's own record of issued links (localStorage) and keys seen signing edits; enforcement is by signatures |
 
 Text merges character by character (CRDT). Binary files are last-writer-wins
@@ -58,7 +59,9 @@ per path (whole-file replacement), as in Dropbox.
 
 Blobs are **content-addressed**: `id = HMAC-SHA256(key, plaintext)[:16]` (keyed so the
 server cannot confirm guesses about the content), encrypted with the project key, and
-uploaded once. Compiled PDFs are blobs too, so collaborators can view the latest PDF
+uploaded once. (The same 32-byte key is the AES-GCM key and this HMAC key. No attack on that
+is known, but keys derived for each use would be cleaner; changing it would need versioned
+links, since every stored ciphertext and file id depends on it, so it stays as it is.) Compiled PDFs are blobs too, so collaborators can view the latest PDF
 without compiling.
 
 ## Links, keys and access
@@ -78,7 +81,10 @@ without compiling.
   `grant = sign(owner seed, "grant:" ‖ personal public key ‖ ":" ‖ name)`. A personal
   signature is `'M' ‖ personal pub (32) ‖ grant (64) ‖ len(name) ‖ name ‖ sig (64)`, so
   anyone can verify it against the project id alone. A plain 64-byte signature is the
-  owner's.
+  owner's. Signatures go to the server with every change, so since 0.4.35 a link's grant is
+  of an empty name (`n=` empty, `len(name)` 0): the server can't learn who people are. The
+  name is granted separately, in the encrypted `members` entry (`g` signs that name), which
+  is where apps show it from. Links issued before keep their name, and keep working.
 - **Revocation:** the owner sends `sign(owner seed, "revoke:" ‖ personal pub)`. Keys are
   always compared in their canonical base64url spelling (decoders accept variants of the
   same 32 bytes). The relay stores it, refuses that key's updates, snapshots, blobs, mode
@@ -86,8 +92,12 @@ without compiling.
   `rv` frames). Clients keep the list on the device, load it before connecting, and
   ignore peer-to-peer updates until the server's `log` reply is applied; then they refuse
   that key's peer-to-peer updates too. Already-stored updates stay valid (the relay
-  accepted them while the key was good), so documents still converge. Updates carry no
-  trustworthy time, so revocation relies on the relay: only moving to new keys doesn't.
+  accepted them while the key was good), so documents still converge. The owner's app also
+  writes the revocation into the document (`revoked`), so a server that leaves it out of `rv`
+  can't keep it from anyone who syncs the document, peer to peer included. Updates carry no
+  trustworthy time, so the log itself relies on the relay: a server working with a revoked
+  person can still store and deliver their new changes. Only moving to new keys shuts them
+  out completely.
 - **Owner-signed values** use the prefix `"owner:"`, e.g. `meta.movedAt = {at, s}` with
   `s = sign(owner seed, "owner:moved:<at>")`; an unsigned one is ignored.
 - Revoked people keep the AES key and can still read. **Moving to new keys** copies the
@@ -106,7 +116,7 @@ without compiling.
 | `{t:"snap", upto, d, s}` | compaction: encrypted full state replacing log entries ≤ `upto`; `s` signs `"snap:<upto>:" ‖ d` |
 | `{t:"aw", d}` | ephemeral, encrypted awareness (cursors, names); relayed, never stored |
 | `{t:"p2p", d, s?, to?}` | encrypted peer-to-peer payload (below); relayed to one peer or all, never stored |
-| `{t:"mode", m, ts, s}` | set storage mode `"server"` or `"relay"`; `s` signs `"mode:<m>:<ts>"`, valid for 10 min; `relay` (which deletes the server copy) only from the owner |
+| `{t:"mode", m, ts, s}` | set storage mode `"server"` or `"relay"`; `s` signs `"mode:<m>:<ts>"`, valid for 10 min; only from the owner |
 | `{t:"revoke", p, s}` | owner only: revoke personal key `p`; `s` signs `"revoke:" ‖ p` |
 | `{t:"delete", ts, s}` | owner only: delete the project for everyone; `s` signs `"delete:<ts>"`, valid for 10 min. The server erases what it stores, keeps a tombstone (the `deleted` table, which purges never touch; its `projects` row goes) and from then on answers the project's connections with `deleted` and its file requests with 410 |
 
@@ -183,8 +193,13 @@ Blobs move the same way: `{k:"breq", id}` → `{k:"blob", id, b}`. The receiver 
   `up` is broadcast and acknowledged, but not stored. Peers sync with each other
   using the catch-up handshake, so they must be connected at the same time.
 
-The mode is a shared project setting, `meta.storage`; any editor may switch storage on,
-but only the owner may switch it off. A replica sends a signed `mode`
+Only the owner chooses the mode, both ways: the server accepts a `mode` command only with
+the owner's signature, and the shared project setting `meta.storage` is `{m, at, s}` with
+`s` the owner's signature of `"owner:storage:<m>:<at>"`, so an editor can't make everyone
+believe the server keeps a copy it doesn't (or stop them uploading). Without a valid one (a
+project from before 0.4.35, or one an editor overwrote), apps go by what the server last
+said it does, kept for when they're offline; the owner's app signs an old plain value on
+connecting. A replica sends a signed `mode`
 command only when its user *changes* the setting, queuing it if offline; it never
 "corrects" the server on connect, so a stale replica can't undo someone else's
 switch. Switching back to `server` re-uploads a full snapshot and all blobs.
@@ -211,10 +226,10 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   `project-full` (`--project-max-bytes`, not applied to unlimited owners) and `server-full`
   (`--max-bytes`, `--min-free`).
 - **No lost work:** a refused `up` is still broadcast live but not acked; it stays in the
-  sender's outbox and is retried. Clients show a "not saved on server" warning. The desktop
-  app answers `needs-code` for a project it owns and has no code for by making it relay-only
-  (nothing stored is lost: the server stored nothing), so files reach peers and the outbox
-  empties; a code can be added later, which uploads a full copy.
+  sender's outbox and is retried. Clients show a "not saved on server" warning, saying the
+  owner can add a code or make the project sync-only. They never switch by themselves: any
+  server could send `needs-code`. (A project made without a code on a server that needs one
+  is sync-only from the start.)
 - **Snapshots** must satisfy `max(last snapshot, floor) < upto ≤ head`, at most 12 MiB
   (bigger documents just aren't compacted), and they are counted against limits by their
   size change.

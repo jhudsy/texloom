@@ -243,6 +243,8 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   }
 
   async function compileLocally(fail: Fail, fromScratch = false): Promise<CompileOut> {
+    // only writers may ask another computer to compile (and only they could share what it makes)
+    if (!writable) return fail((t) => t('With a read-only link, compile in this browser (⚙ Settings → Compiling), or with your own TeX in the TeXLoom app: the PDF stays on your computer.'))
     if (!(await r.requestCompile(fromScratch))) return fail((t) => t('Not connected, so no local helper can be reached.'))
     showProgress({ phase: 'compile' }, t('Asking your computer to compile…'))
     let acked = false

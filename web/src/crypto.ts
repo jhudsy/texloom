@@ -112,14 +112,18 @@ export class Keys {
   }
 
   /** Owner only: a personal edit link for `name`. */
-  personal(name: string): { pub: string; grant: string; keys: Keys } {
+  /** Owner only: a personal edit link for `name`: `grant` is the owner's grant of that name, for
+   *  the project's encrypted member list. The link signs with a grant of no name: signatures go
+   *  to the server, which shouldn't learn who people are. (Links from before 0.4.35 carry their
+   *  name in it, and keep working.) As Keys.personal in texloom/crypto.py. */
+  personal(name: string): { pub: string; grant: string; name: string; keys: Keys } {
     if (!this.seed) throw new Error('only the owner can create personal links')
     const clean = name.trim().slice(0, 60) || 'collaborator'
     if (enc.encode(clean).length > 200) throw new Error('name too long')
     const mseed = ed25519.utils.randomSecretKey()
     const pub = ed25519.getPublicKey(mseed)
-    const grant = ed25519.sign(grantMsg(pub, clean), this.seed)
-    return { pub: b64e(pub), grant: b64e(grant), keys: new Keys(this.project, this.key, null, { seed: mseed, grant, name: clean }) }
+    const named = ed25519.sign(grantMsg(pub, clean), this.seed), nameless = ed25519.sign(grantMsg(pub, ''), this.seed)
+    return { pub: b64e(pub), grant: b64e(named), name: clean, keys: new Keys(this.project, this.key, null, { seed: mseed, grant: nameless, name: '' }) }
   }
 
   /** Owner only: the signed revocation of a personal key, for its canonical spelling. */

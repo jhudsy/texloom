@@ -47,6 +47,9 @@ const pt: Catalog = {
   "⚠ Check merge": "⚠ Verificar a fusão",
   "{{me}} and {{others}} both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} e {{others}} alteraram este parágrafo cada um por seu lado, e as alterações foram combinadas. Verifique se o texto está como pretendido.",
   "{{me}} and someone else both changed this paragraph while working apart, and the changes were merged. Check that it reads as intended.": "{{me}} e outra pessoa alteraram este parágrafo cada um por seu lado, e as alterações foram combinadas. Verifique se o texto está como pretendido.",
+  'A name anyone with an edit link could type: not checked.': 'Um nome que qualquer pessoa com um link de edição poderia escrever: não verificado.',
+  'Signed with {{name}}’s personal link.': 'Assinado com o link pessoal de {{name}}.',
+  'Written as “{{by}}”, with {{name}}’s personal link.': 'Escrito como «{{by}}», com o link pessoal de {{name}}.',
 }
 
 export default pt
