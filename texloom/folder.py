@@ -1173,7 +1173,7 @@ class FolderSync:
         (cack, cerr) carry the request's `nonce`, and are signed, so they can't be faked or replayed."""
         if not self.compile or not self.r.can_write:
             return
-        # Anyone with the link can ask (requests aren't signed): at most one compile every few seconds.
+        # Only writers can ask (requests are signed), and at most one compile every few seconds.
         now = time.monotonic()
         if now - self._last_request < 5:
             return

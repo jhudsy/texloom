@@ -117,9 +117,12 @@ class Keys:
         pub = Ed25519PrivateKey.from_private_bytes(self.member[0]).public_key()
         return b64e(pub.public_bytes(Encoding.Raw, PublicFormat.Raw))
 
-    def personal(self, name: str) -> tuple[str, str, "Keys"]:
+    def personal(self, name: str) -> tuple[str, str, "Keys", str]:
         """Owner only: a personal edit link for `name` (as Keys.personal in web/src/crypto.ts):
-        returns (public key, owner's grant, the link's Keys)."""
+        returns (public key, the owner's grant of that name, for the project's encrypted member
+        list; the link's Keys; the name). The link signs with a grant of no name: signatures go
+        to the server, which shouldn't learn who people are. (Links from before 0.4.35 carry
+        their name in it, and keep working.)"""
         if not self.seed:
             raise PermissionError("only the owner can create personal links")
         clean = name.strip()[:60] or "collaborator"
@@ -128,8 +131,9 @@ class Keys:
         sk = Ed25519PrivateKey.generate()
         mseed = sk.private_bytes_raw()
         pub = sk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-        grant = Ed25519PrivateKey.from_private_bytes(self.seed).sign(grant_msg(pub, clean))
-        return b64e(pub), b64e(grant), Keys(self.project, self.key, None, member=(mseed, grant, clean))
+        owner = Ed25519PrivateKey.from_private_bytes(self.seed)
+        named, nameless = owner.sign(grant_msg(pub, clean)), owner.sign(grant_msg(pub, ""))
+        return b64e(pub), b64e(named), Keys(self.project, self.key, None, member=(mseed, nameless, "")), clean
 
     # --- links -----------------------------------------------------------
     def fragment(self, write: bool = True) -> str:
@@ -147,16 +151,16 @@ class Keys:
     @classmethod
     def from_link(cls, link: str) -> tuple["Keys", str]:
         u = urlsplit(link)
-        q = {k: v[0] for k, v in parse_qs(u.fragment).items()}
+        q = {k: v[0] for k, v in parse_qs(u.fragment, keep_blank_values=True).items()}  # (a personal link's name may be empty)
         server = f"{u.scheme}://{u.netloc}"
         member = None
-        if "m" in q and "g" in q and "n" in q:
+        if q.get("m") and q.get("g") and "n" in q:
             mseed, grant, name = b64d(q["m"]), b64d(q["g"]), q["n"]
             mpub = Ed25519PrivateKey.from_private_bytes(mseed).public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
             if not _ok(b64d(q["p"]), grant, grant_msg(mpub, name)):
                 raise ValueError("this personal link was not issued for this project")
             member = (mseed, grant, name)
-        keys = cls(q["p"], b64d(q["k"]), b64d(q["w"]) if "w" in q else None, member)
+        keys = cls(q["p"], b64d(q["k"]), b64d(q["w"]) if q.get("w") else None, member)
         if keys.seed is not None:
             sk = Ed25519PrivateKey.from_private_bytes(keys.seed)
             pub = sk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)

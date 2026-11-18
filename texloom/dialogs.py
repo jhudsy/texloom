@@ -137,12 +137,12 @@ async def create_personal(engine: Engine, d: Path, name: str) -> str:
     r = st.replica if st else None
     if r is None or not r.connected.is_set():
         raise FolderProblem(_("this folder isn't connected right now: try again in a moment"))
-    pub, grant, personal = r.keys.personal(name)
+    pub, grant, personal, granted = r.keys.personal(name)
     at = int(time.time() * 1000)
     me = load_config(d).get("name") or f"TeXLoom app on {platform.node().split('.')[0]}"
-    r.local_change(lambda: r.members.__setitem__(pub, {"name": personal.member[2], "at": at, "by": me, "g": grant}))
+    r.local_change(lambda: r.members.__setitem__(pub, {"name": granted, "at": at, "by": me, "g": grant}))
     link = personal.link(r.server)
-    issued = {**load_issued(d), pub: {"name": personal.member[2], "at": at, "link": link}}
+    issued = {**load_issued(d), pub: {"name": granted, "at": at, "link": link}}
     fd = os.open(issued_file(d), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # these links are keys
     with os.fdopen(fd, "w") as f:
         json.dump(issued, f, indent=2)

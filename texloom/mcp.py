@@ -256,6 +256,8 @@ class Project:
         if s.isascii():
             fields["start"] = self._sticky(yt, s, start, start == len(s)).encode()
             fields["end"] = (self._sticky(yt, s, end, True) if end > 0 else self._sticky(yt, s, end, False)).encode()
+        # who wrote it is signed (as in web/src/review.ts): its id with the name
+        fields["s"] = b64e(self.r.keys.sign(b"review:" + f"{iid}\n{self.name}".encode()))
         item = Map(fields)
         self.r.local_change(lambda: self.review.__setitem__(iid, item))
         self.point_at(path, start, end)
@@ -302,7 +304,9 @@ class Project:
         replies = m.get("replies")
         if not isinstance(replies, Array):
             raise ValueError("That item can't take replies.")
-        self.edit(lambda: replies.append({"by": self.name, "at": int(time.time() * 1000), "text": text[:20000]}))
+        at = int(time.time() * 1000)
+        sig = b64e(self.r.keys.sign(b"reply:" + f"{id}\n{at}\n{self.name}".encode()))  # (as in web/src/review.ts)
+        self.edit(lambda: replies.append({"by": self.name, "at": at, "text": text[:20000], "s": sig}))
         return "Replied."
 
     def resolve_comment(self, id: str) -> str:

@@ -75,6 +75,9 @@ class Replica:
         self.meta: Map = self.doc.get("meta", type=Map)
         self.out: Map = self.doc.get("out", type=Map)
         self.members: Map = self.doc.get("members", type=Map)  # personal links the owner issued (see sharing.ts)
+        # The owner's revocations, in the document too (pub -> signature): a server that holds them
+        # back can't keep them from anyone who syncs the document, peer to peer included.
+        self.revoked_doc: Map = self.doc.get("revoked", type=Map)
         self.since = 0
         self.outbox: dict[str, bytes] = {}
         self.refs: dict[int, str] = {}  # stored changes and snapshots that are uploads: seq -> upload id
@@ -93,6 +96,7 @@ class Replica:
         self.on_compile_request: Callable[[int, bool, str], Awaitable[None]] | None = None
         self.server_mode = "server"  # what the server says: "server" (stores) or "relay"
         self.pending_mode: str | None = None  # storage change not yet sent to the server
+        self.heard_mode: str | None = None  # what the server last said it does with this project (kept)
         self.store_refusal: str | None = None  # what the server last said
         self.denied: str | None = None  # the server turned this project away: why (private server, or update-needed)
         self.min_version = ""  # with update-needed: the oldest version the server accepts
@@ -115,7 +119,33 @@ class Replica:
 
     @property
     def storage(self) -> str:
-        return "relay" if self.meta.get("storage") == "relay" else "server"
+        """Where the project lives, as its owner set it: meta "storage" is {m, at, s}, signed by the
+        owner, so an editor can't change it for everyone. Without a valid one (a project from
+        before 0.4.35, or an editor overwrote it), what the server last said it does decides, as
+        it is the one that knows whether it keeps a copy; failing that, the plain value. As in
+        web/src/replica.ts."""
+        v = self.meta.get("storage")
+        if isinstance(v, dict) and v.get("m") in ("relay", "server") and isinstance(v.get("at"), (int, float)):
+            try:
+                if self.keys.owner_signed(f"owner:storage:{v['m']}:{int(v['at'])}".encode(), b64d(str(v.get("s", "")))):
+                    return v["m"]
+            except (ValueError, TypeError):
+                pass
+        return self.heard_mode or ("relay" if v == "relay" else "server")
+
+    def _heard(self, mode: object) -> None:
+        """What the server says it does with this project (kept, for when it can't be asked)."""
+        if mode not in ("relay", "server"):
+            return
+        self.server_mode = str(mode)
+        if mode != self.heard_mode:
+            self.heard_mode = str(mode)
+            self.save()
+
+    def _sign_storage(self, mode: str) -> None:
+        at = int(time.time() * 1000)
+        sig = b64e(self.keys.sign(f"owner:storage:{mode}:{at}".encode()))
+        self.local_change(lambda: self.meta.__setitem__("storage", {"m": mode, "at": at, "s": sig}))
 
     # --- persistence -------------------------------------------------------
     def load(self) -> None:
@@ -127,15 +157,19 @@ class Replica:
             s = json.loads(p.read_text())
             self.since = s.get("since", 0)
             self.pending_mode = s.get("pending_mode")
+            self.heard_mode = s.get("heard_mode") if s.get("heard_mode") in ("relay", "server") else None
             self.outbox = {k: b64d(v) for k, v in s.get("outbox", {}).items()}
             self.deleted_at = s.get("deleted")
             self.refs = {int(q): b for q, b in s.get("refs", {}).items() if isinstance(b, str) and BLOB_RE.match(b)}
             self._revoked(s.get("revoked", []), save=False)  # before anything arrives from peers
+        self._revoked([{"p": p, "s": v} for p, v in self.revoked_doc.items()], save=False)
+        # (saved with the change that brought it: not from inside that change)
+        self.revoked_doc.observe(lambda _e: self._revoked([{"p": p, "s": v} for p, v in self.revoked_doc.items()], save=False))
 
     def save(self) -> None:
         (self.dir / "doc.bin.tmp").write_bytes(self.doc.get_update())
         (self.dir / "doc.bin.tmp").replace(self.dir / "doc.bin")
-        state = {"since": self.since, "pending_mode": self.pending_mode,
+        state = {"since": self.since, "pending_mode": self.pending_mode, "heard_mode": self.heard_mode,
                  "outbox": {k: b64e(v) for k, v in self.outbox.items()}, "revoked": self._revocations,
                  **({"refs": self.refs} if self.refs else {}),
                  **({"deleted": self.deleted_at} if self.deleted_at is not None else {})}
@@ -656,6 +690,9 @@ class Replica:
                 if not fut.done():
                     fut.set_result(blob)
         elif k == "creq" and self.on_compile_request:
+            # only writers may ask (signed): a read-only member compiles on their own computer
+            if "s" not in m or not self.keys.verify(b"p2p:" + data, b64d(m["s"]), fresh=True):
+                return
             nonce = p.get("n") if isinstance(p.get("n"), str) and len(p["n"]) <= 64 else ""
             await self.on_compile_request(frm, p.get("clean") is True, nonce)
 
@@ -679,21 +716,12 @@ class Replica:
             await self.upload_pending()
 
     def set_storage(self, mode: str) -> None:
-        """User changed the project's storage mode; tell the server on next connect."""
-        self.local_change(lambda: self.meta.__setitem__("storage", mode))
+        """The owner changed the project's storage mode; tell the server on next connect."""
+        if self.keys.seed is None:
+            raise PermissionError("only the owner can change where the project is kept")
+        self._sign_storage(mode)
         self.pending_mode = mode
         self.save()
-
-    async def _sync_only(self) -> None:
-        """The server keeps projects only with a creation code, and this one has none: rather than
-        changes it refuses and files nobody can fetch, pass everything straight to the other
-        computers, while they're online (the server's copy, if any, is nothing to lose)."""
-        log.warning("This server keeps projects only with a creation code. Without one, this project now "
-                    "syncs only between computers that are online at the same time.")
-        self.store_refusal = None
-        self.set_storage("relay")
-        await self.send_mode("relay")
-        await self.flush_outbox()
 
     def pending_count(self) -> int:
         """Changes and files waiting for the server. Files of a project the server doesn't
@@ -708,8 +736,8 @@ class Replica:
         return self.store_refusal
 
     def _storage_warning(self, code: str) -> None:
-        if code == "needs-code" and (self.storage == "relay" or (self.keys.seed and not self.create_code)):
-            return  # sync-only, or about to be (see _sync_only): the server isn't meant to keep it
+        if code == "needs-code" and self.storage == "relay":
+            return  # sync-only: the server isn't meant to keep it
         self.store_refusal = code
         code = self.store_problem
         if code in self._warned:
@@ -717,7 +745,8 @@ class Replica:
         self._warned.add(code)
         log.warning({
             "needs-code": "NOT SAVED ON SERVER: this server keeps projects only with a creation code, and this "
-                          "project has none. Its owner can add one, or make it sync-only. "
+                          "project has none. Its owner can add one (\"create_code\" in .texloom/config.json), "
+                          "or make it sync-only (`texloom storage <folder> relay`). "
                           "Changes still reach collaborators who are online.",
             "code-expired": "NOT SAVED ON SERVER: this project's creation code has expired; renewing it restores storage.",
             "quota-full": "NOT SAVED ON SERVER: the storage allowance of this project's creation code is used up.",
@@ -782,8 +811,11 @@ class Replica:
                     (pending / bid).touch()
             uid = secrets.token_hex(8)
             self.outbox[uid] = self.doc.get_update()
-        if self.keys.writable and self.pending_mode:  # setting changed while offline
+        if self.keys.seed is not None and self.pending_mode:  # setting changed while offline
             await self.send_mode(self.pending_mode)
+        old = self.meta.get("storage")
+        if self.keys.seed is not None and not self.pending_mode and old is not None and not isinstance(old, dict):
+            self._sign_storage(self.server_mode)  # a project from before 0.4.35: its owner signs what the server does
         await self.upload_pending()  # blobs first, so peers can fetch what updates reference
         self.since = head if lost else max(self.since, head)
         self._hold_for_missing()
@@ -816,7 +848,7 @@ class Replica:
             return
         if t == "log":
             self.denied = None
-            self.server_mode = m.get("mode", "server")
+            self._heard(m.get("mode", "server"))
             self._revoked(m.get("rv", []))
             # the server dropped its copy (idle eviction): everything up to `floor` is gone
             floor = m.get("floor") or 0
@@ -860,7 +892,7 @@ class Replica:
         elif t == "p2p":
             await self._on_p2p(m)
         elif t == "mode":
-            self.server_mode = m["m"]
+            self._heard(m["m"])
         elif t == "rv":
             self._revoked([m])
         elif t == "ack":
@@ -888,8 +920,6 @@ class Replica:
                                 "Add \"create_code\" to .texloom/config.json and restart.")
             elif m.get("code") == "needs-code" and self.storage == "relay":
                 pass  # sent before the switch to sync-only: it's sent again
-            elif m.get("code") == "needs-code" and self.keys.seed and not self.create_code:
-                await self._sync_only()
             elif m.get("code") in ("needs-code", "quota-full", "code-expired", "project-full", "server-full"):
                 self._storage_warning(m["code"])  # kept in the outbox; retried on reconnect
             else:

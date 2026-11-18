@@ -469,6 +469,8 @@ def main() -> None:
             sys.exit(str(e))
     elif a.cmd == "storage":
         keys, server = load(a.dir)
+        if keys.seed is None:
+            sys.exit("Only the project's owner can change where it's kept (this folder has an edit link, not the owner link).")
         r = Replica(a.dir / STATE, keys, server)
         r.set_storage(a.mode)
         asyncio.run(run(a.dir, False, once=True))  # connecting aligns the server with the setting
