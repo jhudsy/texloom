@@ -722,7 +722,7 @@ async function openProject(keys: Keys, server: string) {
   const syncNow = async () => { syncBtn.setAttribute('disabled', ''); await r.syncNow(); syncBtn.removeAttribute('disabled') }
   const syncBtn = h('button', { class: 'wide-only', onclick: syncNow }, t('Sync now'))
   const zipBtn = h('button', { class: 'wide-only', title: t('Download all files as a .zip'), onclick: () => downloadZip() }, icon('download'), t('Source'))
-  const submitBtn = h('button', { class: 'wide-only', title: t('Download a .zip for arXiv or a journal: only the files the document uses, with the compiled bibliography'), onclick: () => submissionDialog(r) }, icon('download'), t('Submission'))
+  const submitBtn = h('button', { class: 'wide-only', title: t('Download a .zip for arXiv or a journal: only the files the document uses, with the compiled bibliography'), onclick: () => submissionDialog(r) }, icon('download'), t('arXiv / journal')) // (was “Submission”, which didn't say what for)
   const copyProject = () => copyDialog({ name: title.value, by: prefs.name, server, replica: r })
   const copyBtn = h('button', { class: 'wide-only', title: t('Start a new project from this one’s files'), 'aria-label': t('Make a copy'), onclick: copyProject }, icon('copy'), h('span', { class: 'lbl' }, t('Make a copy')))
   const tagsLabel = () => { const n = tags.of(keys.project).length; return n ? t('Tags ({{n}})', { n }) : t('Tags') }
@@ -741,7 +741,7 @@ async function openProject(keys: Keys, server: string) {
   const headerActions: { btn: HTMLElement; label: () => string; run: () => void }[] = [
     { btn: syncBtn, label: () => t('Sync now'), run: syncNow },
     { btn: zipBtn, label: () => t('Download the source (.zip)'), run: () => downloadZip() },
-    { btn: submitBtn, label: () => t('Download for submission (.zip)'), run: () => submissionDialog(r) },
+    { btn: submitBtn, label: () => t('Download for arXiv or a journal (.zip)'), run: () => submissionDialog(r) },
     { btn: copyBtn, label: () => t('Make a copy'), run: copyProject },
     { btn: tagsBtn, label: tagsLabel, run: editTags },
     { btn: folderBtn, label: () => folderBtn.textContent ?? '', run: () => folderMenu() },

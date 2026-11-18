@@ -6,7 +6,7 @@ const zh: Catalog = {
   "One .tex file": "合并为一个 .tex",
   "Put the files read with \\input and \\include into the main file, for journals that want a single file. With BibTeX, the bibliography goes in too.": "把通过 \\input 和 \\include 读取的文件并入主文件，适用于要求单个文件的期刊。使用 BibTeX 时，参考文献也会并入。",
   "Download .zip": "下载 .zip",
-  "Download for submission": "下载投稿文件",
+  "Download for arXiv or a journal": "下载用于 arXiv 或期刊",
   "A .zip for arXiv or a journal: the files {{main}} uses, with the compiled bibliography (.bbl) instead of the .bib. Build files and unused files are left out.": "适用于 arXiv 或期刊的 .zip：包含 {{main}} 用到的文件，并以编译好的参考文献（.bbl）代替 .bib。编译生成的文件和未使用的文件不包含在内。",
   "{{n}} files go in": { other: "包含 {{n}} 个文件" },
   "{{n}} files are left out": { other: "{{n}} 个文件未包含" },

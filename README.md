@@ -239,7 +239,7 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   filled in. **New → Import…** in
   the file list does the same for an existing project. From git: clone it and run
   `texloom new` in the folder.
-- **Submission** (next to **Source**; under ⋯ in small windows) downloads a `.zip` for arXiv or a
+- **arXiv / journal** (next to **Source**; under ⋯ in small windows) downloads a `.zip` for arXiv or a
   journal: only the files the main document uses (followed through `\input`, `\include`,
   `\includegraphics`, `\usepackage`, … and `\graphicspath`), with the compiled bibliography
   (`.bbl`, from a compile in the browser) instead of the `.bib`, and without build files.

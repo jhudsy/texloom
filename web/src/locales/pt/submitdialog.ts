@@ -6,7 +6,7 @@ const pt: Catalog = {
   "One .tex file": "Um só .tex",
   "Put the files read with \\input and \\include into the main file, for journals that want a single file. With BibTeX, the bibliography goes in too.": "Coloca os ficheiros lidos com \\input e \\include no ficheiro principal, para as revistas que pedem um único ficheiro. Com BibTeX, a bibliografia também entra.",
   "Download .zip": "Transferir .zip",
-  "Download for submission": "Transferir para submissão",
+  "Download for arXiv or a journal": "Transferir para o arXiv ou uma revista",
   "A .zip for arXiv or a journal: the files {{main}} uses, with the compiled bibliography (.bbl) instead of the .bib. Build files and unused files are left out.": "Um .zip para o arXiv ou uma revista: os ficheiros que {{main}} usa, com a bibliografia compilada (.bbl) em vez do .bib. Os ficheiros de compilação e os que não são usados ficam de fora.",
   "{{n}} files go in": ["Entra {{n}} ficheiro", "Entram {{n}} ficheiros"],
   "{{n}} files are left out": ["Fica de fora {{n}} ficheiro", "Ficam de fora {{n}} ficheiros"],

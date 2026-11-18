@@ -30,7 +30,7 @@ export function submissionDialog(r: Replica) {
   const go = h('button', { class: 'primary', onclick: () => run() }, t('Download .zip'))
   let busy = false
   const dlg = dialog('settings',
-    h('h3', {}, t('Download for submission')),
+    h('h3', {}, t('Download for arXiv or a journal')),
     h('p', {}, t('A .zip for arXiv or a journal: the files {{main}} uses, with the compiled bibliography (.bbl) instead of the .bib. Build files and unused files are left out.', { main })),
     strip.el, one.el, summary, status,
     h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Cancel')), go),
