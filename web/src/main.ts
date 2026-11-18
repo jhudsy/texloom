@@ -191,7 +191,7 @@ function startSettings() {
     languagePicker(),
     h('h4', {}, 'Zotero'),
     zoteroAccountBox(),
-    h('h4', {}, 'GitHub'),
+    h('h4', {}, t('Git repositories')),
     githubAccountBox(),
     h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => { dlg.close(); refreshProjects() } }, t('Done'))))
 }

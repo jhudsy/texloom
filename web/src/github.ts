@@ -1,14 +1,15 @@
-// GitHub: keep the project in step with a GitHub repository, from the browser (api.github.com
-// allows that). Two levels, as for Zotero (zotero.ts):
-// - the account (a token) is yours alone: kept in this browser, and with a project list it
-//   travels with the list, encrypted. It never enters a project.
-// - the link ("this project ⇄ owner/repo, branch, folder") is the project's, in its shared
+// Keeping a project in step with a git repository from the browser: on GitHub, GitLab, or Gitea or
+// Forgejo (Codeberg), each through its own API (forges.ts). The file is named for GitHub, the
+// first. Two levels, as for Zotero (zotero.ts):
+// - the account (a token, one per host) is yours alone: kept in this browser, and with a project
+//   list it travels with the list, encrypted. It never enters a project.
+// - the link ("this project ⇄ host, owner/repo, branch, folder") is the project's, in its shared
 //   settings under `github`, with the commit last brought in or sent (`head`): the base of the
 //   next three-way merge, for whoever syncs next.
 //
-// Bringing commits in: each file GitHub changed since `head` is merged three ways (base: the
-// file at `head`), so collaborators' edits survive. If any file clashes, nothing comes in and
-// the commit is noted as `blocked` until GitHub moves on, or someone chooses to keep the
+// Bringing commits in: each file the repository changed since `head` is merged three ways (base:
+// the file at `head`), so collaborators' edits survive. If any file clashes, nothing comes in and
+// the commit is noted as `blocked` until the repository moves on, or someone chooses to keep the
 // project's version where they clash. Sending out: once the project has been quiet for a while,
 // the files that differ from `head` go up as one commit.
 //
@@ -25,23 +26,19 @@ import { BUILD } from './foldersync'
 import { cleanPath, isText } from './projectfiles'
 import { t } from './i18n'
 import { accountStore } from './accounts'
+import { forge, GitError, hostOf, kindOf, MOVED, type Account, type Change, type Entry, type Forge, type Kind, type Tree } from './forges'
 
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 export const RENEW = 30_000, EXPIRE = 100_000 // ms
 const PULL_EVERY = 60_000, QUIET = 120_000, TICK = 5000 // ms
 
-/** api.github.com, or a stand-in when testing on this computer (set texloom.githubApi in localStorage). */
-function api(): string {
-  try {
-    const o = localStorage.getItem('texloom.githubApi')
-    if (o && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return o.replace(/\/+$/, '')
-  } catch {}
-  return 'https://api.github.com'
-}
+export type { Account } from './forges'
+export { GitError } from './forges'
 
-export interface Account { token: string; login: string }
-/** The project's link, in its shared settings under `github`. */
+/** The project's link, in its shared settings under `github` (the name from when GitHub was the only
+ *  host): `kind` and `host` say which (none: GitHub). */
 export interface Link {
+  kind?: Kind; host?: string
   repo: string; branch: string; dir: string // dir: the folder in the repository that holds the project ('' for all of it)
   head: string | null // the commit last brought in or sent
   by: string; at: number // who synced last, and when
@@ -50,80 +47,53 @@ export interface Link {
 }
 export interface Lease { id: string; by: string; n: number }
 
-/** This browser's GitHub account, and when it was set (so the latest follows the project list). */
+/** This browser's GitHub account (kept apart from the others, as it was before there were others), and when it was set (so the latest follows the project list). */
 export const githubAccount = accountStore<Account>('texloom.github', (a) => typeof a.token === 'string')
+/** Its accounts with other hosts (GitLab, Gitea, Forgejo), one per host, likewise. */
+export const otherAccounts = accountStore<{ list: Account[] }>('texloom.gitAccounts', (a) => Array.isArray(a.list))
 
-export class GitHubError extends Error { constructor(msg: string, readonly status = 0) { super(msg) } }
+const sameHost = (a: { kind?: Kind; host?: string }, b: { kind?: Kind; host?: string }) =>
+  kindOf(a) === kindOf(b) && hostOf(a).toLowerCase() === hostOf(b).toLowerCase()
 
-async function call(a: Account, method: string, path: string, body?: unknown): Promise<any> {
-  let res: Response
-  try {
-    res = await fetch(api() + path, {
-      method, headers: { Authorization: `Bearer ${a.token}`, Accept: 'application/vnd.github+json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      body: body ? JSON.stringify(body) : undefined, cache: 'no-store',
-    })
-  } catch { throw new GitHubError(t('Couldn’t reach GitHub (offline?).')) }
-  if (res.ok) return res.status === 204 ? null : res.json()
-  const why = await res.json().then((j) => String(j?.message ?? ''), () => '')
-  if (res.status === 401) throw new GitHubError(t('GitHub refused the token: it may have expired. Connect again with a new one.'), 401)
-  if (res.status === 403 && /rate limit/i.test(why)) throw new GitHubError(t('GitHub asks to slow down: trying again later.'), 403)
-  if (res.status === 403) throw new GitHubError(t('The token doesn’t allow this: it needs read and write access to the repository’s contents.'), 403)
-  if (res.status === 404) throw new GitHubError(t('GitHub doesn’t have that repository, or the token can’t see it.'), 404)
-  throw new GitHubError(t('GitHub answered {{status}}{{why}}.', { status: res.status, why: why ? `: ${why}` : '' }), res.status)
+/** Every account this browser has: GitHub's first. */
+export function accounts(): Account[] {
+  const gh = githubAccount.get()
+  return [...(gh ? [{ ...gh, kind: 'github' as const }] : []), ...(otherAccounts.get()?.list ?? []).filter((a) => typeof a?.token === 'string' && kindOf(a) !== 'github')]
+}
+
+/** This browser's account for a host (a link's), if it has one. */
+export function accountFor(where: { kind?: Kind; host?: string } | null): Account | null {
+  return where ? accounts().find((a) => sameHost(a, where)) ?? null : null
+}
+
+/** Keep an account (null: forget the one for that host). */
+export function setAccount(where: { kind?: Kind; host?: string }, a: Account | null) {
+  if (kindOf(where) === 'github') { githubAccount.set(a && { token: a.token, login: a.login }); return }
+  const list = (otherAccounts.get()?.list ?? []).filter((x) => !sameHost(x, where))
+  otherAccounts.set({ list: a ? [...list, { ...a, kind: kindOf(where), host: hostOf(where) }] : list })
 }
 
 /** Check a token and learn whose it is. */
-export async function connect(token: string): Promise<Account> {
+export async function connect(kind: Kind, host: string, token: string): Promise<Account> {
   const tok = token.trim()
-  if (!/^[A-Za-z0-9_\-.]{20,255}$/.test(tok)) throw new GitHubError(t('That doesn’t look like a GitHub token.'))
-  const me = await call({ token: tok, login: '' }, 'GET', '/user')
-  return { token: tok, login: String(me?.login ?? '') }
+  const where = { kind, host: kind === 'github' ? undefined : host }
+  if (!/^[A-Za-z0-9_\-.]{8,255}$/.test(tok)) throw new GitError(t('That doesn’t look like a token.'))
+  const login = await forge({ token: tok, login: '', ...where }).login()
+  return { token: tok, login, ...where }
 }
 
-/** owner/name from "owner/name", or a github.com address. */
-export function repoName(s: string): string | null {
-  const m = s.trim().match(/^(?:https?:\/\/github\.com\/|git@github\.com:)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/)
-  return m ? `${m[1]}/${m[2]}` : null
-}
-
-const enc = (s: string) => s.split('/').map(encodeURIComponent).join('/')
-
-export async function repoInfo(a: Account, repo: string): Promise<{ defaultBranch: string; canPush: boolean }> {
-  const j = await call(a, 'GET', `/repos/${enc(repo)}`)
-  return { defaultBranch: String(j.default_branch ?? 'main'), canPush: !!j.permissions?.push }
-}
-
-/** The branch's latest commit; null if there is no such branch (or the repository is empty). */
-export async function headOf(a: Account, repo: string, branch: string): Promise<string | null> {
-  try { return String((await call(a, 'GET', `/repos/${enc(repo)}/git/ref/heads/${enc(branch)}`)).object.sha) }
-  catch (e) { if (e instanceof GitHubError && (e.status === 404 || e.status === 409)) return null; throw e }
-}
-
-interface Entry { sha: string; mode: string; size: number }
-const trees = new Map<string, { tree: string; files: Map<string, Entry> }>() // commit -> its files (commits don't change)
+const trees = new Map<string, Tree>() // commit -> its files (commits don't change)
 
 /** A commit's tree and its files (path -> blob), every folder down. */
-export async function filesAt(a: Account, repo: string, commit: string): Promise<{ tree: string; files: Map<string, Entry> }> {
-  const key = `${repo}@${commit}`
+async function filesAt(f: Forge, l: Link, commit: string): Promise<Tree> {
+  const key = `${hostOf(l)} ${l.repo}@${commit}`
   const known = trees.get(key)
   if (known) return known
-  const c = await call(a, 'GET', `/repos/${enc(repo)}/git/commits/${commit}`)
-  const tr = await call(a, 'GET', `/repos/${enc(repo)}/git/trees/${c.tree.sha}?recursive=1`)
-  if (tr.truncated) throw new GitHubError(t('The repository has too many files for TeXLoom to keep in step.'))
-  const files = new Map<string, Entry>()
-  for (const e of tr.tree ?? []) if (e.type === 'blob' && (e.mode === '100644' || e.mode === '100755')) files.set(e.path, { sha: e.sha, mode: e.mode, size: e.size ?? 0 })
-  const out = { tree: String(c.tree.sha), files }
+  const out = await f.filesAt(l.repo, commit)
   if (trees.size > 20) trees.delete(trees.keys().next().value!)
   trees.set(key, out)
   return out
 }
-
-async function blob(a: Account, repo: string, sha: string): Promise<Uint8Array> {
-  const j = await call(a, 'GET', `/repos/${enc(repo)}/git/blobs/${sha}`)
-  return Uint8Array.from(atob(String(j.content).replace(/\s/g, '')), (c) => c.charCodeAt(0))
-}
-
-const b64 = (d: Uint8Array) => { let s = ''; for (let i = 0; i < d.length; i += 0x8000) s += String.fromCharCode(...d.subarray(i, i + 0x8000)); return btoa(s) }
 
 /** The id git gives this content: SHA-1 of "blob <size>\0<content>". */
 export async function gitSha(d: Uint8Array): Promise<string> {
@@ -136,7 +106,10 @@ export async function gitSha(d: Uint8Array): Promise<string> {
 
 export function linkOf(r: Replica): Link | null {
   const v = r.meta.get('github') as Link | undefined
-  return v && typeof v === 'object' && typeof v.repo === 'string' && typeof v.branch === 'string' ? { ...v, dir: typeof v.dir === 'string' ? v.dir : '' } : null
+  if (!v || typeof v !== 'object' || typeof v.repo !== 'string' || typeof v.branch !== 'string') return null
+  const kind = v.kind === 'gitlab' || v.kind === 'gitea' ? v.kind : undefined
+  if (kind && typeof v.host !== 'string') return null
+  return { ...v, kind, host: kind ? v.host : undefined, dir: typeof v.dir === 'string' ? v.dir : '' }
 }
 export function setLink(r: Replica, l: Link | null) { if (l) r.meta.set('github', l); else r.meta.delete('github') }
 
@@ -144,21 +117,21 @@ export function setLink(r: Replica, l: Link | null) { if (l) r.meta.set('github'
 // this browser's own token: a collaborator could point it at a private repository of yours (bringing
 // it into the project) or at any repository the token can write to. So a browser syncs only a link
 // its user made or approved here: the repository, branch and folder approved, by project.
-type Target = Pick<Link, 'repo' | 'branch' | 'dir'>
+type Target = Pick<Link, 'kind' | 'host' | 'repo' | 'branch' | 'dir'>
 const approvedKey = (r: Replica) => `texloom.githubApproved.${r.keys.project}`
 
 /** What this browser's user approved syncing for this project, if anything. */
 export function approvedTarget(r: Replica): Target | null {
   try {
     const v = JSON.parse(localStorage.getItem(approvedKey(r)) || 'null')
-    return v && typeof v.repo === 'string' && typeof v.branch === 'string' && typeof v.dir === 'string' ? v : null
+    return v && typeof v.repo === 'string' && typeof v.branch === 'string' && typeof v.dir === 'string' ? { ...v, kind: v.kind || undefined, host: v.host || undefined } : null
   } catch { return null }
 }
 
 /** Approve syncing this repository, branch and folder from this browser (null: none). */
 export function approve(r: Replica, l: Target | null) {
   try {
-    if (l) localStorage.setItem(approvedKey(r), JSON.stringify({ repo: l.repo, branch: l.branch, dir: l.dir ?? '' }))
+    if (l) localStorage.setItem(approvedKey(r), JSON.stringify({ kind: kindOf(l), host: hostOf(l), repo: l.repo, branch: l.branch, dir: l.dir ?? '' }))
     else localStorage.removeItem(approvedKey(r))
   } catch {}
 }
@@ -166,14 +139,16 @@ export function approve(r: Replica, l: Target | null) {
 /** Whether this browser's user approved the project's link (as it is now). */
 export function approved(r: Replica, l: Link | null = linkOf(r)): boolean {
   const ok = approvedTarget(r)
-  return !!l && !!ok && ok.repo === l.repo && ok.branch === l.branch && ok.dir === l.dir
+  return !!l && !!ok && kindOf(ok) === kindOf(l) && hostOf(ok) === hostOf(l) && ok.repo === l.repo && ok.branch === l.branch && ok.dir === l.dir
 }
-const notApproved = () => new GitHubError(t('This browser hasn’t approved syncing the project’s GitHub link.'))
+const notApproved = () => new GitError(t('This browser hasn’t approved syncing the project’s repository link.'))
+const notLinked = () => new GitError(t('This project isn’t linked to a repository.'))
 
 const inDir = (l: Link, path: string) => (l.dir ? (path.startsWith(l.dir + '/') ? path.slice(l.dir.length + 1) : null) : path)
 const toRepo = (l: Link, p: string) => (l.dir ? `${l.dir}/${p}` : p)
 
-/** A repository file the project keeps: inside the folder, a name TeXLoom accepts, not build output, not too big. */
+/** A repository file the project keeps: inside the folder, a name TeXLoom accepts, not build output, not too big
+ *  (as far as the host says: GitLab doesn't, so its files are checked once fetched). */
 function kept(l: Link, path: string, size: number): string | null {
   const p = inDir(l, path)
   return p && cleanPath(p) === p && !BUILD.test(p) && size <= MAX ? p : null
@@ -213,25 +188,26 @@ async function shaOfMine(r: Replica, f: Mine, cache: ReturnType<typeof shaCache>
 
 export interface PullResult { commit: string | null; files: string[]; clash: string[] }
 
-/** Bring GitHub's new commits into the project. With `oursWins`, where both changed the same
+/** Bring the repository's new commits into the project. With `oursWins`, where both changed the same
  *  thing the project's version stays (and goes up with the next send) instead of nothing coming in. */
 export async function pull(r: Replica, a: Account, by: string, oursWins = false, still: () => boolean = () => true): Promise<PullResult> {
   const link = linkOf(r)
-  if (!link) throw new GitHubError(t('This project isn’t linked to GitHub.'))
+  if (!link) throw notLinked()
   if (!approved(r, link)) throw notApproved()
-  const c = await headOf(a, link.repo, link.branch)
+  const f = forge(a)
+  const c = await f.headOf(link.repo, link.branch)
   if (!c || c === link.head) return { commit: c, files: [], clash: [] }
   if (c === link.blocked && !oursWins) return { commit: c, files: [], clash: link.clash ?? [] }
-  const none = { tree: '', files: new Map<string, Entry>() }
-  const theirs = await filesAt(a, link.repo, c)
-  const base = link.head ? await filesAt(a, link.repo, link.head).catch((e) => {
-    if (e instanceof GitHubError && e.status === 404) return none // history rewritten: no base
+  const none: Tree = { tree: '', files: new Map<string, Entry>() }
+  const theirs = await filesAt(f, link, c)
+  const base = link.head ? await filesAt(f, link, link.head).catch((e) => {
+    if (e instanceof GitError && e.status === 404) return none // history rewritten: no base
     throw e
   }) : none
   const cache = shaCache(r)
   const mine = projectFiles(r, link)
 
-  // 1. decide each file GitHub changed since `head`: take GitHub's, merge, or clash
+  // 1. decide each file the repository changed since `head`: take its version, merge, or clash
   type Step = { rel: string; path: string; was: Mine | null; take?: Uint8Array | null; merge?: { base: string; theirs: string } }
   const steps: Step[] = [], clash: string[] = []
   for (const path of new Set([...base.files.keys(), ...theirs.files.keys()])) {
@@ -242,9 +218,13 @@ export async function pull(r: Replica, a: Account, by: string, oursWins = false,
     const m = mine.get(path) ?? null
     const sha = m ? await shaOfMine(r, m, cache) : null
     if (sha === (th?.sha ?? null)) continue // the project already has it
-    if (sha === (b?.sha ?? null)) { steps.push({ rel, path, was: m, take: th ? await blob(a, link.repo, th.sha) : null }); continue } // unchanged here
+    if (sha === (b?.sha ?? null)) { // unchanged here
+      const take = th ? await f.blob(link.repo, th.sha) : null
+      if (take && take.length > MAX) continue
+      steps.push({ rel, path, was: m, take }); continue
+    }
     if (m && 'text' in m && b && th) {
-      const bt = isText(rel, await blob(a, link.repo, b.sha)), tt = isText(rel, await blob(a, link.repo, th.sha))
+      const bt = isText(rel, await f.blob(link.repo, b.sha)), tt = isText(rel, await f.blob(link.repo, th.sha))
       if (bt !== null && tt !== null) { steps.push({ rel, path, was: m, merge: { base: bt, theirs: tt } }); continue }
     }
     clash.push(rel) // changed on both sides (or deleted on one), and not text that merges
@@ -304,61 +284,55 @@ export async function pull(r: Replica, a: Account, by: string, oursWins = false,
 // ---- sending changes out ---------------------------------------------------------------
 
 /** Send the project's changes since `head` as one commit. Null if nothing changed; throws a
- *  GitHubError with status 422 if GitHub moved meanwhile (bring that in first). */
-export async function push(r: Replica, a: Account, by: string, still: () => boolean = () => true): Promise<{ commit: string; files: string[] } | null> {
+ *  GitError with status MOVED if the branch moved meanwhile (bring that in first). `onTop` false:
+ *  someone pushed just as it went up, so it landed on top of theirs; `head` stays, and bringing in
+ *  next sorts that out. */
+export async function push(r: Replica, a: Account, by: string, still: () => boolean = () => true): Promise<{ commit: string; files: string[]; onTop: boolean } | null> {
   const link = linkOf(r)
-  if (!link) throw new GitHubError(t('This project isn’t linked to GitHub.'))
+  if (!link) throw notLinked()
   if (!approved(r, link)) throw notApproved()
-  const repo = `/repos/${enc(link.repo)}`
-  const base = link.head ? await filesAt(a, link.repo, link.head) : { tree: '', files: new Map<string, Entry>() }
+  const f = forge(a)
+  const base: Tree = link.head ? await filesAt(f, link, link.head) : { tree: '', files: new Map<string, Entry>() }
   const cache = shaCache(r)
   const mine = projectFiles(r, link)
-  const entries: { path: string; mode: string; type: 'blob'; sha: string | null }[] = []
+  const changes: Change[] = []
   const names: string[] = []
-  for (const [path, f] of mine) {
-    const sha = await shaOfMine(r, f, cache)
+  for (const [path, m] of mine) {
+    const sha = await shaOfMine(r, m, cache)
     const was = base.files.get(path)
     if (was?.sha === sha) continue
-    const data = 'text' in f ? new TextEncoder().encode(f.text) : await r.getBlob(f.h)
-    entries.push({ path, mode: was?.mode ?? '100644', type: 'blob', sha: (await call(a, 'POST', `${repo}/git/blobs`, { content: b64(data), encoding: 'base64' })).sha })
+    changes.push({ path, was, data: 'text' in m ? new TextEncoder().encode(m.text) : await r.getBlob(m.h) })
     names.push(inDir(link, path)!)
   }
   for (const [path, e] of base.files) {
     if (mine.has(path) || !kept(link, path, e.size)) continue
-    entries.push({ path, mode: e.mode, type: 'blob', sha: null })
+    changes.push({ path, was: e, data: null })
     names.push(inDir(link, path)!)
   }
-  if (!entries.length || !still()) return null
+  if (!changes.length || !still()) return null
   const shown = names.sort().slice(0, 3).join(', ') + (names.length > 3 ? ` (+${names.length - 3})` : '')
-  const tree = await call(a, 'POST', `${repo}/git/trees`, { ...(base.tree ? { base_tree: base.tree } : {}), tree: entries })
-  const commit = await call(a, 'POST', `${repo}/git/commits`, {
-    message: `TeXLoom: ${shown}\n\nSent from the TeXLoom project by ${by}.`, tree: tree.sha, parents: link.head ? [link.head] : [] })
-  if (link.head) await call(a, 'PATCH', `${repo}/git/refs/heads/${enc(link.branch)}`, { sha: commit.sha, force: false })
-  else await call(a, 'POST', `${repo}/git/refs`, { ref: `refs/heads/${link.branch}`, sha: commit.sha })
-  if (linkOf(r)?.head === link.head) setLink(r, { ...linkOf(r)!, head: commit.sha, blocked: null, clash: [], by, at: Date.now() })
-  return { commit: commit.sha, files: names }
-}
-
-/** An empty repository takes no commits through the git API: its first has to go through the
- *  contents API, one file at a time. This sends the main file (the rest follows with push). */
-export async function firstCommit(r: Replica, a: Account, l: Link): Promise<string> {
-  if (!approved(r, l)) throw notApproved()
-  const mine = [...projectFiles(r, l)].filter(([, f]) => 'text' in f)
-  const [path, f] = mine.find(([p]) => p.endsWith('main.tex')) ?? mine[0] ?? [toRepo(l, 'README.md'), { text: '' }]
-  const j = await call(a, 'PUT', `/repos/${enc(l.repo)}/contents/${enc(path)}`, {
-    message: 'TeXLoom: first commit', content: b64(new TextEncoder().encode((f as { text: string }).text)), branch: l.branch })
-  return String(j.commit.sha)
+  const c = await f.commit(link.repo, link.branch, { ...base, sha: link.head }, changes, `TeXLoom: ${shown}\n\nSent from the TeXLoom project by ${by}.`)
+  if (c.onTop && linkOf(r)?.head === link.head) setLink(r, { ...linkOf(r)!, head: c.sha, blocked: null, clash: [], by, at: Date.now() })
+  return { commit: c.sha, files: names, onTop: c.onTop }
 }
 
 /** Link the project to a repository. If the branch has commits, the two are combined now:
  *  files only on one side end up on both, and where both have a file but it differs, `prefer`
- *  says whose stays ('project': it goes up with the first send). Returns how many files came in. */
+ *  says whose stays ('project': it goes up with the first send). A branch that doesn't exist yet
+ *  starts from the repository's main branch. Returns how many files came in. */
 export async function linkRepo(r: Replica, a: Account, by: string, repo: string, branch: string, dir: string, prefer: 'repo' | 'project'): Promise<number> {
-  const l: Link = { repo, branch, dir, head: null, by, at: Date.now(), blocked: null, clash: [] }
+  const where = kindOf(a) === 'github' ? {} : { kind: kindOf(a), host: hostOf(a) }
+  const l: Link = { ...where, repo, branch, dir, head: null, by, at: Date.now(), blocked: null, clash: [] }
   approve(r, l) // linking it is approving it
-  const c = await headOf(a, repo, branch)
-  if (!c) { setLink(r, l); return 0 } // an empty repository or a new branch: the project goes up on the first send
-  const theirs = await filesAt(a, repo, c)
+  const f = forge(a)
+  let c = await f.headOf(repo, branch)
+  if (!c) {
+    const info = await f.repoInfo(repo)
+    const from = info.empty ? null : await f.headOf(repo, info.defaultBranch)
+    if (from) { await f.branchFrom(repo, branch, from); c = from }
+  }
+  if (!c) { setLink(r, l); return 0 } // an empty repository: the project goes up on the first send
+  const theirs = await filesAt(f, l, c)
   const cache = shaCache(r), mine = projectFiles(r, l)
   const take: [string, Uint8Array][] = []
   for (const [path, e] of theirs.files) {
@@ -366,7 +340,8 @@ export async function linkRepo(r: Replica, a: Account, by: string, repo: string,
     if (!rel) continue
     const m = mine.get(path)
     if (m && (prefer === 'project' || (await shaOfMine(r, m, cache)) === e.sha)) continue
-    take.push([rel, await blob(a, repo, e.sha)])
+    const data = await f.blob(repo, e.sha)
+    if (data.length <= MAX) take.push([rel, data])
   }
   const uploads = new Map<string, string>()
   for (const [rel, d] of take) if (isText(rel, d) === null) uploads.set(rel, await r.putBlob(d))
@@ -403,7 +378,7 @@ export function startGitHub(r: Replica, me: () => string, onChange: () => void) 
   const state: SyncState = { role: 'off', holder: null, error: null, busy: false, lastPull: 0, lastPush: 0 }
   let seen = Date.now() // when the lease last changed, by this tab's clock
   // a send is due at the start, when the link changes, and after edits (a send that finds nothing makes no commit)
-  let renewed = 0, claimed = 0, changedAt = 0, dirty = true, nextPull = 0
+  let renewed = 0, claimed = 0, changedAt = 0, dirty = true, nextPull = 0, moved = 0
   const lease = () => { const l = r.meta.get('githubLease') as Lease | undefined; return l && typeof l.id === 'string' ? l : null }
   r.meta.observe((ev) => {
     if (ev.keysChanged.has('githubLease')) seen = Date.now()
@@ -418,7 +393,7 @@ export function startGitHub(r: Replica, me: () => string, onChange: () => void) 
   const mine = () => lease()?.id === id
 
   async function round(force = false) {
-    const a = githubAccount.get(), link = linkOf(r)
+    const link = linkOf(r), a = accountFor(link)
     // a link this browser's user didn't make or approve isn't synced from here (see approved())
     if (!a || !link || !approved(r, link) || !r.keys.writable || r.deletedAt) { if (mine()) r.meta.delete('githubLease'); set({ role: 'off', holder: null }); return }
     const l = lease()
@@ -445,14 +420,15 @@ export function startGitHub(r: Replica, me: () => string, onChange: () => void) 
       const cur = linkOf(r)
       if (cur && !cur.blocked && (force || (dirty && Date.now() - changedAt >= QUIET))) {
         dirty = false
-        try { if (await push(r, a, me(), mine)) state.lastPush = Date.now() }
-        catch (e) {
-          if (!(e instanceof GitHubError)) throw e
-          if (e.status === 409 && !cur.head) { // an empty repository: its first commit, then the rest
-            setLink(r, { ...cur, head: await firstCommit(r, a, cur) })
-            if (await push(r, a, me(), mine)) state.lastPush = Date.now()
-          } else if (e.status === 422) { dirty = true; nextPull = 0 } // GitHub moved: bring that in first
-          else throw e
+        try {
+          const sent = await push(r, a, me(), mine)
+          if (sent) state.lastPush = Date.now()
+          if (sent && !sent.onTop) { dirty = true; nextPull = 0 } // landed on top of someone's push: bring theirs in
+          moved = 0
+        } catch (e) {
+          // the branch moved: bring that in first (unless that keeps happening: then say so)
+          if (!(e instanceof GitError) || e.status !== MOVED || ++moved > 3) { moved = 0; throw e }
+          dirty = true; nextPull = 0
         }
       }
       set({ error: null })

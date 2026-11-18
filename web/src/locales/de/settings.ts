@@ -118,6 +118,7 @@ const de: Catalog = {
   "Yours, in every project in this browser.": "Ihre, in jedem Projekt in diesem Browser.",
   "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "Für Mitarbeitende sichtbar: neben Ihrem Cursor, bei Kommentaren und Vorschlägen und in „Wer hat das geschrieben“.",
   'Only the project’s owner can change this.': 'Nur der Eigentümer des Projekts kann dies ändern.',
+  "Git repositories": "Git-Repositorys",
 }
 
 export default de

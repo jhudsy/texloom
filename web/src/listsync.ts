@@ -14,7 +14,7 @@ import { projects } from './projects'
 import { creationCode } from './replica'
 import { myName, NAME_CHANGED } from './myname'
 import { zoteroAccount } from './zotero'
-import { githubAccount } from './github'
+import { githubAccount, otherAccounts } from './github'
 import type { AccountStore } from './accounts'
 import { tags } from './tags'
 import { normalServer } from './servers'
@@ -165,7 +165,7 @@ async function exchangeTags(secret: Uint8Array, list: ListDoc): Promise<boolean>
 // ---- settings: the creation code follows the list -----------------------------------------
 const settingsKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 'texloom list settings'))
 
-/** Settings that follow the list: your name, and Zotero and GitHub accounts, each with when
+/** Settings that follow the list: your name, and Zotero and git hosts' accounts, each with when
  *  it was set (one from before that was recorded counts as older than any that was). */
 /** An account (accounts.ts) as a setting: JSON, '' for none. */
 const accountSetting = (s: AccountStore<object>) => ({
@@ -178,6 +178,7 @@ const SETTINGS: Record<string, { get(): string; at(): number; set(v: string, at:
   name: { get: () => myName.get(), at: () => myName.at(), set: (v, at) => myName.set(v, at, true) },
   zotero: accountSetting(zoteroAccount),
   github: accountSetting(githubAccount),
+  git: accountSetting(otherAccounts), // GitLab, Gitea and Forgejo accounts
 }
 
 /** SETTINGS, with a code:<server> entry for each server whose creation code this browser holds or

@@ -69,7 +69,7 @@ survives only on devices, so keep a folder copy or download a `.zip`.
 A project's **⚙ Settings** has tabs: **Project** (main file, engine, bibliography, spelling
 language, and removing it: shared with everyone in it), **Compiling** and **Editor** (this device),
 **Sync & storage** (syncing on this device; the server's copy and creation code; a copy in a folder),
-**Integrations** (Zotero and GitHub; your accounts are yours, the links are the project's) and **You** (your name
+**Integrations** (Zotero and git repositories; your accounts are yours, the links are the project's) and **You** (your name
 and the interface language, in every project). It opens on the tab you used last.
 
 The start page lists the projects you've opened **in that browser** (your name and the
@@ -529,8 +529,8 @@ sees the rewritten files as your edits and shares them. (History can undo it.) S
 - Do rebases and conflict resolution in the separate checkout: collaborators' edits can
   arrive in the synced folder mid-operation and look like unexpected changes to git.
 
-**Keeping a GitHub repository in step automatically** (like Overleaf's GitHub sync, but
-continuous): run the helper with `--git` on a folder that is also a git clone, on any
+**Keeping a git repository in step automatically** (like Overleaf's GitHub sync, but
+continuous, and with any host: GitHub, GitLab, Bitbucket, your own): run the helper with `--git` on a folder that is also a git clone, on any
 computer that stays on (a desktop, a server, a Raspberry Pi).
 
 ```bash
@@ -559,32 +559,41 @@ existing project: `texloom clone '<link>' ~/papers/demo`, then in that folder `g
 once.) Lines that ask to run programs, arriving from git, are pointed out as they are for
 collaborators' changes.
 
-**Keeping a GitHub repository in step from the browser** (nothing to install, nothing left
-running): project ⚙ Settings → **Integrations** → GitHub.
-- **Connect** once with a GitHub token: a fine-grained token (github.com → Settings →
-  Developer settings → Personal access tokens) for just the repositories you'll use, with
-  *Contents: Read and write*. It stays in your browser, and with a project list it follows the
-  list, encrypted; it never goes into a project.
-- **Link a repository…**: the repository (owner/name or its address), the branch, and
-  optionally a folder in it that holds the project. Files only in the repository come into the
-  project and files only in the project go to the repository; where both have a file that
-  differs, you choose whose version stays. An empty repository gets the project as its first
-  commits.
+**Keeping a git repository in step from the browser** (nothing to install, nothing left
+running): project ⚙ Settings → **Integrations** → Git repositories. It works with **GitHub**,
+**GitLab** (gitlab.com or your own) and **Gitea or Forgejo** (Codeberg, gitea.com or your own).
+- **Connect** once per service with a token. It stays in your browser, and with a project list
+  it follows the list, encrypted; it never goes into a project, and it's only ever sent to its
+  own service.
+  - GitHub: a fine-grained token (github.com → Settings → Developer settings → Personal access
+    tokens) for just the repositories you'll use, with *Contents: Read and write*.
+  - GitLab: a personal access token with the *api* scope (GitLab has no narrower scope that can
+    make commits), or a project access token to limit it to one repository.
+  - Gitea or Forgejo: an access token (Settings → Applications) with *repository: read and
+    write* and *user: read*. Codeberg and gitea.com allow this from the browser; a server of your
+    own needs its admin to turn on CORS (`[cors] ENABLED = true` in its `app.ini`).
+- **Link a repository…**: the service, the repository (owner/name, a GitLab group/…/name, or
+  its address), the branch (a new one starts from the main branch), and optionally a folder in it
+  that holds the project. Files only in the repository come into the project and files only in
+  the project go to the repository; where both have a file that differs, you choose whose version
+  stays. An empty repository gets the project as its first commits.
 - **Then, while the project is open:** new commits come in every minute, merged with
   collaborators' edits (each file three ways); the project's changes go up as one commit once
   it has been quiet for 2 minutes. **Sync now** does both at once.
-- **Clashes:** if GitHub and the project changed the same lines, nothing comes in, and Settings
-  says which files. Make one side match the other, or press **Keep the project's version**,
-  which brings in the rest of GitHub's changes and sends the project's version of the clashing
-  lines.
+- **Clashes:** if the repository and the project changed the same lines, nothing comes in, and
+  Settings says which files. Make one side match the other, or press **Keep the project's
+  version**, which brings in the rest of the repository's changes and sends the project's
+  version of the clashing lines.
 - **One at a time:** everyone in the project sees the link, and it syncs from the browser of
-  whoever has connected GitHub (or the TeXLoom app, below), one copy at a time, so the same
+  whoever has connected that service (or the TeXLoom app, below), one copy at a time, so the same
   commit is never brought in twice. Settings says who it is; if they close the project, another
   takes over within two minutes.
 - **The same repository in a folder too:** turn on *Keep this folder's git repository in step*
   (`--git`) for that folder in the TeXLoom app. It then takes turns with browsers. Pulling into
   a synced clone of the linked repository by hand, while a browser syncs it, could bring the
   same changes in twice; the app warns about such a folder.
+- **Bitbucket** isn't supported from the browser (its API doesn't say which files changed
+  without downloading them all); use the `--git` bridge above, which works with any host.
 
 ### Agents (MCP)
 
@@ -764,7 +773,7 @@ it runs a database of its own from the folder, nothing installed as a service.
 | `web/src/merges.ts`, `texloom/merges.py` | notes paragraphs two people changed while apart, to check |
 | `web/src/latexlog.ts`, `synctex.ts` | log parsing into problems; SyncTeX |
 | `web/src/templates.ts`, `references.ts`, `pasteimage.ts` | templates and import; DOI/arXiv references; pasted images |
-| `web/src/zotero.ts`, `github.ts` (and `*ui.ts`) | integrations: a `.bib` file from Zotero; keeping a GitHub repository in step |
+| `web/src/zotero.ts`, `github.ts`, `forges.ts` (and `*ui.ts`) | integrations: a `.bib` file from Zotero; keeping a git repository (GitHub, GitLab, Gitea, Forgejo) in step |
 | `web/src/sharing.ts`, `crypto.ts` | links, personal links, revocation, moving to new keys |
 | `web/src/foldersync.ts` | folder sync from the browser (File System Access API) |
 | `web/sw-template.js` | service worker (offline app) |

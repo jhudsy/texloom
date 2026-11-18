@@ -793,33 +793,52 @@ refresh it. A refresh exports the collection's top-level items as BibTeX or BibL
 request, using `Total-Results`) and applies the difference to the file (`applyText`), directly
 even in suggest mode, as the file is generated. Keys are Zotero's own.
 
-## GitHub
+## Git repositories (GitHub, GitLab, Gitea, Forgejo)
 
-`web/src/github.ts` keeps a project in step with a GitHub repository through api.github.com,
-from the browser. As for Zotero, the **account** (a token and its login) is the person's
-(`localStorage`, and the project list's settings entry `github`); the **link** is the
-project's: `meta.github = {repo, branch, dir, head, by, at, blocked, clash}`, where `head` is
-the commit last brought in or sent, the base for the next three-way merge, whoever syncs.
+`web/src/github.ts` keeps a project in step with a git repository from the browser, through
+the host's own API (`web/src/forges.ts`: GitHub, GitLab, and Gitea or Forgejo, such as Codeberg;
+the file names are from when GitHub was the only one). A browser can't speak git's own protocol to
+these hosts (they don't allow it from other sites), but their APIs do allow it (CORS; a
+self-hosted Gitea or Forgejo only once its admin turns that on). Each host is an adapter with the
+same few calls: whose token, a branch's commit, a commit's files with their git blob ids, a blob,
+start a branch, and commit on top of a known parent. Bitbucket's API gives no blob ids, so it
+isn't one; the app's git bridge works with any host.
+
+As for Zotero, the **account** (a token and its login, one per host) is the person's
+(`localStorage`; GitHub's under `texloom.github` and the list's settings entry `github`, others
+under `texloom.gitAccounts` and the entry `git`); the **link** is the project's:
+`meta.github = {kind?, host?, repo, branch, dir, head, by, at, blocked, clash}` (no `kind`:
+GitHub), where `head` is the commit last brought in or sent, the base for the next three-way
+merge, whoever syncs. A token is only ever sent to its own host: a link to a host this browser
+has no account for isn't synced from here.
 
 Any collaborator can change the link, and syncing uses the browser's own token, so a browser syncs
 only a link its user made or approved there (`texloom.githubApproved.<project>` in `localStorage`:
-repository, branch and folder). A link someone else set shows "Approve and sync" instead; until
-then nothing is fetched from or sent to GitHub with this browser's token.
+host, repository, branch and folder; one without a host is GitHub). A link someone else set shows
+"Approve and sync" instead; until then nothing is fetched from or sent to the host with this
+browser's token.
 
-- **Bringing in** (every minute): for each kept file GitHub changed between `head` and the
-  branch's commit: if the project has GitHub's version already, nothing; if the project still
-  has `head`'s version, GitHub's; if both changed a text file, `merge3Strict` (diff.ts: null
+- **Bringing in** (every minute): for each kept file the repository changed between `head` and
+  the branch's commit: if the project has its version already, nothing; if the project still
+  has `head`'s version, the repository's; if both changed a text file, `merge3Strict` (diff.ts: null
   where both changed the same lines differently); anything else clashes. One clash and nothing
   comes in: `blocked` and `clash` record the commit and files until the branch moves on, or
   someone keeps the project's version (`merge3`, ours where they clash). The decisions are
   made first (fetching what they need), then applied in one change, after checking that
   neither `head` nor the files changed meanwhile.
-- **Sending** (after 2 minutes quiet, or Sync now): files whose git blob id (SHA-1 of
-  `blob <size>\0…`) differs from `head`'s tree go up as blobs, then one tree (`base_tree` =
-  `head`'s, deletions as `sha: null`), one commit (parent `head`) and a fast-forward ref update.
-  GitHub having moved (422) means bringing that in first. An empty repository takes no git-API
-  writes (409): its first commit goes through the contents API, then the rest as above.
-- **Kept files:** inside `dir`, names `cleanPath` accepts, not build output, at most 50 MB.
+- **Sending** (after 2 minutes quiet, or Sync now): the files whose git blob id (SHA-1 of
+  `blob <size>\0…`) differs from `head`'s tree go up as one commit whose parent is `head`.
+  GitHub: blobs, one tree (`base_tree` = `head`'s, deletions as `sha: null`), the commit, and a
+  fast-forward ref update, which fails if the branch moved (then bring that in first); an empty
+  repository takes no git-API writes, so its first file goes through the contents API. GitLab
+  (one commit of file actions) and Gitea/Forgejo (one change-files call, each update or deletion
+  naming the blob it replaces) commit on top of the branch as it is: TeXLoom checks the branch is
+  still at `head` just before. If someone pushes in that moment, the commit lands on top of theirs
+  (its parent isn't `head`): `head` then stays, and the next bringing-in finds the project's files
+  already there and brings in the rest. A branch that doesn't exist yet is started from the
+  default branch when linking.
+- **Kept files:** inside `dir`, names `cleanPath` accepts, not build output, at most 50 MB
+  (GitLab doesn't list sizes, so its files are checked once fetched).
   Repository files TeXLoom wouldn't keep are left alone (sends build on `base_tree`).
 - **One at a time:** two copies merging the same commit at once would insert its text twice
   (Yjs keeps both insertions). `meta.githubLease = {id, by, n}` names the copy that syncs; it
@@ -829,9 +848,10 @@ then nothing is fetched from or sent to GitHub with this browser's token.
   resumes) and, for the TeXLoom app, per folder (`.texloom/git-device`). A closing tab gives
   the lease up if it can.
 - **The app's git bridge** (`texloom/gitsync.py`, `--git`) takes part when its folder's
-  upstream is the linked repository and branch (and `dir` is empty): it brings in, commits and
+  upstream is the linked repository and branch (and `dir` is empty; its remote address, https or
+  ssh, names the link's host and repository): it brings in, commits and
   pushes only while holding the lease, and records the commit it matches as `head`. While it
-  waits, collaborators' changes (including those a browser brought in from GitHub) reach its
+  waits, collaborators' changes (including those a browser brought in from the host) reach its
   folder through TeXLoom as usual; when its turn comes, git merges the identical change once.
   A synced folder that is a plain clone of the linked repository, without `--git`, gets a
   warning: pulling there by hand while a browser syncs could bring changes in twice.

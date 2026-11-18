@@ -118,6 +118,7 @@ const es: Catalog = {
   "Yours, in every project in this browser.": "Suyos, en todos los proyectos de este navegador.",
   "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "Visible para sus colaboradores: junto a su cursor, en comentarios y sugerencias, y en «Quién escribió esto».",
   'Only the project’s owner can change this.': 'Solo el propietario del proyecto puede cambiar esto.',
+  "Git repositories": "Repositorios git",
 }
 
 export default es

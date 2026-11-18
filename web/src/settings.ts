@@ -230,7 +230,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       whose(t('Your accounts are yours alone and stay with you; what a project links to is shared with everyone in it.')),
       h('h4', {}, 'Zotero'),
       zoteroSection(r, () => prefs.name, w),
-      h('h4', {}, 'GitHub'),
+      h('h4', {}, t('Git repositories')),
       githubSection(r, () => prefs.name, w),
     ] },
     you: { label: t('You'), body: () => [

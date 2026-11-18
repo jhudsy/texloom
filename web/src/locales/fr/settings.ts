@@ -16,7 +16,6 @@ const fr: Catalog = {
     'Modifiez les fichiers avec l’outil de votre choix (Claude Code, vim, VS Code) ; les modifications vont dans les deux sens. Installation : voir le README.',
   'already downloaded on this browser': 'déjà téléchargé dans ce navigateur',
   'one-time download of ≈125 MB, shared by all projects': 'téléchargement unique d’environ 125 Mo, commun à tous les projets',
-
   // setup dialog
   'Shown to collaborators': 'Visible par les collaborateurs',
   'Open “{{name}}”': 'Ouvrir « {{name}} »',
@@ -43,7 +42,6 @@ const fr: Catalog = {
   'Manual': 'Manuelle',
   'Keep changes on this device until you press Sync.': 'Garder les modifications sur cet appareil jusqu’à ce que vous cliquiez sur Synchroniser.',
   'Start': 'Commencer',
-
   // settings dialog: server storage
   'needs code': 'code requis',
   'quota full': 'quota épuisé',
@@ -63,7 +61,6 @@ const fr: Catalog = {
     'Supprimer la copie chiffrée du serveur ? Les modifications ne parviendront aux collaborateurs que lorsque vous serez en ligne en même temps.',
   'Cleared': 'Supprimé',
   'Remove downloaded TeX engine': 'Supprimer le moteur TeX téléchargé',
-
   // settings dialog: project
   'Settings': 'Paramètres',
   'Project': 'Projet',
@@ -88,7 +85,6 @@ const fr: Catalog = {
   'Server storage': 'Stockage sur le serveur',
   'Enter creation code…': 'Saisir un code de création…',
   'Codes come from whoever runs this server.': 'Les codes sont fournis par la personne qui gère ce serveur.',
-
   // settings dialog: this device
   'Live sync': 'Synchronisation en direct',
   'Manual sync': 'Synchronisation manuelle',
@@ -117,7 +113,6 @@ const fr: Catalog = {
   'Choose a folder…': 'Choisir un dossier…',
   'Or, to keep it in sync without a browser (and compile with your own TeX):':
     'Ou, pour le synchroniser sans navigateur (et compiler avec votre propre TeX) :',
-
   // remove
   'Remove': 'Supprimer',
   'code expired': 'code expiré',
@@ -150,6 +145,7 @@ const fr: Catalog = {
   "Yours, in every project in this browser.": "À vous, dans tous les projets de ce navigateur.",
   "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "Visible par vos collaborateurs : à côté de votre curseur, sur les commentaires et suggestions, et dans « Qui a écrit ceci ».",
   'Only the project’s owner can change this.': 'Seul le propriétaire du projet peut modifier ce réglage.',
+  "Git repositories": "Dépôts git",
 }
 
 export default fr

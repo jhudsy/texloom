@@ -118,6 +118,7 @@ const zh: Catalog = {
   "Yours, in every project in this browser.": "你的设置，适用于此浏览器中的所有项目。",
   "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "对协作者可见：显示在你的光标旁、评论和建议中，以及“谁写的”中。",
   'Only the project’s owner can change this.': '只有项目所有者可以更改此设置。',
+  "Git repositories": "Git 仓库",
 }
 
 export default zh
