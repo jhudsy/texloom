@@ -77,7 +77,7 @@ class Admin:
         r, st = self.relay, self.relay.store
         r.codes._load()
         e = html.escape
-        modes, rows, apps = await st.admin_rows()
+        modes, rows, apps, snaps = await st.admin_rows()
         online = {p: len(ws) for p, ws in r.rooms.items() if ws}
         label = {c: lab for c, (_, lab) in r.codes.codes.items()}
         label["default"] = "default (no code)"
@@ -93,10 +93,17 @@ class Admin:
             days = r.codes.lapsed_since(c)
             return f"<td>{u.isoformat()}</td>" if days is None else f"<td><b>expired</b> {days} day{'s' * (days != 1)} ago</td>"
 
+        def snapshot_cell(n: int | None) -> str:
+            """A project's whole history, compressed: snapshots stop at 50 MB (issue #18)."""
+            if n is None:
+                return "<span class=muted>—</span>"
+            return "<b>over 12 MB</b>" if n < 200 else _size(n)  # (a reference to an upload: a real snapshot is bigger)
+
         projects = sorted(rows, key=lambda x: -st.usage.get(x[0], 0))
         prow = "".join(
             f"<tr><td><code>{e(p[:10])}…</code></td><td>{e(code_name(o))}</td>"
-            f"<td class=n>{_size(st.usage.get(p, 0))}</td><td>{'relay-only' if modes.get(p) else ('evicted' if ev and not st.usage.get(p) else 'stored')}</td>"
+            f"<td class=n>{_size(st.usage.get(p, 0))}</td><td class=n>{snapshot_cell(snaps.get(p))}</td>"
+            f"<td>{'relay-only' if modes.get(p) else ('evicted' if ev and not st.usage.get(p) else 'stored')}</td>"
             f"<td>{_ago(created)}</td><td>{_ago(st.seen.get(p, seen))}</td><td class=n>{online.get(p, 0) or ''}</td></tr>"
             for p, created, o, seen, ev in projects[:500])
         owners: dict[str, list[str]] = {}
@@ -146,7 +153,8 @@ renew one: <code>--renew-code CODE --months 12</code>.</p>
 "No minimum version: every app may connect."} Set one with <code>--min-version X.Y.Z</code> (or <code>TEXLOOM_MIN_VERSION</code>)
 once the versions you'd turn away no longer connect.</p>
 <h2>Projects (largest first{", first 500" if len(rows) > 500 else ""})</h2>
-<table><tr><th>Project id</th><th>Created with</th><th class=n>Stored</th><th>State</th><th>Created</th><th>Last opened</th><th class=n>Online</th></tr>{prow}</table>
+<p class=muted>Snapshot: the project's whole editing history, compressed. Over 12 MB it's stored as an upload; at 50 MB snapshots stop and the log grows instead (issue #18).</p>
+<table><tr><th>Project id</th><th>Created with</th><th class=n>Stored</th><th class=n>Snapshot</th><th>State</th><th>Created</th><th>Last opened</th><th class=n>Online</th></tr>{prow}</table>
 <p class=muted>Contents and names are end-to-end encrypted: the server can’t see them.</p>
 </body></html>"""
         return web.Response(text=body, content_type="text/html",

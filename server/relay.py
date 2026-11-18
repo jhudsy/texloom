@@ -789,6 +789,8 @@ class Relay:
                     if len(raw.data) > FRAME_LIMITS.get(t, 4 * KiB):
                         raise BadMessage(f"{t} frame too large")
                     await self.handle(project, ws, conn, t, msg)
+                except ConnectionError:  # it went while its message was handled (an answer had nowhere to go)
+                    break
                 except (BadMessage, ValueError, TypeError, KeyError, OverflowError, binascii.Error, RecursionError) as e:
                     await ws.send_json({"t": "err", "m": f"bad message: {e}"[:200]})
                 except Exception:

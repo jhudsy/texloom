@@ -620,13 +620,17 @@ class Store:
                                 "ON CONFLICT (app, version) DO UPDATE SET n = clients.n + 1, seen = excluded.seen",
                                 app, version, time.time())
 
-    async def admin_rows(self) -> tuple[dict[str, bool], list, list]:
-        """Storage modes, project registrations, and the apps that connect."""
+    async def admin_rows(self) -> tuple[dict[str, bool], list, list, dict[str, int]]:
+        """Storage modes, project registrations, the apps that connect, and each project's latest
+        snapshot's size (its log entry: a snapshot too big for a message is an upload, and its
+        entry a short reference to it)."""
         async with self.pool.acquire() as c:
             modes = {r["project"]: r["relay"] for r in await c.fetch("SELECT project, relay FROM mode")}
             projects = [tuple(r) for r in await c.fetch("SELECT project, created, owner, seen, evicted FROM projects")]
             apps = [tuple(r) for r in await c.fetch("SELECT app, version, n, seen FROM clients ORDER BY seen DESC LIMIT 200")]
-        return modes, projects, apps
+            snaps = {r["project"]: r["n"] for r in await c.fetch(
+                "SELECT DISTINCT ON (project) project, octet_length(data) AS n FROM log WHERE snap ORDER BY project, seq DESC")}
+        return modes, projects, apps, snaps
 
 
 def redact(dsn: str) -> str:
