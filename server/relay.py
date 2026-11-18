@@ -924,10 +924,9 @@ class Relay:
         elif t == "mode":
             mode, ts, sig = field(msg, "m", str), field(msg, "ts", int), b64d(field(msg, "s", str))
             who = signer(project, f"mode:{mode}:{ts}".encode(), sig)
-            # Anyone with edit access may turn server storage on; only the owner may turn it off,
-            # since that deletes the server's copy.
-            if (mode not in ("server", "relay") or abs(time.time() - ts) > MODE_SKEW or who is None
-                    or who in await self.store.revoked(project) or (mode == "relay" and who != "owner")):
+            # Only the owner chooses where the project is kept: turning storage off deletes the
+            # server's copy, and turning it on stores the project against the owner's allowance.
+            if mode not in ("server", "relay") or abs(time.time() - ts) > MODE_SKEW or who != "owner":
                 await ws.send_json({"t": "err", "code": "mode-rejected", "m": "rejected mode change"})
                 return
             if self.store.owner(project) is None and not await self.store.has_mode(project) and not self.store.meta_budget():
