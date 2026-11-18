@@ -48,9 +48,8 @@ Decided to wait; each says when to revisit it.
 - **[Sync-only projects ask one peer for a file](https://github.com/jhudsy/texloom/issues/16)**, not
   every peer; when relay traffic is high with few people connected.
 - **[Keep documents from outgrowing snapshots](https://github.com/jhudsy/texloom/issues/18)**:
-  every app reads compressed snapshots (from 0.4.31). Next, writing them: once apps older than
-  0.4.31 have stopped connecting (the admin page shows which do), set `min_version = "0.4.31"` and
-  switch writing on. Then, if needed, a true checkpoint: when real projects' documents near 50 MB.
+  compressed snapshots are written since 0.4.36 (read since 0.4.31), about a third the size. Next,
+  if needed, a true checkpoint: when real projects' snapshots near 50 MB.
 - **[One-click desktop updates](https://github.com/jhudsy/texloom/issues/10)**: once the apps are
   signed.
 - **[Direct browser-to-browser sync (WebRTC)](https://github.com/jhudsy/texloom/issues/11)**: small

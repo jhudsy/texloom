@@ -159,9 +159,13 @@ compact by itself: it can't read the data.)
 *packed*: `\x00TLz` followed by the update compressed with zlib, before it's encrypted
 (`texloom/packing.py`, `web/src/packing.ts`; `scripts/packing-vectors.json` checks that both read
 the same cases). Data counts as packed only if it also decompresses cleanly, so a plain update
-is never taken for one. Every app reads packed updates; none writes them yet. Writing starts once
-apps too old to read them can no longer connect (`min_version`), so that no one is handed a
-snapshot they can't read ([#18](https://github.com/jhudsy/texloom/issues/18)).
+is never taken for one. Every app reads packed updates (since 0.4.31) and writes them (since
+0.4.36): snapshots, changes and what a peer catching up is sent, when 64 KiB or more and
+packing makes them smaller ([#18](https://github.com/jhudsy/texloom/issues/18)). A server
+whose apps write them should set `min_version = "0.4.31"`, so an older app is told to update
+rather than handed a snapshot it can't read. Text editing packs to about a third (59–67% saved,
+measured on real LaTeX sources with scattered edits by two people), so a document's whole
+history reaches the 50 MB a snapshot may take only after about 2.7 times as much editing.
 
 **Peer catch-up (Yjs sync step 1/2, relayed):** after `hello`, every replica broadcasts
 `p2p {k:"sv1", sv}`, its state vector. Each writer that receives it replies directly

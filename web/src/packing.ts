@@ -30,6 +30,16 @@ async function through(data: Uint8Array, stream: CompressionStream | Decompressi
   return out
 }
 
+const PACK_FROM = 64 * 1024 // smaller updates (typing) go as they are: little to gain
+
+/** What to send for an update: packed, if it's big enough to be worth it and packing makes it
+ *  smaller; else as it is. As packed() in texloom/packing.py. */
+export async function packed(update: Uint8Array): Promise<Uint8Array> {
+  if (update.length < PACK_FROM) return update
+  const p = await pack(update)
+  return p.length < update.length ? p : update
+}
+
 export async function pack(update: Uint8Array): Promise<Uint8Array> {
   const z = await through(update, new CompressionStream('deflate'))
   const out = new Uint8Array(MARKER.length + z.length)

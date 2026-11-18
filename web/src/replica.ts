@@ -10,7 +10,7 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import { Keys, b64d, b64e, canonicalPub, revokeMsg } from './crypto'
-import { unpack } from './packing'
+import { packed, unpack } from './packing'
 import { t } from './i18n'
 import { APP_VERSION } from './version'
 import type { Link } from './versions'
@@ -494,6 +494,7 @@ export class Replica {
 
   private async send(id: string, update: Uint8Array, covers: string[]) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.status !== 'online') return
+    update = await packed(update) // a big change goes compressed (packing.ts)
     if (update.length > UPDATE_BATCH) {
       if (this.serverMode === 'relay' || this.storage === 'relay') {
         // nothing is stored: give it to the people online, in pieces
@@ -593,9 +594,11 @@ export class Replica {
 
   private async compact() {
     if (!this.keys.writable || !this.ws || this.serverMode === 'relay' || this.missing.size) return // (a snapshot would leave a missing change out)
-    const full = Y.encodeStateAsUpdate(this.doc)
-    let d = await this.keys.encrypt(full), ref: string | null = null
+    // what the state covers: read together with it (a change applied while packing or encrypting
+    // waits would otherwise count as covered, and leave the log without being in the snapshot)
     const upto = this.since
+    const full = await packed(Y.encodeStateAsUpdate(this.doc)) // compressed, so more fits in a message
+    let d = await this.keys.encrypt(full), ref: string | null = null
     if (d.length > MAX_SNAPSHOT) { // too big for one message: as an upload
       ref = await this.asUpload(full)
       if (!ref || !this.ws) return // not uploaded: the log stays as it is for now
@@ -729,7 +732,7 @@ export class Replica {
       this.stateWanted.delete(from)
       if (want === undefined || !this.mayAnswer(`${from}`)) return
       const diff = Y.encodeStateAsUpdate(this.doc, b64d(want))
-      if (diff.length > 2) await this.p2p({ k: 'upd', u: b64e(diff) }, from)
+      if (diff.length > 2) await this.p2p({ k: 'upd', u: b64e(await packed(diff)) }, from)
     }), wait)
   }
 

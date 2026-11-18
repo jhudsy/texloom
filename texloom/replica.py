@@ -22,7 +22,7 @@ from pycrdt import Doc, Map, merge_updates
 
 from . import __version__, tls
 from .crypto import Keys, b64d, b64e, canonical_pub, revoke_msg
-from .packing import unpack
+from .packing import packed, unpack
 
 log = logging.getLogger("texloom")
 
@@ -200,6 +200,7 @@ class Replica:
     async def _send_update(self, uid: str, update: bytes) -> None:
         if self.ws is None or self.ws.closed:
             return  # stays in outbox; flushed on reconnect
+        update = packed(update)  # a big change goes compressed (packing.py)
         if len(update) > UPDATE_BATCH:
             if self.server_mode == "relay" or self.storage == "relay":
                 # nothing is stored: give it to the computers online, in pieces (others catch up
@@ -402,16 +403,17 @@ class Replica:
     async def _maybe_compact(self, count: int) -> None:
         if count < COMPACT_AFTER or not self.keys.writable or self.ws is None or self.server_mode == "relay" or self._missing:
             return  # (a snapshot would leave a missing change out)
-        full = self.doc.get_update()
+        upto = self.since  # what the state taken now covers
+        full = packed(self.doc.get_update())  # compressed, so more fits in a message
         data, ref = self.keys.encrypt(full), None
         if len(data) > MAX_SNAPSHOT:  # too big for one message: as an upload
             ref = await self._as_upload(full)
             if ref is None or self.ws is None:
                 return  # not uploaded: the log stays as it is for now
             data = self.keys.encrypt(REF + json.dumps({"b": ref}).encode())
-        sig = self.keys.sign(f"snap:{self.since}:".encode() + data)
-        self._snap_ref = (self.since, ref)
-        await self.ws.send_json({"t": "snap", "upto": self.since, "d": b64e(data), "s": b64e(sig)})
+        sig = self.keys.sign(f"snap:{upto}:".encode() + data)
+        self._snap_ref = (upto, ref)
+        await self.ws.send_json({"t": "snap", "upto": upto, "d": b64e(data), "s": b64e(sig)})
         log.info("uploaded snapshot (log had %d entries)", count)
 
     # --- blobs ---------------------------------------------------------------
@@ -631,7 +633,7 @@ class Replica:
                 return
             diff = self.doc.get_update(b64d(want))
             if len(diff) > 2:
-                await self.p2p({"k": "upd", "u": b64e(diff)}, frm)
+                await self.p2p({"k": "upd", "u": b64e(packed(diff))}, frm)
         last = self._answered.get(str(frm))
         self._answer(send, 0.0 if last is None else max(0.0, last + ANSWER_EVERY - time.monotonic()))
 
