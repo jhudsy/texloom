@@ -37,6 +37,10 @@ class Dialog(QtWidgets.QDialog):
     """A dialog that, on macOS, slides down from the main window as a sheet."""
 
     def __init__(self, parent=None) -> None:
+        if isinstance(parent, QtWidgets.QMainWindow) and (over := QtWidgets.QApplication.activeModalWidget()) is not None:
+            # asked for from another dialog open over the window (Join… in the project list): on top of
+            # that one, since a sheet would open under it and be blocked by it
+            parent = over
         super().__init__(parent)
         if MAC and isinstance(parent, QtWidgets.QMainWindow):
             self.setWindowModality(Qt.WindowModal)

@@ -36,7 +36,7 @@ from .daemon import CURRENT, FOLDER, FolderTag
 from .dialogs import (ConnectToolDialog, CopyFolderDialog, JoinDialog, LinksDialog, ManageTagsDialog, ProgramsDialog,
                       ProjectListDialog, SettingsDialog, ShareFolderDialog, TagsDialog, ask_code)
 from .i18n import _, app_pref, ngettext, set_app_pref
-from .mac import DockFollowsWindows, nsapp
+from .mac import DockFollowsWindows, menu_opens_where_clicked, nsapp
 from .paths import use_tex_on_path
 from .ui import (GREY, ICON, MAC, RED, TAGS_ROLE, Engine, browser_link, chevron, default_parent, describe, dot,
                  grey_note, open_path, project_name, red, short_path, tag_hex, theme_icon)
@@ -1245,9 +1245,14 @@ def main(argv: list[str] | None = None) -> None:
         menu.addAction(_("Quit TeXLoom"), win.quit_app)
         tray.setContextMenu(menu)
         tray.setToolTip("TeXLoom")
-        tray.activated.connect(lambda reason: win.show_window() if reason == QtWidgets.QSystemTrayIcon.Trigger else None)
+        # A click opens the window, except on a Mac: there it opens the menu (which has Open TeXLoom),
+        # as in other menu-bar apps. Bringing the window forward as well closed that menu at once
+        # when the click was on another screen's menu bar.
+        tray.activated.connect(lambda reason: win.show_window() if reason == QtWidgets.QSystemTrayIcon.Trigger and not MAC else None)
         tray.show()
         win.tray = tray
+        if MAC:
+            menu_opens_where_clicked()
 
     if MAC:  # opening TeXLoom again (Dock, Finder, Spotlight) brings the window back, as in other Mac apps
         started = time.time()
