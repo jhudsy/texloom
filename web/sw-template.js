@@ -2,8 +2,9 @@
 // Makes the app itself available offline: projects already live in IndexedDB, and
 // this caches the code that opens them. Sync traffic (/ws/, /blob/, /api/) is never cached.
 const VERSION = __VERSION__
-const SHELL = __SHELL__ // every built asset, so parts not yet opened also work offline
+const SHELL = __SHELL__ // every built asset (path → hash of its contents), so parts not yet opened also work offline
 const CACHE = `texloom-${VERSION}`
+const HASHES = '/__hashes' // in the version's cache: SHELL as it was cached
 const TEX = 'texloom-tex' // in-browser TeX engine scripts and WebAssembly (kept until the engine changes)
 const ENGINE = __ENGINE__ // the engine these should be from
 const ENGINE_MARK = '/__engine-version' // in the cache: the engine what's there is from
@@ -11,13 +12,39 @@ const TEXLIVE = 'texloom-texlive' // TeX Live files fetched on demand (URLs name
 
 // Each file is cached on its own: one that fails (a stale list, a dropped connection)
 // mustn't stop the update, or the previous version would stay in charge indefinitely.
+// A file whose contents haven't changed is copied from a previous version's cache, so a
+// deploy downloads only what it changed.
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE)
-    await Promise.allSettled(SHELL.map((p) => cache.add(p)))
+    const old = await previous()
+    await Promise.allSettled(Object.entries(SHELL).map(async ([p, hash]) => {
+      // (not the page: the running version stores newer copies of it as they arrive)
+      if (p !== '/' && p !== '/index.html') for (const { cache: c, hashes } of old) {
+        if (hashes[p] !== hash) continue
+        const hit = await c.match(p)
+        if (hit) return cache.put(p, hit)
+      }
+      return cache.add(p)
+    }))
+    await cache.put(HASHES, new Response(JSON.stringify(SHELL)))
     await self.skipWaiting()
   })())
 })
+
+/** Earlier versions' caches, with the hashes of what each one cached. */
+async function previous() {
+  const found = []
+  for (const key of await caches.keys()) {
+    if (key === CACHE || !key.startsWith('texloom-') || key === TEX || key === TEXLIVE) continue
+    try {
+      const c = await caches.open(key)
+      const res = await c.match(HASHES)
+      if (res) found.push({ cache: c, hashes: await res.json() })
+    } catch { /* an unreadable cache is simply not reused */ }
+  }
+  return found
+}
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {

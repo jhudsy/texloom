@@ -19,9 +19,12 @@ function serviceWorker(): Plugin {
       // older two aren't kept for offline use
       const built = walk(out).map((f) => '/' + relative(out, f).split('\\').join('/'))
         .filter((f) => f !== '/index.html' && f !== '/sw.js' && !/\.(woff|ttf)$/.test(f))
-      const shell = [...new Set(['/', '/index.html', ...built])].sort()
+      // each file with a hash of its contents: an update copies the unchanged ones from the
+      // previous version's cache instead of downloading them all again
+      const digest = (f: string) => createHash('sha256').update(readFileSync(join(out, f === '/' ? 'index.html' : f.slice(1)))).digest('hex').slice(0, 16)
+      const shell = Object.fromEntries([...new Set(['/', '/index.html', ...built])].sort().map((f) => [f, digest(f)]))
       const engine = readFileSync(new URL('./node_modules/texlyre-busytex/package.json', import.meta.url), 'utf8')
-      const version = createHash('sha256').update(shell.join('\n') + engine).digest('hex').slice(0, 12)
+      const version = createHash('sha256').update(JSON.stringify(shell) + engine).digest('hex').slice(0, 12)
       const src = readFileSync(new URL('./sw-template.js', import.meta.url), 'utf8')
         .replace('__VERSION__', JSON.stringify(version))
         .replace('__SHELL__', JSON.stringify(shell))
