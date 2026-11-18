@@ -390,6 +390,10 @@ class Store:
             if relay_only:  # forget everything we stored for this project
                 await c.execute("DELETE FROM log WHERE project=$1", project)
                 await c.execute("DELETE FROM gone WHERE project=$1", project)
+                # as eviction does: nothing up to head can be stored again (a replay of an old,
+                # validly signed change or snapshot, should the project go back to server storage)
+                await c.execute("INSERT INTO floor(project, seq) SELECT $1, COALESCE((SELECT seq FROM head WHERE project=$1), 0) "
+                                "ON CONFLICT (project) DO UPDATE SET seq=excluded.seq", project)
         self._modes[project] = relay_only
         if relay_only:
             await self._drop_files(project)
@@ -573,7 +577,7 @@ class Store:
         async with self.pool.acquire() as c:
             modes = {r["project"]: r["relay"] for r in await c.fetch("SELECT project, relay FROM mode")}
             projects = [tuple(r) for r in await c.fetch("SELECT project, created, owner, seen, evicted FROM projects")]
-            apps = [tuple(r) for r in await c.fetch("SELECT app, version, n, seen FROM clients ORDER BY seen DESC")]
+            apps = [tuple(r) for r in await c.fetch("SELECT app, version, n, seen FROM clients ORDER BY seen DESC LIMIT 200")]
         return modes, projects, apps
 
 

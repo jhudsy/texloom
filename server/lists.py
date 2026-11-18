@@ -87,4 +87,5 @@ class Lists:
         return _n(await self.pool.execute("DELETE FROM lists WHERE owner=$1", owner))
 
     async def drop_idle(self, before: float) -> int:
-        return _n(await self.pool.execute("DELETE FROM lists WHERE seen < $1", before))
+        """Drop lists unused since `before`. Not the markers of retired ids: those stay a year (see retire)."""
+        return _n(await self.pool.execute("DELETE FROM lists WHERE seen < $1 AND seq <> $2", before, RETIRED))

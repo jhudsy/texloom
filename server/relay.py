@@ -58,6 +58,7 @@ from pathlib import Path
 
 from aiohttp import WSCloseCode, WSMsgType, web
 
+from texloom import __version__
 from texloom.crypto import canonical_pub, revoke_msg, signer
 
 from .files import Files, FilesError, open_files
@@ -74,11 +75,13 @@ MAX_UPDATE = 8 * MiB
 MAX_SNAPSHOT = 12 * MiB  # bigger documents just aren't compacted (their log is kept as it is)
 MAX_BLOB = 50 * MiB  # uploaded over HTTP
 # Every WebSocket frame is read whole before it can be checked, so keep frames small: a few
-# large ones at once must not exhaust the server's memory. p2p frames carry files only in
-# relay-only projects, up to P2P_BLOB (clients check).
+# large ones at once must not exhaust the server's memory. Clients send a p2p message over 4 MiB
+# in pieces of 4 MiB, each encrypted and base64-encoded: at most about 5.4 MiB a frame.
 MAX_FRAME = 16 * MiB
+P2P_FRAME = 6 * MiB
 FRAME_LIMITS = {"hello": 4 * KiB, "aw": 64 * KiB, "mode": 4 * KiB, "delete": 4 * KiB, "up": MAX_UPDATE * 4 // 3 + KiB,
-                "snap": MAX_SNAPSHOT * 4 // 3 + KiB, "p2p": MAX_FRAME, "revoke": 4 * KiB}
+                "snap": MAX_SNAPSHOT * 4 // 3 + KiB, "p2p": P2P_FRAME, "revoke": 4 * KiB}
+UPLOADS_AT_ONCE = 3  # uploads read into memory and checked at once (each up to MAX_BLOB)
 RATE_WINDOW, RATE_MSGS, RATE_BYTES = 10.0, 600, 160 * MiB  # per connection
 HELLOS_PER_WINDOW = 5  # a log reply can be large: don't let one connection ask for it in a loop
 MAX_CONNECTIONS = 2000
@@ -498,6 +501,7 @@ class Relay:
         self.texlive = None  # TexLive, when serving TeX Live files on demand
         self.inflight = 0  # bytes of large frames being handled right now
         self.catchup = Budget(CATCHUP_MEMORY)
+        self.uploads = asyncio.Semaphore(UPLOADS_AT_ONCE)  # see put_blob
         self.held = 0  # bytes held for connections, see Metered
         self.stopping = False
 
@@ -832,7 +836,10 @@ class Relay:
         elif t == "up":
             d, s = field(msg, "d", str), field(msg, "s", str)
             data, sig = b64d(d), b64d(s)
-            if len(data) > MAX_UPDATE or not verify(project, b"upd:" + data, sig, await self.store.revoked(project)):
+            revoked = await self.store.revoked(project)
+            ok = len(data) <= MAX_UPDATE and (verify(project, b"upd:" + data, sig, revoked) if len(data) < 64 * KiB
+                                              else await asyncio.to_thread(verify, project, b"upd:" + data, sig, revoked))
+            if not ok:
                 await ws.send_json({"t": "err", "m": "rejected update (bad signature, or this personal link was revoked)"})
                 return
             if relay_only:  # pass it on, but keep nothing
@@ -893,8 +900,8 @@ class Relay:
                 to = field(msg, "to", int)
                 for peer in list(self.rooms[project]):
                     c = self.conns.get(peer)
-                    if c and c.id == to and not peer.closed:
-                        await peer.send_json(out)
+                    if c and c.id == to:
+                        await self.send(peer, json.dumps(out))  # cut off, rather than waited on, if it isn't reading
         elif t == "mode":
             mode, ts, sig = field(msg, "m", str), field(msg, "ts", int), b64d(field(msg, "s", str))
             who = signer(project, f"mode:{mode}:{ts}".encode(), sig)
@@ -962,8 +969,9 @@ class Relay:
             raise web.HTTPForbidden(text="bad signature")
         if not (len(sig) == 64 or 162 <= len(sig) <= 417):  # an owner or personal-link signature
             raise web.HTTPForbidden(text="bad signature")
-        # Read to a temporary file, so a slow or stalled upload holds up nobody else, and only
-        # one large file is in memory at a time.
+        # Read to a temporary file, so a slow or stalled upload holds up nobody else. Only a few are
+        # then read into memory and checked at once (UPLOADS_AT_ONCE): anyone can send uploads,
+        # signed or not, and the signature can only be checked once the whole file is in memory.
         size = 0
         with tempfile.SpooledTemporaryFile(max_size=MiB, dir=self.store.dir) as spool:
             try:
@@ -977,23 +985,30 @@ class Relay:
                         spool.write(piece)
             except TimeoutError:
                 raise web.HTTPRequestTimeout() from None
-            # one copy in memory: the signed message (prefix + file), with the file a view into it
-            prefix = f"blob:{bid}:".encode()
-            signed = bytearray(len(prefix) + size)
-            signed[: len(prefix)] = prefix
-            spool.seek(0)
-            if spool.readinto(memoryview(signed)[len(prefix):]) != size:
-                raise web.HTTPBadRequest(text="short upload")
-            data = memoryview(signed)[len(prefix):]
+            async with self.uploads:
+                return await self._store_upload(request, project, bid, sig, spool, size)
+
+    async def _store_upload(self, request: web.Request, project: str, bid: str, sig: bytes, spool, size: int) -> web.Response:
+        """The rest of put_blob, with the file read to `spool` and an upload slot held."""
+        # one copy in memory: the signed message (prefix + file), with the file a view into it
+        prefix = f"blob:{bid}:".encode()
+        signed = bytearray(len(prefix) + size)
+        signed[: len(prefix)] = prefix
+        spool.seek(0)
+        # From here on, answers are returned rather than raised: a raised one would keep this frame,
+        # and the file in memory, alive (see the middleware `headers`).
+        if spool.readinto(memoryview(signed)[len(prefix):]) != size:
+            return web.Response(status=400, text="short upload")
+        data = memoryview(signed)[len(prefix):]
         # checking the signature reads the whole file: on a worker thread, so live editing carries on
         if not await asyncio.to_thread(verify, project, signed, sig, await self.store.revoked(project)):
-            raise web.HTTPForbidden(text="bad signature")
+            return web.Response(status=403, text="bad signature")
         if project in self.store.deleted:  # deleted while it was uploading
             return web.json_response({"code": "deleted"}, status=410)
         if await self.denied(project, request.headers.get("X-Create-Code")):  # a genuine upload: now it may claim
             return web.json_response({"code": "needs-code"}, status=403)
         if self.store.relay_only(project):
-            raise web.HTTPConflict(text="project is relay-only: blobs are exchanged peer to peer")
+            return web.Response(status=409, text="project is relay-only: blobs are exchanged peer to peer")
         kind = "output" if request.headers.get("X-Kind") == "output" else "file"
         async with self.store.lock(project):  # the check and the reservation; not the (maybe slow) write
             if await self.store.has_blob(project, bid):
@@ -1053,7 +1068,9 @@ class Relay:
     async def note_client(self, app: object, version: object) -> None:
         """Count an app connecting, by kind and version (shown on the admin page)."""
         a = app if app in APPS else "unknown"
-        v = version if version_tuple(version) else "unknown"
+        # versions up to this server's own, as they are; anything else (made up, or unknown) as one
+        # row, so that connections can't add rows without end
+        v = version if (t := version_tuple(version)) and t <= (version_tuple(__version__) or ()) else "other"
         await self.store.note_client(a, v)
 
     def too_old(self, version: object) -> bool:
@@ -1177,7 +1194,9 @@ async def headers(request: web.Request, handler):
         try:
             resp = await handler(request)
         except web.HTTPException as e:
-            resp = e
+            # Without its traceback: that keeps the handler's frame, and so everything it held (an
+            # upload of 50 MB, say), alive until the garbage collector finds the cycle.
+            resp = e.with_traceback(None)
     resp.headers["Access-Control-Allow-Origin"] = "*"  # sync data is ciphertext; keys never leave the page
     resp.headers["Access-Control-Allow-Headers"] = "X-Sig, X-Seq, X-Create-Code, X-Kind, X-Only-Output, X-TeXLoom, Content-Type"
     resp.headers["Access-Control-Expose-Headers"] = "X-Seq"  # project lists kept on several servers are read and written from any page
