@@ -27,6 +27,7 @@ const enc = new TextEncoder(), dec = new TextDecoder()
 const REF = enc.encode('\x00texloom-ref\x00')
 const isRef = (u: Uint8Array) => u.length > REF.length && REF.every((b, i) => u[i] === b)
 const refTo = (id: string) => { const j = enc.encode(JSON.stringify({ b: id })), u = new Uint8Array(REF.length + j.length); u.set(REF); u.set(j, REF.length); return u }
+const ANSWER_EVERY = 30_000 // ms: how often one connection's request for what it lacks is answered (onP2p)
 const P2P_BLOB = 50 * 1024 * 1024 // files sent peer to peer (relay-only projects): as big as any synced file
 // A peer-to-peer message bigger than this (a whole project for a peer catching up, a file) goes
 // in pieces: the server takes frames of at most 16 MiB. As in texloom/replica.py.
@@ -145,6 +146,7 @@ export class Replica {
   get storeProblem(): StoreProblem { return this.refusal }
   onStatus: () => void = () => {}
   onCompileAck: (info: { by: string }) => void = () => {}
+  private compileNonces: string[] = [] // our last compile requests', which answers must carry
   onCompileError: (info: { by: string; why: string }) => void = () => {}
 
   private db!: IDBDatabase
@@ -158,7 +160,11 @@ export class Replica {
   private refs: Record<number, string> = {} // stored changes and snapshots that are uploads: seq -> upload id
   private refSent = new Map<string, string>() // sent id -> upload id, until the server stores it
   private snapRef: { upto: number; ref: string | null } | null = null // the snapshot sent, until the server takes it
-  private resync = 0 // 1: an upload a change refers to couldn't be fetched, so catch up from the start
+  private resync = 0 // 1: an upload a change refers to is gone, so catch up from the start (once: then it's skipped)
+  // Changes whose upload couldn't be fetched just now (offline, a server error): `since` stays
+  // below the first, so it's fetched again on reconnecting, and no snapshot is made meanwhile.
+  private missing = new Set<number>()
+  private missingTries = 0
   private blobWaiters = new Map<string, ((b: Uint8Array) => void)[]>()
   private backoff = 1000
   private closed = false
@@ -271,6 +277,7 @@ export class Replica {
       this.backoff = 1000
       const code = this.creationCode()
       this.logPending = null
+      this.missing.clear() // (this catch-up finds them again if they're still missing)
       ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ...(code ? { code } : {}) }))
     }
     ws.onmessage = (ev) => {
@@ -295,6 +302,7 @@ export class Replica {
   /** The last page of a catch-up is in: what follows from being up to date. */
   private async onCaughtUp(head: number, count: number, lost: boolean) {
     this.since = lost ? head : Math.max(this.since, head)
+    this.holdForMissing()
     if (lost && this.keys.writable) await this.reseed()
     for (const q of this.seen) if (q <= this.since) this.seen.delete(q)
     this.markSeen(this.since)
@@ -343,6 +351,7 @@ export class Replica {
         await this.apply([m])
         if (this.resync === 1) { await this.catchUpAgain(); break }
         if (m.q) this.markSeen(m.q)
+        this.holdForMissing()
         break
       case 'snapped': // the server took our snapshot: what it replaced can go
         if (this.snapRef && this.snapRef.upto === m.upto) {
@@ -426,7 +435,7 @@ export class Replica {
 
   private markSeen(q: number) {
     if (q > this.since) this.seen.add(q)
-    while (this.seen.has(this.since + 1)) this.seen.delete(++this.since)
+    while (this.seen.has(this.since + 1) && !this.missing.has(this.since + 1)) this.seen.delete(++this.since)
     idbPut(this.db, 'kv', 'since', this.since)
   }
 
@@ -440,7 +449,11 @@ export class Replica {
       try { update = await this.keys.decrypt(data) } catch (err) { console.warn('dropping undecryptable update', e.q, err); continue }
       if (isRef(update)) {
         const got = await this.fetchRef(update)
-        if (!got) { console.warn('couldn’t fetch the upload change', e.q, 'refers to'); this.resync ||= 1; continue }
+        if (got === 'retry') { console.warn('couldn’t fetch the upload change', e.q, 'refers to; trying again shortly'); this.missing.add(e.q); continue }
+        if (got === 'gone') {
+          console.warn(this.resync ? 'skipping change' : 'the upload change', e.q, this.resync ? ': its upload is gone' : 'refers to is gone: catching up from the start')
+          this.resync ||= 1; continue
+        }
         this.refs[e.q] = got.id
         await idbPut(this.db, 'kv', 'refs', this.refs)
         update = got.content
@@ -501,17 +514,35 @@ export class Replica {
   }
 
   /** The change a reference points to, from the server (null if it can't be had). */
-  private async fetchRef(ref: Uint8Array): Promise<{ id: string; content: Uint8Array } | null> {
+  /** The upload a change refers to: 'retry' if it couldn't be fetched just now, 'gone' if it isn't
+   *  there (or isn't what the change names). */
+  private async fetchRef(ref: Uint8Array): Promise<{ id: string; content: Uint8Array } | 'retry' | 'gone'> {
     let id: unknown
-    try { id = JSON.parse(dec.decode(ref.subarray(REF.length))).b } catch { return null }
-    if (typeof id !== 'string' || !BLOB_ID.test(id)) return null
+    try { id = JSON.parse(dec.decode(ref.subarray(REF.length))).b } catch { return 'gone' }
+    if (typeof id !== 'string' || !BLOB_ID.test(id)) return 'gone'
     const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`).catch(() => null)
-    if (!r?.ok) return null
+    if (!r) return 'retry'
+    if (r.status === 404 || r.status === 410) return 'gone'
+    if (!r.ok) return 'retry'
+    let data: Uint8Array
+    try { data = new Uint8Array(await r.arrayBuffer()) } catch { return 'retry' }
     try {
-      const content = await this.keys.decrypt(new Uint8Array(await r.arrayBuffer()))
-      return (await this.keys.blobId(content)) === id ? { id, content } : null
-    } catch { return null }
+      const content = await this.keys.decrypt(data)
+      return (await this.keys.blobId(content)) === id ? { id, content } : 'gone'
+    } catch { return 'gone' }
   }
+
+  /** `since` stops below a change whose upload couldn't be fetched; reconnecting (after a while,
+   *  longer each time) catches up from there. */
+  private holdForMissing() {
+    if (!this.missing.size) { this.missingTries = 0; return }
+    this.since = Math.min(this.since, Math.min(...this.missing) - 1)
+    idbPut(this.db, 'kv', 'since', this.since)
+    if (this.missingRetry) return
+    const wait = Math.min(5000 * 2 ** this.missingTries++, 5 * 60_000)
+    this.missingRetry = setTimeout(() => { this.missingRetry = null; this.ws?.close() }, wait) // onclose reconnects
+  }
+  private missingRetry: ReturnType<typeof setTimeout> | null = null
 
   /** After a snapshot up to `upto`: the uploads of what it replaced aren't needed any more. */
   private async dropRefs(upto: number, keep: string | null) {
@@ -536,7 +567,7 @@ export class Replica {
   }
 
   private async compact() {
-    if (!this.keys.writable || !this.ws || this.serverMode === 'relay') return
+    if (!this.keys.writable || !this.ws || this.serverMode === 'relay' || this.missing.size) return // (a snapshot would leave a missing change out)
     const full = Y.encodeStateAsUpdate(this.doc)
     let d = await this.keys.encrypt(full), ref: string | null = null
     const upto = this.since
@@ -642,6 +673,40 @@ export class Replica {
     }
   }
 
+  // Peers ask for what they lack (sv1/sv2: all of the document they don't have; breq: a file).
+  // Anyone with the link can ask, a read-only one too, and a few bytes can ask for megabytes:
+  // each connection gets at most one answer of each kind per ANSWER_EVERY (a state vector asked
+  // for sooner is answered then, with the latest), and answers go out one at a time.
+  private answered = new Map<string, number>() // what (connection, or connection:file) -> when
+  private stateWanted = new Map<number, string>() // connection -> its latest state vector, to answer
+  private answers: Promise<void> = Promise.resolve()
+
+  private mayAnswer(key: string): boolean {
+    const now = Date.now()
+    if (this.answered.size > 1000) for (const [k, at] of this.answered) if (now - at > ANSWER_EVERY) this.answered.delete(k)
+    if (now - (this.answered.get(key) ?? 0) < ANSWER_EVERY) return false
+    this.answered.set(key, now)
+    return true
+  }
+
+  private answer(fn: () => Promise<void>) {
+    this.answers = this.answers.then(fn).catch((e) => console.warn('couldn’t answer a peer', e))
+  }
+
+  private answerState(from: number, sv: string) {
+    const waiting = this.stateWanted.has(from)
+    this.stateWanted.set(from, sv)
+    if (waiting) return
+    const wait = Math.max(0, (this.answered.get(`${from}`) ?? 0) + ANSWER_EVERY - Date.now())
+    setTimeout(() => this.answer(async () => {
+      const want = this.stateWanted.get(from)
+      this.stateWanted.delete(from)
+      if (want === undefined || !this.mayAnswer(`${from}`)) return
+      const diff = Y.encodeStateAsUpdate(this.doc, b64d(want))
+      if (diff.length > 2) await this.p2p({ k: 'upd', u: b64e(diff) }, from)
+    }), wait)
+  }
+
   private async onP2p(m: { d: string; s?: string; from: number }) {
     const data = b64d(m.d)
     let p: any
@@ -653,10 +718,7 @@ export class Replica {
       case 'sv1': // a peer just connected: send what it lacks, and ask for what we lack
       case 'sv2': {
         this.peers = Math.max(this.peers, 1); this.onStatus()
-        if (this.keys.writable) {
-          const diff = Y.encodeStateAsUpdate(this.doc, b64d(p.sv))
-          if (diff.length > 2) await this.p2p({ k: 'upd', u: b64e(diff) }, m.from)
-        }
+        if (this.keys.writable && typeof p.sv === 'string') this.answerState(m.from, p.sv)
         if (p.k === 'sv1') await this.p2p({ k: 'sv2', sv: b64e(Y.encodeStateVector(this.doc)) }, m.from)
         break
       }
@@ -668,17 +730,25 @@ export class Replica {
         Y.applyUpdate(this.doc, await unpack(b64d(p.u)), REMOTE)
         break
       case 'breq': {
-        if (typeof p.id !== 'string' || !BLOB_ID.test(p.id)) return
-        const blob = await idbGet<Uint8Array>(this.db, 'blobs', p.id)
-        if (blob && blob.length <= P2P_BLOB) await this.p2p({ k: 'blob', id: p.id, b: b64e(blob) }, m.from)
+        if (typeof p.id !== 'string' || !BLOB_ID.test(p.id) || !this.mayAnswer(`${m.from}:${p.id}`)) return
+        const id = p.id, to = m.from
+        this.answer(async () => {
+          const blob = await idbGet<Uint8Array>(this.db, 'blobs', id)
+          if (blob && blob.length <= P2P_BLOB) await this.p2p({ k: 'blob', id, b: b64e(blob) }, to)
+        })
         break
       }
       case 'cack': // a texloom helper accepted our compile request
-        this.onCompileAck(p)
+      case 'cerr': { // it couldn't compile (no TeX on that computer, or the compile stopped)
+        // Only from a writer (signed: a read-only member can't fake one) answering one of our own
+        // requests (its nonce: an old answer replayed doesn't count).
+        if (typeof p.n !== 'string' || !this.compileNonces.includes(p.n)) return
+        if (!m.s || !this.keys.verify('p2p:', data, b64d(m.s), true)) { console.warn('unsigned compile answer ignored'); return }
+        const by = String(p.by ?? '').slice(0, 100)
+        if (p.k === 'cack') this.onCompileAck({ by })
+        else if (typeof p.why === 'string') this.onCompileError({ by, why: p.why.slice(0, 500) })
         break
-      case 'cerr': // it couldn't compile (no TeX on that computer, or the compile stopped)
-        if (typeof p.why === 'string') this.onCompileError({ by: String(p.by ?? ''), why: p.why.slice(0, 500) })
-        break
+      }
       case 'blob': {
         // only files we asked for (anyone with the link can send these)
         if (typeof p.id !== 'string' || !this.blobWaiters.has(p.id) || typeof p.b !== 'string') return
@@ -695,7 +765,9 @@ export class Replica {
    *  deletes their build folder (.aux, .bbl, …) first. */
   async requestCompile(fromScratch = false): Promise<boolean> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
-    await this.p2p(fromScratch ? { k: 'creq', clean: true } : { k: 'creq' })
+    const n = b64e(crypto.getRandomValues(new Uint8Array(12)))
+    this.compileNonces = [...this.compileNonces.slice(-9), n] // a helper may answer a recent one later
+    await this.p2p(fromScratch ? { k: 'creq', clean: true, n } : { k: 'creq', n })
     return true
   }
 

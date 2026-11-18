@@ -11,7 +11,9 @@ import { t } from '../i18n'
 
 export const ASSISTANT = Symbol('assistant') // Yjs transaction origin for assistant edits
 
-export interface Change { path: string; before: string | null; after: string | null; summary: string }
+/** What the assistant asks to do: a file's text before and after (null: no file), or with `note`, a
+ *  comment, reply or resolve, shown as that text. */
+export interface Change { path: string; before: string | null; after: string | null; summary: string; note?: string }
 
 export interface ToolCtx {
   replica: Replica
@@ -255,8 +257,13 @@ export const TOOLS: ToolDef[] = [
       const text = textOf(ctx.replica, p).toString()
       const hits = occurrences(text, quote)
       if (hits.length !== 1) throw new ToolError(hits.length ? `quote occurs ${hits.length} times in ${p}; add context to make it unique.` : `quote not found in ${p}. Re-read the file.`)
-      addItem(ctx.replica, 'comment', p, hits[0], hits[0] + quote.length, comment, ctx.agentName)
-      return `Comment added on ${p} line ${text.slice(0, hits[0]).split('\n').length}.`
+      // everyone sees it: asked first, like an edit (the comment may come from something the assistant read)
+      if (!(await ctx.review({ path: p, before: null, after: '', summary: t('Comment on {{path}}', { path: p }), note: `“${quote.slice(0, 300)}”\n\n${comment}` })))
+        return 'The user rejected this comment.'
+      const now = textOf(ctx.replica, p).toString(), at = occurrences(now, quote)
+      if (at.length !== 1) throw new ToolError(`${p} changed while waiting for approval; re-read it and try again.`)
+      addItem(ctx.replica, 'comment', p, at[0], at[0] + quote.length, comment, ctx.agentName)
+      return `Comment added on ${p} line ${now.slice(0, at[0]).split('\n').length}.`
     },
   },
   {
@@ -294,8 +301,12 @@ export const TOOLS: ToolDef[] = [
     write: true,
     schema: z.object({ id: z.string(), text: z.string().min(1) }),
     run: async ({ id, text }, ctx) => {
-      reviewItem(ctx, id)
-      reply(ctx.replica, id, text.slice(0, 20000), ctx.agentName)
+      const item = reviewItem(ctx, id)
+      const body = text.slice(0, 20000)
+      if (!(await ctx.review({ path: item.file, before: null, after: '', summary: t('Reply to {{who}}', { who: item.by }), note: `“${item.text.slice(0, 300)}”\n\n${body}` })))
+        return 'The user rejected this reply.'
+      reviewItem(ctx, id) // (still there)
+      reply(ctx.replica, id, body, ctx.agentName)
       return 'Replied.'
     },
   },
@@ -305,7 +316,11 @@ export const TOOLS: ToolDef[] = [
     write: true,
     schema: z.object({ id: z.string() }),
     run: async ({ id }, ctx) => {
-      if (reviewItem(ctx, id).kind === 'suggestion') throw new ToolError('Suggested changes are accepted or rejected by people in the Review tab. Reply to it instead, or tell the user.')
+      const item = reviewItem(ctx, id)
+      if (item.kind === 'suggestion') throw new ToolError('Suggested changes are accepted or rejected by people in the Review tab. Reply to it instead, or tell the user.')
+      if (!(await ctx.review({ path: item.file, before: null, after: '', summary: t('Resolve {{who}}’s comment', { who: item.by }), note: `“${item.text.slice(0, 300)}”` })))
+        return 'The user chose not to resolve it.'
+      reviewItem(ctx, id)
       setResolved(ctx.replica, id, true)
       return 'Resolved. People can reopen it in the Review tab.'
     },

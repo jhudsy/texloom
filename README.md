@@ -478,8 +478,9 @@ much with `"shell_escape"` in `.texloom/config.json`, or on the command line:
   e.g. `epstopdf`, not for minted).
 - `true` / `--shell-escape`: anything the document asks for, e.g. minted. Because anyone
   with an edit link writes the document, lines that run programs must be approved first:
-  `texloom allow <dir>` lists them (`\write18`, minted, pythontex, Lua `os.execute`, …) and
-  allows exactly those. When a line is new or changed, that compile runs in restricted
+  `texloom allow <dir>` lists them (`\write18`, minted, pythontex, Lua `os.execute`, …) in
+  every file, whatever its name, pictures and other binary files included (TeX can read any
+  of them), and allows exactly those. When a line is new or changed, that compile runs in restricted
   mode instead, and the log says which line is waiting. The check sees commands written
   out plainly; macros can hide one, so use `true` only for projects whose editors you trust.
 
@@ -618,7 +619,8 @@ collaborator:
 - it can list, read and search files, read the comments and suggestions in the Review tab and reply to or resolve them, make targeted edits, create or delete files,
   compile, and read the compile log;
 - with **Ask before applying edits** (the default), each change appears word by word, like a
-  suggestion, to apply or reject; deleting a file always asks, even with this turned off;
+  suggestion, to apply or reject, and so does each comment, reply or resolve it would make;
+  deleting a file always asks, even with this turned off;
 - every request's edits can be undone in one click, and they reach collaborators like
   anyone else's.
 

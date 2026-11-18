@@ -62,6 +62,8 @@ const TOOLS: [RegExp, string][] = [
   [/^\s*%\s*arara\s*:/, 'tells arara which programs to run'],
   [/^\s*%\s*!\s*(?:TeX|TEX|tex|BIB|bib)\s+(?:TS-|TXS-)?program\b/, 'sets the program your LaTeX editor runs'],
 ]
+// Files whose comments may hold instructions for other tools (TOOLS). Lines that run programs
+// (SHELL) are looked for in every text file: TeX reads a file of any name. As in texloom/scan.py.
 const SCANNED = /\.(tex|sty|cls|ltx|dtx|def|cfg|lua|tikz)$/i
 
 /** The line up to its comment: a '%' after an even number of backslashes. */
@@ -77,13 +79,12 @@ function codePart(line: string): string {
 }
 
 export function programRequests(path: string, text: string): ProgramLine[] {
-  if (!SCANNED.test(path) || text.length > 4 * 1024 * 1024) return []
-  const lua = /\.lua$/i.test(path), out: ProgramLine[] = []
+  const lua = /\.lua$/i.test(path), tools = SCANNED.test(path) && !lua, out: ProgramLine[] = []
   text.split('\n').forEach((line, i) => {
     const shown = line.trim().slice(0, 160), code = lua ? line : codePart(line)
     const s = SHELL.find(([rx]) => rx.test(code))
     if (s) { out.push({ path, line: i + 1, kind: 'shell', what: s[1], text: shown }); return }
-    const t = lua ? undefined : TOOLS.find(([rx]) => rx.test(line))
+    const t = tools ? TOOLS.find(([rx]) => rx.test(line)) : undefined
     if (t) out.push({ path, line: i + 1, kind: 'tools', what: t[1], text: shown })
   })
   return out

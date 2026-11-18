@@ -384,7 +384,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       const btns = h('div', { class: 'row end' },
         h('button', { onclick: () => done(false) }, t('Reject')),
         h('button', { class: 'primary', onclick: () => done(true) }, t('Apply')))
-      const card = h('div', { class: 'ai-review' }, h('div', { class: 'title' }, c.summary), diffView(c.before, c.after), btns)
+      const card = h('div', { class: 'ai-review' }, h('div', { class: 'title' }, c.summary), c.note !== undefined ? h('div', { class: 'ai-note' }, c.note) : diffView(c.before, c.after), btns)
       turnEl.append(card)
       log.scrollTop = log.scrollHeight
     })

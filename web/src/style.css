@@ -316,6 +316,7 @@ details { margin-top: 12px; }
 .ai-review .row.end { padding: 6px 8px; margin: 0; }
 .ai-review.accepted { border-color: var(--ok); }
 .ai-review.rejected { border-color: var(--err); opacity: .7; }
+.ai-review .ai-note { padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 240px; overflow: auto; }
 .diff { font: 12px/1.45 ui-monospace, "SF Mono", Menlo, monospace; max-height: 320px; overflow: auto; }
 .dl { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 8px 0 0; display: flex; }
 .dl .ln { width: 3.5em; flex: none; text-align: right; padding-right: 8px; color: var(--muted); user-select: none; }

@@ -158,6 +158,10 @@ snapshot they can't read ([#18](https://github.com/jhudsy/texloom/issues/18)).
 with `{k:"upd", u}`, the update the newcomer lacks, signed with `"p2p:" ‖ ciphertext`.
 Every peer also replies with `{k:"sv2", sv}`, so the newcomer can send back whatever
 *they* lack. Read-only peers never send updates, and unsigned updates are ignored.
+Anyone with the link can ask, a read-only member too, and a few bytes ask for megabytes, so a
+writer answers each connection at most once every 30 s (a request sooner is answered then,
+with its latest state vector), and answers one request at a time; the same goes for a file
+asked for with `breq`. The desktop answers apart from receiving, so a flood can't stall it.
 **Compiled output** (PDF, log, SyncTeX) is uploaded with `X-Kind: output` and replaced by
 every compile. `DELETE /blob/<project>/<id>` with `X-Sig = sign("del:<id>")` erases stored
 content: any writer may erase *output*; only the owner may erase other content, and
@@ -265,8 +269,12 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   text) or a snapshot over 12 MiB goes up as an encrypted upload, like a file (≤ 50 MiB,
   kind `output`), and the log entry is a small reference to it (`\x00texloom-ref\x00` +
   `{"b": id}`, encrypted like any update, so the server can't tell). Readers fetch it over
-  HTTP when they apply the entry; if it's gone (a snapshot replaced it meanwhile), they catch
-  up from the start once, which brings the snapshot. The server answers an accepted snapshot
+  HTTP when they apply the entry. If it couldn't be fetched just now (offline, a server error),
+  `since` stays below that entry, no snapshot is made, and they reconnect after a while
+  (5 s, doubling up to 5 min) to fetch it again. If it's gone (404, or not what the reference
+  names: a snapshot replaced it meanwhile), they catch up from the start once, which brings
+  the snapshot, and after that skip it with a warning: retrying for ever would let a writer
+  who referred to nothing stop everyone's snapshots. The server answers an accepted snapshot
   with `snapped`, and its sender then deletes the uploads of the entries it replaced. In a
   relay-only project a big change goes to the peers online as a `p2p` update instead.
 - **Per-connection limits:** frame-size caps per message type, a message/byte rate limit,
@@ -314,7 +322,9 @@ The resolved path must stay inside the project folder (no writing through symlin
 - **Lines that run programs** (`texloom/scan.py`, `programRequests` in `texscan.ts`):
   `\write18`, `\ShellEscape`, `\input|`, Lua `os.execute`/`io.popen`, packages such as
   minted or pythontex, TikZ externalisation ("shell"), and arara directives or editor
-  `% !TeX program` comments ("tools"). With full shell escape, a compile uses
+  `% !TeX program` comments ("tools"). "Shell" lines are looked for in every file, as TeX
+  reads a file of any name: texts, and binary files' bytes read as Latin-1 ("tools" only in
+  TeX's own file types). With full shell escape, a compile uses
   `-shell-escape` only if every "shell" line is approved in `.texloom/allowed.json`
   (keyed by file and line text, set by `texloom allow`), else `-shell-restricted` with a
   note in the published log. Lines a remote change writes into a synced folder are
@@ -385,8 +395,11 @@ relay) as the fallback for symmetric NATs.
 - Ignores build products (`*.aux`, `*.log`, `*.synctex.gz`, the main PDF, …) and
   `.texloom/`, `.git/`.
 - `--compile`: run `latexmk` after changes (debounced) and publish PDF + log to `out`.
-  It also answers `p2p {k:"creq"}` compile requests from browsers set to "compile
-  with my own TeX" (acknowledging with `{k:"cack", by}`).
+  It also answers `p2p {k:"creq", n}` compile requests from browsers set to "compile
+  with my own TeX" (acknowledging with `{k:"cack", by, n}`). The answers (`cack`, `cerr`)
+  are signed like `upd` and carry the request's random `n`: the browser takes only a writer's
+  answer to one of its own recent requests, so a read-only member can't fake one, nor the
+  server replay one.
 - Local options in `.texloom/config.json`: `engine`, `latexmk_args`, `shell_escape`,
   `label`. They are never shared. Shell-escape runs code from collaborators, so it is
   strictly a local opt-in.
@@ -503,7 +516,8 @@ A chat panel (`web/src/assistant/`) that acts on the project like another collab
   - `edit_file` finds its target again *after* the user approves, because collaborators
     may have typed in the meantime.
 - **Review and undo:** with "Ask before applying edits", each change waits as a diff card
-  (Apply / Reject). Assistant transactions use their own Yjs origin, tracked by a
+  (Apply / Reject); so do a comment, a reply and resolving one, which everyone sees (the
+  request may come from something the assistant read, such as a comment). Assistant transactions use their own Yjs origin, tracked by a
   `Y.UndoManager`; each request is one undo step ("Undo these changes"). Its edits
   sync to collaborators like any local edit.
 - **Compaction** (`compactBefore`, `makeRoom` and `summarise` in `panel.ts`; the session methods in `llm.ts`).
