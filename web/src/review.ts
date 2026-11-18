@@ -10,6 +10,7 @@ import { b64d, b64e, signer } from './crypto'
 import { h } from './dom'
 import { t, locale } from './i18n'
 import { applyChange, placeOf } from './suggestcore'
+import { byReading, readingOrder } from './navigate'
 import { isWordChar, refine, wordDiff, type DiffOp } from './worddiff'
 
 export type Kind = 'comment' | 'suggestion'
@@ -493,8 +494,11 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
 
   function render() {
     const items = allItems(r).filter((i) => showResolved || !i.resolved)
-    const at = new Map(items.map((i) => [i.id, rangeOf(r, i.id)?.from ?? 0])) // each found once, not per comparison
-    items.sort((a, b) => a.file.localeCompare(b.file) || at.get(a.id)! - at.get(b.id)!)
+    // in the order the document reads (following \\input), not by file name; a comment whose text has
+    // gone, at the end of its file
+    const place = readingOrder(r)
+    const at = new Map(items.map((i) => [i.id, place(i.file, rangeOf(r, i.id)?.from ?? Number.MAX_SAFE_INTEGER)])) // each found once
+    items.sort((a, b) => byReading(at.get(a.id)!, at.get(b.id)!))
     const typing = document.activeElement instanceof HTMLTextAreaElement && list.contains(document.activeElement) ? document.activeElement : null
     const caret = typing?.selectionStart ?? 0, typingIn = typing?.getAttribute('data-reply')
     list.replaceChildren(...(items.length ? items.map(card)

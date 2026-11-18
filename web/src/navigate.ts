@@ -69,6 +69,33 @@ function resolveInput(r: Replica, from: string, name: string): string | null {
   return null
 }
 
+/** Where each place in the project comes when the document is read: a key per (file, offset) that
+ *  sorts in reading order, following \input and \include from the main file. Files the document
+ *  doesn't read (a .bib, say) come after, by name. */
+export function readingOrder(r: Replica): (file: string, offset: number) => number[] {
+  const main = mainFile(r)
+  const prefix = new Map<string, number[]>() // file -> where it's read: the offsets of the \inputs leading to it
+  const walk = (file: string, at: number[]) => {
+    if (prefix.has(file) || prefix.size > 200) return
+    prefix.set(file, at)
+    const text = r.files.get(file)?.toString()
+    if (text == null) return
+    for (const m of blankNonProse(text).matchAll(/\\(?:input|include|subfile)\s*\{([^}]{1,300})\}/g)) {
+      const target = resolveInput(r, file, m[1])
+      if (target) walk(target, [...at, m.index])
+    }
+  }
+  if (main) walk(main, [])
+  const rest = [...r.files.keys()].filter((f) => !prefix.has(f)).sort()
+  return (file, offset) => prefix.has(file) ? [...prefix.get(file)!, offset] : [Number.MAX_SAFE_INTEGER, rest.indexOf(file), offset]
+}
+
+/** Compares two readingOrder keys. */
+export function byReading(a: number[], b: number[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i]
+  return a.length - b.length
+}
+
 export function outline(r: Replica): Outline {
   const main = mainFile(r)
   const headings: Heading[] = []
