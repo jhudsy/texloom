@@ -824,9 +824,19 @@ uv run --with playwright python -m playwright install chromium   # once
 uv run --extra server --with playwright python scripts/check_synconly.py
 ```
 
+The web app in a real browser (headless Chromium, through its own screens; build it first). Each
+starts its own throwaway server; `scripts/webcheck.py` is what they share, for writing more:
+
+```bash
+(cd web && npm run build)
+uv run --extra server --with playwright python scripts/check_web_git.py     # keeping a project in step with GitHub, GitLab and Gitea (stand-ins: scripts/fakeforge.py)
+uv run --extra server --with playwright python scripts/check_web_review.py  # the Review tab: comments in reading order, several drafts at once
+```
+
 The quick checks run on every push (`.github/workflows/checks.yml`). The sync-only check takes a
 few minutes, so it runs when the desktop app's sync or the server changes, every night, and on
-demand (Actions → Sync-only check), on Linux, macOS and a real Windows (`sync-only.yml`).
+demand (Actions → Sync-only check), on Linux, macOS and a real Windows (`sync-only.yml`). The web
+app's browser checks run likewise when the web app or the server changes (`web-app.yml`).
 
 To see what a relay can take, `uv run --extra server python scripts/loadtest.py all` starts its own throwaway server
 and reports latency, CPU and memory for each scenario. Results depend on the machine.
