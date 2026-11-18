@@ -7,7 +7,7 @@
   texloom start                                   sync every folder on this computer's list, in one process
   texloom autostart on|off                        run `texloom start` at login
   texloom list | add <dir> | leave <dir>          the folder list (clone and new add to it)
-  texloom run   <dir> --git                       also keep the folder's git repository in step (e.g. GitHub)
+  texloom run   <dir> --git                       also keep the folder's git repository in step (any host)
   texloom allow <dir>                             review lines that run programs; allow them with --shell-escape
   texloom mcp   <dir|link> [--name NAME] [--suggest-only]  MCP server: an agent edits/comments as a collaborator
 """
@@ -125,7 +125,7 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
         if not bridge:
             from .gitsync import clone_of_link
             if await clone_of_link(d, replica.meta.get("github")):
-                log.warning("This folder is a git clone of %s, which the project is kept in step with on GitHub. Pulling "
+                log.warning("This folder is a git clone of %s, which the project is kept in step with from the web app. Pulling "
                             "here by hand while that runs can bring the same changes in twice: turn on “Keep this "
                             "folder’s git repository in step” (texloom run --git) instead, so the app takes turns.",
                             replica.meta.get("github", {}).get("repo"))

@@ -11,8 +11,8 @@ A merge that conflicts is aborted, leaving the project as it is: nothing with co
 markers ever reaches collaborators. Git uses your own credentials and configuration; the
 TeXLoom server is not involved, so end-to-end encryption is unaffected.
 
-When the project is also linked to a GitHub repository from the web app (its `github`
-setting) and this folder is a clone of that repository and branch, the bridge takes turns with
+When the project is also linked to a repository from the web app (its `github` setting: GitHub,
+GitLab, Gitea or Forgejo) and this folder is a clone of that repository and branch, the bridge takes turns with
 browsers through the project's `githubLease` (web/src/github.ts), so one commit is never
 brought in twice: it brings in, commits and pushes only while it holds the lease, renews it
 every RENEW seconds, and takes it over only when no renewal has been seen for EXPIRE. It
@@ -27,6 +27,7 @@ import os
 import re
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .folder import IGNORE_DIRS, FolderSync
 from .paths import safe_rel
@@ -38,13 +39,24 @@ MARKER = re.compile(r"^(<{7}|>{7})( |$)", re.M)  # an unresolved merge conflict
 
 DEFAULTS = {"interval": 60, "quiet": 120, "push": True}
 RENEW, EXPIRE = 30.0, 100.0  # seconds, as in web/src/github.ts
-GITHUB = re.compile(r"^(?:https?://(?:[^@/]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", re.IGNORECASE)
+REMOTE = re.compile(r"^(?:(?:https?|ssh|git)://(?:[^@/]+@)?(?P<h1>[^/:]+)(?::\d+)?/|(?:[^@/]+@)?(?P<h2>[^/:]+):)(?P<path>[^:]+?)(?:\.git)?/?$", re.IGNORECASE)
 
 
-def github_repo(url: str) -> str | None:
-    """owner/name of a github.com remote address, lower-cased; None for anything else."""
-    m = GITHUB.match(url.strip())
-    return f"{m[1]}/{m[2]}".lower() if m else None
+def remote_repo(url: str) -> tuple[str, str] | None:
+    """(host, path) of a git remote address (https, ssh or user@host:path), lower-cased."""
+    m = REMOTE.match(url.strip())
+    return ((m["h1"] or m["h2"]).lower(), m["path"].strip("/").lower()) if m else None
+
+
+def same_repo(url: str, link: dict) -> bool:
+    """Whether a remote address is the repository a project's link names (`host` absent: GitHub).
+    A GitLab under a path (https://example.org/gitlab) is reached over ssh without that path."""
+    have = remote_repo(url)
+    host = urlsplit(str(link.get("host") or "https://github.com"))
+    repo = str(link.get("repo", "")).strip("/").lower()
+    prefix = host.path.strip("/").lower()
+    return bool(have and repo and have[0] == (host.hostname or "").lower()
+                and have[1] in (repo, f"{prefix}/{repo}" if prefix else repo))
 
 
 class GitError(Exception):
@@ -52,7 +64,7 @@ class GitError(Exception):
 
 
 async def clone_of_link(root: Path, link: object) -> bool:
-    """Whether the folder is a git clone of the GitHub repository the project is linked to."""
+    """Whether the folder is a git clone of the repository the project is linked to."""
     if not isinstance(link, dict) or not isinstance(link.get("repo"), str) or not (root / ".git").exists():
         return False
     try:
@@ -61,8 +73,7 @@ async def clone_of_link(root: Path, link: object) -> bool:
         out, _ = await proc.communicate()
     except OSError:
         return False
-    want = link["repo"].lower()
-    return any(len(p := line.split()) >= 2 and github_repo(p[1]) == want for line in out.decode(errors="replace").splitlines())
+    return any(len(p := line.split()) >= 2 and same_repo(p[1], link) for line in out.decode(errors="replace").splitlines())
 
 
 class GitBridge:
@@ -259,13 +270,13 @@ class GitBridge:
 
     # --- taking turns with browsers ---------------------------------------------------
     async def shared_link(self, upstream: str | None) -> dict | None:
-        """The project's GitHub link, if this folder is a clone of that repository and branch."""
+        """The project's repository link, if this folder is a clone of that repository and branch."""
         link = self.r.meta.get("github")
         if not isinstance(link, dict) or not upstream or link.get("dir"):
             return None
         remote, _, branch = upstream.partition("/")
         url = (await self.git("config", "--get", f"remote.{remote}.url", check=False)).strip()
-        same = github_repo(url) == str(link.get("repo", "")).lower() and branch == link.get("branch")
+        same = same_repo(url, link) and branch == link.get("branch")
         return link if same else None
 
     def _lease(self) -> dict | None:
@@ -297,7 +308,7 @@ class GitBridge:
             return False
         self._set_lease(0)
         self._claimed = time.monotonic()
-        log.info("git: this folder now keeps the project's GitHub repository in step")
+        log.info("git: this folder now keeps the project's linked repository in step")
         self._told = {k for k in self._told if not k.startswith("lease:")}
         return False
 
