@@ -199,7 +199,10 @@ export class PdfView {
       this.openMenu(e.clientX, e.clientY, [...comment, ...copy, [t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)], ...(this.menuExtras?.() ?? [])])
     })
     this.el.addEventListener('keydown', (e) => {
-      if (e.code === 'KeyM' && e.altKey && (e.metaKey || e.ctrlKey) && this.onComment) { // as in the editor
+      // C comments on the selection (nothing is typed in the PDF, so a plain key is free; the editor's
+      // ⌘⌥M also works here, except in a popped-out window on a Mac, where it minimises the windows)
+      const plainC = e.key.toLowerCase() === 'c' && !e.metaKey && !e.ctrlKey && !e.altKey
+      if ((plainC || (e.code === 'KeyM' && e.altKey && (e.metaKey || e.ctrlKey))) && this.onComment) {
         const sel = this.selectedText() && this.selection()
         if (sel) { e.preventDefault(); this.commentOn(sel) }
         return

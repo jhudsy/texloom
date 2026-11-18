@@ -281,7 +281,7 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **Text and links in the PDF:** its text can be selected and copied, and with `hyperref` its links work: citations,
   references and the table of contents scroll to their place (**↩ Back** returns), and web links open in a new tab.
 - **Comments from the PDF:** select text in the PDF (in the app or a popped-out window), then right-click ▸ **Add a comment…**
-  or ⌘⌥M / Ctrl+Alt+M. A box opens beside the text, and the comment goes on those words in the source: SyncTeX gives the
+  or press C. A box opens beside the text, and the comment goes on those words in the source: SyncTeX gives the
   lines, and the selected words are found there. Where they aren't in the source as such (maths, tables, generated text),
   it goes on the line they come from, and the box says so; a bibliography entry is found in the `.bib` file.
 - **PDF zoom and pages:** the zoom percentage offers **Fit width**, **Fit page** (a whole page in view, kept as the window

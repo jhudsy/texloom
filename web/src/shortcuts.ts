@@ -55,7 +55,7 @@ function groups(): [string, Row[]][] {
       [t('Fit the width or a whole page'), { mouse: t('Click the zoom percentage') }],
       [t('Go to the source of a spot'), { mouse: t('Double-click') }],
       [t('Zoom'), { mouse: t('{{key}} + scroll, or pinch', { key: keys('Mod') }) }],
-      [t('Comment on the selected text'), 'Mod-Alt-m'],
+      [t('Comment on the selected text'), 'c'],
       [t('Copy selected text, open in a separate window, download'), { mouse: t('Right-click') }],
     ]],
     [t('In the assistant'), [
