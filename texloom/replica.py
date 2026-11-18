@@ -36,6 +36,8 @@ UPDATE_BATCH = 6 * 1024 * 1024  # pending changes are merged up to this much per
 # can't tell the difference (it's all encrypted). Uploads go as "output", so the writer whose
 # snapshot replaces them may delete them. See web/src/replica.ts.
 REF = b"\x00texloom-ref\x00"
+SIGNED_P2P = ("upd", "cack", "cerr")  # peer-to-peer messages that carry the sender's signature
+ANSWER_EVERY = 30.0  # seconds: how often one connection's request for what it lacks is answered (_on_p2p)
 P2P_BLOB = 50 * 1024 * 1024  # files sent peer to peer (relay-only projects): as big as any synced file
 # A peer-to-peer message bigger than this (a whole project for a computer catching up, a file)
 # goes in pieces: the server takes frames of at most 16 MiB. Pieces are put together again
@@ -57,7 +59,12 @@ class Replica:
         self.server = server.rstrip("/")
         self.create_code = create_code  # needed only to store a *new* project on some servers
         self._warned: set[str] = set()
-        self._parts: dict[tuple, dict] = {}  # big peer-to-peer messages coming in pieces
+        self._parts: dict[tuple, dict] = {}
+        self._answered: dict[str, float] = {}  # what (connection, or connection:file) -> when it was answered
+        self._state_wanted: dict = {}  # connection -> its latest state vector, to answer
+        self._answering = asyncio.Lock()
+        self._uploading = asyncio.Lock()
+        self._answer_tasks: set[asyncio.Task] = set()  # big peer-to-peer messages coming in pieces
         self._part_at = 0.0  # when a piece last came in
         self._p2p_window: list = [0.0, 0]  # [start, bytes sent] (see P2P_RATE)
         self.doc = Doc(skip_gc=True)  # keep deleted text so past versions can be reconstructed
@@ -73,12 +80,17 @@ class Replica:
         self.refs: dict[int, str] = {}  # stored changes and snapshots that are uploads: seq -> upload id
         self._ref_sent: dict[str, str] = {}  # outbox id -> upload id, until the server stores it
         self._snap_ref: tuple[int, str | None] | None = None  # the snapshot sent, until the server says it took it
-        self._resync = 0  # 1: an upload a change refers to couldn't be fetched, so catch up from the start
+        self._resync = 0  # 1: an upload a change refers to is gone, so catch up from the start (once: then it's skipped)
+        # Changes whose upload couldn't be fetched just now (offline, a server error): `since` stays
+        # below the first, so it's fetched again on reconnecting, and no snapshot is made meanwhile.
+        self._missing: set[int] = set()
+        self._missing_tries = 0
+        self._missing_retry: asyncio.Task | None = None
         self._seen: set[int] = set()  # seqs received above `since` (out of order)
         self.ws: aiohttp.ClientWebSocketResponse | None = None
         self.http: aiohttp.ClientSession | None = None
         self.on_remote: Callable[[], Awaitable[None]] | None = None
-        self.on_compile_request: Callable[[int, bool], Awaitable[None]] | None = None
+        self.on_compile_request: Callable[[int, bool, str], Awaitable[None]] | None = None
         self.server_mode = "server"  # what the server says: "server" (stores) or "relay"
         self.pending_mode: str | None = None  # storage change not yet sent to the server
         self.store_refusal: str | None = None  # what the server last said
@@ -182,19 +194,49 @@ class Replica:
         (self.dir / "blobs" / bid).unlink(missing_ok=True)  # the server has it: no need for a copy here
         return bid
 
-    async def _fetch_ref(self, update: bytes) -> bytes | None:
-        """The change a reference points to, from the server (None if it can't be had)."""
+    async def _fetch_ref(self, update: bytes) -> bytes | str:
+        """The change a reference points to, from the server: "retry" if it couldn't be fetched
+        just now, "gone" if it isn't there (or isn't what the reference names)."""
         try:
             bid = json.loads(update[len(REF):])["b"]
-            if not isinstance(bid, str) or not BLOB_RE.match(bid) or self.http is None:
-                return None
+        except (ValueError, KeyError, TypeError):
+            return "gone"
+        if not isinstance(bid, str) or not BLOB_RE.match(bid):
+            return "gone"
+        if self.http is None:
+            return "retry"
+        try:
             async with self.http.get(f"{self.server}/blob/{self.keys.project}/{bid}") as r:
+                if r.status in (404, 410):
+                    return "gone"
                 if r.status != 200:
-                    return None
-                content = self.keys.decrypt(await r.read())
-        except (ValueError, KeyError, TypeError, InvalidTag, aiohttp.ClientError):
-            return None
-        return content if self.keys.blob_id(content) == bid else None
+                    return "retry"
+                data = await r.read()
+        except (aiohttp.ClientError, TimeoutError, OSError):
+            return "retry"
+        try:
+            content = self.keys.decrypt(data)
+        except (InvalidTag, ValueError):
+            return "gone"
+        return content if self.keys.blob_id(content) == bid else "gone"
+
+    def _hold_for_missing(self) -> None:
+        """`since` stops below a change whose upload couldn't be fetched; reconnecting (after a
+        while, longer each time) catches up from there."""
+        if not self._missing:
+            self._missing_tries = 0
+            return
+        self.since = min(self.since, min(self._missing) - 1)
+        if self._missing_retry is not None and not self._missing_retry.done():
+            return
+        wait = min(5.0 * 2 ** self._missing_tries, 300.0)
+        self._missing_tries += 1
+
+        async def reconnect() -> None:
+            await asyncio.sleep(wait)
+            if self.ws is not None:
+                await self.ws.close()
+        self._missing_retry = asyncio.get_running_loop().create_task(reconnect())
 
     async def _drop_refs(self, upto: int, keep: str | None) -> None:
         """After a snapshot up to `upto`: the uploads of what it replaced aren't needed any more."""
@@ -281,11 +323,17 @@ class Replica:
                 continue
             if update.startswith(REF):
                 ref = update
-                update = await self._fetch_ref(ref)
-                if update is None:
-                    log.warning("couldn't fetch the upload change %s refers to", q)
+                got = await self._fetch_ref(ref)
+                if got == "retry":
+                    log.warning("couldn't fetch the upload change %s refers to; trying again shortly", q)
+                    self._missing.add(q)
+                    continue
+                if isinstance(got, str):
+                    log.warning("skipping change %s: its upload is gone" if self._resync else
+                                "the upload change %s refers to is gone: catching up from the start", q)
                     self._resync = self._resync or 1
                     continue
+                update = got
                 try:
                     self.refs[q] = json.loads(ref[len(REF):])["b"]
                 except (ValueError, KeyError):
@@ -313,13 +361,13 @@ class Replica:
         """Advance `since` only over contiguous sequence numbers, so nothing is skipped."""
         if q > self.since:
             self._seen.add(q)
-        while self.since + 1 in self._seen:
+        while self.since + 1 in self._seen and self.since + 1 not in self._missing:
             self.since += 1
             self._seen.discard(self.since)
 
     async def _maybe_compact(self, count: int) -> None:
-        if count < COMPACT_AFTER or not self.keys.writable or self.ws is None or self.server_mode == "relay":
-            return
+        if count < COMPACT_AFTER or not self.keys.writable or self.ws is None or self.server_mode == "relay" or self._missing:
+            return  # (a snapshot would leave a missing change out)
         full = self.doc.get_update()
         data, ref = self.keys.encrypt(full), None
         if len(data) > MAX_SNAPSHOT:  # too big for one message: as an upload
@@ -351,12 +399,18 @@ class Replica:
         return bid
 
     async def upload_pending(self) -> None:
+        async with self._uploading:  # one at a time: the folder sync and the connection both start it
+            await self._upload_pending()
+
+    async def _upload_pending(self) -> None:
         pending = self.dir / "blobs-pending"
         if not pending.exists() or not self.keys.writable or self.http is None:
             return
         if self.server_mode == "relay" or self.storage == "relay":
             return  # blobs travel peer to peer instead
         for marker in list(pending.iterdir()):
+            if not marker.exists():
+                continue
             bid = marker.name
             data = self.keys.encrypt((self.dir / "blobs" / bid).read_bytes())
             sig = self.keys.sign(f"blob:{bid}:".encode() + data)
@@ -376,7 +430,7 @@ class Replica:
                         self._storage_warning((await r.json(content_type=None) or {}).get("code", str(r.status)))
                         return
                     r.raise_for_status()
-                marker.unlink()
+                marker.unlink(missing_ok=True)
                 self.store_refusal = None
             except aiohttp.ClientError as e:
                 log.warning("blob upload failed (%s); will retry", e)
@@ -436,7 +490,8 @@ class Replica:
             return
         data = self.keys.encrypt(json.dumps(payload).encode())
         d = b64e(data)
-        sig = b64e(self.keys.sign(b"p2p:" + data)) if payload.get("k") == "upd" else None
+        # signed: changes, and the answers to compile requests (so a read-only member can't fake those)
+        sig = b64e(self.keys.sign(b"p2p:" + data)) if payload.get("k") in SIGNED_P2P and self.keys.writable else None
         if len(d) <= P2P_PIECE:
             await self._send_p2p(d, sig, to)
             return
@@ -503,6 +558,49 @@ class Replica:
                 m["s"] = whole["s"]
             await self._on_p2p(m)
 
+    # Peers ask for what they lack (sv1/sv2: all of the document they don't have; breq: a file).
+    # Anyone with the link can ask, a read-only one too, and a few bytes can ask for megabytes:
+    # each connection gets at most one answer of each kind per ANSWER_EVERY (a state vector asked
+    # for sooner is answered then, with the latest), answers go out one at a time, and apart
+    # from the receiving of messages, which they never hold up. As in web/src/replica.ts.
+    def _may_answer(self, key: str) -> bool:
+        now = time.monotonic()
+        if len(self._answered) > 1000:
+            self._answered = {k: at for k, at in self._answered.items() if now - at < ANSWER_EVERY}
+        if now - self._answered.get(key, -ANSWER_EVERY) < ANSWER_EVERY:
+            return False
+        self._answered[key] = now
+        return True
+
+    def _answer(self, send, wait: float = 0.0) -> None:
+        async def run() -> None:
+            if wait:
+                await asyncio.sleep(wait)
+            async with self._answering:
+                try:
+                    await send()
+                except Exception as e:  # noqa: BLE001 - a peer not answered is no reason to stop
+                    log.debug("couldn't answer a peer: %s", e)
+        task = asyncio.get_running_loop().create_task(run())
+        self._answer_tasks.add(task)
+        task.add_done_callback(self._answer_tasks.discard)
+
+    def _answer_state(self, frm, sv: str) -> None:
+        waiting = frm in self._state_wanted
+        self._state_wanted[frm] = sv
+        if waiting:
+            return
+
+        async def send() -> None:
+            want = self._state_wanted.pop(frm, None)
+            if want is None or not self._may_answer(str(frm)):
+                return
+            diff = self.doc.get_update(b64d(want))
+            if len(diff) > 2:
+                await self.p2p({"k": "upd", "u": b64e(diff)}, frm)
+        last = self._answered.get(str(frm))
+        self._answer(send, 0.0 if last is None else max(0.0, last + ANSWER_EVERY - time.monotonic()))
+
     async def _on_p2p(self, m: dict) -> None:
         data = b64d(m["d"])
         try:
@@ -513,10 +611,8 @@ class Replica:
         if k == "part":
             await self._on_part(frm, p)
         elif k in ("sv1", "sv2"):
-            if self.keys.writable:
-                diff = self.doc.get_update(b64d(p["sv"]))
-                if len(diff) > 2:
-                    await self.p2p({"k": "upd", "u": b64e(diff)}, frm)
+            if self.keys.writable and isinstance(p.get("sv"), str):
+                self._answer_state(frm, p["sv"])
             if k == "sv1":
                 await self.p2p({"k": "sv2", "sv": b64e(self.doc.get_state())}, frm)
         elif k == "upd":
@@ -542,9 +638,14 @@ class Replica:
             bid = p.get("id")
             if not isinstance(bid, str) or not BLOB_RE.match(bid):
                 return
+            if not self._may_answer(f"{frm}:{bid}"):
+                return
             cache = self.dir / "blobs" / bid
-            if cache.exists() and cache.stat().st_size <= P2P_BLOB:
-                await self.p2p({"k": "blob", "id": p["id"], "b": b64e(cache.read_bytes())}, frm)
+
+            async def send_blob() -> None:
+                if cache.exists() and cache.stat().st_size <= P2P_BLOB:
+                    await self.p2p({"k": "blob", "id": bid, "b": b64e(cache.read_bytes())}, frm)
+            self._answer(send_blob)
         elif k == "blob":
             if p.get("id") not in self._blob_waiters:
                 return  # only files we asked for
@@ -555,7 +656,8 @@ class Replica:
                 if not fut.done():
                     fut.set_result(blob)
         elif k == "creq" and self.on_compile_request:
-            await self.on_compile_request(frm, p.get("clean") is True)
+            nonce = p.get("n") if isinstance(p.get("n"), str) and len(p["n"]) <= 64 else ""
+            await self.on_compile_request(frm, p.get("clean") is True, nonce)
 
     async def send_mode(self, mode: str) -> None:
         if self.ws is None or not self.keys.writable:
@@ -637,6 +739,7 @@ class Replica:
                         self.ws = ws
                         self._caught_up = False
                         self._log_pending = None
+                        self._missing.clear()  # (this catch-up finds them again if they're still missing)
                         self._resync = 0 if self._resync == 1 else self._resync
                         backoff = 1
                         log.info("connected to %s", self.server)
@@ -683,6 +786,7 @@ class Replica:
             await self.send_mode(self.pending_mode)
         await self.upload_pending()  # blobs first, so peers can fetch what updates reference
         self.since = head if lost else max(self.since, head)
+        self._hold_for_missing()
         self._seen = {q for q in self._seen if q > self.since}
         self._mark_seen(self.since)
         await self.flush_outbox()
@@ -744,6 +848,7 @@ class Replica:
                 return
             if m["q"]:
                 self._mark_seen(m["q"])
+            self._hold_for_missing()
             self.save()
         elif t == "snapped":  # the server took our snapshot: what it replaced can go
             if self._snap_ref and self._snap_ref[0] == m.get("upto"):

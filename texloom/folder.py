@@ -30,7 +30,7 @@ from .textpos import U16, Char, length_u16, u16_of
 from .invariants import broken, checking, first_difference, well_formed
 from .replica import BLOB_RE, Replica
 from .confine import OUTSIDE_NOTE, forget_reads, outside_reads, sandboxed
-from .scan import SCANNED, added, allowed, shell_lines
+from .scan import SCANNED, added, allowed, binaries_on_disk, shell_lines
 from .xr import compile_order, external_documents
 from .paths import PROTECTED_DIRS, STATE, latexmk_command, main_file, safe_rel, tex_env, tex_names_refused
 
@@ -504,7 +504,7 @@ class FolderSync:
         replica.on_compile_request = self.on_compile_request
         self._warned_shell: frozenset[str] = frozenset()
         self._last_request = 0.0
-        self._asked: set = set()  # browsers whose compile requests the next compile answers
+        self._asked: dict = {}  # browsers whose compile requests the next compile answers -> their nonce
         self._compiled_at = 0.0  # when the last compile finished (monotonic)
         self._chained = 0  # compiles in a row started by this folder's changes just after the last
         self._generated: set[str] = set()  # files seen changing here just after a compile
@@ -1167,9 +1167,10 @@ class FolderSync:
             self._compile_task.cancel()  # still waiting for changes to stop: wait again
         self._compile_task = asyncio.get_event_loop().create_task(self._compile(delay=delay))
 
-    async def on_compile_request(self, frm: int | None, clean: bool = False) -> None:
+    async def on_compile_request(self, frm: int | None, clean: bool = False, nonce: str = "") -> None:
         """A browser asked for a compile (its device setting: 'compile with my own TeX');
-        `clean`: from scratch, without the previous run's .aux, .bbl and other files."""
+        `clean`: from scratch, without the previous run's .aux, .bbl and other files. The answers
+        (cack, cerr) carry the request's `nonce`, and are signed, so they can't be faked or replayed."""
         if not self.compile or not self.r.can_write:
             return
         # Anyone with the link can ask (requests aren't signed): at most one compile every few seconds.
@@ -1177,8 +1178,8 @@ class FolderSync:
         if now - self._last_request < 5:
             return
         self._last_request = now
-        self._asked.add(frm)
-        await self.r.p2p({"k": "cack", "by": self.opts["label"]}, frm)
+        self._asked[frm] = nonce
+        await self.r.p2p({"k": "cack", "by": self.opts["label"], "n": nonce}, frm)
         if clean:
             self.compile_from_scratch()
         else:
@@ -1186,7 +1187,7 @@ class FolderSync:
 
     async def _compile(self, delay: float) -> None:
         await asyncio.sleep(delay)
-        asked, self._asked = self._asked, set()
+        asked, self._asked = self._asked, {}
         self._compiling = True
         try:
             await self._run_compile()
@@ -1208,10 +1209,10 @@ class FolderSync:
                 self._again = False
                 self._start(1.5)
 
-    async def _compile_failed(self, asked: set, why: str, e: BaseException | None = None) -> None:
+    async def _compile_failed(self, asked: dict, why: str, e: BaseException | None = None) -> None:
         log.error("can't compile: %s%s", why, f" ({e})" if e else "")
-        for frm in asked:
-            await self.r.p2p({"k": "cerr", "by": self.opts["label"], "why": why}, frm)
+        for frm, nonce in asked.items():
+            await self.r.p2p({"k": "cerr", "by": self.opts["label"], "why": why, "n": nonce}, frm)
 
     async def _run_compile(self) -> None:
         main = self.main_file()
@@ -1299,7 +1300,7 @@ class FolderSync:
             return "-shell-restricted", ""
         if not mode:
             return "-no-shell-escape", ""
-        new = [f for f in shell_lines(self.r.files) if f.key not in allowed(self.root)]
+        new = [f for f in shell_lines(self.r.files, binaries_on_disk(self.root, self.r.bin)) if f.key not in allowed(self.root)]
         if not new:
             return "-shell-escape", ""
         keys = frozenset(f.key for f in new)

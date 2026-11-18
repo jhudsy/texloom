@@ -275,10 +275,10 @@ def list_folders() -> None:
 
 def allow_programs(d: Path, yes: bool) -> None:
     """Show every line that asks to run programs; on confirmation, allow exactly those."""
-    from .scan import allow, allowed, shell_lines
+    from .scan import allow, allowed, binaries_on_disk, shell_lines
     keys, server = load(d)
     r = Replica(d / STATE, keys, server)  # the local copy, as last synced
-    found = shell_lines(r.files)
+    found = shell_lines(r.files, binaries_on_disk(d, r.bin))
     if not found:
         allow(d, set())
         print("No lines in this project ask to run programs.")

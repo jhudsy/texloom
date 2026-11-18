@@ -46,6 +46,9 @@ TOOLS = [
     (re.compile(r"^\s*%\s*!\s*(?:TeX|TEX|tex|BIB|bib)\s+(?:TS-|TXS-)?program\b"),
      "sets the program your LaTeX editor runs"),
 ]
+# Files whose comments may hold instructions for other tools (TOOLS). Lines that run programs
+# (SHELL) are looked for in every file: TeX reads a file of any name (\input{notes.txt}, or one
+# with no extension at all), and even a file stored as binary.
 SCANNED = (".tex", ".sty", ".cls", ".ltx", ".dtx", ".def", ".cfg", ".lua", ".tikz")
 
 
@@ -80,9 +83,8 @@ def code_part(line: str) -> str:
 
 
 def scan_text(path: str, text: str) -> list[Finding]:
-    if not path.lower().endswith(SCANNED) or len(text) > 4 * 1024 * 1024:
-        return []
     lua = path.lower().endswith(".lua")
+    tools = path.lower().endswith(SCANNED) and not lua
     out = []
     for n, line in enumerate(text.split("\n"), 1):
         shown = line.strip()[:160]
@@ -92,7 +94,7 @@ def scan_text(path: str, text: str) -> list[Finding]:
                 out.append(Finding(path, n, "shell", what, shown))
                 break
         else:
-            if not lua:
+            if tools:
                 for rx, what in TOOLS:
                     if rx.search(line):
                         out.append(Finding(path, n, "tools", what, shown))
@@ -104,10 +106,42 @@ def scan(files: dict[str, str]) -> list[Finding]:
     return [f for p, t in sorted(files.items()) for f in scan_text(p, t)]
 
 
-def shell_lines(files: Mapping[str, object] | Map) -> list[Finding]:
+_binary_found: dict[tuple[str, int, int], list[Finding]] = {}
+
+
+def scan_binary(path: str, full: Path) -> list[Finding]:
+    """Lines that run programs in a file stored as binary (a picture, a PDF, a text too big or
+    with odd bytes): TeX can still \\input it, so its bytes are read as Latin-1 text. Remembered
+    by size and date, so a big file is read once."""
+    try:
+        st = full.stat()
+    except OSError:
+        return []
+    k = (path, st.st_size, st.st_mtime_ns)
+    if k not in _binary_found:
+        try:
+            text = full.read_bytes().decode("latin-1")
+        except OSError:
+            return []
+        if len(_binary_found) > 1000:
+            _binary_found.clear()
+        # (most files have none of it anywhere: only those are looked at line by line)
+        found = any(rx.search(text) for rx, _ in SHELL)
+        _binary_found[k] = [f for f in scan_text(path, text) if f.kind == "shell"] if found else []
+    return _binary_found[k]
+
+
+def shell_lines(files: Mapping[str, object] | Map, binaries: Mapping[str, Path] | None = None) -> list[Finding]:
     """The lines that run programs with shell escape on, in the project's texts (CRDT texts or
-    strings) under names collaborators' apps accept: what `texloom allow` approves."""
-    return [f for f in scan({p: str(t) for p, t in files.items() if safe_rel(p)}) if f.kind == "shell"]
+    strings) and its files stored as binary (`binaries`: project path -> the file on disk), under
+    names collaborators' apps accept: what `texloom allow` approves."""
+    found = [f for f in scan({p: str(t) for p, t in files.items() if safe_rel(p)}) if f.kind == "shell"]
+    return found + [f for p, full in sorted((binaries or {}).items()) if safe_rel(p) for f in scan_binary(p, full)]
+
+
+def binaries_on_disk(root: Path, bin_paths) -> dict[str, Path]:
+    """The project's files stored as binary that are in the folder `root` (what TeX would read)."""
+    return {p: root / p for p in bin_paths if safe_rel(p) and (root / p).is_file()}
 
 
 def added(path: str, old: str | None, new: str) -> list[Finding]:

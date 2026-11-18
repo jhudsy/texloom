@@ -58,10 +58,10 @@ from .ui import (
 async def program_lines(engine: Engine, d: Path) -> tuple[list, set[str]]:
     """Lines in a folder's project that ask to run programs (shell escape), and those allowed."""
     from .replica import Replica
-    from .scan import allowed, shell_lines
+    from .scan import allowed, binaries_on_disk, shell_lines
     st = engine.daemon.states.get(d)
     r = st.replica if st and st.replica is not None else Replica(d / STATE, *load(d))
-    return shell_lines(r.files), allowed(d)
+    return shell_lines(r.files, binaries_on_disk(d, r.bin)), allowed(d)
 
 
 class ProgramsDialog(Dialog):
