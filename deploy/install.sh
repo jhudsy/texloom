@@ -131,6 +131,9 @@ User=texloom
 WorkingDirectory=$APP_DIR
 # settings: /etc/texloom/texloom.toml (TEXLOOM_<NAME> variables in /etc/texloom/env override it)
 EnvironmentFile=-/etc/texloom/env
+# buffers over 1 MB (catch-ups, uploads) go back to the system when freed, rather than staying
+# in the heap, where MemoryMax would keep counting them
+Environment=MALLOC_MMAP_THRESHOLD_=1048576
 ExecStart=$APP_DIR/.venv/bin/texloom-server --config /etc/texloom/texloom.toml --host 127.0.0.1 --port 8787
 Restart=on-failure
 UMask=0077
