@@ -26,6 +26,7 @@ jobs:
       - run: uv run python scripts/check_xr.py
       - run: uv run python scripts/check_packing.py
       - run: uv run python scripts/check_folder_deletions.py
+      - run: uv run python scripts/check_folder_reads.py
       - name: The example settings file matches the server's settings
         run: uv run --extra server python scripts/check_config.py
       - name: The server's file store (a folder, with a throwaway PostgreSQL; S3 is checked locally against Garage)

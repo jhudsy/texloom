@@ -514,6 +514,7 @@ class FolderSync:
         self._rewrite = False  # write the project's text to disk after this ingest
         self._lf_done = False  # "\r" taken out of the project's texts (once, at the start)
         self._unsettled: dict[str, int] = {}  # files found still being written, and how many times in a row
+        self._settled: dict[str, tuple[int, int] | None] = {}  # each file's (size, date) once it stopped changing, until read
         self._later_paths: set[str] = set()  # those, to look at again shortly
         self._later_task: asyncio.Task | None = None
         self._unwritten: set[str] = set()  # files the last write_out couldn't write (on Windows, open elsewhere)
@@ -764,6 +765,7 @@ class FolderSync:
         for rel in cand:
             if self._look(rel) == first[rel]:
                 self._unsettled.pop(rel, None)
+                self._settled[rel] = first[rel]
                 continue
             n = self._unsettled[rel] = self._unsettled.get(rel, 0) + 1
             if n <= 20:  # one that never stops changing is taken as it is, after a while
@@ -847,12 +849,16 @@ class FolderSync:
             # made meanwhile, which would then pass for this content and never be shared.
             try:
                 before = full.stat()
-                data = full.read_bytes()
-                moved = self._look(rel) != (before.st_size, before.st_mtime_ns)
+                # not the file that settled: an editor began its next save since (emptying the
+                # file first, say), on a slow or busy computer, between settling and this read
+                settled = self._settled.pop(rel, False)
+                moved = settled is not False and settled != (before.st_size, before.st_mtime_ns)
+                data = b"" if moved else full.read_bytes()
+                moved = moved or self._look(rel) != (before.st_size, before.st_mtime_ns)
             except OSError:
                 self._later({rel})
                 continue
-            if moved:  # changed while being read: again in a moment
+            if moved:  # changed since it settled, or while being read: again in a moment
                 self._later({rel})
                 continue
             if len(data) > MAX_FILE:

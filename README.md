@@ -799,6 +799,7 @@ cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for
 uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
 uv run --with hypothesis python scripts/check_folder_model.py     # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
 uv run python scripts/check_folder_deletions.py                   # a file deleted or renamed in the folder isn't brought back by a change arriving just then
+uv run python scripts/check_folder_reads.py                       # a file is shared only as it was once it stopped changing, not mid-way through the next save
 uv run --extra server python scripts/check_files.py               # the server's file store: a folder, and Garage (S3) if installed
 uv run --extra server python scripts/check_config.py              # texloom.example.toml lists every server setting, and parses
 (cd web && npm run check-folder-model)                           # the same for the browser's folder sync, on a fake clock and folder
