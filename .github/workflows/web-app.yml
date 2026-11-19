@@ -47,9 +47,16 @@ jobs:
       - name: PostgreSQL's programs (scripts/pg.py runs a throwaway one)
         run: ls /usr/lib/postgresql/*/bin/initdb >/dev/null 2>&1 || sudo apt-get install -y postgresql
       - name: Chromium
-        run: uv run --with playwright python -m playwright install --with-deps chromium
+        id: chromium
+        # Ubuntu's package mirrors are sometimes unreachable for a while: try again before failing
+        run: |
+          for i in 1 2 3; do
+            uv run --with playwright python -m playwright install --with-deps chromium && exit 0
+            echo "Chromium install failed (attempt $i); trying again in a minute"; sleep 60
+          done
+          exit 1
       - name: Keeping a project in step with a git repository (GitHub, GitLab, Gitea)
         run: uv run --extra server --with playwright python scripts/check_web_git.py
       - name: The Review tab
-        if: success() || failure()
+        if: (success() || failure()) && steps.chromium.outcome == 'success'  # even if the one above failed
         run: uv run --extra server --with playwright python scripts/check_web_review.py
