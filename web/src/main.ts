@@ -371,7 +371,6 @@ function projectList(): HTMLElement {
     const code = projectCode(r.project)
     const others = (r.people ?? []).filter((p) => p !== me && p !== r.createdBy)
     const meta: string[] = []
-    if (r.nick && r.name) meta.push(t('your label; everyone else sees “{{name}}”', { name: r.name }))
     if (r.createdBy && r.createdBy !== me) meta.push(t('started by {{name}}', { name: r.createdBy }))
     if (others.length) meta.push(t('with {{names}}', { names: `${others.slice(0, 4).join(', ')}${others.length > 4 ? ` +${others.length - 4}` : ''}` }))
     if (r.files) meta.push(tn(r.files, '{{n}} file', '{{n}} files'))
@@ -385,7 +384,7 @@ function projectList(): HTMLElement {
         showSelection()
       } }),
       h('div', { class: 'top' },
-        h('a', { href: `#p=${r.project}`, class: 'pname', title: t('{{name}} · project code {{code}}', { name: label, code }) }, label),
+        h('a', { href: `#p=${r.project}`, class: 'pname', title: r.nick && r.name ? t('{{name}} · others see “{{shared}}” · project code {{code}}', { name: label, shared: r.name, code }) : t('{{name}} · project code {{code}}', { name: label, code }) }, label),
         dupes.has(label) ? h('code', { class: 'pcode', title: t('Project code: derived from this project’s unique ID. Two projects with the same name always have different codes.') }, code) : null,
         r.writable ? null : h('span', { class: 'tag ro' }, t('read-only')),
         r.server ? h('span', { class: 'tag away', title: t('Kept on another server, {{server}}: this page syncs it with that server.', { server: r.server }) }, serverName(r.server)) : null,
