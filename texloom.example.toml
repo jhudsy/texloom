@@ -24,6 +24,7 @@ tex_assets = "/var/www/texloom/tex-assets"    # in-browser TeX (busytex/)
 # --- who may store what --------------------------------------------------------------------
 codes_file = ["/etc/texloom/codes.txt"]  # creation codes and allowances (TEXLOOM_CODES_FILES adds more)
 # codes_url = "https://example.org/how-to-get-a-code"
+# dropbox_app_key = "abc123def456ghi"  # a Dropbox app for the web app's Dropbox integration (README → Dropbox)
 # private = false                     # only projects created with a creation code may connect
 min_free = "2G"                       # stop storing when the disk of "data" has less free
 project_max_bytes = "200M"            # most one project may store (except unlimited allowances)

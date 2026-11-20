@@ -501,6 +501,7 @@ class Relay:
         # asked to update, so that support for older data and protocols can be dropped
         self.min_version = version_tuple(min_version) if min_version else None
         self.codes_url = ""  # where people learn how to get a creation code (/api/info)
+        self.dropbox_app_key = ""  # the server's Dropbox app, for the web app's Dropbox integration (/api/info)
         self.store: Store = store  # type: ignore[assignment]  # (attach, when the server starts)
         self.private = private  # only projects created with a valid creation code may use this server
         self.want_lists = lists
@@ -1135,6 +1136,7 @@ class Relay:
             "projectLists": self.lists is not None,
             "texlive": self.texlive.info() if self.texlive else None,
             **({"codesUrl": self.codes_url} if self.codes_url else {}),
+            **({"dropboxAppKey": self.dropbox_app_key} if self.dropbox_app_key else {}),
             **({"minVersion": ".".join(map(str, self.min_version))} if self.min_version else {}),
         })
 
@@ -1261,9 +1263,10 @@ def make_app(database: str, static: Path | None, tex: Path | None = None,
              texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None,
              purge_days: float | None = None, lists: bool = True, private: bool = False,
              codes_url: str = "", min_version: str = "", files: Files | None = None,
-             data: Path = Path("data")) -> web.Application:
+             data: Path = Path("data"), dropbox_app_key: str = "") -> web.Application:
     relay = Relay(None, limits, codes, lists, private, min_version)
     relay.codes_url = codes_url
+    relay.dropbox_app_key = dropbox_app_key
     if texlive:  # TeX Live files on demand for the in-browser engine
         from .texlive import TexLive
         tl = TexLive(texlive, texlive_max, (limits or Limits()).min_free, texlive_mirrors)
@@ -1395,6 +1398,10 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--codes-url", default="", metavar="URL",
                    help="a web page saying how to get a creation code for this server; the apps link to it where "
                         "they ask for a code (default: none, and they say to ask whoever runs it)")
+    p.add_argument("--dropbox-app-key", default="", metavar="KEY",
+                   help="the app key of a Dropbox app made for this server (Full Dropbox access; redirect URI "
+                        "https://<this server>/dropbox-auth.html): lets the web app keep projects in step with Dropbox "
+                        "folders. The key is public; the app secret isn't needed (default: no Dropbox)")
     p.add_argument("--no-project-lists", action="store_true",
                    help="don't store people's encrypted project lists (the sync link and passkey features)")
     p.add_argument("--no-arxiv", action="store_true", help="disable importing arXiv sources through this server")
@@ -1531,7 +1538,10 @@ def main() -> None:
         p.error("--min-version is a version such as 0.4.30")
     if a.codes_url and not re.match(r"https?://", a.codes_url, re.I):
         p.error("--codes-url must be an http:// or https:// address")
+    if a.dropbox_app_key and not re.fullmatch(r"[a-z0-9]{8,32}", a.dropbox_app_key):
+        p.error("--dropbox-app-key is the app key from the Dropbox App Console (letters and digits), not the secret")
     web.run_app(make_app(a.database, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv, codes_url=a.codes_url,
+                        dropbox_app_key=a.dropbox_app_key,
                         admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
                         texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
                         purge_days=a.purge_expired_after, lists=not a.no_project_lists, private=a.private,

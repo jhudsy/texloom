@@ -835,6 +835,40 @@ refresh it. A refresh exports the collection's top-level items as BibTeX or BibL
 request, using `Total-Results`) and applies the difference to the file (`applyText`), directly
 even in suggest mode, as the file is generated. Keys are Zotero's own.
 
+## Dropbox
+
+`web/src/dropbox.ts` keeps a project in step with a Dropbox folder from the browser, as the git
+integration does with a repository, but file by file: Dropbox has no commits.
+- **Signing in:** OAuth with PKCE in a pop-up (no secret anywhere; the server's
+  `dropbox_app_key`, from /api/info, names the app). The pop-up returns to
+  `/dropbox-auth.html`, which hands the code over a BroadcastChannel (Dropbox's pages cut the
+  pop-up's opener). The account (`texloom.dropbox`: refresh token, short-lived access token) is
+  the person's, and follows the project list as the setting `dropbox`.
+- **The link** (`meta.dropbox = {folder, path, name, by, at, blocked, clash}`) names the folder by
+  its id, `.texloom/folder-id` in it, made if missing: the same id the app's folder sync uses
+  (sharedfolder.py). Each browser approves it with the folder's path in its own Dropbox
+  (`texloom.dropboxApproved.<project>`, with the account), checked against that id: a shared
+  folder sits at a different path in each member's Dropbox.
+- **The base:** the shared map `dropboxBase` (path -> {rev, h, size}): each file's Dropbox
+  revision and content hash as last synced. Only changed entries are rewritten, so the project's
+  history grows with the changes, not the folder's size.
+- **Bringing in** (every minute): a full listing; each file whose content hash differs from its
+  base is taken (unchanged here), merged three ways (base: that revision, downloaded by `rev:`),
+  or clashes, as for git; `blocked` holds the clashing files' revisions. Revisions Dropbox no
+  longer keeps (30 days and more) mean no base: a clash.
+- **Sending:** each file whose hash differs from its base is uploaded in "update" mode with its
+  base revision (or "add" for a new one), which Dropbox refuses if the file changed since; a
+  deletion names its base revision. A refusal means bringing in first. Each success updates its
+  base entry at once, so a send cut short is finished by the next.
+- **One at a time:** the lease `dropboxLease`, as `githubLease`. And browsers stand by while the
+  TeXLoom app on someone's computer keeps the same folder (its `fold` messages, with that folder
+  id and "holding", heard in the last 70 s; `Replica.folders`), Dropbox carrying it to that
+  computer: syncing from both would bring each change in twice. A browser listens 25 s before
+  first syncing a link.
+- Dropbox's conflicted copies, `.texloom` and build output are never project files.
+
+`scripts/check_web_dropbox.py` drives it against `scripts/fakedropbox.py`.
+
 ## Git repositories (GitHub, GitLab, Gitea, Forgejo)
 
 `web/src/github.ts` keeps a project in step with a git repository from the browser, through

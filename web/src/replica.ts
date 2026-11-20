@@ -150,6 +150,10 @@ export class Replica {
   get storeProblem(): StoreProblem { return this.refusal }
   onStatus: () => void = () => {}
   onCompileAck: (info: { by: string }) => void = () => {}
+  /** Folders the TeXLoom app syncs on other computers, by folder id: when last heard, whether that
+   *  computer keeps the folder in step, its name (texloom/sharedfolder.py; the Dropbox link stands
+   *  by while an app keeps the same folder, dropbox.ts). */
+  readonly folders = new Map<string, { at: number; holding: boolean; by: string }>()
   private compileNonces: string[] = [] // our last compile requests', which answers must carry
   onCompileError: (info: { by: string; why: string }) => void = () => {}
 
@@ -743,6 +747,9 @@ export class Replica {
     switch (p.k) {
       case 'part':
         await this.onPart(m.from, p)
+        break
+      case 'fold': // the app on another computer syncs a folder of this project
+        if (typeof p.f === 'string' && /^[0-9a-f]{32}$/.test(p.f)) this.folders.set(p.f, { at: Date.now(), holding: !!p.h, by: String(p.by ?? '').slice(0, 60) })
         break
       case 'sv1': // a peer just connected: send what it lacks, and ask for what we lack
       case 'sv2': {

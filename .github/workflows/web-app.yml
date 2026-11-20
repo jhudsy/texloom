@@ -1,5 +1,5 @@
 # The web app in a real browser (headless Chromium), through its own screens: keeping a project in
-# step with GitHub, GitLab and Gitea repositories (stand-ins, scripts/fakeforge.py), and the Review
+# step with GitHub, GitLab and Gitea repositories and a Dropbox folder (stand-ins), and the Review
 # tab (comment order, several drafts at once). About three minutes, so it runs when the web app or
 # the server changes, every night, and on demand (Actions → Web app check → Run workflow).
 name: Web app check
@@ -13,6 +13,7 @@ on:
       - 'scripts/webcheck.py'
       - 'scripts/check_web_*.py'
       - 'scripts/fakeforge.py'
+      - 'scripts/fakedropbox.py'
       - 'scripts/pg.py'
       - '.github/workflows/web-app.yml'
   pull_request:
@@ -22,6 +23,7 @@ on:
       - 'scripts/webcheck.py'
       - 'scripts/check_web_*.py'
       - 'scripts/fakeforge.py'
+      - 'scripts/fakedropbox.py'
       - 'scripts/pg.py'
       - '.github/workflows/web-app.yml'
   schedule:
@@ -57,6 +59,9 @@ jobs:
           exit 1
       - name: Keeping a project in step with a git repository (GitHub, GitLab, Gitea)
         run: uv run --extra server --with playwright python scripts/check_web_git.py
+      - name: Keeping a project in step with a Dropbox folder
+        if: (success() || failure()) && steps.chromium.outcome == 'success'
+        run: uv run --extra server --with playwright python scripts/check_web_dropbox.py
       - name: The Review tab
         if: (success() || failure()) && steps.chromium.outcome == 'success'  # even if the one above failed
         run: uv run --extra server --with playwright python scripts/check_web_review.py

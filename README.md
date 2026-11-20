@@ -499,6 +499,32 @@ When a collaborator's change writes such a line into your folder, or an `% arara
 directive or `% !TeX program` comment (which your own LaTeX editor may follow), the helper
 and the browser's folder sync point it out once.
 
+### Dropbox from the browser
+
+Project ⚙ Settings → **Integrations** → Dropbox keeps a project in step with a folder in your
+Dropbox, or one shared with you there, with nothing to install:
+- **Connect Dropbox…** once: Dropbox asks you to allow TeXLoom in a small window. The connection
+  stays in your browser (with a project list it follows the list, encrypted); TeXLoom's server
+  never sees it.
+- **Link a Dropbox folder…**: a folder (made if there isn't one). Files only in one of the two end
+  up in both; where both have a file that differs, you choose whose version stays.
+- **Then, while the project is open:** Dropbox's changes come in every minute, merged with
+  collaborators' edits; the project's changes go up once it has been quiet for 2 minutes (only if
+  Dropbox still has the version they were made on: otherwise its changes come in first). Clashes,
+  and one browser at a time, work as for git repositories, below.
+- **A shared Dropbox folder** sits at a different place in each person's Dropbox: a collaborator
+  approves the link with where it is in theirs, and TeXLoom checks it's the same folder (by its
+  id, `.texloom/folder-id`, which it puts there).
+- **With the TeXLoom app too:** if someone's app keeps the same folder in step (Dropbox bringing it
+  to their computer), browsers leave it to the app, so changes don't come in twice.
+- Dropbox's conflicted copies are never brought in.
+
+For a server of your own: make an app in the [Dropbox App Console](https://www.dropbox.com/developers/apps)
+(Scoped access, Full Dropbox; permissions `account_info.read`, `files.metadata.read`,
+`files.content.read`, `files.content.write`; redirect URI `https://<your server>/dropbox-auth.html`;
+*Allow public clients* on), and set its app key as `dropbox_app_key` in the server's settings. The
+app secret isn't needed (the browser signs in with PKCE).
+
 ### A folder in Dropbox (or iCloud Drive, OneDrive, Google Drive, Syncthing)
 
 A synced folder can live in a folder that a file-sync service keeps, and that folder can be shared
@@ -801,7 +827,7 @@ it runs a database of its own from the folder, nothing installed as a service.
 | `web/src/merges.ts`, `texloom/merges.py` | notes paragraphs two people changed while apart, to check |
 | `web/src/latexlog.ts`, `synctex.ts` | log parsing into problems; SyncTeX |
 | `web/src/templates.ts`, `references.ts`, `pasteimage.ts` | templates and import; DOI/arXiv references; pasted images |
-| `web/src/zotero.ts`, `github.ts`, `forges.ts` (and `*ui.ts`) | integrations: a `.bib` file from Zotero; keeping a git repository (GitHub, GitLab, Gitea, Forgejo) in step |
+| `web/src/zotero.ts`, `github.ts`, `forges.ts`, `dropbox.ts` (and `*ui.ts`) | integrations: a `.bib` file from Zotero; keeping a git repository (GitHub, GitLab, Gitea, Forgejo) or a Dropbox folder in step |
 | `web/src/sharing.ts`, `crypto.ts` | links, personal links, revocation, moving to new keys |
 | `web/src/foldersync.ts` | folder sync from the browser (File System Access API) |
 | `web/sw-template.js` | service worker (offline app) |
@@ -861,6 +887,7 @@ starts its own throwaway server; `scripts/webcheck.py` is what they share, for w
 (cd web && npm run build)
 uv run --extra server --with playwright python scripts/check_web_git.py     # keeping a project in step with GitHub, GitLab and Gitea (stand-ins: scripts/fakeforge.py)
 uv run --extra server --with playwright python scripts/check_web_review.py  # the Review tab: comments in reading order, several drafts at once
+uv run --extra server --with playwright python scripts/check_web_dropbox.py # keeping a project in step with a Dropbox folder (stand-in: scripts/fakedropbox.py)
 ```
 
 The quick checks run on every push (`.github/workflows/checks.yml`). The sync-only check takes a

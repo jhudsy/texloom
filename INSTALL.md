@@ -134,6 +134,7 @@ min_free = "2G"
 | `private` | `false` | only projects created with a creation code may use the server ([Private servers](#private-servers)) |
 | `min_version` | none | the oldest app allowed ([Retiring old app versions](#retiring-old-app-versions)) |
 | `codes_url` | none | a page saying how to get a creation code; the apps link to it |
+| `dropbox_app_key` | none | the app key of a Dropbox app for this server (README → Dropbox): lets the web app keep projects in step with Dropbox folders |
 | `evict_idle_days` | `0` (never) | drop the stored copy of projects nobody opened for this long |
 | `purge_expired_after` | never | drop the stored copies of projects whose code expired this many days ago |
 | `admin_token` or `admin_token_file` | none | the password for `/admin` |

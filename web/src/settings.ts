@@ -10,6 +10,7 @@ import { t, LANGUAGES, langPref, setLangPref, type Lang } from './i18n'
 import { editorMarkup, type Markup } from './review'
 import { zoteroSection } from './zoteroui'
 import { githubSection } from './githubui'
+import { dropboxSection } from './dropboxui'
 
 /** "Codes come from whoever runs this server", with the server's own page about them once known. */
 function codeSourceSlot(): HTMLElement {
@@ -235,6 +236,8 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       zoteroSection(r, () => prefs.name, w),
       h('h4', {}, t('Git repositories')),
       githubSection(r, () => prefs.name, w),
+      h('h4', {}, 'Dropbox'),
+      dropboxSection(r, () => prefs.name, w),
     ] },
     you: { label: t('You'), body: () => [
       whose(t('Yours, in every project in this browser.')),

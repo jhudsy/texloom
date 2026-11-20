@@ -95,7 +95,8 @@ class Session:
         """A new project (not compiled in the browser), with these files, open in a new page."""
         from texloom.crypto import Keys
         p = self.page(storage)
-        p.goto(Keys.generate().link(self.urls["texloom"]))
+        p.link = Keys.generate().link(self.urls["texloom"])  # (for a collaborator to open)
+        p.goto(p.link)
         p.wait_for_selector("dialog[open] button:has-text('Start')", timeout=30000)
         p.fill("dialog[open] input[placeholder='Shown to collaborators']", name)
         p.locator("dialog[open] label.radio", has_text="Don’t compile here").last.click()

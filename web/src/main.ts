@@ -45,6 +45,7 @@ import { watchMerges } from './merges'
 import { checking, wellFormed } from './invariants'
 import { sharedPos, type SharedPos } from './positions'
 import { githubAccountBox, runGitHub } from './githubui'
+import { dropboxAccountBox, runDropbox } from './dropboxui'
 import { shareDialog } from './sharing'
 import { awayServer, fragmentFor, fragmentOfLink, serverName, serverOr } from './servers'
 import { folderFiles, folderPermission, folderSyncSupported, pickFolder, rememberFolder, savedFolder, startFolderSync, type FolderSync } from './foldersync'
@@ -193,6 +194,8 @@ function startSettings() {
     zoteroAccountBox(),
     h('h4', {}, t('Git repositories')),
     githubAccountBox(),
+    h('h4', {}, 'Dropbox'),
+    dropboxAccountBox(),
     h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => { dlg.close(); refreshProjects() } }, t('Done'))))
 }
 
@@ -980,6 +983,7 @@ async function openProject(keys: Keys, server: string) {
     }
   } catch { /* storage blocked: no hooks */ }
   runGitHub(r, () => me.name) // keep it in step with a GitHub repository, if it's linked to one
+  runDropbox(r, () => me.name) // and with a Dropbox folder
   r.meta.observe(renderMoved); renderMoved()
   r.onStatus = () => {
     renderStatus()

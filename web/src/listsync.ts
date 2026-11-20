@@ -15,6 +15,7 @@ import { creationCode } from './replica'
 import { myName, NAME_CHANGED } from './myname'
 import { zoteroAccount } from './zotero'
 import { githubAccount, otherAccounts } from './github'
+import { dropboxAccount } from './dropbox'
 import type { AccountStore } from './accounts'
 import { tags } from './tags'
 import { normalServer } from './servers'
@@ -179,6 +180,7 @@ const SETTINGS: Record<string, { get(): string; at(): number; set(v: string, at:
   zotero: accountSetting(zoteroAccount),
   github: accountSetting(githubAccount),
   git: accountSetting(otherAccounts), // GitLab, Gitea and Forgejo accounts
+  dropbox: accountSetting(dropboxAccount),
 }
 
 /** SETTINGS, with a code:<server> entry for each server whose creation code this browser holds or
