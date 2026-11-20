@@ -74,30 +74,34 @@ const hex = (d: ArrayBuffer) => [...new Uint8Array(d)].map((b) => b.toString(16)
 /** JSON for an HTTP header: anything outside ASCII escaped, as Dropbox asks. */
 const headerJson = (v: unknown) => JSON.stringify(v).replace(/[\u007f-￿]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
 
-/** Sign in to Dropbox in a pop-up (OAuth with PKCE). The pop-up comes back to /dropbox-auth.html,
- *  which hands the answer to this page (a BroadcastChannel: the pop-up has no opener by then). */
-export async function signIn(): Promise<DropboxAccount> {
+/** Sign in to Dropbox (OAuth with PKCE), in this tab: Dropbox's login can stall in a pop-up. This
+ *  page goes to Dropbox, which sends the tab back to /dropbox-auth.html; that page swaps the code
+ *  for the tokens (with the verifier, kept in this tab's sessionStorage, never sent anywhere else),
+ *  keeps the account as dropboxAccount, and returns to `back` (this page, by default). Nothing is
+ *  lost by leaving: the project is kept in this browser. */
+export async function signIn(back = location.href): Promise<never> {
   const key = await dropboxAppKey()
   if (!key) throw new DropboxError(t('This server isn’t set up for Dropbox.'))
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)))
   const challenge = b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))))
   const state = b64url(crypto.getRandomValues(new Uint8Array(16)))
   const redirect = `${location.origin}/dropbox-auth.html`
+  try { sessionStorage.setItem('texloom.dropboxPending', JSON.stringify({ verifier, state, key, back, redirect, api: ep().api })) }
+  catch { throw new DropboxError(t('This browser won’t keep the sign-in for a moment (private browsing?), so Dropbox can’t be connected here.')) }
   const q = new URLSearchParams({ client_id: key, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256',
     token_access_type: 'offline', redirect_uri: redirect, state })
-  const w = window.open(`${ep().www}/oauth2/authorize?${q}`, 'texloom-dropbox', 'width=560,height=720')
-  if (!w) throw new DropboxError(t('The browser blocked the Dropbox window: allow pop-ups for this site and try again.'))
-  const answer = await new Promise<{ code?: string; error?: string }>((resolve, reject) => {
-    const ch = new BroadcastChannel('texloom-dropbox-auth')
-    const done = () => { ch.close(); clearTimeout(timer) }
-    ch.onmessage = (e) => { if (e.data?.state === state) { done(); resolve(e.data) } }
-    const timer = setTimeout(() => { done(); reject(new DropboxError(t('Signing in to Dropbox took too long: try again.'))) }, 10 * 60_000)
-  })
-  if (!answer.code) throw new DropboxError(answer.error === 'access_denied' ? t('Dropbox access wasn’t allowed.') : t('Dropbox didn’t sign you in ({{why}}).', { why: answer.error || '?' }))
-  const tok = await tokenRequest({ grant_type: 'authorization_code', code: answer.code, code_verifier: verifier, client_id: key, redirect_uri: redirect })
-  const a: DropboxAccount = { refresh: tok.refresh_token, access: tok.access_token, expires: Date.now() + tok.expires_in * 1000 - 60_000, id: String(tok.account_id ?? ''), name: '', key }
-  const me = await rpc(a, '/2/users/get_current_account', null)
-  return { ...a, name: String(me?.name?.display_name ?? '') }
+  location.assign(`${ep().www}/oauth2/authorize?${q}`)
+  return new Promise<never>(() => {}) // (the page is going)
+}
+
+/** What the last sign-in left to say, if it didn't work (dropbox-auth.html keeps it), once. */
+export function signInProblem(): string {
+  try {
+    const why = sessionStorage.getItem('texloom.dropboxProblem')
+    sessionStorage.removeItem('texloom.dropboxProblem')
+    if (!why) return ''
+    return why === 'access_denied' ? t('Dropbox access wasn’t allowed.') : t('Dropbox didn’t sign you in ({{why}}).', { why })
+  } catch { return '' }
 }
 
 async function tokenRequest(form: Record<string, string>): Promise<any> {

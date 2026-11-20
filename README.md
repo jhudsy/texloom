@@ -503,7 +503,7 @@ and the browser's folder sync point it out once.
 
 Project ⚙ Settings → **Integrations** → Dropbox keeps a project in step with a folder in your
 Dropbox, or one shared with you there, with nothing to install:
-- **Connect Dropbox…** once: Dropbox asks you to allow TeXLoom in a small window. The connection
+- **Connect Dropbox…** once: it takes you to Dropbox to allow TeXLoom, then back. The connection
   stays in your browser (with a project list it follows the list, encrypted); TeXLoom's server
   never sees it.
 - **Link a Dropbox folder…**: a folder (made if there isn't one). Files only in one of the two end

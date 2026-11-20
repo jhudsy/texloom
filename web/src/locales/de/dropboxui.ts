@@ -5,7 +5,6 @@ const de: Catalog = {
   "{{path}} in your Dropbox isn’t the folder this project is linked to.": "{{path}} in Ihrer Dropbox ist nicht der Ordner, mit dem dieses Projekt verknüpft ist.",
   "Dropbox: connected as {{name}}.": "Dropbox: verbunden als {{name}}.",
   "Connect Dropbox…": "Dropbox verbinden…",
-  "Keep a project in step with a folder in your Dropbox, or one shared with you there. Dropbox asks you to allow TeXLoom in a small window.": "Halten Sie ein Projekt mit einem Ordner in Ihrer Dropbox abgeglichen, oder mit einem, der dort mit Ihnen geteilt wird. Dropbox bittet Sie in einem kleinen Fenster, TeXLoom zu erlauben.",
   "The connection stays in this browser. With a project list, it travels with the list, encrypted, so anyone with your sync link could use it.": "Die Verbindung bleibt in diesem Browser. Mit einer Projektliste reist sie verschlüsselt mit der Liste, sodass jeder mit Ihrem Synchronisierungslink sie nutzen könnte.",
   "Not linked to a Dropbox folder.": "Mit keinem Dropbox-Ordner verknüpft.",
   "Link a Dropbox folder…": "Dropbox-Ordner verknüpfen…",
@@ -31,5 +30,7 @@ const de: Catalog = {
   "Sync the Dropbox folder “{{name}}”": "Dropbox-Ordner „{{name}}“ abgleichen",
   "Syncing uses your Dropbox connection: it brings that folder’s files into the project and sends the project’s changes to it. Where is the folder in your Dropbox? (A folder shared with you can be somewhere else in yours than in theirs.)": "Der Abgleich nutzt Ihre Dropbox-Verbindung: Er holt die Dateien dieses Ordners ins Projekt und sendet die Änderungen des Projekts dorthin. Wo liegt der Ordner in Ihrer Dropbox? (Ein mit Ihnen geteilter Ordner kann bei Ihnen woanders liegen als beim Teilenden.)",
   "Linked; {{n}} files came in from Dropbox.": ["Verknüpft; {{n}} Datei kam von Dropbox.", "Verknüpft; {{n}} Dateien kamen von Dropbox."],
+  "Keep a project in step with a folder in your Dropbox, or one shared with you there. Connecting takes you to Dropbox to allow TeXLoom, then back here.": "Halten Sie ein Projekt mit einem Ordner in Ihrer Dropbox abgeglichen, oder mit einem, der dort mit Ihnen geteilt wird. Beim Verbinden gelangen Sie zu Dropbox, um TeXLoom zu erlauben, und dann hierher zurück.",
 }
+
 export default de

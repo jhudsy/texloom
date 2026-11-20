@@ -5,7 +5,6 @@ const fr: Catalog = {
   "{{path}} in your Dropbox isn’t the folder this project is linked to.": "{{path}} dans votre Dropbox n’est pas le dossier auquel ce projet est lié.",
   "Dropbox: connected as {{name}}.": "Dropbox : connecté en tant que {{name}}.",
   "Connect Dropbox…": "Connecter Dropbox…",
-  "Keep a project in step with a folder in your Dropbox, or one shared with you there. Dropbox asks you to allow TeXLoom in a small window.": "Gardez un projet synchronisé avec un dossier de votre Dropbox, ou un dossier qu’on y partage avec vous. Dropbox vous demande d’autoriser TeXLoom dans une petite fenêtre.",
   "The connection stays in this browser. With a project list, it travels with the list, encrypted, so anyone with your sync link could use it.": "La connexion reste dans ce navigateur. Avec une liste de projets, elle voyage avec la liste, chiffrée : toute personne ayant votre lien de synchronisation pourrait l’utiliser.",
   "Not linked to a Dropbox folder.": "Non lié à un dossier Dropbox.",
   "Link a Dropbox folder…": "Lier un dossier Dropbox…",
@@ -31,5 +30,7 @@ const fr: Catalog = {
   "Sync the Dropbox folder “{{name}}”": "Synchroniser le dossier Dropbox « {{name}} »",
   "Syncing uses your Dropbox connection: it brings that folder’s files into the project and sends the project’s changes to it. Where is the folder in your Dropbox? (A folder shared with you can be somewhere else in yours than in theirs.)": "La synchronisation utilise votre connexion Dropbox : elle apporte les fichiers de ce dossier dans le projet et y envoie les modifications du projet. Où se trouve le dossier dans votre Dropbox ? (Un dossier partagé avec vous peut être ailleurs chez vous que chez la personne qui le partage.)",
   "Linked; {{n}} files came in from Dropbox.": ["Lié ; {{n}} fichier est arrivé de Dropbox.", "Lié ; {{n}} fichiers sont arrivés de Dropbox."],
+  "Keep a project in step with a folder in your Dropbox, or one shared with you there. Connecting takes you to Dropbox to allow TeXLoom, then back here.": "Gardez un projet synchronisé avec un dossier de votre Dropbox, ou un dossier qu’on y partage avec vous. La connexion vous emmène sur Dropbox pour autoriser TeXLoom, puis vous ramène ici.",
 }
+
 export default fr

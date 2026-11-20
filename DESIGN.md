@@ -839,10 +839,10 @@ even in suggest mode, as the file is generated. Keys are Zotero's own.
 
 `web/src/dropbox.ts` keeps a project in step with a Dropbox folder from the browser, as the git
 integration does with a repository, but file by file: Dropbox has no commits.
-- **Signing in:** OAuth with PKCE in a pop-up (no secret anywhere; the server's
-  `dropbox_app_key`, from /api/info, names the app). The pop-up returns to
-  `/dropbox-auth.html`, which hands the code over a BroadcastChannel (Dropbox's pages cut the
-  pop-up's opener). The account (`texloom.dropbox`: refresh token, short-lived access token) is
+- **Signing in:** OAuth with PKCE, in the same tab (Dropbox's login can stall in a pop-up; no
+  secret anywhere: the server's `dropbox_app_key`, from /api/info, names the app). The verifier
+  waits in the tab's sessionStorage; Dropbox sends the tab back to `/dropbox-auth.html`, which
+  swaps the code for tokens, keeps the account and returns to the project. The account (`texloom.dropbox`: refresh token, short-lived access token) is
   the person's, and follows the project list as the setting `dropbox`.
 - **The link** (`meta.dropbox = {folder, path, name, by, at, blocked, clash}`) names the folder by
   its id, `.texloom/folder-id` in it, made if missing: the same id the app's folder sync uses

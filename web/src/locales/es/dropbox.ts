@@ -1,8 +1,6 @@
 import type { Catalog } from '../../i18n'
 
 const es: Catalog = {
-  "The browser blocked the Dropbox window: allow pop-ups for this site and try again.": "El navegador bloqueó la ventana de Dropbox: permita las ventanas emergentes en este sitio e inténtelo de nuevo.",
-  "Signing in to Dropbox took too long: try again.": "Iniciar sesión en Dropbox tardó demasiado: inténtelo de nuevo.",
   "Dropbox access wasn’t allowed.": "No se permitió el acceso a Dropbox.",
   "Dropbox didn’t sign you in ({{why}}).": "Dropbox no inició su sesión ({{why}}).",
   "Couldn’t reach Dropbox (offline?).": "No se pudo conectar con Dropbox (¿sin conexión?).",
@@ -15,5 +13,7 @@ const es: Catalog = {
   "The folder has too many files for TeXLoom to keep in step.": "La carpeta tiene demasiados archivos para que TeXLoom la mantenga sincronizada.",
   "This project isn’t linked to a Dropbox folder.": "Este proyecto no está vinculado a ninguna carpeta de Dropbox.",
   "This browser hasn’t approved syncing the project’s Dropbox folder.": "Este navegador no ha aprobado sincronizar la carpeta de Dropbox del proyecto.",
+  "This browser won’t keep the sign-in for a moment (private browsing?), so Dropbox can’t be connected here.": "Este navegador no guarda el inicio de sesión ni un momento (¿navegación privada?), así que Dropbox no se puede conectar aquí.",
 }
+
 export default es

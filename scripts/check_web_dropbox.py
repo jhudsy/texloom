@@ -2,7 +2,7 @@
 """The web app keeping a project in step with a Dropbox folder (a stand-in: scripts/fakedropbox.py),
 through its real screens in headless Chromium.
 
-Checked: connecting (the sign-in pop-up, PKCE); linking a folder (its files come in, and it gets a
+Checked: connecting (to Dropbox and back in the same tab, PKCE); linking a folder (its files come in, and it gets a
 folder id); the project's edits, a new file and a deletion go to Dropbox; a change made in Dropbox
 merges with the project's own edit to the same file; a clash is reported and "Keep the project's
 version" sends it; someone saving in Dropbox just as a change goes up loses nothing; a collaborator
@@ -26,6 +26,16 @@ PNG = bytes(range(256)) * 4
 ROOT = "/Papers/paper"
 
 
+def connect(page) -> None:
+    """Connect Dropbox from the open Settings: the tab goes to Dropbox and comes back to the project."""
+    back = page.url
+    page.locator("dialog[open] .dropbox-account button:has-text('Connect Dropbox')").click()
+    page.wait_for_url(lambda u: u == back, timeout=20000)
+    page.wait_for_function("() => window.__texloom?.r?.synced", timeout=60000)
+    page.click("button.gearbtn")
+    page.locator("dialog[open] .dropbox >> text=Dropbox").first.wait_for(timeout=10000)
+
+
 def main() -> None:
     with webcheck.Session({"dropbox": D.make_fake()}) as s:
         fake = s.urls["dropbox"]
@@ -42,11 +52,8 @@ def main() -> None:
         page = s.project({"main.tex": "local main\n"}, storage)
         page.click("button.gearbtn")
         dlg = page.locator("dialog[open]")
-        with page.expect_popup() as pop:
-            dlg.locator(".dropbox-account button:has-text('Connect Dropbox')").click()
-        pop.value.wait_for_load_state()
-        dlg.locator(".dropbox-account >> text=connected as").wait_for(timeout=10000)
-        s.check("connecting: the pop-up signs in and closes", "Ann Example" in dlg.locator(".dropbox-account").inner_text())
+        connect(page)
+        s.check("connecting: to Dropbox and back to the project, signed in", "Ann Example" in dlg.locator(".dropbox-account").inner_text())
         acc = json.loads(page.evaluate("() => localStorage.getItem('texloom.dropbox')"))
         s.check("the connection keeps a refresh token, not the app secret", acc["refresh"].startswith("r-") and "secret" not in json.dumps(acc))
 
@@ -124,9 +131,7 @@ def main() -> None:
         p2.wait_for_function("() => window.__texloom?.r?.synced", timeout=60000)
         p2.click("button.gearbtn")
         d2 = p2.locator("dialog[open]")
-        with p2.expect_popup() as pop2:
-            d2.locator(".dropbox-account button:has-text('Connect Dropbox')").click()
-        pop2.value.wait_for_load_state()
+        connect(p2)
         d2.locator(".dropbox >> text=Approve and sync").wait_for(timeout=10000)
         s.check("a collaborator's browser asks before syncing the link", "linked this project to the Dropbox folder" in d2.locator(".dropbox").inner_text())
         d2.locator(".dropbox button:has-text('Approve and sync')").click()

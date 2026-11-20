@@ -5,7 +5,6 @@ const pt: Catalog = {
   "{{path}} in your Dropbox isn’t the folder this project is linked to.": "{{path}} no seu Dropbox não é a pasta a que este projeto está ligado.",
   "Dropbox: connected as {{name}}.": "Dropbox: ligado como {{name}}.",
   "Connect Dropbox…": "Ligar o Dropbox…",
-  "Keep a project in step with a folder in your Dropbox, or one shared with you there. Dropbox asks you to allow TeXLoom in a small window.": "Mantenha um projeto sincronizado com uma pasta do seu Dropbox, ou uma partilhada consigo lá. O Dropbox pede-lhe que permita o TeXLoom numa pequena janela.",
   "The connection stays in this browser. With a project list, it travels with the list, encrypted, so anyone with your sync link could use it.": "A ligação fica neste navegador. Com uma lista de projetos, viaja cifrada com a lista, por isso qualquer pessoa com a sua ligação de sincronização a poderia usar.",
   "Not linked to a Dropbox folder.": "Não ligado a nenhuma pasta do Dropbox.",
   "Link a Dropbox folder…": "Ligar uma pasta do Dropbox…",
@@ -31,5 +30,7 @@ const pt: Catalog = {
   "Sync the Dropbox folder “{{name}}”": "Sincronizar a pasta do Dropbox «{{name}}»",
   "Syncing uses your Dropbox connection: it brings that folder’s files into the project and sends the project’s changes to it. Where is the folder in your Dropbox? (A folder shared with you can be somewhere else in yours than in theirs.)": "A sincronização usa a sua ligação ao Dropbox: traz os ficheiros dessa pasta para o projeto e envia-lhe as alterações do projeto. Onde está a pasta no seu Dropbox? (Uma pasta partilhada consigo pode estar noutro sítio no seu do que no de quem a partilha.)",
   "Linked; {{n}} files came in from Dropbox.": ["Ligado; veio {{n}} ficheiro do Dropbox.", "Ligado; vieram {{n}} ficheiros do Dropbox."],
+  "Keep a project in step with a folder in your Dropbox, or one shared with you there. Connecting takes you to Dropbox to allow TeXLoom, then back here.": "Mantenha um projeto sincronizado com uma pasta do seu Dropbox, ou uma partilhada consigo lá. Ao ligar, vai ao Dropbox para permitir o TeXLoom e depois volta aqui.",
 }
+
 export default pt

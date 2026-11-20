@@ -1,8 +1,6 @@
 import type { Catalog } from '../../i18n'
 
 const zh: Catalog = {
-  "The browser blocked the Dropbox window: allow pop-ups for this site and try again.": "浏览器拦截了 Dropbox 窗口：请允许此网站的弹出窗口后重试。",
-  "Signing in to Dropbox took too long: try again.": "登录 Dropbox 耗时过长：请重试。",
   "Dropbox access wasn’t allowed.": "未允许访问 Dropbox。",
   "Dropbox didn’t sign you in ({{why}}).": "Dropbox 未让你登录（{{why}}）。",
   "Couldn’t reach Dropbox (offline?).": "无法连接 Dropbox（离线？）。",
@@ -15,5 +13,7 @@ const zh: Catalog = {
   "The folder has too many files for TeXLoom to keep in step.": "该文件夹的文件太多，TeXLoom 无法保持同步。",
   "This project isn’t linked to a Dropbox folder.": "此项目未关联任何 Dropbox 文件夹。",
   "This browser hasn’t approved syncing the project’s Dropbox folder.": "此浏览器尚未批准同步项目的 Dropbox 文件夹。",
+  "This browser won’t keep the sign-in for a moment (private browsing?), so Dropbox can’t be connected here.": "此浏览器无法暂存登录信息（无痕浏览？），因此无法在这里连接 Dropbox。",
 }
+
 export default zh

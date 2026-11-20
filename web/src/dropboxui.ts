@@ -3,7 +3,7 @@
 import type { Replica } from './replica'
 import { dialog, h } from './dom'
 import { t, tn } from './i18n'
-import { appHolds, approve, approvedPath, dropboxAccount, dropboxAppKey, folderPath, linkFolder, linkOf, pull, push, signIn, startDropbox, topFolders, unlink } from './dropbox'
+import { appHolds, approve, approvedPath, dropboxAccount, dropboxAppKey, folderPath, linkFolder, linkOf, pull, push, signIn, signInProblem, startDropbox, topFolders, unlink } from './dropbox'
 
 const ago = (at: number) => new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -29,16 +29,15 @@ export function dropboxAccountBox(changed: () => void = () => {}): HTMLElement {
       return
     }
     if (!(await dropboxAppKey())) { box.replaceChildren(h('p', { class: 'muted small' }, t('This server isn’t set up for Dropbox.'))); return }
-    const msg = h('p', { class: 'err small', role: 'status' })
+    const msg = h('p', { class: 'err small', role: 'status' }, signInProblem())
     const go = h('button', { onclick: async () => {
       msg.textContent = ''
       go.setAttribute('disabled', '')
-      try { dropboxAccount.set(await signIn()); render(); changed() }
-      catch (e) { msg.textContent = say(e) }
-      finally { go.removeAttribute('disabled') }
+      try { await signIn() } // (goes to Dropbox, and comes back here)
+      catch (e) { msg.textContent = say(e); go.removeAttribute('disabled') }
     } }, t('Connect Dropbox…'))
     box.replaceChildren(
-      h('p', { class: 'muted small' }, t('Keep a project in step with a folder in your Dropbox, or one shared with you there. Dropbox asks you to allow TeXLoom in a small window.')),
+      h('p', { class: 'muted small' }, t('Keep a project in step with a folder in your Dropbox, or one shared with you there. Connecting takes you to Dropbox to allow TeXLoom, then back here.')),
       h('div', { class: 'row' }, go),
       msg,
       h('p', { class: 'muted small' }, t('The connection stays in this browser. With a project list, it travels with the list, encrypted, so anyone with your sync link could use it.')))

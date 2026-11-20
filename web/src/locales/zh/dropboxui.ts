@@ -5,7 +5,6 @@ const zh: Catalog = {
   "{{path}} in your Dropbox isn’t the folder this project is linked to.": "你 Dropbox 中的 {{path}} 不是此项目关联的文件夹。",
   "Dropbox: connected as {{name}}.": "Dropbox：已以 {{name}} 身份连接。",
   "Connect Dropbox…": "连接 Dropbox…",
-  "Keep a project in step with a folder in your Dropbox, or one shared with you there. Dropbox asks you to allow TeXLoom in a small window.": "让项目与你 Dropbox 中的文件夹（或他人与你共享的文件夹）保持同步。Dropbox 会在一个小窗口中请你允许 TeXLoom。",
   "The connection stays in this browser. With a project list, it travels with the list, encrypted, so anyone with your sync link could use it.": "连接保存在此浏览器中。使用项目列表时，它会加密后随列表同步，因此拥有你同步链接的人都能使用它。",
   "Not linked to a Dropbox folder.": "未关联 Dropbox 文件夹。",
   "Link a Dropbox folder…": "关联 Dropbox 文件夹…",
@@ -31,5 +30,7 @@ const zh: Catalog = {
   "Sync the Dropbox folder “{{name}}”": "同步 Dropbox 文件夹“{{name}}”",
   "Syncing uses your Dropbox connection: it brings that folder’s files into the project and sends the project’s changes to it. Where is the folder in your Dropbox? (A folder shared with you can be somewhere else in yours than in theirs.)": "同步使用你的 Dropbox 连接：会把该文件夹的文件带入项目，并把项目的更改发送过去。该文件夹在你 Dropbox 中的什么位置？（与你共享的文件夹在你那里的位置可能与对方不同。）",
   "Linked; {{n}} files came in from Dropbox.": {"other": "已关联；从 Dropbox 拉取了 {{n}} 个文件。"},
+  "Keep a project in step with a folder in your Dropbox, or one shared with you there. Connecting takes you to Dropbox to allow TeXLoom, then back here.": "让项目与你 Dropbox 中的文件夹（或他人与你共享的文件夹）保持同步。连接时会先前往 Dropbox 允许 TeXLoom，然后回到这里。",
 }
+
 export default zh
