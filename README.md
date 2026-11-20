@@ -924,7 +924,7 @@ To add a language (`it`, say):
 
 ## Status
 
-Early prototype. What's planned or considered next, with links to the issues, is in [ROADMAP.md](ROADMAP.md).
+Early prototype. What's planned or considered next, with links to the issues, is in [ROADMAP.md](ROADMAP.md); how the server is meant to scale and stay up is in [SCALING.md](SCALING.md).
 
 ## License
 

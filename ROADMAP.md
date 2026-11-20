@@ -6,11 +6,13 @@ that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitat
 
 ## Next: the server, towards redundancy and scale
 
-In this order, each building on the one before:
+How the pieces fit, and why (a bucket for files, one primary database, a lease as the tie-breaker),
+is in [SCALING.md](SCALING.md). In this order, each building on the one before:
 
 1. **[A warm standby](https://github.com/jhudsy/texloom/issues/12)**: PostgreSQL streaming to a
-   second server (or a hosted PostgreSQL), stored files in a bucket, and a written switch-over. About
-   2 days; no change to the relay's code.
+   second server (or a hosted PostgreSQL), stored files in a bucket, and a written switch-over; then
+   automatic failover using a lease in the bucket. About 2 days for the standby; no change to the
+   relay's code.
 2. **[A choice of database behind one interface](https://github.com/jhudsy/texloom/issues/30)**:
    SQLite (nothing to install, for running your own relay) or PostgreSQL (for standbys and several
    relays), with the notifier and locks separate, and one test suite both must pass. About a week.

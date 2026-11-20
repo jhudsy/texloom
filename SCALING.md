@@ -1,0 +1,154 @@
+# Scaling and availability
+
+How the TeXLoom server is meant to grow from one small relay to something that stays up when a
+machine fails and copes with many people, and why it is built from the parts it is. What exists
+today is marked **today**; the rest is **planned** (see [ROADMAP.md](ROADMAP.md), and
+[issue #12](https://github.com/jhudsy/texloom/issues/12) for the work itself). Nothing here is
+needed to run a relay: a small one stays one process on one machine.
+
+## What makes this easier than most systems
+
+- **Everyone keeps a full copy.** The desktop app and the browser hold the whole project, so the
+  server is a way to meet and to keep a backup, not the only copy. If the relay is down, nobody
+  loses anything and edits made meanwhile sync when it returns. Availability is about convenience
+  and about the backup, not about avoiding data loss.
+- **The server only sees encrypted data.** A second, third or someone else's server needs no more
+  trust than the first.
+- **Projects are independent.** Each project's changes are one ordered stream and nothing crosses
+  between projects. So a project can live on any server, and a database can later be split by
+  project without redesigning anything. (A project may already live on any server: see "Projects on
+  several servers" in [DESIGN.md](DESIGN.md).)
+- **Compiling is not the server's job.** It happens on the user's machine (WebAssembly TeX Live in
+  the browser, or TeX on the desktop). The server hands out TeX Live package files on demand, which
+  is disk and bandwidth, not CPU.
+
+## What runs today
+
+One relay process (aiohttp behind nginx, a systemd service), a PostgreSQL database for the edit
+logs, project records and project lists, and stored files in a folder or an S3-compatible bucket.
+Who is connected to which project, and some counters (usage, owners), are kept in the relay's
+memory, which is how a change reaches the others connected to it.
+
+## Why stored files go in a bucket
+
+Stored files are most of the bytes the server keeps, so they are the first thing to move off its
+disk. An object store fits them unusually well:
+
+- **They never change.** A file's key is `<project>/<id>` and the id names the content, so a key
+  holds one content for ever. Writing it twice is harmless and nothing is updated in place, which
+  is all an object store offers and all this needs.
+- **The store makes the copies.** Durability, replication and growth are its job, not ours. A
+  second server, or a replacement, attaches to the same bucket and has every file at once, with
+  nothing to copy.
+- **It is cheap and standard.** Only four S3 requests are used (PUT, GET, DELETE, HEAD), signed
+  with the ordinary S3 scheme. Any S3-compatible store works: Garage or RustFS on your own
+  machines, or a hosted one. Nobody is tied to a provider, and the store sees only encrypted data.
+- **A folder stays the default.** For one small relay a folder is simpler and needs nothing. The
+  choice is one setting (`files`), behind one small interface in `server/files.py`.
+
+The same reasoning is behind the next piece: a bucket is also something every server can reach, so
+it can hold the small amount of shared state that two servers must agree on (below).
+
+## The database
+
+**Today** it is PostgreSQL. **Planned** ([issue #30](https://github.com/jhudsy/texloom/issues/30)):
+a choice behind one interface, so that a relay can use:
+
+- **SQLite**: one file, one process, nothing to install. For anyone running their own relay. It
+  allows one writing process, so it is the single-relay option, and the server should refuse a
+  second relay on the same file.
+- **PostgreSQL**: replicas, a standby, several relays and, later, splitting projects across
+  databases. For servers that need availability or scale.
+
+The relay then depends on a small interface rather than on SQL: the **log store** (append a
+change, read since a point, snapshots, revocations, deletion records, project lists), **accounting
+and policy** (quotas and eviction, ordinary code on top), a **notifier** ("project X has a new
+change") and a **lock or lease**. One test suite that every backend must pass keeps them
+identical, so growing means changing a setting, not rewriting.
+
+## Availability
+
+### Two machines are enough
+
+Nothing needs a vote, because the database is the one place changes are numbered and the relays
+defer to it. With one primary (the main server) and one standby, the standby holds a nearly
+current copy, kept up by PostgreSQL's streaming replication, and the files are in the bucket.
+
+### Switching over
+
+Detecting that the primary has failed and promoting the standby can be automatic. The danger with
+two machines is that the standby cannot tell a dead primary from a broken link between them. If it
+promotes while the primary is alive, two primaries number changes differently ("split brain"). A
+client's content would survive, since clients keep everything and merge, but the order of changes
+on the server would have to be repaired. So the switch must be safe, not just fast.
+
+The plan uses the bucket as the tie-breaker, so no third machine is needed:
+
+1. The primary renews a small "I am primary" lease object in the bucket every few seconds.
+2. The standby promotes itself only once the lease has expired.
+3. A primary that is alive but cut off from the standby can still renew the lease, so the standby
+   stays put.
+4. A primary that cannot reach the bucket cannot renew, so it stops itself. Then the standby can
+   promote safely.
+5. A primary that comes back reads the lease first and rejoins as a standby.
+
+This needs a store with conditional writes (most S3-compatible ones have them; check yours) and
+clocks that are roughly right, and it is **not yet modelled**: [issue #8](https://github.com/jhudsy/texloom/issues/8)
+is where the ordering and the lease get a model before several servers run at once. A third
+machine (a small voter) is the alternative if you would rather use a standard tool such as
+Patroni, which expects three.
+
+Promoting the database is half of it: traffic must follow, by changing DNS (with a short TTL) or
+through a front end that checks health. Clients already reconnect with backoff and resume from
+their last acknowledged change, so a switch looks like a short "connecting…".
+
+### A standby that is not public
+
+A standby on a home network (a small computer on a private network) works for replication, which
+is asynchronous and tolerant of a slow link: at worst the last few seconds of server-side changes
+are missing, and clients resend them. To take over, though, it must be reachable by the public, and
+its connection and disk then set everyone's speed. Use an SSD, not an SD card. It adds little as
+extra capacity.
+
+## Scaling
+
+### Where the load is
+
+1. **The TeX engine and package files.** Most of the bytes. Serve them from a CDN, and compile
+   output (PDFs) only when someone is looking ([issue #15](https://github.com/jhudsy/texloom/issues/15)).
+   This is cheaper than adding servers, so it comes first.
+2. **Live editing.** Passed between connections in the relay's memory; it does not touch the
+   database.
+3. **The database.** One small write per batch of edits to each active project, and reads when
+   someone connects and catches up.
+
+### Growing, in order
+
+1. **Several identical relays** behind a load balancer, sharing one PostgreSQL primary. Route by
+   project id so collaborators on a project usually reach the same relay; a PostgreSQL
+   LISTEN/NOTIFY message ("project X has a new change", and each relay then reads it) covers the
+   rest. Counters and caches kept in a relay's memory move into shared state, and maintenance (the
+   reaper, eviction) runs once, not once per relay.
+2. **When the database starts to feel it**, in this order: batch edits for a few hundred
+   milliseconds so a burst of typing is one write; put read replicas (the standbys) to work on
+   catch-ups; add a connection pooler (PgBouncer, transaction pooling) if the number of relays
+   multiplied by the pool size (10 each) approaches PostgreSQL's limit, keeping the notifier on
+   its own direct connection. None of this is needed early: the relay's pool is small and the admin
+   page and PostgreSQL's statistics show trouble long before users do.
+3. **Only if one primary is not enough**, split projects across several databases by project id,
+   each with its own standby. Projects don't talk to each other, so this needs no redesign.
+
+### What we are deliberately not doing
+
+Several regions (TeXLoom is local-first, so latency matters little), a distributed database (the
+single primary has plenty of headroom and is far simpler to reason about), a separate message
+system such as Redis or NATS (LISTEN/NOTIFY is enough for a signal that carries no data), and a
+compile service (compiling is the client's job).
+
+## Open questions
+
+- The ordering model for several writers, and the lease above ([#8](https://github.com/jhudsy/texloom/issues/8)).
+- Which per-process state must be shared, and which can be rebuilt on demand.
+- How a SQLite relay later moves up to PostgreSQL (an export and import is the likely answer).
+- Whether to run the database ourselves or use a managed one: it removes most of the work of
+  replication, failover and backups, at a cost, and the data is encrypted either way.
