@@ -93,7 +93,7 @@ class Bases(dict):
         h = self.history.setdefault(rel, [])
         if not h or h[-1] != text:
             h.append(text)
-            del h[:-6]
+            del h[:-6]  # not a text: the list of versions
 
 
 def fork_point(versions: list[str], new: str) -> str:

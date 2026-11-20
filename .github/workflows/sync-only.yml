@@ -88,6 +88,8 @@ jobs:
       - name: A folder two computers also share through a file-sync service (Dropbox and the like)
         if: success() || failure()
         run: uv run --extra server python scripts/check_shared_folder.py
+        env:
+          CHECK_DIR: ${{ runner.temp }}/shared-folder
       - name: Desktop pairings with 30% of file writes refused (as on Windows when a file is open elsewhere)
         if: runner.os == 'Linux'
         run: uv run --extra server python scripts/check_synconly.py unix/unix windows/unix
@@ -101,4 +103,5 @@ jobs:
           path: |
             ${{ runner.temp }}/synconly
             ${{ runner.temp }}/synconly-refused
+            ${{ runner.temp }}/shared-folder
           include-hidden-files: true

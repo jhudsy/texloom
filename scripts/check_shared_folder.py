@@ -128,7 +128,8 @@ def once_everywhere(cs, rel: str, *bits: str) -> bool:
 
 
 def check(step) -> None:
-    tmp = Path(tempfile.mkdtemp(prefix="texloom-shared-"))
+    tmp = Path(os.environ.get("CHECK_DIR") or tempfile.mkdtemp(prefix="texloom-shared-"))  # (CI: the runner's own temp folder)
+    tmp.mkdir(parents=True, exist_ok=True)
     port = free_port()
     url = f"http://127.0.0.1:{port}"
     database, _ = pg.start(tmp / "pg")
