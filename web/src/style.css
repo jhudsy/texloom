@@ -370,7 +370,7 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 .recent li:hover .addtag, .recent li:focus-within .addtag, .recent .addtag:focus-visible { opacity: 1; }
 @media (hover: none) { .recent .details .addtag { opacity: 1; } }
 /* the service a project is kept in step with, as its logo */
-.brand { width: 14px; height: 14px; flex: none; fill: currentColor; vertical-align: -2px; }
+.svc { width: 14px; height: 14px; flex: none; fill: currentColor; vertical-align: -2px; }
 .recent .kept { display: inline-flex; align-items: center; color: var(--muted); }
 .landing .findrow { align-items: center; }
 .landing .findrow .sortby { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; flex: none; white-space: nowrap; }

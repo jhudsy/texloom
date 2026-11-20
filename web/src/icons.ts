@@ -43,7 +43,7 @@ export function icon(name: IconName): SVGSVGElement {
 export function brandIcon(name: BrandName): SVGSVGElement {
   const svg = document.createElementNS(NS, 'svg')
   svg.setAttribute('viewBox', '0 0 24 24')
-  svg.setAttribute('class', `brand brand-${name}`)
+  svg.setAttribute('class', `svc svc-${name}`)
   svg.setAttribute('aria-hidden', 'true')
   const path = document.createElementNS(NS, 'path')
   path.setAttribute('d', BRANDS[name])
