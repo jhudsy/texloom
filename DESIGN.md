@@ -852,11 +852,14 @@ integration does with a repository, but file by file: Dropbox has no commits.
 - **The base:** the shared map `dropboxBase` (path -> {rev, h, size}): each file's Dropbox
   revision and content hash as last synced. Only changed entries are rewritten, so the project's
   history grows with the changes, not the folder's size.
-- **Bringing in** (every minute): a full listing; each file whose content hash differs from its
+- **Bringing in** (when Dropbox's long poll, `notify.dropboxapi.com`, says the folder changed, and
+  every minute): the listing, in full the first time and after that only what changed since
+  (Dropbox's cursor, kept per account and folder); each file whose content hash differs from its
   base is taken (unchanged here), merged three ways (base: that revision, downloaded by `rev:`),
   or clashes, as for git; `blocked` holds the clashing files' revisions. Revisions Dropbox no
   longer keeps (30 days and more) mean no base: a clash.
-- **Sending:** each file whose hash differs from its base is uploaded in "update" mode with its
+- **Sending** (after 10 s quiet, on leaving the tab, or Sync now; four files at a time): each file
+  whose hash differs from its base is uploaded in "update" mode with its
   base revision (or "add" for a new one), which Dropbox refuses if the file changed since; a
   deletion names its base revision. A refusal means bringing in first. Each success updates its
   base entry at once, so a send cut short is finished by the next.
@@ -866,6 +869,9 @@ integration does with a repository, but file by file: Dropbox has no commits.
   computer: syncing from both would bring each change in twice. A browser listens 25 s before
   first syncing a link.
 - Dropbox's conflicted copies, `.texloom` and build output are never project files.
+
+The folder is checked to be the linked one every 10 minutes, not every round. With
+`texloom.debug` = 1 in localStorage, each sync's time and requests go to the console.
 
 `scripts/check_web_dropbox.py` drives it against `scripts/fakedropbox.py`.
 

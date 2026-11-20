@@ -2,7 +2,8 @@
 scripts/check_web_dropbox.py: only what web/src/dropbox.ts calls, behaving as Dropbox does where
 it matters.
 
-Sign-in is OAuth with PKCE (the authorize page approves at once and sends the browser back with a
+Listings come with a cursor that later says only what changed since (deletions too), and the
+long poll answers as soon as something changes after a cursor. Sign-in is OAuth with PKCE (the authorize page approves at once and sends the browser back with a
 code; the token endpoint checks the verifier against the challenge). Files have revisions, and old
 revisions can be downloaded ("rev:…"); listings come a few entries a page; an upload in "update"
 mode is refused if the file has changed since that revision, and in "add" mode if one is there; a
@@ -17,7 +18,9 @@ import base64
 import hashlib
 import itertools
 import json
+import asyncio
 import secrets
+import time
 from urllib.parse import urlencode
 
 from aiohttp import web
@@ -39,11 +42,15 @@ class Store:
         self.tokens: dict[str, str] = {}  # access or refresh token -> account
         self.next_account = "ann"
         self.calls: list[str] = []
+        self.seq = 0  # bumped by every change; a cursor says up to which one a listing went
+        self.deleted: dict[str, int] = {}  # lower path -> the change that deleted it
 
     def put(self, path: str, data: bytes) -> dict:
         rev = f"{next(self.n):09x}"
         self.revs[rev] = data
-        e = self.files[path.lower()] = {"display": path, "data": data, "rev": rev}
+        self.seq += 1
+        self.deleted.pop(path.lower(), None)
+        e = self.files[path.lower()] = {"display": path, "data": data, "rev": rev, "seq": self.seq}
         parts = path.split("/")
         for i in range(2, len(parts)):
             self.folders.add("/".join(parts[:i]).lower())
@@ -132,28 +139,59 @@ async def account(req: web.Request) -> web.Response:
     return web.json_response({"account_id": f"dbid:{acct}", "name": {"display_name": acct.capitalize() + " Example"}})
 
 
+def cursor(**c) -> str:
+    return base64.b64encode(json.dumps(c).encode()).decode()
+
+
 async def list_folder(req: web.Request) -> web.Response:
     acct = who(req)
     j = await req.json()
     if req.path.endswith("/continue"):
-        root, recursive, start = json.loads(base64.b64decode(j["cursor"]))
+        c = json.loads(base64.b64decode(j["cursor"]))
+        if c.pop("live", False):  # "what changed since": up to now
+            c["at"] = S.seq
     else:
-        root, recursive, start = real(acct, j["path"]).lower(), j.get("recursive", False), 0
+        root = real(acct, j["path"]).lower()
         if root and root not in S.folders:
             return err("path/not_found/")
+        c = {"root": root, "rec": j.get("recursive", False), "start": 0, "since": -1, "at": S.seq}
+    root, rec = c["root"], c["rec"]
+    inside = lambda p: p.startswith(root + "/") and (rec or "/" not in p[len(root) + 1:])  # noqa: E731
     items = []
     for lower, e in sorted(S.files.items()):
-        if lower.startswith(root + "/") and (recursive or "/" not in lower[len(root) + 1:]):
+        if inside(lower) and c["since"] < e["seq"] <= c["at"]:
             m = S.meta(e)
-            m["path_display"], m["path_lower"] = shown(acct, m["path_display"]), shown(acct, m["path_lower"]).lower()
+            m["path_display"], m["path_lower"] = shown(acct, m["path_display"]), shown(acct, m["path_display"]).lower()
             items.append(m)
-    for f in sorted(S.folders):
-        if f.startswith(root + "/") and (recursive or "/" not in f[len(root) + 1:]) or (root == "" and "/" not in f[1:]):
-            d = shown(acct, f)
-            items.append({".tag": "folder", "name": d.rsplit("/", 1)[-1], "path_display": d, "path_lower": d.lower()})
-    page = items[start:start + PAGE]
-    more = start + PAGE < len(items)
-    return web.json_response({"entries": page, "has_more": more, "cursor": base64.b64encode(json.dumps([root, recursive, start + PAGE]).encode()).decode()})
+    if c["since"] >= 0:  # what was deleted since
+        for lower, at in sorted(S.deleted.items()):
+            if inside(lower) and c["since"] < at <= c["at"]:
+                d = shown(acct, lower)
+                items.append({".tag": "deleted", "name": d.rsplit("/", 1)[-1], "path_display": d, "path_lower": d.lower()})
+    else:
+        for f in sorted(S.folders):
+            if inside(f) or (root == "" and "/" not in f[1:]):
+                d = shown(acct, f)
+                items.append({".tag": "folder", "name": d.rsplit("/", 1)[-1], "path_display": d, "path_lower": d.lower()})
+    page = items[c["start"]:c["start"] + PAGE]
+    if c["start"] + PAGE < len(items):
+        return web.json_response({"entries": page, "has_more": True, "cursor": cursor(**{**c, "start": c["start"] + PAGE})})
+    # the listing is done: from here on, the cursor means "what changes after this"
+    return web.json_response({"entries": page, "has_more": False, "cursor": cursor(root=root, rec=rec, start=0, since=c["at"], at=c["at"], live=True)})
+
+
+async def longpoll(req: web.Request) -> web.Response:
+    j = await req.json()
+    c = json.loads(base64.b64decode(j["cursor"]))
+    S.calls.append("longpoll")
+    end = time.monotonic() + min(int(j.get("timeout", 30)), 30)
+    while time.monotonic() < end:
+        root = c["root"]
+        if any(p.startswith(root + "/") and e["seq"] > c["at"] for p, e in S.files.items()) or \
+                any(p.startswith(root + "/") and at > c["at"] for p, at in S.deleted.items()):
+            return web.json_response({"changes": True})
+        await asyncio.sleep(0.2)
+    return web.json_response({"changes": False})
 
 
 async def download(req: web.Request) -> web.Response:
@@ -194,6 +232,8 @@ async def delete(req: web.Request) -> web.Response:
     if j.get("parent_rev") and j["parent_rev"] != e["rev"]:
         return err("path_lookup/conflict/")  # (Dropbox: the revision isn't the latest)
     del S.files[path]
+    S.seq += 1
+    S.deleted[path] = S.seq
     return web.json_response({"metadata": S.meta(e)})
 
 
@@ -218,6 +258,7 @@ def make_fake() -> web.Application:
     app.router.add_post("/2/users/get_current_account", account)
     app.router.add_post("/2/files/list_folder", list_folder)
     app.router.add_post("/2/files/list_folder/continue", list_folder)
+    app.router.add_post("/2/files/list_folder/longpoll", longpoll)
     app.router.add_post("/2/files/download", download)
     app.router.add_post("/2/files/upload", upload)
     app.router.add_post("/2/files/delete_v2", delete)

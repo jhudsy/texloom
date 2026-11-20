@@ -2,7 +2,8 @@
 """The web app keeping a project in step with a Dropbox folder (a stand-in: scripts/fakedropbox.py),
 through its real screens in headless Chromium.
 
-Checked: connecting (to Dropbox and back in the same tab, PKCE); linking a folder (its files come in, and it gets a
+Checked: connecting (to Dropbox and back in the same tab, PKCE); changes made in Dropbox coming in
+by themselves within seconds, and edits going out after 10 quiet seconds or on leaving the tab; linking a folder (its files come in, and it gets a
 folder id); the project's edits, a new file and a deletion go to Dropbox; a change made in Dropbox
 merges with the project's own edit to the same file; a clash is reported and "Keep the project's
 version" sends it; someone saving in Dropbox just as a change goes up loses nothing; a collaborator
@@ -17,6 +18,7 @@ stand by.
 from __future__ import annotations
 
 import json
+import time
 
 import fakedropbox as D
 import webcheck
@@ -53,6 +55,7 @@ def main() -> None:
         page.click("button.gearbtn")
         dlg = page.locator("dialog[open]")
         connect(page)
+        opened = time.monotonic()  # (the tab has just loaded again)
         s.check("connecting: to Dropbox and back to the project, signed in", "Ann Example" in dlg.locator(".dropbox-account").inner_text())
         acc = json.loads(page.evaluate("() => localStorage.getItem('texloom.dropbox')"))
         s.check("the connection keeps a refresh token, not the app secret", acc["refresh"].startswith("r-") and "secret" not in json.dumps(acc))
@@ -81,6 +84,34 @@ def main() -> None:
         sync()
         s.check("edits, a new file and a deletion go to Dropbox", b"Edited in TeXLoom." in (dbx("main.tex") or b"") and dbx("notes.tex") is None
                 and dbx("new.tex") == b"brand new\n" and dbx("fig.png") == PNG, str(sorted(D.S.files)))
+
+        # without Sync now: a change in Dropbox comes in within seconds (Dropbox's long poll), and an
+        # edit here goes out once the project has been quiet for 10 s, or straight away on leaving the tab
+        # (a tab first listens 25 s for a TeXLoom app keeping the folder: only Sync now goes before that)
+        page.wait_for_timeout(max(0, int((27 - (time.monotonic() - opened)) * 1000)))
+        D.S.put(f"{ROOT}/sec/intro.tex", b"Intro from Dropbox, changed there.\n")
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 20 and files_of(page).get("sec/intro.tex") != "Intro from Dropbox, changed there.\n":
+            page.wait_for_timeout(250)
+        took = time.monotonic() - t0
+        s.check(f"a change made in Dropbox comes in by itself within seconds ({took:.1f} s)", took < 8)
+        page.evaluate("() => __texloom.r.files.get('new.tex').insert(0, 'Quiet edit. ')")
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 40 and not (dbx("new.tex") or b"").startswith(b"Quiet edit."):
+            page.wait_for_timeout(250)
+        took = time.monotonic() - t0
+        s.check(f"an edit goes to Dropbox by itself after 10 quiet seconds ({took:.1f} s)", 9 < took < 20)
+        page.evaluate("() => __texloom.r.files.get('new.tex').insert(0, 'Leaving edit. ')")
+        page.wait_for_timeout(300)
+        page.evaluate("() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) }")
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 10 and not (dbx("new.tex") or b"").startswith(b"Leaving edit."):
+            page.wait_for_timeout(100)
+        took = time.monotonic() - t0
+        page.evaluate("() => { Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true }) }")
+        s.check(f"leaving the tab sends what's waiting straight away ({took:.1f} s)", took < 3)
+        full = sum(1 for c in D.S.calls if c == "POST /2/files/list_folder")
+        s.check(f"after the first, listings ask only for what changed ({full} full listings)", full <= 2)
 
         D.S.put(f"{ROOT}/main.tex", dbx("main.tex").replace(b"Dropbox line one.", b"Dropbox line one, changed in Dropbox."))
         D.S.put(f"{ROOT}/sec/new.tex", b"made in Dropbox\n")

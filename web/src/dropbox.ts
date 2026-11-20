@@ -28,7 +28,10 @@ import { accountStore } from './accounts'
 import { EXPIRE, RENEW, type Lease } from './github'
 
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
-const PULL_EVERY = 60_000, QUIET = 120_000, TICK = 5000 // ms
+// (quiet: each send is a new version of the changed files in Dropbox, as each save is in its own app)
+const PULL_EVERY = 60_000, QUIET = 10_000, TICK = 5000 // ms
+const PARALLEL = 4 // files moved at once
+const RECHECK = 10 * 60_000 // ms between checks that the approved path is still the linked folder
 const APP_FRESH = 70_000 // ms an app's "I keep this folder in step" counts for (EXPIRE in sharedfolder.py)
 const HEAR_APPS = 25_000 // ms to listen for apps keeping the folder before syncing it from here
 const BLOCK = 4 * 1024 * 1024 // Dropbox's content hash works in blocks of this size
@@ -56,12 +59,26 @@ const MOVED = 409
 
 const local = () => /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
 /** Dropbox's addresses, or stand-ins when testing on this computer (texloom.dropboxApi in localStorage). */
-function ep(): { api: string; content: string; www: string } {
+function ep(): { api: string; content: string; www: string; notify: string } {
   try {
     const o = JSON.parse(localStorage.getItem('texloom.dropboxApi') || 'null')
-    if (o && local()) return o
+    if (o && local()) return { notify: o.api, ...o }
   } catch {}
-  return { api: 'https://api.dropboxapi.com', content: 'https://content.dropboxapi.com', www: 'https://www.dropbox.com' }
+  return { api: 'https://api.dropboxapi.com', content: 'https://content.dropboxapi.com', www: 'https://www.dropbox.com', notify: 'https://notify.dropboxapi.com' }
+}
+
+/** With debugging on (localStorage texloom.debug = 1): requests to Dropbox and the time they took, for the console. */
+const debugging = () => { try { return localStorage.getItem('texloom.debug') === '1' } catch { return false } }
+const requests = { n: 0, ms: 0 }
+
+/** Run `fn` on each item, `n` at a time. */
+async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length)
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]) }
+  }))
+  return out
 }
 
 let keyAsked: Promise<string> | null = null
@@ -130,8 +147,10 @@ async function access(a: DropboxAccount, force = false): Promise<string> {
 async function send(a: DropboxAccount, url: string, init: (token: string) => RequestInit): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
     let res: Response
+    const began = performance.now()
     try { res = await fetch(url, { method: 'POST', cache: 'no-store', ...init(await access(a, attempt > 0)) }) }
     catch (e) { if (e instanceof DropboxError) throw e; throw new DropboxError(t('Couldn’t reach Dropbox (offline?).')) }
+    finally { requests.n++; requests.ms += performance.now() - began }
     if (res.status === 401 && attempt === 0) continue // the token expired early: refresh once
     if (res.ok) return res
     const text = await res.text().catch(() => '')
@@ -191,23 +210,54 @@ export async function topFolders(a: DropboxAccount): Promise<string[]> {
   return (j.entries ?? []).filter((e: any) => e['.tag'] === 'folder').map((e: any) => String(e.path_display)).sort()
 }
 
-/** Every file in the folder (path in it -> entry), every folder down. */
-async function listFiles(a: DropboxAccount, root: string): Promise<Map<string, Entry>> {
-  const out = new Map<string, Entry>()
+/** The folder's listing as last fetched, and Dropbox's cursor for what changed since (per account and folder). */
+const listings = new Map<string, { files: Map<string, Entry>; cursor: string }>()
+
+/** Every file in the folder (path in it -> entry), every folder down. After the first time, only
+ *  what changed since is asked for (Dropbox's cursor), and applied to the listing kept here. */
+async function listFiles(a: DropboxAccount, root: string): Promise<{ files: Map<string, Entry>; cursor: string }> {
+  const key = `${a.id} ${root.toLowerCase()}`
   const rootLower = root.toLowerCase()
-  let j = await rpc(a, '/2/files/list_folder', { path: root, recursive: true, include_deleted: false, limit: 2000 })
+  const known = listings.get(key)
+  const files = new Map(known?.files ?? [])
+  let j: any
+  try {
+    j = known ? await rpc(a, '/2/files/list_folder/continue', { cursor: known.cursor })
+      : await rpc(a, '/2/files/list_folder', { path: root, recursive: true, include_deleted: true, limit: 2000 })
+  } catch (e) {
+    if (known && e instanceof DropboxError && e.status === 409 && /reset/.test(e.tag)) { listings.delete(key); return listFiles(a, root) } // (the cursor has expired)
+    throw e
+  }
   for (let pages = 0; ; pages++) {
     for (const e of j.entries ?? []) {
-      if (e['.tag'] !== 'file' || !String(e.path_lower).startsWith(rootLower + '/')) continue
-      const relLower = String(e.path_lower).slice(rootLower.length + 1)
+      const lower = String(e.path_lower)
+      if (!lower.startsWith(rootLower + '/')) continue
+      const relLower = lower.slice(rootLower.length + 1)
+      if (e['.tag'] === 'deleted') { // a file or a folder (then everything in it)
+        for (const k of [...files.keys()]) { const kl = k.toLowerCase(); if (kl === relLower || kl.startsWith(relLower + '/')) files.delete(k) }
+        continue
+      }
+      if (e['.tag'] !== 'file') continue
       const rel = String(e.path_display).split('/').slice(-relLower.split('/').length).join('/') // (the display name's case)
-      out.set(rel, { rev: String(e.rev), h: String(e.content_hash ?? ''), size: Number(e.size ?? 0) })
+      for (const k of [...files.keys()]) if (k !== rel && k.toLowerCase() === relLower) files.delete(k) // (renamed in case only)
+      files.set(rel, { rev: String(e.rev), h: String(e.content_hash ?? ''), size: Number(e.size ?? 0) })
     }
     if (!j.has_more) break
     if (pages > 200) throw new DropboxError(t('The folder has too many files for TeXLoom to keep in step.'))
     j = await rpc(a, '/2/files/list_folder/continue', { cursor: j.cursor })
   }
-  return out
+  listings.set(key, { files, cursor: String(j.cursor) })
+  return { files: new Map(files), cursor: String(j.cursor) }
+}
+
+/** Wait (up to `secs`) until something changes in the folder after `cursor`: Dropbox's long poll,
+ *  so changes made there come in within seconds. Needs no token. True if something changed. */
+async function changesAfter(cursor: string, secs: number): Promise<{ changes: boolean; backoff: number }> {
+  const res = await fetch(`${ep().notify}/2/files/list_folder/longpoll`, {
+    method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cursor, timeout: secs }) })
+  if (!res.ok) throw new DropboxError(t('Dropbox answered {{status}}{{why}}.', { status: res.status, why: '' }), res.status)
+  const j = await res.json()
+  return { changes: !!j.changes, backoff: Number(j.backoff ?? 0) }
 }
 
 /** The folder's id (.texloom/folder-id in it), made if it has none. */
@@ -286,13 +336,18 @@ export function appHolds(r: Replica, l: DropboxLink | null = linkOf(r)): { by: s
 }
 
 /** Where this browser syncs the link: its approved path, checked to be the same folder. */
+const checked = new Map<string, number>() // folder, path and account -> when last found to match
 async function where(r: Replica, a: DropboxAccount): Promise<{ link: DropboxLink; root: string }> {
   const link = linkOf(r)
   if (!link) throw new DropboxError(t('This project isn’t linked to a Dropbox folder.'))
   const root = approvedPath(r, link)
   if (!root) throw new DropboxError(t('This browser hasn’t approved syncing the project’s Dropbox folder.'))
-  const id = await folderIdOf(a, root, false)
-  if (id !== link.folder) throw new DropboxError(t('{{path}} in your Dropbox isn’t the folder this project is linked to.', { path: root }))
+  const key = `${link.folder} ${root} ${a.id}`
+  if (Date.now() - (checked.get(key) ?? 0) > RECHECK) { // (not every round: once in a while is enough)
+    const id = await folderIdOf(a, root, false)
+    if (id !== link.folder) { checked.delete(key); throw new DropboxError(t('{{path}} in your Dropbox isn’t the folder this project is linked to.', { path: root })) }
+    checked.set(key, Date.now())
+  }
   return { link, root }
 }
 
@@ -304,30 +359,34 @@ export interface PullResult { files: string[]; clash: string[] }
  *  the project's version stays (and goes up with the next send) instead of nothing coming in. */
 export async function pull(r: Replica, a: DropboxAccount, by: string, oursWins = false, still: () => boolean = () => true): Promise<PullResult> {
   const { link, root } = await where(r, a)
-  const now = await listFiles(a, root)
+  const now = (await listFiles(a, root)).files
   const base = new Map(baseMap(r).entries())
   const cache = hashCache(r), mine = projectFiles(r)
   type Step = { rel: string; was: Mine | null; take?: Uint8Array | null; merge?: { base: string; theirs: string } }
   const steps: Step[] = [], clash: string[] = [], same: string[] = []
-  for (const rel of new Set([...base.keys(), ...now.keys()])) {
+  const changed = [...new Set([...base.keys(), ...now.keys()])].filter((rel) => {
     const b = base.get(rel), th = now.get(rel)
-    if ((b?.h ?? null) === (th?.h ?? null)) continue
-    if (!kept(rel, th?.size ?? b?.size ?? 0)) continue
+    return (b?.h ?? null) !== (th?.h ?? null) && kept(rel, th?.size ?? b?.size ?? 0)
+  })
+  await pool(changed, PARALLEL, async (rel) => { // what to do with each file Dropbox changed (fetching what that needs)
+    const b = base.get(rel), th = now.get(rel)
     const m = mine.get(rel) ?? null
     const h = m ? await hashOfMine(r, m, cache) : null
-    if (h === (th?.h ?? null)) { same.push(rel); continue } // the project has it already
+    if (h === (th?.h ?? null)) { same.push(rel); return } // the project has it already
     if (h === (b?.h ?? null)) { // unchanged here
       const take = th ? await download(a, `rev:${th.rev}`) : null
       if (!take || take.length <= MAX) steps.push({ rel, was: m, take })
-      continue
+      return
     }
     if (m && 'text' in m && b && th) {
-      const old = await download(a, `rev:${b.rev}`).catch((e) => { if (e instanceof DropboxError && e.status === 409) return null; throw e }) // (kept 30 days or more)
-      const bt = old && isText(rel, old), tt = isText(rel, await download(a, `rev:${th.rev}`))
-      if (bt != null && tt !== null) { steps.push({ rel, was: m, merge: { base: bt, theirs: tt } }); continue }
+      const [old, theirs] = await Promise.all([
+        download(a, `rev:${b.rev}`).catch((e) => { if (e instanceof DropboxError && e.status === 409) return null; throw e }), // (kept 30 days or more)
+        download(a, `rev:${th.rev}`)])
+      const bt = old && isText(rel, old), tt = isText(rel, theirs)
+      if (bt != null && tt !== null) { steps.push({ rel, was: m, merge: { base: bt, theirs: tt } }); return }
     }
     clash.push(rel)
-  }
+  })
   if (!still()) return { files: [], clash: [] }
   for (const st of steps) if (st.merge && !oursWins && merge3Strict(st.merge.base, st.merge.theirs, (st.was as { text: string }).text) === null) clash.push(st.rel)
   const blocked = clash.sort().map((p) => `${p}@${now.get(p)?.rev ?? '-'}`).join(' ')
@@ -383,25 +442,25 @@ export async function push(r: Replica, a: DropboxAccount, by: string, still: () 
   const { root } = await where(r, a)
   const base = baseMap(r), cache = hashCache(r), mine = projectFiles(r)
   const sent: string[] = []
-  for (const [rel, m] of mine) {
-    const b = base.get(rel)
-    if (b && b.h === await hashOfMine(r, m, cache)) continue
-    if (!still()) return sent
-    const e = await upload(a, `${root}/${rel}`, await bytesOf(r, m), b?.rev ?? null)
-    base.set(rel, e)
-    sent.push(rel)
-  }
-  for (const [rel, b] of base.entries()) {
-    if (mine.has(rel) || !kept(rel, b.size)) continue
-    if (!still()) return sent
-    try { await rpc(a, '/2/files/delete_v2', { path: `${root}/${rel}`, parent_rev: b.rev }) }
-    catch (e) {
-      if (!(e instanceof DropboxError && e.status === 409)) throw e
-      if (!/not_found/.test(e.tag)) throw new DropboxError(t('Dropbox has newer changes: bringing them in first.'), MOVED, 'moved')
+  const ups: [string, Mine][] = []
+  for (const [rel, m] of mine) { const b = base.get(rel); if (!b || b.h !== await hashOfMine(r, m, cache)) ups.push([rel, m]) }
+  const gone = [...base.entries()].filter(([rel, b]) => !mine.has(rel) && kept(rel, b.size))
+  // each file on its own (each success noted at once, so a send cut short is finished by the next)
+  await pool([...ups.map((u) => ['up', ...u] as const), ...gone.map((g) => ['rm', ...g] as const)], PARALLEL, async (job) => {
+    if (!still()) return
+    const rel = job[1]
+    if (job[0] === 'up') {
+      base.set(rel, await upload(a, `${root}/${rel}`, await bytesOf(r, job[2]), base.get(rel)?.rev ?? null))
+    } else {
+      try { await rpc(a, '/2/files/delete_v2', { path: `${root}/${rel}`, parent_rev: job[2].rev }) }
+      catch (e) {
+        if (!(e instanceof DropboxError && e.status === 409)) throw e
+        if (!/not_found/.test(e.tag)) throw new DropboxError(t('Dropbox has newer changes: bringing them in first.'), MOVED, 'moved')
+      }
+      base.delete(rel)
     }
-    base.delete(rel)
     sent.push(rel)
-  }
+  })
   if (sent.length) setLink(r, { ...linkOf(r)!, by, at: Date.now() })
   return sent
 }
@@ -415,7 +474,7 @@ export async function linkFolder(r: Replica, a: DropboxAccount, by: string, path
   const folder = (await folderIdOf(a, path, true))!
   const name = path.split('/').pop() || path
   approve(r, { folder }, path) // linking it is approving it
-  const now = await listFiles(a, path)
+  const now = (await listFiles(a, path)).files
   const cache = hashCache(r), mine = projectFiles(r)
   const take: [string, Uint8Array, Entry][] = []
   for (const [rel, e] of now) {
@@ -498,18 +557,21 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
     if (Date.now() - renewed >= RENEW) { r.meta.set('dropboxLease', { id, by: me(), n: (l?.n ?? 0) + 1 }); renewed = Date.now() }
     if (r.apart) { set({ role: 'waiting', holder: me() }); return }
     set({ role: 'syncing', holder: me() })
-    if (state.busy) return
+    if (state.busy) { if (force) again = true; return } // (a Sync now during a round: another straight after)
     state.busy = true
+    const began = performance.now(), before = { ...requests }
+    let came: string[] = [], went: string[] = []
     try {
       if (force || Date.now() >= nextPull || dirty) {
         const p = await pull(r, a, me(), false, mine)
         nextPull = Date.now() + PULL_EVERY
+        came = p.files
         if (p.files.length) dirty = true
       }
       const cur = linkOf(r)
       if (cur && !cur.blocked && (force || (dirty && Date.now() - changedAt >= QUIET))) {
         dirty = false
-        try { await push(r, a, me(), mine); moved = 0 }
+        try { went = await push(r, a, me(), mine); moved = 0 }
         catch (e) {
           if (!(e instanceof DropboxError) || e.status !== MOVED || ++moved > 3) { moved = 0; throw e }
           dirty = true; nextPull = 0
@@ -518,15 +580,38 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
       set({ error: null })
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) })
-    } finally { state.busy = false; set({ busy: false }) }
+    } finally {
+      state.busy = false; set({ busy: false })
+      if (debugging() && (force || came.length || went.length)) console.debug(`[dropbox] ${force ? 'sync now' : 'round'}: ${Math.round(performance.now() - began)} ms, `
+        + `${requests.n - before.n} requests to Dropbox (${Math.round(requests.ms - before.ms)} ms in all, ${PARALLEL} at once); in: ${came.join(', ') || 'nothing'}; out: ${went.join(', ') || 'nothing'}`)
+      if (again) { again = false; queueMicrotask(() => { round(true).catch(() => {}) }) }
+    }
   }
+  let again = false, stopped = false
   const timer = setInterval(() => { round().catch(() => {}) }, TICK)
   const release = () => { if (mine()) r.meta.delete('dropboxLease') }
+  // leaving the tab (or closing it): send what's waiting now rather than after the quiet time
+  const hidden = () => { if (document.visibilityState === 'hidden' && dirty && mine()) round(true).catch(() => {}) }
+  document.addEventListener('visibilitychange', hidden)
   window.addEventListener('pagehide', release)
+  // while this tab syncs, Dropbox tells it when the folder changes (long poll), so changes made
+  // there come in within seconds rather than at the next minute's round
+  ;(async () => {
+    while (!stopped) {
+      const a = dropboxAccount.get(), l = linkOf(r), root = l && approvedPath(r, l)
+      const cursor = a && root ? listings.get(`${a.id} ${root.toLowerCase()}`)?.cursor : undefined
+      if (state.role !== 'syncing' || !cursor) { await new Promise((ok) => setTimeout(ok, TICK)); continue }
+      try {
+        const { changes, backoff } = await changesAfter(cursor, 120)
+        if (changes && !stopped) { nextPull = 0; await round().catch(() => {}) }
+        if (backoff) await new Promise((ok) => setTimeout(ok, backoff * 1000))
+      } catch { await new Promise((ok) => setTimeout(ok, 30_000)) } // offline, or Dropbox busy: the minute's round goes on
+    }
+  })()
   round().catch(() => {})
   return {
     state,
     now: () => round(true),
-    stop() { clearInterval(timer); window.removeEventListener('pagehide', release); release() },
+    stop() { stopped = true; clearInterval(timer); document.removeEventListener('visibilitychange', hidden); window.removeEventListener('pagehide', release); release() },
   }
 }

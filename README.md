@@ -508,9 +508,11 @@ Dropbox, or one shared with you there, with nothing to install:
   never sees it.
 - **Link a Dropbox folder…**: a folder (made if there isn't one). Files only in one of the two end
   up in both; where both have a file that differs, you choose whose version stays.
-- **Then, while the project is open:** Dropbox's changes come in every minute, merged with
-  collaborators' edits; the project's changes go up once it has been quiet for 2 minutes (only if
-  Dropbox still has the version they were made on: otherwise its changes come in first). Clashes,
+- **Then, while the project is open:** changes made in Dropbox come in within seconds, merged with
+  collaborators' edits; the project's changes go up once it has been quiet for 10 seconds, or
+  straight away when you leave the tab (only if Dropbox still has the version they were made on:
+  otherwise its changes come in first). Closing the tab before then loses nothing: the changes
+  are in the project, and go to Dropbox the next time a browser with Dropbox connected has it open. Clashes,
   and one browser at a time, work as for git repositories, below.
 - **A shared Dropbox folder** sits at a different place in each person's Dropbox: a collaborator
   approves the link with where it is in theirs, and TeXLoom checks it's the same folder (by its
