@@ -149,10 +149,10 @@ export function listDialog(onClose?: () => void) {
     }
     const other = h('input', { placeholder: 'https://…', 'aria-label': t('Another server’s address') }) as HTMLInputElement
     copies.replaceChildren(
-      h('h5', {}, t('Copies on other servers')),
-      h('p', { class: 'muted small' }, t('With copies on several servers, the list survives if one goes away. Passkeys only work on the server where they were added.')),
+      h('h5', {}, t('Copies on other TeXLoom servers')),
+      h('p', { class: 'muted small' }, t('Your list is stored, encrypted, on this server. To keep it safe if this server ever goes away, you can keep copies on other TeXLoom servers too: tick one below, or type its address (such as https://texloom.example.org). Each server decides whether to take a copy; some ask for one of their creation codes. Passkeys only work on the server where they were added.')),
       ...known.map(row),
-      h('div', { class: 'row' }, other, btn(t('Add'), t('Keep a copy of the list on this server too'), async () => {
+      h('div', { class: 'row' }, other, btn(t('Add'), t('Keep a copy of the list on that server too'), async () => {
         const server = normalServer(other.value.trim())
         if (!server) { say(t('Give a server’s address, starting with https://')); return }
         await setCopy(server, true)
