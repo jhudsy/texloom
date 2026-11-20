@@ -170,6 +170,7 @@ const zh: Catalog = {
   "Sync between your devices…": "在你的设备之间同步…",
   "Kept in step with the Dropbox folder {{folder}}": "与 Dropbox 文件夹 {{folder}} 保持同步",
   "Kept in step with {{repo}} on {{service}}": "与 {{service}} 上的 {{repo}} 保持同步",
+  'Remove the tag “{{tag}}” from {{name}}': '从 {{name}} 移除标签“{{tag}}”',
 }
 
 export default zh

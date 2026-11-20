@@ -144,7 +144,7 @@ function landing() {
     selectAllBox?.focus()
   } }) as HTMLInputElement
   const tagline = h('p', { class: 'sub', hidden: !!projects.list().length }, t('Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.'))
-  const finderRow = h('div', { class: 'findrow', hidden: !finderShown() }, selectAllBox, finder, sortPicker())
+  const finderRow = h('div', { class: 'findrow', hidden: !projects.list().length }, selectAllBox, finder, sortPicker())
   const syncNote = h('span', { class: 'syncnote' })
   const showSync = () => {
     const synced = !!savedSecret()
@@ -173,7 +173,7 @@ function landing() {
     sourceNote(),
   )
   refreshProjects = () => {
-    finderRow.hidden = !finderShown()
+    finderRow.hidden = !projects.list().length
     tagline.hidden = !!projects.list().length
     list.replaceChildren(projectList())
   }
@@ -252,10 +252,6 @@ const SORTS: Record<string, { label: () => string; order: (a: Recent, b: Recent)
 }
 const SORT_KEY = 'texloom.projectSort'
 let sorting = (() => { try { const s = localStorage.getItem(SORT_KEY); return s && SORTS[s] ? s : 'opened' } catch { return 'opened' } })()
-
-/** Search and sorting only matter once there are a few projects (or while a search is under way). */
-const FEW = 6
-const finderShown = () => projects.list().length >= FEW || !!finding.text || finding.tags.size > 0
 
 function sortPicker(): HTMLElement {
   const select = h('select', { class: 'sorter', 'aria-label': t('Sort projects'), onchange: (e: any) => {
@@ -421,7 +417,10 @@ function projectList(): HTMLElement {
       r.docTitle && r.docTitle !== label && r.docTitle !== r.name ? h('div', { class: 'dtitle' }, r.docTitle) : null,
       h('div', { class: 'details muted' },
         meta.length ? h('span', {}, meta.join(' · ')) : null,
-        ...tagsOf(r.project).map((tag) => h('button', { class: `utag tc-${tag.colour}${finding.tags.has(tag.id) ? ' on' : ''}`, title: t('Show only projects tagged “{{name}}”', { name: tag.name }), onclick: () => toggleFilter(tag.id) }, tag.name)),
+        ...tagsOf(r.project).map((tag) => h('span', { class: 'tagchip' },
+          h('button', { class: `utag tc-${tag.colour}${finding.tags.has(tag.id) ? ' on' : ''}`, title: t('Show only projects tagged “{{name}}”', { name: tag.name }), onclick: () => toggleFilter(tag.id) }, tag.name),
+          h('button', { class: `utag x tc-${tag.colour}${finding.tags.has(tag.id) ? ' on' : ''}`, title: t('Remove the tag “{{tag}}” from {{name}}', { tag: tag.name, name: label }),
+            'aria-label': t('Remove the tag “{{tag}}” from {{name}}', { tag: tag.name, name: label }), onclick: () => { tags.set([r.project], tag.id, false); refreshProjects() } }, '×'))),
         h('button', { class: 'addtag', 'aria-label': t('Tags for {{name}}…', { name: label }), onclick: () => pickTags([r.project], t('Tags for “{{name}}”', { name: label }), () => refreshProjects()) }, t('+ Tag'))))
   })) : h('p', { class: 'muted' }, t('No projects match your search.'))
   return h('div', {}, bar, selectionBar(), rows, pager(matching.length, list.length))

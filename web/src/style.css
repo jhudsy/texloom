@@ -372,7 +372,14 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 /* the service a project is kept in step with, as its logo */
 .brand { width: 14px; height: 14px; flex: none; fill: currentColor; vertical-align: -2px; }
 .recent .kept { display: inline-flex; align-items: center; color: var(--muted); }
-.findrow .sortby { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.landing .findrow { align-items: center; }
+.landing .findrow .sortby { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; flex: none; white-space: nowrap; }
+.landing .findrow .sortby .sorter { max-width: none; }
+/* a tag on a project: the pill filters by it, the × takes it off this project */
+.recent .tagchip { display: inline-flex; }
+.recent .tagchip .utag:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.recent .tagchip .utag.x { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-width: 0; padding: 0 6px 0 4px; cursor: pointer; line-height: 18px; }
+.recent .tagchip .utag.x:hover, .recent .tagchip .utag.x:focus-visible { background: var(--tag, var(--accent)); color: var(--bg); }
 .findrow .selectall, .recent .pick { align-self: center; margin: 0; }
 .recent .icon { border: 1px solid transparent; background: transparent; color: var(--muted); padding: 0; width: 26px; height: 26px; display: inline-grid; place-items: center; flex: none; }
 .recent .icon:hover, .recent .icon:focus-visible { color: var(--fg); background: var(--panel); border-color: var(--line); }

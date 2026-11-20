@@ -170,6 +170,7 @@ const pt: Catalog = {
   "Sync between your devices…": "Sincronizar entre seus dispositivos…",
   "Kept in step with the Dropbox folder {{folder}}": "Sincronizado com a pasta do Dropbox {{folder}}",
   "Kept in step with {{repo}} on {{service}}": "Sincronizado com {{repo}} em {{service}}",
+  'Remove the tag “{{tag}}” from {{name}}': 'Remover a etiqueta “{{tag}}” de {{name}}',
 }
 
 export default pt
