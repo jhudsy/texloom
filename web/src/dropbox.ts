@@ -32,6 +32,9 @@ const PULL_EVERY = 60_000, QUIET = 120_000, TICK = 5000 // ms
 const APP_FRESH = 70_000 // ms an app's "I keep this folder in step" counts for (EXPIRE in sharedfolder.py)
 const HEAR_APPS = 25_000 // ms to listen for apps keeping the folder before syncing it from here
 const BLOCK = 4 * 1024 * 1024 // Dropbox's content hash works in blocks of this size
+// Only what TeXLoom uses, whatever else the Dropbox app was given (a team permission would make
+// Dropbox ask for a work account)
+const SCOPES = 'account_info.read files.metadata.read files.content.read files.content.write'
 
 export interface DropboxAccount { refresh: string; access: string; expires: number; id: string; name: string; key: string }
 /** The project's link, in its shared settings under `dropbox`. */
@@ -89,7 +92,7 @@ export async function signIn(back = location.href): Promise<never> {
   try { sessionStorage.setItem('texloom.dropboxPending', JSON.stringify({ verifier, state, key, back, redirect, api: ep().api })) }
   catch { throw new DropboxError(t('This browser won’t keep the sign-in for a moment (private browsing?), so Dropbox can’t be connected here.')) }
   const q = new URLSearchParams({ client_id: key, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256',
-    token_access_type: 'offline', redirect_uri: redirect, state })
+    token_access_type: 'offline', redirect_uri: redirect, state, scope: SCOPES })
   location.assign(`${ep().www}/oauth2/authorize?${q}`)
   return new Promise<never>(() => {}) // (the page is going)
 }

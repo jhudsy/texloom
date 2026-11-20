@@ -98,7 +98,8 @@ def who(req: web.Request) -> str:
 
 async def authorize(req: web.Request) -> web.Response:
     q = req.query
-    if q.get("code_challenge_method") != "S256" or q.get("response_type") != "code" or not q.get("client_id"):
+    if q.get("code_challenge_method") != "S256" or q.get("response_type") != "code" or not q.get("client_id") \
+            or set(q.get("scope", "").split()) != {"account_info.read", "files.metadata.read", "files.content.read", "files.content.write"}:
         return web.Response(status=400, text="bad request")
     code = secrets.token_urlsafe(16)
     S.codes[code] = (q["code_challenge"], S.next_account)
