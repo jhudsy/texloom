@@ -19,14 +19,13 @@ const zh: Catalog = {
   'More': '更多',
   'Editor': '编辑器',
   'LaTeX characters': 'LaTeX 字符',
-  'Sync this list…': '同步此列表…',
   'Sync {{name}} to a folder…': '将 {{name}} 同步到文件夹…',
   'Manage sync…': '管理同步…',
   'Preview': '预览',
   'This list is synced between your devices, encrypted. The server can’t read it.': '此列表已在你的设备间加密同步。服务器无法读取它。',
   'This list is kept only in this browser: clearing this site’s data deletes it.{{safari}} A project stored on the server can always be reopened from its link, so keep your links safe, or sync this list to have it on all your devices.': '此列表仅保存在此浏览器中：清除此网站的数据会将其删除。{{safari}} 存储在服务器上的项目始终可以通过链接重新打开，所以请妥善保存链接，或同步此列表以便在所有设备上使用。',
   'Untitled project': '未命名项目',
-  'shared name “{{name}}”': '共享名称“{{name}}”',
+  'your label; everyone else sees “{{name}}”': '你的名称；其他人看到的是“{{name}}”',
   'started by {{name}}': '由 {{name}} 创建',
   'with {{names}}': '协作者：{{names}}',
   '{{n}} files': { other: '{{n}} 个文件' },
@@ -167,6 +166,10 @@ const zh: Catalog = {
   'Search your projects by name, document title or tag': '按名称、文档标题或标签搜索你的项目',
   'Start a new project from a template, an import or a folder': '从模板、导入或文件夹开始新项目',
   'Have a link to a project?': '有项目链接？',
+  "Sort by": "排序方式",
+  "Sync between your devices…": "在你的设备之间同步…",
+  "Kept in step with the Dropbox folder {{folder}}": "与 Dropbox 文件夹 {{folder}} 保持同步",
+  "Kept in step with {{repo}} on {{service}}": "与 {{service}} 上的 {{repo}} 保持同步",
 }
 
 export default zh

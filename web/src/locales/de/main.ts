@@ -19,14 +19,13 @@ const de: Catalog = {
   'More': 'Mehr',
   'Editor': 'Editor',
   'LaTeX characters': 'LaTeX-Zeichen',
-  'Sync this list…': 'Diese Liste synchronisieren …',
   'Sync {{name}} to a folder…': '{{name}} mit einem Ordner synchronisieren …',
   'Manage sync…': 'Synchronisation verwalten …',
   'Preview': 'Vorschau',
   'This list is synced between your devices, encrypted. The server can’t read it.': 'Diese Liste wird verschlüsselt zwischen Ihren Geräten synchronisiert. Der Server kann sie nicht lesen.',
   'This list is kept only in this browser: clearing this site’s data deletes it.{{safari}} A project stored on the server can always be reopened from its link, so keep your links safe, or sync this list to have it on all your devices.': 'Diese Liste liegt nur in diesem Browser: Löschen der Daten dieser Website entfernt sie.{{safari}} Ein auf dem Server gespeichertes Projekt lässt sich immer über seinen Link wieder öffnen. Bewahren Sie Ihre Links also gut auf oder synchronisieren Sie diese Liste, um sie auf allen Geräten zu haben.',
   'Untitled project': 'Unbenanntes Projekt',
-  'shared name “{{name}}”': 'gemeinsamer Name „{{name}}“',
+  'your label; everyone else sees “{{name}}”': 'Ihre Bezeichnung; alle anderen sehen „{{name}}“',
   'started by {{name}}': 'begonnen von {{name}}',
   'with {{names}}': 'mit {{names}}',
   '{{n}} files': ['{{n}} Datei', '{{n}} Dateien'],
@@ -167,6 +166,10 @@ const de: Catalog = {
   'Search your projects by name, document title or tag': 'Ihre Projekte nach Name, Dokumenttitel oder Tag durchsuchen',
   'Start a new project from a template, an import or a folder': 'Ein neues Projekt aus einer Vorlage, einem Import oder einem Ordner beginnen',
   'Have a link to a project?': 'Haben Sie einen Link zu einem Projekt?',
+  "Sort by": "Sortieren nach",
+  "Sync between your devices…": "Zwischen Ihren Geräten synchronisieren …",
+  "Kept in step with the Dropbox folder {{folder}}": "Mit dem Dropbox-Ordner {{folder}} abgeglichen",
+  "Kept in step with {{repo}} on {{service}}": "Mit {{repo}} auf {{service}} abgeglichen",
 }
 
 export default de

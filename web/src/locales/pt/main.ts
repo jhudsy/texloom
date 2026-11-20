@@ -19,14 +19,13 @@ const pt: Catalog = {
   'More': 'Mais',
   'Editor': 'Editor',
   'LaTeX characters': 'Caracteres do LaTeX',
-  'Sync this list…': 'Sincronizar esta lista…',
   'Sync {{name}} to a folder…': 'Sincronizar {{name}} com uma pasta…',
   'Manage sync…': 'Gerenciar a sincronização…',
   'Preview': 'Visualizar',
   'This list is synced between your devices, encrypted. The server can’t read it.': 'Esta lista é sincronizada entre seus dispositivos, criptografada. O servidor não consegue lê-la.',
   'This list is kept only in this browser: clearing this site’s data deletes it.{{safari}} A project stored on the server can always be reopened from its link, so keep your links safe, or sync this list to have it on all your devices.': 'Esta lista fica apenas neste navegador: limpar os dados deste site a exclui.{{safari}} Um projeto armazenado no servidor sempre pode ser reaberto pelo link, então guarde bem seus links ou sincronize esta lista para tê-la em todos os seus dispositivos.',
   'Untitled project': 'Projeto sem título',
-  'shared name “{{name}}”': 'nome compartilhado “{{name}}”',
+  'your label; everyone else sees “{{name}}”': 'seu nome; os outros veem “{{name}}”',
   'started by {{name}}': 'iniciado por {{name}}',
   'with {{names}}': 'com {{names}}',
   '{{n}} files': ['{{n}} arquivo', '{{n}} arquivos'],
@@ -167,6 +166,10 @@ const pt: Catalog = {
   'Search your projects by name, document title or tag': 'Pesquise seus projetos por nome, título do documento ou etiqueta',
   'Start a new project from a template, an import or a folder': 'Comece um novo projeto a partir de um modelo, de uma importação ou de uma pasta',
   'Have a link to a project?': 'Tem um link para um projeto?',
+  "Sort by": "Ordenar por",
+  "Sync between your devices…": "Sincronizar entre seus dispositivos…",
+  "Kept in step with the Dropbox folder {{folder}}": "Sincronizado com a pasta do Dropbox {{folder}}",
+  "Kept in step with {{repo}} on {{service}}": "Sincronizado com {{repo}} em {{service}}",
 }
 
 export default pt

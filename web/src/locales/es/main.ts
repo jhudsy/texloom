@@ -19,14 +19,13 @@ const es: Catalog = {
   'More': 'Más',
   'Editor': 'Editor',
   'LaTeX characters': 'Caracteres de LaTeX',
-  'Sync this list…': 'Sincronizar esta lista…',
   'Sync {{name}} to a folder…': 'Sincronizar {{name}} con una carpeta…',
   'Manage sync…': 'Gestionar la sincronización…',
   'Preview': 'Vista previa',
   'This list is synced between your devices, encrypted. The server can’t read it.': 'Esta lista se sincroniza entre tus dispositivos, cifrada. El servidor no puede leerla.',
   'This list is kept only in this browser: clearing this site’s data deletes it.{{safari}} A project stored on the server can always be reopened from its link, so keep your links safe, or sync this list to have it on all your devices.': 'Esta lista se guarda solo en este navegador: si borras los datos de este sitio, se elimina.{{safari}} Un proyecto guardado en el servidor siempre se puede volver a abrir desde su enlace, así que guarda bien tus enlaces o sincroniza esta lista para tenerla en todos tus dispositivos.',
   'Untitled project': 'Proyecto sin título',
-  'shared name “{{name}}”': 'nombre compartido «{{name}}»',
+  'your label; everyone else sees “{{name}}”': 'tu nombre; los demás ven «{{name}}»',
   'started by {{name}}': 'iniciado por {{name}}',
   'with {{names}}': 'con {{names}}',
   '{{n}} files': ['{{n}} archivo', '{{n}} archivos'],
@@ -167,6 +166,10 @@ const es: Catalog = {
   'Search your projects by name, document title or tag': 'Busca tus proyectos por nombre, título del documento o etiqueta',
   'Start a new project from a template, an import or a folder': 'Empieza un proyecto nuevo a partir de una plantilla, una importación o una carpeta',
   'Have a link to a project?': '¿Tienes un enlace a un proyecto?',
+  "Sort by": "Ordenar por",
+  "Sync between your devices…": "Sincronizar entre tus dispositivos…",
+  "Kept in step with the Dropbox folder {{folder}}": "Sincronizado con la carpeta de Dropbox {{folder}}",
+  "Kept in step with {{repo}} on {{service}}": "Sincronizado con {{repo}} en {{service}}",
 }
 
 export default es

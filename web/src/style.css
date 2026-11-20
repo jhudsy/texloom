@@ -360,14 +360,19 @@ button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent
 .recent .tag.ro { color: var(--warn); }
 .recent .tag.away { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .recent .details { font-size: 12px; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
-.recent .dtitle { font-size: 13px; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent .dtitle { font-size: 13px; font-style: italic; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+/* the title and details stop short of the buttons above them, so they never run underneath */
+.recent .dtitle, .recent .details { margin-right: 124px; }
+@media (max-width: 560px) { .recent .dtitle, .recent .details { margin-right: 0; } }
 .recent .to-app.on { color: var(--accent); }
-/* Tick boxes and "+ Tag" appear where the pointer is, or once something is selected; always on touch screens */
-.recent .pick, .findrow .selectall, .recent .details .addtag { opacity: 0; transition: opacity .12s; }
-.recent li:hover .pick, .recent li:focus-within .pick, .recent li:hover .addtag, .recent li:focus-within .addtag,
-.landing.selecting .pick, .landing.selecting .selectall, .findrow:hover .selectall, .landing:has(.recent li:hover) .selectall,
-.findrow .selectall:focus-visible, .recent .addtag:focus-visible { opacity: 1; }
-@media (hover: none) { .recent .pick, .findrow .selectall, .recent .details .addtag { opacity: 1; } }
+/* Tick boxes are always shown (people didn't know they were there); "+ Tag" appears where the pointer is, always on touch screens */
+.recent .details .addtag { opacity: 0; transition: opacity .12s; }
+.recent li:hover .addtag, .recent li:focus-within .addtag, .recent .addtag:focus-visible { opacity: 1; }
+@media (hover: none) { .recent .details .addtag { opacity: 1; } }
+/* the service a project is kept in step with, as its logo */
+.brand { width: 14px; height: 14px; flex: none; fill: currentColor; vertical-align: -2px; }
+.recent .kept { display: inline-flex; align-items: center; color: var(--muted); }
+.findrow .sortby { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .findrow .selectall, .recent .pick { align-self: center; margin: 0; }
 .recent .icon { border: 1px solid transparent; background: transparent; color: var(--muted); padding: 0; width: 26px; height: 26px; display: inline-grid; place-items: center; flex: none; }
 .recent .icon:hover, .recent .icon:focus-visible { color: var(--fg); background: var(--panel); border-color: var(--line); }
@@ -642,6 +647,7 @@ p.ok { color: var(--ok); }
 
 /* "Free software (AGPL-3.0): source code · licences" at the foot of the start page and Settings */
 .source-note { margin-top: 1.5em; }
+.source-note a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 
 /* Zotero links in project Settings */
 .zotero .zlink { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }

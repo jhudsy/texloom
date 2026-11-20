@@ -11,7 +11,7 @@ import { createAssistantPanel } from './assistant/panel'
 import { setupLayout } from './layout'
 import { askCode, chooseNewProject, chooseServer, riskBanner, SAFARI_NOTE } from './storagenotice'
 import { $, dialog, h, saveFile, askText } from './dom'
-import { icon } from './icons'
+import { brandIcon, icon } from './icons'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
 import { submissionDialog } from './submitdialog'
@@ -33,6 +33,7 @@ import { newProjectInApp, openInApp, sourceNote } from './openinapp'
 import { links as zoteroLinks, refresh as zoteroRefresh, zoteroAccount } from './zotero'
 import { zoteroAccountBox, zoteroAccountStatus } from './zoteroui'
 import { integrationCard } from './integrationcard'
+import { serviceName, kindOf } from './forges'
 import { COLORS, createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
@@ -64,6 +65,16 @@ if (openedByApp) history.replaceState(null, '', location.pathname + location.has
 /** The app opened this project here, so it keeps it in a folder on this computer (as far as this
  *  browser knows: the start page offers "In the TeXLoom app" instead of "Sync to a folder…"). */
 const inAppKey = (project: string) => `texloom.inApp.${project}`
+/** Logos of the Dropbox folder or git repository this browser keeps a project in step with (what it has approved). */
+function keptIn(project: string): HTMLElement[] {
+  const saved = (key: string) => { try { return JSON.parse(localStorage.getItem(`texloom.${key}.${project}`) || 'null') } catch { return null } }
+  const out: HTMLElement[] = []
+  const dbx = saved('dropboxApproved')
+  if (dbx) out.push(h('span', { class: 'kept', title: t('Kept in step with the Dropbox folder {{folder}}', { folder: dbx.path || dbx.folder || '' }) }, brandIcon('dropbox')))
+  const git = saved('githubApproved')
+  if (git) out.push(h('span', { class: 'kept', title: t('Kept in step with {{repo}} on {{service}}', { repo: git.repo ?? '', service: serviceName(git) }) }, brandIcon(kindOf(git))))
+  return out
+}
 const keptByApp = (project: string) => { try { return !!localStorage.getItem(inAppKey(project)) } catch { return false } }
 
 const APP = 'TeXLoom'
@@ -132,7 +143,8 @@ function landing() {
     refreshProjects()
     selectAllBox?.focus()
   } }) as HTMLInputElement
-  const finderRow = h('div', { class: 'findrow', hidden: !projects.list().length }, selectAllBox, finder, sortPicker())
+  const tagline = h('p', { class: 'sub', hidden: !!projects.list().length }, t('Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.'))
+  const finderRow = h('div', { class: 'findrow', hidden: !finderShown() }, selectAllBox, finder, sortPicker())
   const syncNote = h('span', { class: 'syncnote' })
   const showSync = () => {
     const synced = !!savedSecret()
@@ -141,12 +153,12 @@ function landing() {
         ? t('This list is synced between your devices, encrypted. The server can’t read it.')
         : t('This list is kept only in this browser: clearing this site’s data deletes it.{{safari}} A project stored on the server can always be reopened from its link, so keep your links safe, or sync this list to have it on all your devices.', { safari: SAFARI_NOTE }) },
         synced ? t('Synced between your devices') : t('Only in this browser')),
-      h('button', { class: 'small', onclick: () => listDialog(() => { showSync(); refreshProjects() }) }, synced ? t('Manage sync…') : t('Sync this list…')))
+      h('button', { class: 'small', onclick: () => listDialog(() => { showSync(); refreshProjects() }) }, synced ? t('Manage sync…') : t('Sync between your devices…')))
   }
   showSync()
   app.append(
     h('div', { class: 'masthead' },
-      h('div', {}, h('h1', {}, brand()), h('p', { class: 'sub' }, t('Local-first collaborative LaTeX. Your files live on your devices; the server only relays encrypted changes.'))),
+      h('div', {}, h('h1', {}, brand()), tagline),
       h('button', { class: 'icon gear', title: t('Settings'), 'aria-label': t('Settings'), onclick: startSettings }, icon('gear'))),
     h('div', { class: 'startrow' },
       h('button', { class: 'primary big', title: t('Start a new project from a template, an import or a folder'), onclick: () => createProject() }, icon('plus'), t('Create project')),
@@ -161,7 +173,8 @@ function landing() {
     sourceNote(),
   )
   refreshProjects = () => {
-    finderRow.hidden = !projects.list().length
+    finderRow.hidden = !finderShown()
+    tagline.hidden = !!projects.list().length
     list.replaceChildren(projectList())
   }
 }
@@ -240,13 +253,18 @@ const SORTS: Record<string, { label: () => string; order: (a: Recent, b: Recent)
 const SORT_KEY = 'texloom.projectSort'
 let sorting = (() => { try { const s = localStorage.getItem(SORT_KEY); return s && SORTS[s] ? s : 'opened' } catch { return 'opened' } })()
 
+/** Search and sorting only matter once there are a few projects (or while a search is under way). */
+const FEW = 6
+const finderShown = () => projects.list().length >= FEW || !!finding.text || finding.tags.size > 0
+
 function sortPicker(): HTMLElement {
-  return h('select', { class: 'sorter', 'aria-label': t('Sort projects'), onchange: (e: any) => {
+  const select = h('select', { class: 'sorter', 'aria-label': t('Sort projects'), onchange: (e: any) => {
     sorting = e.target.value
     try { localStorage.setItem(SORT_KEY, sorting) } catch {}
     finding.page = 0
     refreshProjects()
   } }, ...Object.entries(SORTS).map(([id, s]) => h('option', { value: id, ...(id === sorting ? { selected: true } : {}) }, s.label())))
+  return h('label', { class: 'sortby' }, h('span', { class: 'muted small' }, t('Sort by')), select)
 }
 
 async function removeProject(r: Recent, scope: RemoveScope) {
@@ -357,7 +375,7 @@ function projectList(): HTMLElement {
     const code = projectCode(r.project)
     const others = (r.people ?? []).filter((p) => p !== me && p !== r.createdBy)
     const meta: string[] = []
-    if (r.nick && r.name) meta.push(t('shared name “{{name}}”', { name: r.name }))
+    if (r.nick && r.name) meta.push(t('your label; everyone else sees “{{name}}”', { name: r.name }))
     if (r.createdBy && r.createdBy !== me) meta.push(t('started by {{name}}', { name: r.createdBy }))
     if (others.length) meta.push(t('with {{names}}', { names: `${others.slice(0, 4).join(', ')}${others.length > 4 ? ` +${others.length - 4}` : ''}` }))
     if (r.files) meta.push(tn(r.files, '{{n}} file', '{{n}} files'))
@@ -375,6 +393,7 @@ function projectList(): HTMLElement {
         dupes.has(label) ? h('code', { class: 'pcode', title: t('Project code: derived from this project’s unique ID. Two projects with the same name always have different codes.') }, code) : null,
         r.writable ? null : h('span', { class: 'tag ro' }, t('read-only')),
         r.server ? h('span', { class: 'tag away', title: t('Kept on another server, {{server}}: this page syncs it with that server.', { server: r.server }) }, serverName(r.server)) : null,
+        ...keptIn(r.project),
         r.deleted ? h('span', { class: 'tag warn', title: t('The owner deleted this project for everyone. This browser keeps a read-only copy.') }, t('deleted by the owner'))
           : !hasServerCopy(r) ? h('span', { class: 'tag warn', title: t('The server keeps no copy: this browser (and collaborators’ devices) hold the only copies. Clearing browser data deletes this one.') }, t('not on server')) : null,
         h('span', { class: 'spacer' }),
