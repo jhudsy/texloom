@@ -72,7 +72,7 @@ export function dropboxSection(r: Replica, me: () => string, writable: boolean):
       : !writable ? t('Read-only link: this browser doesn’t sync it.')
       : !path ? t('A collaborator linked this project to the Dropbox folder “{{name}}”. This browser doesn’t sync it until you approve, with where that folder is in your Dropbox: syncing uses your Dropbox connection.', { name: l.name })
       : st?.role === 'app' || app ? t('The TeXLoom app on {{name}} keeps this folder in step (Dropbox brings it there), so browsers don’t.', { name: st?.holder || app?.by || '?' })
-      : st?.role === 'syncing' ? t('This browser keeps it in step: it brings changes in every minute, and sends changes once the project has been quiet for two minutes.')
+      : st?.role === 'syncing' ? t('This browser keeps it in step: changes made in Dropbox come in within seconds, and the project’s go to Dropbox once it has been quiet for ten seconds.')
       : st?.role === 'standby' ? t('{{name}} keeps it in step now (another browser). This browser takes over if they stop.', { name: st.holder ?? '?' })
       : t('Waiting to sync (offline, or listening for a TeXLoom app that keeps this folder).')
     const blocked = l.blocked ? h('div', { class: 'risk' },

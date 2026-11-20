@@ -75,7 +75,13 @@ def main() -> None:
         s.check("the folder gets an id, and the link names it", len(fid) == 32 and link["folder"] == fid, str(link))
 
         def sync(p=page, d=None, wait=2500):
-            (d or dlg).locator("button:has-text('Sync now')").click()
+            button = (d or dlg).locator("button:has-text('Sync now')")
+            try:
+                button.click(timeout=30000)
+            except Exception:
+                print("  Sync now stayed unclickable. Dropbox section:", (d or dlg).locator(".dropbox").inner_text().replace("\n", " | ")[:400])
+                print("  last requests to the stand-in:", D.S.calls[-12:])
+                raise
             p.wait_for_timeout(wait)
 
         page.evaluate("""() => { const r = __texloom.r; const yt = r.files.get('main.tex'); yt.insert(yt.toString().indexOf('Dropbox line two'), 'Edited in TeXLoom. ')

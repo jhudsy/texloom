@@ -409,13 +409,15 @@ export function startGitHub(r: Replica, me: () => string, onChange: () => void) 
     if (r.apart) { set({ role: 'waiting', holder: me() }); return }
     set({ role: 'syncing', holder: me() })
     if (state.busy) return
-    state.busy = true
+    if (!force && Date.now() < nextPull && !dirty) return // nothing to do this time (and the screen needn't redraw)
+    set({ busy: true }) // (through set, so the screen hears it: and hears it end)
     try {
       if (force || Date.now() >= nextPull || dirty) {
         const p = await pull(r, a, me(), false, mine)
         nextPull = Date.now() + PULL_EVERY
         state.lastPull = Date.now()
         if (p.files.length) dirty = true
+        if (p.clash.length) dirty = false // a clash waits for someone: look again when something changes, not every few seconds
       }
       const cur = linkOf(r)
       if (cur && !cur.blocked && (force || (dirty && Date.now() - changedAt >= QUIET))) {
@@ -434,7 +436,7 @@ export function startGitHub(r: Replica, me: () => string, onChange: () => void) 
       set({ error: null })
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) })
-    } finally { state.busy = false; set({ busy: false }) }
+    } finally { set({ busy: false }) }
   }
   const timer = setInterval(() => { round().catch(() => {}) }, TICK)
   const release = () => { if (mine()) r.meta.delete('githubLease') }

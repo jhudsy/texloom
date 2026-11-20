@@ -11,7 +11,6 @@ const zh: Catalog = {
   "Connect your Dropbox account to sync it from this browser.": "连接你的 Dropbox 账户即可从此浏览器同步。",
   "A collaborator linked this project to the Dropbox folder “{{name}}”. This browser doesn’t sync it until you approve, with where that folder is in your Dropbox: syncing uses your Dropbox connection.": "一位协作者将此项目关联到 Dropbox 文件夹“{{name}}”。在你批准并指明该文件夹在你 Dropbox 中的位置之前，此浏览器不会同步：同步使用你的 Dropbox 连接。",
   "The TeXLoom app on {{name}} keeps this folder in step (Dropbox brings it there), so browsers don’t.": "{{name}} 上的 TeXLoom 应用正在同步此文件夹（由 Dropbox 带到那里），因此浏览器不同步。",
-  "This browser keeps it in step: it brings changes in every minute, and sends changes once the project has been quiet for two minutes.": "此浏览器负责同步：每分钟拉取更改，项目静止两分钟后发送更改。",
   "{{name}} keeps it in step now (another browser). This browser takes over if they stop.": "{{name}} 正在同步（另一个浏览器）。如果它停止，此浏览器会接手。",
   "Waiting to sync (offline, or listening for a TeXLoom app that keeps this folder).": "等待同步（离线，或正在留意是否有 TeXLoom 应用在同步此文件夹）。",
   "The Dropbox folder has changes that clash with the project’s in {{files}}. Nothing was brought in. Make one side match the other, or keep the project’s version where they clash.": "Dropbox 文件夹中的更改与项目在 {{files}} 中的更改冲突。未拉取任何内容。请让一方与另一方一致，或在冲突处保留项目的版本。",
@@ -31,6 +30,7 @@ const zh: Catalog = {
   "Syncing uses your Dropbox connection: it brings that folder’s files into the project and sends the project’s changes to it. Where is the folder in your Dropbox? (A folder shared with you can be somewhere else in yours than in theirs.)": "同步使用你的 Dropbox 连接：会把该文件夹的文件带入项目，并把项目的更改发送过去。该文件夹在你 Dropbox 中的什么位置？（与你共享的文件夹在你那里的位置可能与对方不同。）",
   "Linked; {{n}} files came in from Dropbox.": {"other": "已关联；从 Dropbox 拉取了 {{n}} 个文件。"},
   "Keep a project in step with a folder in your Dropbox, or one shared with you there. Connecting takes you to Dropbox to allow TeXLoom, then back here.": "让项目与你 Dropbox 中的文件夹（或他人与你共享的文件夹）保持同步。连接时会先前往 Dropbox 允许 TeXLoom，然后回到这里。",
+  "This browser keeps it in step: changes made in Dropbox come in within seconds, and the project’s go to Dropbox once it has been quiet for ten seconds.": "此浏览器负责同步：在 Dropbox 中的更改几秒内就会进来，项目的更改在静止十秒后发送到 Dropbox。",
 }
 
 export default zh

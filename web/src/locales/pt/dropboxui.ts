@@ -11,7 +11,6 @@ const pt: Catalog = {
   "Connect your Dropbox account to sync it from this browser.": "Ligue a sua conta do Dropbox para o sincronizar a partir deste navegador.",
   "A collaborator linked this project to the Dropbox folder “{{name}}”. This browser doesn’t sync it until you approve, with where that folder is in your Dropbox: syncing uses your Dropbox connection.": "Um colaborador ligou este projeto à pasta do Dropbox «{{name}}». Este navegador não a sincroniza até aprovar, indicando onde está essa pasta no seu Dropbox: a sincronização usa a sua ligação ao Dropbox.",
   "The TeXLoom app on {{name}} keeps this folder in step (Dropbox brings it there), so browsers don’t.": "A app TeXLoom em {{name}} mantém esta pasta sincronizada (o Dropbox leva-a até lá), por isso os navegadores não o fazem.",
-  "This browser keeps it in step: it brings changes in every minute, and sends changes once the project has been quiet for two minutes.": "Este navegador mantém-no sincronizado: traz alterações a cada minuto e envia alterações quando o projeto está calmo há dois minutos.",
   "{{name}} keeps it in step now (another browser). This browser takes over if they stop.": "{{name}} mantém-no sincronizado agora (outro navegador). Este navegador assume se ele parar.",
   "Waiting to sync (offline, or listening for a TeXLoom app that keeps this folder).": "À espera para sincronizar (sem ligação, ou à escuta de uma app TeXLoom que mantenha esta pasta).",
   "The Dropbox folder has changes that clash with the project’s in {{files}}. Nothing was brought in. Make one side match the other, or keep the project’s version where they clash.": "A pasta do Dropbox tem alterações que chocam com as do projeto em {{files}}. Nada foi trazido. Faça um lado coincidir com o outro, ou mantenha a versão do projeto onde chocam.",
@@ -31,6 +30,7 @@ const pt: Catalog = {
   "Syncing uses your Dropbox connection: it brings that folder’s files into the project and sends the project’s changes to it. Where is the folder in your Dropbox? (A folder shared with you can be somewhere else in yours than in theirs.)": "A sincronização usa a sua ligação ao Dropbox: traz os ficheiros dessa pasta para o projeto e envia-lhe as alterações do projeto. Onde está a pasta no seu Dropbox? (Uma pasta partilhada consigo pode estar noutro sítio no seu do que no de quem a partilha.)",
   "Linked; {{n}} files came in from Dropbox.": ["Ligado; veio {{n}} ficheiro do Dropbox.", "Ligado; vieram {{n}} ficheiros do Dropbox."],
   "Keep a project in step with a folder in your Dropbox, or one shared with you there. Connecting takes you to Dropbox to allow TeXLoom, then back here.": "Mantenha um projeto sincronizado com uma pasta do seu Dropbox, ou uma partilhada consigo lá. Ao ligar, vai ao Dropbox para permitir o TeXLoom e depois volta aqui.",
+  "This browser keeps it in step: changes made in Dropbox come in within seconds, and the project’s go to Dropbox once it has been quiet for ten seconds.": "Este navegador mantém-no sincronizado: as alterações feitas no Dropbox chegam em segundos, e as do projeto vão para o Dropbox quando está calmo há dez segundos.",
 }
 
 export default pt

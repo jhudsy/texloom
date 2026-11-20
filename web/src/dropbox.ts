@@ -558,7 +558,8 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
     if (r.apart) { set({ role: 'waiting', holder: me() }); return }
     set({ role: 'syncing', holder: me() })
     if (state.busy) { if (force) again = true; return } // (a Sync now during a round: another straight after)
-    state.busy = true
+    if (!force && Date.now() < nextPull && !dirty) return // nothing to do this time (and the screen needn't redraw)
+    set({ busy: true }) // (through set, so the screen hears it: and hears it end)
     const began = performance.now(), before = { ...requests }
     let came: string[] = [], went: string[] = []
     try {
@@ -567,6 +568,7 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
         nextPull = Date.now() + PULL_EVERY
         came = p.files
         if (p.files.length) dirty = true
+        if (p.clash.length) dirty = false // a clash waits for someone: look again when something changes, not every few seconds
       }
       const cur = linkOf(r)
       if (cur && !cur.blocked && (force || (dirty && Date.now() - changedAt >= QUIET))) {
@@ -581,7 +583,7 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) })
     } finally {
-      state.busy = false; set({ busy: false })
+      set({ busy: false })
       if (debugging() && (force || came.length || went.length)) console.debug(`[dropbox] ${force ? 'sync now' : 'round'}: ${Math.round(performance.now() - began)} ms, `
         + `${requests.n - before.n} requests to Dropbox (${Math.round(requests.ms - before.ms)} ms in all, ${PARALLEL} at once); in: ${came.join(', ') || 'nothing'}; out: ${went.join(', ') || 'nothing'}`)
       if (again) { again = false; queueMicrotask(() => { round(true).catch(() => {}) }) }
