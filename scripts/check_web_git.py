@@ -39,6 +39,7 @@ def run(s: webcheck.Session, kind: str) -> None:
 
     # connect and link
     page.click("button.gearbtn")
+    webcheck.open_card(page, "Git repositories")
     dlg = page.locator("dialog[open]")
     box = dlg.locator(".git-accounts")
     box.locator("select").select_option(kind)
@@ -114,6 +115,7 @@ def run(s: webcheck.Session, kind: str) -> None:
         page.reload()
         page.wait_for_function("() => window.__texloom?.r?.synced", timeout=60000)
         page.click("button.gearbtn")
+        webcheck.open_card(page, "Git repositories")
         sec = page.locator("dialog[open] .github")
         try:
             sec.locator("text=keeps it in step").wait_for(timeout=20000)  # once it has taken its turn again
@@ -131,6 +133,7 @@ def run(s: webcheck.Session, kind: str) -> None:
             r2.push("main", {"main.tex": b"on main\n", "extra.tex": b"extra\n"})
         p2 = s.project({"main.tex": "second project\n", "b.tex": "bee\n"}, {**storage, **{k: v for k, v in accounts.items() if v}})
         p2.click("button.gearbtn")
+        webcheck.open_card(p2, "Git repositories")
         d2 = p2.locator("dialog[open]")
         d2.locator("button:has-text('Link a repository…')").click()
         l2 = p2.locator("dialog.zlinkdlg[open]")

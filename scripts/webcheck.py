@@ -134,3 +134,13 @@ def select(page, file: str, start: int, end: int) -> None:
     page.evaluate(f"() => __texloom.open({json.dumps(file)})")
     page.wait_for_timeout(300)
     page.evaluate(f"() => {{ const v = __texloom.view(); v.focus(); v.dispatch({{ selection: {{ anchor: {start}, head: {end} }} }}) }}")
+
+
+def open_card(page, name: str):
+    """Unfold an integration's card in the open Settings (integrationcard.ts), as a person would by
+    clicking its name; returns the card."""
+    card = page.locator("dialog[open] details.icard", has=page.locator(f"summary .iname:text-is('{name}')"))
+    card.wait_for(timeout=10000)
+    if card.get_attribute("open") is None:
+        card.locator("summary").click()
+    return card

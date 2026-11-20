@@ -8,9 +8,10 @@ import { myName } from './myname'
 import { detectMain } from './projectfiles'
 import { t, LANGUAGES, langPref, setLangPref, type Lang } from './i18n'
 import { editorMarkup, type Markup } from './review'
-import { zoteroSection } from './zoteroui'
-import { githubSection } from './githubui'
-import { dropboxSection } from './dropboxui'
+import { zoteroSection, zoteroStatus } from './zoteroui'
+import { githubSection, gitStatus } from './githubui'
+import { dropboxSection, dropboxStatus } from './dropboxui'
+import { integrationCard } from './integrationcard'
 
 /** "Codes come from whoever runs this server", with the server's own page about them once known. */
 function codeSourceSlot(): HTMLElement {
@@ -232,12 +233,9 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     ] },
     integrations: { label: t('Integrations'), body: () => [
       whose(t('Your accounts are yours alone and stay with you; what a project links to is shared with everyone in it.')),
-      h('h4', {}, 'Zotero'),
-      zoteroSection(r, () => prefs.name, w),
-      h('h4', {}, t('Git repositories')),
-      githubSection(r, () => prefs.name, w),
-      h('h4', {}, 'Dropbox'),
-      dropboxSection(r, () => prefs.name, w),
+      integrationCard('Zotero', () => zoteroStatus(r), zoteroSection(r, () => prefs.name, w)),
+      integrationCard(t('Git repositories'), () => gitStatus(r), githubSection(r, () => prefs.name, w)),
+      integrationCard('Dropbox', () => dropboxStatus(r), dropboxSection(r, () => prefs.name, w)),
     ] },
     you: { label: t('You'), body: () => [
       whose(t('Yours, in every project in this browser.')),

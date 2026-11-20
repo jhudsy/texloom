@@ -6,6 +6,7 @@ import { dialog, h } from './dom'
 import { t, tn } from './i18n'
 import { accountFor, accounts, approve, approved, connect, GitError, linkOf, linkRepo, pull, push, setAccount, setLink, startGitHub } from './github'
 import { forge, hostOf, kindOf, normalHost, repoPath, serviceName, tokenPage, type Account, type Kind } from './forges'
+import type { Status } from './integrationcard'
 
 const ago = (at: number) => new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -19,6 +20,25 @@ const listeners = new Set<() => void>()
 export function runGitHub(r: Replica, me: () => string) {
   engine = startGitHub(r, me, () => listeners.forEach((f) => f()))
   r.meta.observe((ev) => { if (ev.keysChanged.has('github') || ev.keysChanged.has('githubLease')) listeners.forEach((f) => f()) })
+}
+
+/** The accounts this browser has, in a line (the start page's card). */
+export function gitAccountsStatus(): Status {
+  const have = accounts()
+  return have.length ? { text: have.map((a) => t('{{service}} as {{name}}', { service: serviceName(a), name: a.login || '?' })).join(', '), tone: 'ok' }
+    : { text: t('Not connected'), tone: 'off' }
+}
+
+/** The project's link and what's happening, in a line (its card in project Settings). */
+export function gitStatus(r: Replica): Status {
+  const l = linkOf(r), st = engine?.state
+  if (!l) return accounts().length ? { text: t('Not linked'), tone: 'off' } : { text: t('Not connected'), tone: 'off' }
+  const where = `${l.repo} · ${serviceName(l)}`
+  if (l.blocked) return { text: t('⚠ {{where}}: changes clash', { where }), tone: 'warn', open: true }
+  if (st?.error) return { text: t('⚠ {{where}}: not syncing', { where }), tone: 'err', open: true }
+  if (!accountFor(l)) return { text: t('{{where}} (synced from another browser)', { where }), tone: 'off', open: true }
+  if (!approved(r, l)) return { text: t('{{where}}: waiting for your approval', { where }), tone: 'warn', open: true }
+  return { text: st?.role === 'syncing' ? t('{{where}}: in step', { where }) : st?.role === 'standby' ? t('{{where}}: kept in step by {{name}}', { where, name: st.holder ?? '?' }) : where, tone: 'ok', open: true }
 }
 
 /** The accounts this browser has connected, each with Disconnect, and a form to connect another

@@ -2,7 +2,8 @@
 // collection to a .bib file in project Settings. The work itself is in zotero.ts.
 import type { Replica } from './replica'
 import { dialog, h } from './dom'
-import { t } from './i18n'
+import { t, tn } from './i18n'
+import type { Status } from './integrationcard'
 import { collections, connect, libraries, links, refresh, setLink, validLink, zoteroAccount, type Collection, type Library, type Link } from './zotero'
 import { cleanPath } from './projectfiles'
 
@@ -10,6 +11,18 @@ const NEW_KEY = 'https://www.zotero.org/settings/keys/new'
 const ago = (at: number) => new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 /** Connected as …, or a box to connect with an API key. `changed` runs after either. */
+/** The account this browser has, in a line (the start page's card). */
+export function zoteroAccountStatus(): Status {
+  return zoteroAccount.get() ? { text: t('Connected'), tone: 'ok' } : { text: t('Not connected'), tone: 'off' }
+}
+
+/** The project's linked files, in a line (its card in project Settings). */
+export function zoteroStatus(r: Replica): Status {
+  const n = Object.keys(links(r)).length
+  if (!n) return zoteroAccount.get() ? { text: t('Not linked'), tone: 'off' } : { text: t('Not connected'), tone: 'off' }
+  return { text: tn(n, '{{n}} file kept in step', '{{n}} files kept in step'), tone: 'ok', open: true }
+}
+
 export function zoteroAccountBox(changed: () => void = () => {}): HTMLElement {
   const box = h('div', { class: 'zotero-account' })
   const render = () => {

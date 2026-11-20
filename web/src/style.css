@@ -668,3 +668,23 @@ dialog.settings.tabbed[open] { display: flex; flex-direction: column; }
   .tablist .tab { white-space: nowrap; }
   .tabbed .foot .source-note { display: none; }
 }
+
+/* Integrations as cards (integrationcard.ts): the name stands out, a status line beside it, the
+   section folded away underneath unless the project uses it */
+.icard { border: 1px solid var(--line); border-radius: 10px; margin: 10px 0; background: var(--panel); }
+.icard[data-tone="warn"] { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.icard[data-tone="err"] { border-color: color-mix(in srgb, var(--err) 55%, var(--line)); }
+.icard > summary { display: flex; align-items: center; gap: 12px; padding: 10px 14px; cursor: pointer; list-style: none; }
+.icard > summary::-webkit-details-marker { display: none; }
+.icard > summary::before { content: ''; width: 7px; height: 7px; flex: none; border: solid var(--muted); border-width: 0 2px 2px 0;
+  transform: rotate(-45deg); transition: transform .15s; margin-right: 2px; }
+.icard[open] > summary::before { transform: rotate(45deg); }
+.icard .iname { font-weight: 600; font-size: 15px; color: var(--fg); white-space: nowrap; flex: none; }
+.icard .iright { margin-left: auto; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; color: var(--muted); text-align: right; }
+.icard .istatus { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icard .idot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--line); }
+.icard .idot.ok { background: var(--ok); } .icard .idot.warn { background: var(--warn); } .icard .idot.err { background: var(--err); }
+.icard > .ibody { padding: 0 14px 12px 33px; border-top: 1px solid var(--line); }
+.icard > .ibody > :first-child { margin-top: 10px; }
+.icard > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 10px; }
+@media (max-width: 560px) { .icard > .ibody { padding-left: 14px; } .icard .istatus { max-width: 46vw; } }

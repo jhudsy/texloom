@@ -2,6 +2,7 @@
 // project to a Dropbox folder in project Settings, with what's happening. The work is in dropbox.ts.
 import type { Replica } from './replica'
 import { dialog, h } from './dom'
+import type { Status } from './integrationcard'
 import { t, tn } from './i18n'
 import { appHolds, approve, approvedPath, dropboxAccount, dropboxAppKey, folderPath, linkFolder, linkOf, pull, push, signIn, signInProblem, startDropbox, topFolders, unlink } from './dropbox'
 
@@ -15,6 +16,27 @@ const listeners = new Set<() => void>()
 export function runDropbox(r: Replica, me: () => string) {
   engine = startDropbox(r, me, () => listeners.forEach((f) => f()))
   r.meta.observe((ev) => { if (ev.keysChanged.has('dropbox') || ev.keysChanged.has('dropboxLease')) listeners.forEach((f) => f()) })
+}
+
+/** The account this browser has, in a line (the start page's card). */
+export function dropboxAccountStatus(): Status {
+  const a = dropboxAccount.get()
+  return a ? { text: t('Connected as {{name}}', { name: a.name || '?' }), tone: 'ok' } : { text: t('Not connected'), tone: 'off' }
+}
+
+/** The project's link and what's happening, in a line (its card in project Settings). */
+export function dropboxStatus(r: Replica): Status {
+  const l = linkOf(r), st = engine?.state, a = dropboxAccount.get()
+  if (!l) return a ? { text: t('Not linked'), tone: 'off' } : { text: t('Not connected'), tone: 'off' }
+  const path = approvedPath(r, l), where = path ?? l.name
+  if (l.blocked) return { text: t('⚠ {{where}}: changes clash', { where }), tone: 'warn', open: true }
+  if (st?.error) return { text: t('⚠ {{where}}: not syncing', { where }), tone: 'err', open: true }
+  if (!a) return { text: t('{{where}} (synced from another browser)', { where }), tone: 'off', open: true }
+  if (!path) return { text: t('{{where}}: waiting for your approval', { where }), tone: 'warn', open: true }
+  const app = appHolds(r, l)
+  return { text: app || st?.role === 'app' ? t('{{where}}: kept in step by the TeXLoom app', { where })
+    : st?.role === 'syncing' ? t('{{where}}: in step', { where }) : st?.role === 'standby' ? t('{{where}}: kept in step by {{name}}', { where, name: st.holder ?? '?' }) : where,
+    tone: 'ok', open: true }
 }
 
 /** Connected as …, or a button to connect. `changed` runs after either. Nothing if this server has no Dropbox app. */

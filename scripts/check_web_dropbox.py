@@ -35,6 +35,7 @@ def connect(page) -> None:
     page.wait_for_url(lambda u: u == back, timeout=20000)
     page.wait_for_function("() => window.__texloom?.r?.synced", timeout=60000)
     page.click("button.gearbtn")
+    webcheck.open_card(page, "Dropbox")
     page.locator("dialog[open] .dropbox >> text=Dropbox").first.wait_for(timeout=10000)
 
 
@@ -53,6 +54,7 @@ def main() -> None:
 
         page = s.project({"main.tex": "local main\n"}, storage)
         page.click("button.gearbtn")
+        webcheck.open_card(page, "Dropbox")
         dlg = page.locator("dialog[open]")
         connect(page)
         opened = time.monotonic()  # (the tab has just loaded again)
@@ -167,6 +169,7 @@ def main() -> None:
         p2.click("dialog[open] button:has-text('Start')")
         p2.wait_for_function("() => window.__texloom?.r?.synced", timeout=60000)
         p2.click("button.gearbtn")
+        webcheck.open_card(p2, "Dropbox")
         d2 = p2.locator("dialog[open]")
         connect(p2)
         d2.locator(".dropbox >> text=Approve and sync").wait_for(timeout=10000)

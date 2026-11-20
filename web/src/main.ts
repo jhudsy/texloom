@@ -31,7 +31,8 @@ import { tags, type Tag } from './tags'
 import { manageTags, pickTags } from './tagdialogs'
 import { newProjectInApp, openInApp, sourceNote } from './openinapp'
 import { links as zoteroLinks, refresh as zoteroRefresh, zoteroAccount } from './zotero'
-import { zoteroAccountBox } from './zoteroui'
+import { zoteroAccountBox, zoteroAccountStatus } from './zoteroui'
+import { integrationCard } from './integrationcard'
 import { COLORS, createEditorPane } from './editor'
 import { createOutput } from './output'
 import { pdfjs } from './pdfview'
@@ -44,8 +45,8 @@ import { watchClashes, type Clash } from './clashes'
 import { watchMerges } from './merges'
 import { checking, wellFormed } from './invariants'
 import { sharedPos, type SharedPos } from './positions'
-import { githubAccountBox, runGitHub } from './githubui'
-import { dropboxAccountBox, runDropbox } from './dropboxui'
+import { githubAccountBox, gitAccountsStatus, runGitHub } from './githubui'
+import { dropboxAccountBox, dropboxAccountStatus, runDropbox } from './dropboxui'
 import { shareDialog } from './sharing'
 import { awayServer, fragmentFor, fragmentOfLink, serverName, serverOr } from './servers'
 import { folderFiles, folderPermission, folderSyncSupported, pickFolder, rememberFolder, savedFolder, startFolderSync, type FolderSync } from './foldersync'
@@ -190,12 +191,10 @@ function startSettings() {
     h('h3', {}, t('Settings')),
     h('label', { class: 'field' }, t('Name'), nameIn),
     languagePicker(),
-    h('h4', {}, 'Zotero'),
-    zoteroAccountBox(),
-    h('h4', {}, t('Git repositories')),
-    githubAccountBox(),
-    h('h4', {}, 'Dropbox'),
-    dropboxAccountBox(),
+    h('h4', {}, t('Integrations')),
+    integrationCard('Zotero', zoteroAccountStatus, zoteroAccountBox()),
+    integrationCard(t('Git repositories'), gitAccountsStatus, githubAccountBox()),
+    integrationCard('Dropbox', dropboxAccountStatus, dropboxAccountBox()),
     h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => { dlg.close(); refreshProjects() } }, t('Done'))))
 }
 
