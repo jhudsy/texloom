@@ -30,7 +30,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .folder import IGNORE_DIRS, FolderSync
-from .paths import safe_rel
+from .paths import safe_rel, state_dir
 from .scan import SCANNED, added
 
 log = logging.getLogger("texloom.git")
@@ -89,7 +89,7 @@ class GitBridge:
         self._told: set[str] = set()  # warnings already shown
         self.name = "TeXLoom app"  # shown to others as who keeps the repository in step (set by cli)
         # taking turns with browsers that sync the same repository (see the module's notes)
-        idf = root / ".texloom" / "git-device"
+        idf = state_dir(root) / "git-device"
         try:
             self.lease_id = idf.read_text().strip() or ""
         except OSError:

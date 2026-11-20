@@ -331,4 +331,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Update needed': '需要更新',
     "This project's server needs TeXLoom {version} or later. Update the app (Help ▸ Check for updates…).": '此项目的服务器需要 TeXLoom {version} 或更高版本。请更新应用（帮助 ▸ 检查更新…）。',
     'This server needs a newer TeXLoom: update the app.': '此服务器需要更新的 TeXLoom：请更新应用。',
+    'Standing by': '待命',
+    '{name} keeps this folder in step. The folder is shared with that computer through a file-sync service (Dropbox, iCloud…), which brings its changes here; this computer takes over if it stops.': '{name} 正在同步此文件夹。该文件夹通过文件同步服务（Dropbox、iCloud…）与那台电脑共享，该服务会把它的更改带到这里；如果它停止，这台电脑会接手。',
+    'This folder is shared through a file-sync service (Dropbox, iCloud…) with another computer that runs TeXLoom. One computer at a time keeps it in step; this one is waiting to hear from the others.': '此文件夹通过文件同步服务（Dropbox、iCloud…）与另一台运行 TeXLoom 的电脑共享。每次只有一台电脑同步它；这台电脑正在等待其他电脑的消息。',
 }

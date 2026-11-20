@@ -14,6 +14,33 @@ from collections.abc import Mapping
 from pathlib import Path
 
 STATE = ".texloom"
+# In STATE, kept for the folder as a whole: the rest is each computer's own (state_dir)
+SHARED_STATE = {"computers", "folder-id", "lock", ".gitignore"}
+
+
+def state_dir(folder: Path) -> Path:
+    """This computer's records for a synced folder: its copy of the project, what it last synced,
+    its settings and the project link. In the folder (so they move with it), but apart from other
+    computers': a folder shared through Dropbox, iCloud, OneDrive or the like brings their
+    `.texloom` here too, and each computer must only ever use its own.
+
+    A folder from before 0.4.40 has them in `.texloom` itself: they are moved here the first time
+    (they are this computer's; another computer's from the same file-sync service can't be told
+    apart, as before)."""
+    from .registry import computer_id
+    top = folder / STATE
+    mine = top / "computers" / computer_id()
+    if (top / "config.json").is_file() and not (mine / "config.json").exists():
+        mine.mkdir(parents=True, exist_ok=True)
+        # config.json last: until it has moved, this runs again and finishes the move
+        for entry in sorted(top.iterdir(), key=lambda e: e.name == "config.json"):
+            if entry.name in SHARED_STATE:
+                continue
+            try:
+                os.replace(entry, mine / entry.name)
+            except FileNotFoundError:
+                pass  # another process moved it at the same moment
+    return mine
 
 # Files that TeX tools read as configuration or execute (latexmk runs latexmkrc as Perl).
 # They are never written from, or sent to, the shared project.

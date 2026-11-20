@@ -37,7 +37,7 @@ from .dialogs import (ConnectToolDialog, CopyFolderDialog, JoinDialog, LinksDial
                       ProjectListDialog, SettingsDialog, ShareFolderDialog, TagsDialog, ask_code)
 from .i18n import _, app_pref, ngettext, set_app_pref
 from .mac import DockFollowsWindows, menu_opens_where_clicked, nsapp
-from .paths import use_tex_on_path
+from .paths import state_dir, use_tex_on_path
 from .ui import (GREY, ICON, MAC, RED, TAGS_ROLE, Engine, browser_link, chevron, default_parent, describe, dot,
                  grey_note, open_path, project_name, red, short_path, tag_hex, theme_icon)
 from .wordcount import find_texcount, texcount_report
@@ -916,7 +916,8 @@ class Window(QtWidgets.QMainWindow):
         if not d:
             return
         d = Path(d)
-        if not (d / ".texloom" / "config.json").is_file():
+        from .cli import adopt
+        if not (state_dir(d) / "config.json").is_file() and not adopt(d):
             QtWidgets.QMessageBox.warning(self, _("Add folder"), _(
                 "{d} isn’t a TeXLoom folder yet. To turn it into a project, use Add project ▸ New project from a folder….", d=d))
             return

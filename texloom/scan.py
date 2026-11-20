@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .paths import safe_rel
+from .paths import safe_rel, state_dir
 
 if TYPE_CHECKING:
     from pycrdt import Map
@@ -152,7 +152,7 @@ def added(path: str, old: str | None, new: str) -> list[Finding]:
 
 # --- approvals for shell-escape compiles (per folder, never shared) -------------
 def _allowed_file(root: Path) -> Path:
-    return root / ".texloom" / "allowed.json"
+    return state_dir(root) / "allowed.json"
 
 
 def allowed(root: Path) -> set[str]:

@@ -331,4 +331,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Update needed': 'Actualización necesaria',
     "This project's server needs TeXLoom {version} or later. Update the app (Help ▸ Check for updates…).": 'El servidor de este proyecto necesita TeXLoom {version} o posterior. Actualiza la aplicación (Ayuda ▸ Buscar actualizaciones…).',
     'This server needs a newer TeXLoom: update the app.': 'Este servidor necesita un TeXLoom más reciente: actualiza la aplicación.',
+    'Standing by': 'En espera',
+    '{name} keeps this folder in step. The folder is shared with that computer through a file-sync service (Dropbox, iCloud…), which brings its changes here; this computer takes over if it stops.': '{name} mantiene esta carpeta sincronizada. La carpeta se comparte con ese ordenador mediante un servicio de sincronización (Dropbox, iCloud…), que trae aquí sus cambios; este ordenador toma el relevo si se detiene.',
+    'This folder is shared through a file-sync service (Dropbox, iCloud…) with another computer that runs TeXLoom. One computer at a time keeps it in step; this one is waiting to hear from the others.': 'Esta carpeta se comparte mediante un servicio de sincronización (Dropbox, iCloud…) con otro ordenador que usa TeXLoom. Solo un ordenador a la vez la mantiene sincronizada; este espera noticias de los demás.',
 }

@@ -428,6 +428,48 @@ relay) as the fallback for symmetric NATs.
 This is the main Claude Code integration: `cd ~/papers/x && claude "fix the
 related-work section"`. Edits appear live in collaborators' browsers.
 
+### A folder also shared through a file-sync service
+
+`texloom/sharedfolder.py`. A synced folder in Dropbox (iCloud Drive, OneDrive, Google Drive,
+Syncthing…) that another computer also runs TeXLoom on gets each change twice: through TeXLoom,
+and as the service copies the file. Mostly the second copy matches and is dropped, but whatever the
+service brings while a computer's TeXLoom isn't running (or is offline) would be read in as that
+computer's own edit when it starts: the same text twice (Yjs keeps both insertions). The
+service would also copy each computer's records to the others. So:
+
+- **Records per computer:** `paths.state_dir(folder)` = `.texloom/computers/<computer id>/`
+  (the id: `computer-id` in the app's settings folder, random). Everything but the folder's
+  `folder-id`, the `lock` and `.gitignore` lives there: the replica, `known.json`, the merge bases,
+  `config.json`, approvals, the git bridge's lease id, build output. A folder from before 0.4.40
+  has them in `.texloom` itself; `state_dir` moves them (config.json last, so an interrupted move
+  finishes next time). FolderSync keeps its files in `replica.dir`.
+- **Finding each other:** `.texloom/folder-id` (random, made by the first computer; the service
+  copies it). Each computer sends `{"k": "fold", "f": folder id, "m": computer id, "h": holds the
+  turn, "by": name}` to the project's peers every ANNOUNCE (20 s): peer-to-peer through the relay,
+  encrypted, not stored, so the project's history doesn't grow. Hearing another computer with the
+  same folder id marks the folder shared (`shared.json`, forgotten after 30 days of not hearing).
+- **Taking turns:** a computer that holds the turn keeps it (two at once: the lower computer id
+  keeps it); with none holding, the lowest id heard from in the last EXPIRE (70 s) takes it. A
+  shared folder is synced only while online and caught up, after ANNOUNCE + 5 s of hearing the
+  others, and never into a copy of the project that has no files yet.
+- **Standing by** (`FolderSync.standby`): nothing is read in or written out. Files on disk that
+  already hold the project's version (as the service brought them) are noted as synced, with
+  their text as the merge base (`_track`). Taking over (`resume`) then reads in only what
+  changed on this computer since, as at any start.
+- **Saves from another computer's older copy:** a shared folder's text file merges from
+  `fork_point`: the recent version (the last six merge bases) closest to the save, by lines. A
+  service that kept one of two simultaneous saves (and set the other aside) then loses neither
+  edit: merging from the latest base would take the save as undoing what its older copy lacked.
+- **Conflicted copies** (`CONFLICT_COPY`: Dropbox's and Nextcloud's `… (… conflicted copy …)`,
+  Syncthing's `….sync-conflict-<date>-<time>…`) are not project files, in the app and in the
+  browser's folder sync; the app points each out once.
+- **Adding** the service's copy on another computer (`cli.adopt`, the app's Add folder): no
+  records of its own there yet, so it takes the project link from another computer's
+  `config.json` and starts out marked shared, standing by until its copy has caught up.
+
+`scripts/check_shared_folder.py` runs two computers on one folder with a stand-in service between
+them (and a third as a plain collaborator); with `TEXLOOM_NO_TURNS=1` it shows the duplication.
+
 ## Compilation
 
 1. **In browser:** [texlyre-busytex] (TeX Live 2026 compiled to WebAssembly, AGPL):

@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import getpass
 import json
+import time
 import logging
 import os
 import sys
@@ -28,14 +29,14 @@ from .crypto import Keys
 from .folder import FolderSync
 from . import registry, tls
 from .daemon import CURRENT, FolderProblem, FolderTag, lock_folder
-from .paths import STATE
+from .paths import STATE, state_dir
 from .replica import Replica
 
 log = logging.getLogger("texloom")
 
 
 def config_path(d: Path) -> Path:
-    return d / STATE / "config.json"
+    return state_dir(d) / "config.json"
 
 
 def load(d: Path) -> tuple[Keys, str]:
@@ -62,12 +63,29 @@ DEFAULT_CONFIG = {
 
 
 def save(d: Path, link: str, create_code: str = "") -> None:
-    (d / STATE).mkdir(parents=True, exist_ok=True)
+    state_dir(d).mkdir(parents=True, exist_ok=True)
     os.chmod(d / STATE, 0o700)
     fd = os.open(config_path(d), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # holds the project keys
     with os.fdopen(fd, "w") as f:
         json.dump({"link": link, **DEFAULT_CONFIG, "create_code": create_code}, f, indent=2)
     (d / STATE / ".gitignore").write_text("*\n")
+
+
+def adopt(d: Path) -> bool:
+    """A folder another computer syncs, shared with this one through Dropbox or the like (so its
+    `.texloom` has that computer's records, not this one's): set it up here with the same project
+    link. It starts out known to be shared (sharedfolder.py), so this computer stands by until it has
+    the project and has heard from the others. False if no other computer's records are there."""
+    for other in sorted((d / STATE / "computers").glob("*/config.json")):
+        try:
+            cfg = json.loads(other.read_text())
+            Keys.from_link(cfg["link"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        save(d, cfg["link"], str(cfg.get("create_code") or ""))
+        (state_dir(d) / "shared.json").write_text(json.dumps({"at": time.time()}))
+        return True
+    return False
 
 
 def print_links(keys: Keys, server: str) -> None:
@@ -92,7 +110,7 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
     cfg = {**DEFAULT_CONFIG, **load_config(d)}
     keys, server = load(d)
     code = cfg["create_code"]  # never the environment's: a project's link decides which server hears it
-    replica = Replica(d / STATE, keys, server, code or None)
+    replica = Replica(state_dir(d), keys, server, code or None)
     import platform
     opts = {"engine": cfg["engine"], "latexmk_args": cfg["latexmk_args"],
             "shell_escape": cfg["shell_escape"] or shell_escape,
@@ -102,7 +120,7 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
     from .listsync import my_name
     name = cfg.get("name") or my_name()[0] or f"folder copy on {platform.node().split('.')[0]}"
     from .merges import MergeWatch
-    merges = MergeWatch(replica, lambda: name, d / STATE)  # before ingesting: edits made while stopped count as apart
+    merges = MergeWatch(replica, lambda: name, state_dir(d))  # before ingesting: edits made while stopped count as apart
     if (state := CURRENT.get()) is not None:  # running under the app or `texloom start`
         state.replica, state.fs = replica, fs
     bridge = None
@@ -112,8 +130,12 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
         bridge.name = name
         if why := await bridge.check():
             raise FolderProblem(f"--git: {why}")
+    from .sharedfolder import SharedFolder
+    turns = SharedFolder(d, fs, lambda: name)  # a folder also shared through Dropbox or the like: take turns
+    if state is not None:
+        state.turns = turns
     async with replica.lock:
-        await fs.ingest_all()  # local edits made while we were stopped
+        await fs.ingest_all()  # local edits made while we were stopped (standing by: only noted)
         await fs.write_out()
     conn = asyncio.create_task(replica.run())
 
@@ -149,7 +171,7 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
         log.info(f"git: committing project changes after {bridge.quiet:g}s of quiet"
               + (f", fetching {up} every {bridge.interval:g}s and pushing to it." if up else " (no upstream: commits stay local)."))
     try:
-        await asyncio.gather(conn, fs.watch(), merges.run(), *([bridge.loop()] if bridge else []))
+        await asyncio.gather(conn, fs.watch(), merges.run(), turns.run(), *([bridge.loop()] if bridge else []))
     finally:
         later.cancel()
         merges._save()
@@ -212,7 +234,7 @@ async def new_project(d: Path, server: str, name: str = "", code: str = "", sett
     d.mkdir(parents=True, exist_ok=True)
     keys = Keys.generate()
     save(d, keys.link(server), code)
-    r = Replica(d / STATE, keys, server, code or None)
+    r = Replica(state_dir(d), keys, server, code or None)
 
     def describe() -> None:
         r.meta["name"] = name or d.resolve().name
@@ -265,7 +287,7 @@ def list_folders() -> None:
         try:
             cfg = {**DEFAULT_CONFIG, **load_config(d)}
             keys, server = Keys.from_link(cfg["link"])
-            name = str(Replica(d / STATE, keys, server).meta.get("name") or "") or d.name
+            name = str(Replica(state_dir(d), keys, server).meta.get("name") or "") or d.name
             extras = [x for x, on in (("compile", cfg["compile"]), ("git", cfg.get("git"))) if on]
             print(f"{d}\n    “{name}” — {'edit' if keys.writable else 'read-only'}, {server}"
                   + (f", {' + '.join(extras)}" if extras else ""))
@@ -277,7 +299,7 @@ def allow_programs(d: Path, yes: bool) -> None:
     """Show every line that asks to run programs; on confirmation, allow exactly those."""
     from .scan import allow, allowed, binaries_on_disk, shell_lines
     keys, server = load(d)
-    r = Replica(d / STATE, keys, server)  # the local copy, as last synced
+    r = Replica(state_dir(d), keys, server)  # the local copy, as last synced
     found = shell_lines(r.files, binaries_on_disk(d, r.bin))
     if not found:
         allow(d, set())
@@ -454,7 +476,7 @@ def main() -> None:
     elif a.cmd == "list":
         list_folders()
     elif a.cmd == "add":
-        if not config_path(a.dir).exists():
+        if not config_path(a.dir).exists() and not adopt(a.dir):
             sys.exit(f"{a.dir} isn't a texloom folder: use `texloom clone <link> {a.dir}` or `texloom new {a.dir} --server …`")
         print("Added." if registry.add(a.dir) else "Already on the list.")
     elif a.cmd == "leave":
@@ -471,7 +493,7 @@ def main() -> None:
         keys, server = load(a.dir)
         if keys.seed is None:
             sys.exit("Only the project's owner can change where it's kept (this folder has an edit link, not the owner link).")
-        r = Replica(a.dir / STATE, keys, server)
+        r = Replica(state_dir(a.dir), keys, server)
         r.set_storage(a.mode)
         asyncio.run(run(a.dir, False, once=True))  # connecting aligns the server with the setting
         print(f"storage mode: {a.mode}")

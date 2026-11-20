@@ -67,13 +67,60 @@ IGNORE_SUFFIXES = (
 )
 
 
+# Copies that file-sync services make when a file changed on two computers at once: Dropbox's
+# "x (Ann's conflicted copy 2026-11-20).tex" (Nextcloud's is alike), Syncthing's
+# "x.sync-conflict-20261120-101500-ABCDEFG.tex". Sharing one would put a second, stale version of
+# the file into the project; it's left for a person to merge (keep these in step with
+# CONFLICT_COPY in web/src/foldersync.ts).
+CONFLICT_COPY = re.compile(r" \([^()/]*conflicted copy[^()/]*\)|\.sync-conflict-\d{8}-\d{6}", re.IGNORECASE)
+
+
+def conflict_copy(rel: str) -> bool:
+    return bool(CONFLICT_COPY.search(rel.rsplit("/", 1)[-1]))
+
+
+class Bases(dict):
+    """Each text file's text last synced with disk (FolderSync.base), also keeping its few latest
+    such texts: in a folder shared through a file-sync service, a save can come from another
+    computer's older copy (fork_point)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.history: dict[str, list[str]] = {}
+
+    def __setitem__(self, rel: str, text: str) -> None:
+        super().__setitem__(rel, text)
+        h = self.history.setdefault(rel, [])
+        if not h or h[-1] != text:
+            h.append(text)
+            del h[:-6]
+
+
+def fork_point(versions: list[str], new: str) -> str:
+    """Which of a file's recent versions `new` was most likely made from: the closest, by lines
+    (the latest when as close). A file-sync service shares a save made on another computer's copy
+    of the file, which may not yet have had the latest version: merging from that older version
+    keeps both edits, where merging from the latest would take the save as undoing what it lacks."""
+    if len(versions) < 2 or len(new) > 1 << 20:
+        return versions[-1]
+    lines = new.splitlines(keepends=True)
+    def close(v: str) -> float:
+        return difflib.SequenceMatcher(None, v.splitlines(keepends=True), lines, autojunk=False).ratio()
+    best = versions[-1]
+    for v in reversed(versions[:-1]):
+        if close(v) > close(best):
+            best = v
+    return best
+
+
 def not_project_file(rel: str, main: str = "main.tex") -> bool:
-    """Whether syncing leaves this path alone: tools' folders, LaTeX's working files, our compiled PDF."""
+    """Whether syncing leaves this path alone: tools' folders, LaTeX's working files, our compiled
+    PDF, and file-sync services' conflicted copies."""
     parts = rel.split("/")
     if any(x in IGNORE_DIRS for x in parts[:-1]) or parts[0] in IGNORE_DIRS:
         return True
     name = parts[-1]
-    if name in IGNORE_NAMES or name.startswith(".#") or name.endswith(IGNORE_SUFFIXES):
+    if name in IGNORE_NAMES or name.startswith(".#") or name.endswith(IGNORE_SUFFIXES) or conflict_copy(name):
         return True
     return rel == main[:-4] + ".pdf"
 
@@ -470,24 +517,28 @@ class FolderSync:
                      **(compile_opts or {})}
         self._fetching: set[str] = set()
         self._refused: set[str] = set()
+        # Standing by: another computer keeps this folder in step, as it's shared through a
+        # file-sync service (sharedfolder.py). Nothing is then read into the project or written out.
+        self.standby = False
         self.known: dict[str, dict] = {}  # path -> {"m": mtime_ns, "z": size, "h": hash}
         # Text files: the text last synced with disk (the base of a three-way merge), and the
         # hashes of versions recently written or read here. An older one reappearing on disk
         # is a replay (an editor saving or reloading a stale copy), not an edit.
-        self.base: dict[str, str] = {}
+        self.base: Bases = Bases()
+        self.shared = False  # the folder is also shared through a file-sync service (sharedfolder.py)
         self.recent: dict[str, list[str]] = {}
         # whether the newest of those was written here by the sync (from others' changes), not a
         # save read from the folder: only then can an older version be a stale copy coming back
         self._wrote_last: dict[str, bool] = {}
         self._compile_task: asyncio.Task | None = None
-        self._known_file = self.root / STATE / "known.json"
+        self._known_file = self.r.dir / "known.json"
         if self._known_file.exists():
             self.known = json.loads(self._known_file.read_text())
         # Each text file's last-synced text, kept on disk by the hash noted for the file: a merge
         # after a restart needs it. Without it, a save made while the app wasn't running replaced
         # the project's text outright, undoing changes the file never got (a write refused, or the
         # app quitting before writing).
-        self._bases_dir = self.root / STATE / "bases"
+        self._bases_dir = self.r.dir / "bases"
         for rel, k in self.known.items():
             h = k.get("h") if isinstance(k, dict) else None
             if isinstance(h, str) and BASE_NAME.fullmatch(h) and (p := self._bases_dir / h).is_file():
@@ -497,7 +548,7 @@ class FolderSync:
                     pass
         # folders mirrored between disk and the project's `dirs` (so empty folders and
         # folder deletions sync too, not only files)
-        self._known_dirs_file = self.root / STATE / "known_dirs.json"
+        self._known_dirs_file = self.r.dir / "known_dirs.json"
         self.known_dirs: set[str] = set(json.loads(self._known_dirs_file.read_text())) if self._known_dirs_file.exists() else set()
         replica.before_remote = self.ingest_all
         replica.on_remote = self.on_remote
@@ -595,7 +646,7 @@ class FolderSync:
 
     def ingest_dirs(self) -> bool:
         """Folders made or deleted on disk -> the project's folder list."""
-        if not self.r.can_write:
+        if not self.r.can_write or self.standby:
             return False
         disk = self.disk_dirs()
         added = {d for d in disk if d not in self.known_dirs and d not in self.r.dirs}
@@ -790,6 +841,9 @@ class FolderSync:
 
     async def ingest(self, paths: set[str]) -> None:
         """Push local disk changes for `paths` into the CRDT."""
+        if self.standby:
+            await self._track(paths)
+            return
         if not self.r.can_write:
             return
         unsettled = await self._settle(paths)
@@ -892,6 +946,8 @@ class FolderSync:
                         return
                     strip_cr(yt)  # a "\r" from an older copy of the app
                     cur, base = str(yt), self.base.get(rel)
+                    if self.shared and base is not None:  # a save from another computer's older copy?
+                        base = fork_point(self.base.history.get(rel) or [base], new)
                     # only what changed on disk since it was last synced, on top of what
                     # collaborators changed meanwhile (without a base: the file as it is)
                     merged = merge3(base, cur, new) if base is not None else new
@@ -921,10 +977,59 @@ class FolderSync:
 
     # --- CRDT -> disk ----------------------------------------------------------
     async def on_remote(self) -> None:
+        if self.standby:  # the file-sync service may have brought these files already
+            await self._track(set(self.r.files.keys()) | set(self.r.bin.keys()))
+            return
         self.keep_lf()  # (an older app's "\r", or one pasted there)
         await self.write_out()
 
+    async def _track(self, paths: set[str]) -> None:
+        """Standing by: note the files on disk that already hold the project's version, as the
+        file-sync service brought them from the computer that keeps the folder in step. When this
+        one takes over (sharedfolder.py), what it then reads in is only what changed here since:
+        edits made on this computer, not the service's copies of edits the project already has."""
+        noted = False
+        for rel in paths:
+            if self.ignored(rel) or safe_rel(rel) is None or self.linked(rel) or self._stat_matches(rel):
+                continue
+            full = self.root / rel
+            try:
+                if not full.is_file():
+                    if rel in self.known and rel not in self.r.files and rel not in self.r.bin:
+                        del self.known[rel]  # deleted in the project and on disk alike
+                        self.base.pop(rel, None)
+                        noted = True
+                    continue
+                before = full.stat()
+                data = full.read_bytes()
+            except OSError:
+                continue
+            if self._look(rel) != (before.st_size, before.st_mtime_ns):
+                continue  # still being written
+            yt, b = self.r.files.get(rel), self.r.bin.get(rel)
+            if yt is not None and is_text(rel, data):
+                text = lf(data.decode("utf-8"))
+                if text != str(yt):
+                    continue
+                self._remember(rel, sha(data), crlf(data), st=before, wrote=False)
+                self.base[rel] = text
+            elif isinstance(b, dict) and b.get("h") == self.r.keys.blob_id(data):
+                self._remember(rel, b["h"], st=before, wrote=False)
+            else:
+                continue
+            noted = True
+        if noted:
+            self.save_known()
+
+    async def resume(self) -> None:
+        """Take the folder over after standing by: read in what changed here, then write the project out."""
+        self.standby = False
+        await self.ingest_all()
+        await self.write_out()
+
     async def write_out(self) -> None:
+        if self.standby:
+            return
         changed = False
         wanted: set[str] = set()
 
@@ -1231,7 +1336,7 @@ class FolderSync:
         # outside it (texloom/confine.py), and latexmk ignores rc files (-norc; latexmkrc is Perl).
         shell, note = self.shell_mode()
         extra.append(shell)
-        build = self.root / STATE / "build"
+        build = self.r.dir / "build"
         if self._clean_build:  # compile from scratch: drop the last run's .aux, .bbl, …
             self._clean_build = False
             shutil.rmtree(build, ignore_errors=True)
@@ -1336,6 +1441,10 @@ class FolderSync:
                     continue
                 if not self.ignored(rel) and ".texloom-tmp" not in rel:
                     paths.add(rel)
+                elif conflict_copy(rel) and rel not in self._refused and (self.root / rel).is_file():
+                    self._refused.add(rel)
+                    log.warning("not sharing %s: a file-sync service made it when the file changed on two computers at once; "
+                                "merge it into the file by hand", rel)
             async with self.r.lock:
                 if paths:
                     await self.ingest(paths)

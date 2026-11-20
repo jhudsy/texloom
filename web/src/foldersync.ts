@@ -9,6 +9,10 @@ import { tn, t, locale } from './i18n'
 
 const DB = 'texloom-folders'
 const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycache__', '.idea', '.vscode'])
+// copies a file-sync service makes when a file changed on two computers at once (Dropbox's
+// "x (Ann's conflicted copy 2026-11-20).tex", Syncthing's "x.sync-conflict-…"): never shared, left
+// for a person to merge (as CONFLICT_COPY in texloom/folder.py)
+export const CONFLICT_COPY = / \([^()/]*conflicted copy[^()/]*\)|\.sync-conflict-\d{8}-\d{6}/i
 // Build output and editor droppings: never synced. Same list as IGNORE_* in texloom/folder.py.
 export const BUILD = latexOutput('|bbl|idx|ilg|ind|swp|swx|tmp', String.raw`|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$`)
 const MAX = 50 * 1024 * 1024
@@ -56,7 +60,7 @@ async function walk(dir: Dir, prefix = '', out = new Map<string, FileSystemFileH
       dirs?.add(rel)
       await walk(handle as Dir, rel + '/', out, dirs)
     }
-    else if (!BUILD.test(rel) && !name.startsWith('.') ) out.set(rel, handle as FileSystemFileHandle)
+    else if (!BUILD.test(rel) && !name.startsWith('.') && !CONFLICT_COPY.test(name)) out.set(rel, handle as FileSystemFileHandle)
   }
   return out
 }

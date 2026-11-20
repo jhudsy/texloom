@@ -164,6 +164,14 @@ def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
         return _("Offline"), AMBER, _("Can't reach the server. Changes here are kept and sent when it's back.")
     if not r.synced.is_set():
         return _("Catching up…"), AMBER, ""
+    turns = getattr(st, "turns", None)
+    if turns is not None and turns.shared and not turns.holding:
+        who = turns.holder
+        return _("Standing by"), GREEN, (
+            _("{name} keeps this folder in step. The folder is shared with that computer through a file-sync service "
+              "(Dropbox, iCloud…), which brings its changes here; this computer takes over if it stops.", name=who) if who else
+            _("This folder is shared through a file-sync service (Dropbox, iCloud…) with another computer that runs TeXLoom. "
+              "One computer at a time keeps it in step; this one is waiting to hear from the others."))
     if r.refused:
         return _("Change refused"), RED, _("The server refused a change from this folder: {reason}", reason=r.refused)
     if r.store_problem and r.storage != "relay":

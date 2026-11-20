@@ -336,7 +336,8 @@ Use this for Claude Code or any other tool, and to compile with your own TeX ins
 
 **In Chrome or Edge, nothing to install:** ⚙ Settings → Sync & storage → *Keep a copy in a folder* →
 **Choose a folder…**. The tab keeps the folder in sync both ways while it is open. After a
-browser restart, click **📁 Reconnect folder** once.
+browser restart, click **📁 Reconnect folder** once. (Safari and Firefox can't open a folder
+from a web page, so they don't offer this: use the app, below.)
 
 How a folder copy (browser or app) takes in an edit made on disk: only what changed since
 the file was last synced is applied, on top of collaborators' edits made meanwhile (lines
@@ -497,6 +498,33 @@ much with `"shell_escape"` in `.texloom/config.json`, or on the command line:
 When a collaborator's change writes such a line into your folder, or an `% arara:`
 directive or `% !TeX program` comment (which your own LaTeX editor may follow), the helper
 and the browser's folder sync point it out once.
+
+### A folder in Dropbox (or iCloud Drive, OneDrive, Google Drive, Syncthing)
+
+A synced folder can live in a folder that a file-sync service keeps, and that folder can be shared
+with other people and computers there, some of them running TeXLoom on it too:
+- **Only one computer keeps it in step at a time.** Otherwise each change would reach the others
+  twice, through TeXLoom and through the service, and the second copy would be shared again as
+  if it were a new edit. Computers running TeXLoom on the same folder find each other through
+  the project (the folder has an id, `.texloom/folder-id`, which the service copies), and take
+  turns: the window says **Standing by** on the others. If the one keeping it in step stops,
+  another takes over in about a minute.
+- **On another computer**, once the service has brought the folder: in the app, **Add folder**
+  (or `texloom add <folder>`). It takes the project link from the first computer's records in the
+  folder, and waits until it has the project from the server before it does anything.
+- **Each computer keeps its own records** in `.texloom/computers/<its id>/` (from 0.4.40; older
+  folders are moved there the first time). The service copies everyone's, but each computer only
+  uses its own. Like the folder's files, they include the project's edit link: anyone the service
+  folder is shared with can open the project.
+- **Saved on two computers at once:** where the service has kept one version and set the other
+  aside as a "conflicted copy", TeXLoom merges from the version each save was made on, so
+  neither edit is lost. The conflicted copy itself (Dropbox's `… (… conflicted copy …)`,
+  Syncthing's `….sync-conflict-…`) is never shared; the app points it out, to merge by hand.
+- **A computer with only the service** (no TeXLoom) is a collaborator through the folder: its
+  edits come in through whichever computer keeps the folder in step. It doesn't see live typing,
+  and the service's own rules apply when two people save the same file at once.
+- A computer whose folder is shared this way syncs it only while online: offline, it can't know
+  whether another computer has taken over.
 
 ### Using TeXLoom with git
 
@@ -800,6 +828,7 @@ uv run --with mypy python scripts/check_textpos.py               # character, by
 uv run --with hypothesis python scripts/check_folder_model.py     # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
 uv run python scripts/check_folder_deletions.py                   # a file deleted or renamed in the folder isn't brought back by a change arriving just then
 uv run python scripts/check_folder_reads.py                       # a file is shared only as it was once it stopped changing, not mid-way through the next save
+uv run --extra server python scripts/check_shared_folder.py       # two computers on one folder shared through a stand-in Dropbox: they take turns, nothing arrives twice
 uv run --extra server python scripts/check_files.py               # the server's file store: a folder, and Garage (S3) if installed
 uv run --extra server python scripts/check_config.py              # texloom.example.toml lists every server setting, and parses
 (cd web && npm run check-folder-model)                           # the same for the browser's folder sync, on a fake clock and folder

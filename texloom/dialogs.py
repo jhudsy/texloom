@@ -33,7 +33,7 @@ from .daemon import FolderProblem
 from .folder import copy_project_files
 from .i18n import _, app_pref, lang_pref, ngettext, set_app_pref, set_lang_pref
 from .locales import NAMES
-from .paths import STATE
+from .paths import state_dir
 from .ui import (
     AMBER,
     GREY,
@@ -60,7 +60,7 @@ async def program_lines(engine: Engine, d: Path) -> tuple[list, set[str]]:
     from .replica import Replica
     from .scan import allowed, binaries_on_disk, shell_lines
     st = engine.daemon.states.get(d)
-    r = st.replica if st and st.replica is not None else Replica(d / STATE, *load(d))
+    r = st.replica if st and st.replica is not None else Replica(state_dir(d), *load(d))
     return shell_lines(r.files, binaries_on_disk(d, r.bin)), allowed(d)
 
 
@@ -120,7 +120,7 @@ class ProgramsDialog(Dialog):
 
 
 def issued_file(d: Path) -> Path:
-    return d / ".texloom" / "issued.json"
+    return state_dir(d) / "issued.json"
 
 
 def load_issued(d: Path) -> dict:

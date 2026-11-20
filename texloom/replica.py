@@ -93,6 +93,7 @@ class Replica:
         self.ws: aiohttp.ClientWebSocketResponse | None = None
         self.http: aiohttp.ClientSession | None = None
         self.on_remote: Callable[[], Awaitable[None]] | None = None
+        self.on_folder: Callable[[dict], None] | None = None  # another computer syncing a folder of this project (sharedfolder.py)
         self.on_compile_request: Callable[[int, bool, str], Awaitable[None]] | None = None
         self.server_mode = "server"  # what the server says: "server" (stores) or "relay"
         self.pending_mode: str | None = None  # storage change not yet sent to the server
@@ -646,6 +647,9 @@ class Replica:
         k, frm = p.get("k"), m.get("from")
         if k == "part":
             await self._on_part(frm, p)
+        elif k == "fold":  # another computer syncing a folder (sharedfolder.py)
+            if self.on_folder is not None:
+                self.on_folder(p)
         elif k in ("sv1", "sv2"):
             if self.keys.writable and isinstance(p.get("sv"), str):
                 self._answer_state(frm, p["sv"])

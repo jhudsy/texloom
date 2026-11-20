@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from . import registry
+from .paths import state_dir
 
 log = logging.getLogger("texloom")
 
@@ -61,6 +62,7 @@ class FolderState:
     path: Path
     replica: object | None = None  # the folder's Replica, once run() has set it up
     fs: object | None = None  # its FolderSync
+    turns: object | None = None  # its SharedFolder (taking turns on a folder shared through Dropbox or the like)
     problem: str = ""  # why it isn't syncing (empty when fine)
     started: float = field(default_factory=time.time)
 
@@ -111,7 +113,7 @@ class Daemon:
     def wanted(self) -> set[Path]:
         want = set()
         for d in registry.folders():
-            if (d / ".texloom" / "config.json").is_file():
+            if (state_dir(d) / "config.json").is_file():
                 want.add(d)
             elif d not in self._told:
                 self._told.add(d)

@@ -1,7 +1,7 @@
 """The list of folders this computer keeps in sync (`texloom start` syncs them all).
 
-Only paths are kept here; each folder's own settings and project link stay in its
-`.texloom/config.json`.
+Only paths are kept here; each folder's own settings and project link stay in the folder, in
+this computer's part of its `.texloom` (paths.state_dir).
 """
 
 from __future__ import annotations
@@ -21,6 +21,26 @@ def config_dir() -> Path:
     else:
         base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
     return Path(os.environ.get("TEXLOOM_HOME") or base / "texloom")
+
+
+def computer_id() -> str:
+    """This computer's id (random, made once): names its part of each synced folder's `.texloom`,
+    so that a folder shared through Dropbox or the like keeps each computer's records apart, and
+    tells computers sharing such a folder apart (sharedfolder.py)."""
+    p = config_dir() / "computer-id"
+    try:
+        cid = p.read_text().strip()
+        if len(cid) == 16 and all(c in "0123456789abcdef" for c in cid):
+            return cid
+    except OSError:
+        pass
+    import secrets
+    cid = secrets.token_hex(8)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(cid)
+    os.replace(tmp, p)
+    return cid
 
 
 def _file() -> Path:
