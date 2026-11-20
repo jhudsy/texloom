@@ -224,6 +224,9 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
         h('p', { class: 'muted small' }, t('Collaborators’ files are written there. TeXLoom won’t write files that LaTeX tools run as programs, and points out lines that ask to run one, but compile the folder with your own tools only if you trust everyone who can edit this project.')),
         h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => { dlg.close(); await chooseFolder() } }, t('Choose a folder…')))) : null,
       chooseFolder ? h('p', { class: 'muted small' }, t('Or, to keep it in sync without a browser (and compile with your own TeX):')) : null,
+      chooseFolder ? null : h('p', { class: 'muted small' }, !w
+        ? t('This link is read-only, so this browser doesn’t keep a folder in sync.')
+        : t('This browser can’t keep a folder in sync itself: only Chrome, Edge and other Chromium browsers on a computer can, not Safari or Firefox (in Brave, turn on “File System Access API” in brave://flags). The TeXLoom app works whichever browser you use:')),
       folderHelp(r, link),
     ] },
     integrations: { label: t('Integrations'), body: () => [

@@ -119,6 +119,8 @@ const de: Catalog = {
   "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "Für Mitarbeitende sichtbar: neben Ihrem Cursor, bei Kommentaren und Vorschlägen und in „Wer hat das geschrieben“.",
   'Only the project’s owner can change this.': 'Nur der Eigentümer des Projekts kann dies ändern.',
   "Git repositories": "Git-Repositorys",
+  "This link is read-only, so this browser doesn’t keep a folder in sync.": "Dieser Link ist schreibgeschützt, daher gleicht dieser Browser keinen Ordner ab.",
+  "This browser can’t keep a folder in sync itself: only Chrome, Edge and other Chromium browsers on a computer can, not Safari or Firefox (in Brave, turn on “File System Access API” in brave://flags). The TeXLoom app works whichever browser you use:": "Dieser Browser kann selbst keinen Ordner abgleichen: Das können nur Chrome, Edge und andere Chromium-Browser auf einem Computer, nicht Safari oder Firefox (in Brave unter brave://flags „File System Access API“ einschalten). Die TeXLoom-App funktioniert mit jedem Browser:",
 }
 
 export default de

@@ -146,6 +146,8 @@ const fr: Catalog = {
   "Shown to collaborators: beside your cursor, on comments and suggestions, and in “Who wrote this”.": "Visible par vos collaborateurs : à côté de votre curseur, sur les commentaires et suggestions, et dans « Qui a écrit ceci ».",
   'Only the project’s owner can change this.': 'Seul le propriétaire du projet peut modifier ce réglage.',
   "Git repositories": "Dépôts git",
+  "This link is read-only, so this browser doesn’t keep a folder in sync.": "Ce lien est en lecture seule : ce navigateur ne synchronise donc pas de dossier.",
+  "This browser can’t keep a folder in sync itself: only Chrome, Edge and other Chromium browsers on a computer can, not Safari or Firefox (in Brave, turn on “File System Access API” in brave://flags). The TeXLoom app works whichever browser you use:": "Ce navigateur ne peut pas synchroniser un dossier lui-même : seuls Chrome, Edge et les autres navigateurs Chromium sur ordinateur le peuvent, pas Safari ni Firefox (dans Brave, activez « File System Access API » dans brave://flags). L’application TeXLoom fonctionne quel que soit votre navigateur :",
 }
 
 export default fr
