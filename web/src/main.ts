@@ -371,8 +371,8 @@ function projectList(): HTMLElement {
     const code = projectCode(r.project)
     const others = (r.people ?? []).filter((p) => p !== me && p !== r.createdBy)
     const meta: string[] = []
-    if (r.createdBy && r.createdBy !== me) meta.push(t('started by {{name}}', { name: r.createdBy }))
-    if (others.length) meta.push(t('with {{names}}', { names: `${others.slice(0, 4).join(', ')}${others.length > 4 ? ` +${others.length - 4}` : ''}` }))
+    if (r.createdBy && r.createdBy !== me) meta.push(t('Owner: {{name}}', { name: r.createdBy }))
+    if (others.length) meta.push(t('Shared with: {{names}}', { names: `${others.slice(0, 4).join(', ')}${others.length > 4 ? ` +${others.length - 4}` : ''}` }))
     if (r.files) meta.push(tn(r.files, '{{n}} file', '{{n}} files'))
     if (r.created && (sorting === 'newest' || sorting === 'oldest')) meta.push(t('added {{when}}', { when: whenOpened(r.created) }))
     if (r.modified) meta.push(t('changed {{when}}', { when: whenOpened(r.modified) }))
