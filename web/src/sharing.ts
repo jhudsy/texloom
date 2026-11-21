@@ -4,7 +4,7 @@ import * as Y from 'yjs'
 import { Keys, canonicalPub } from './crypto'
 import { Replica } from './replica'
 import { dialog, h } from './dom'
-import { projects } from './projects'
+import { projects, whoIn } from './projects'
 import { t, locale } from './i18n'
 import { privateServerAllows } from './storagenotice'
 import { awayServer, serverName } from './servers'
@@ -144,8 +144,14 @@ export function shareDialog(r: Replica, server: string, me: string) {
   ] : []
   nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') create() })
 
+  // who owns it and who else is in it (as the project list says it)
+  const known = projects.list().find((x) => x.project === keys.project)
+  const { owner, shared } = whoIn(String(r.meta.get('createdBy') ?? '') || known?.createdBy, known?.people, me)
+  const who = [keys.owner ? t('You own this project.') : owner ? t('Owner: {{name}}', { name: owner }) : '',
+    (keys.owner && owner ? [owner, ...shared] : shared).length ? t('Shared with: {{names}}', { names: (keys.owner && owner ? [owner, ...shared] : shared).join(', ') }) : ''].filter(Boolean)
   const dlg = dialog('share',
     h('h3', {}, t('Share this project')),
+    who.length ? h('p', { class: 'who' }, who.join(' · ')) : null,
     ...ownerPart,
     h('h4', {}, t('Read-only link')), copyRow(keys.link(server, false), invitation(r, keys.link(server, false), 'read', me)),
     ownerLink,

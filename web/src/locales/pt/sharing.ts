@@ -50,6 +50,7 @@ const pt: Catalog = {
   'Moving failed: {{error}}. Nothing was retired; the project is unchanged.': 'A mudança falhou: {{error}}. Nada foi desativado; o projeto não foi alterado.',
   'Show your owner link': 'Mostrar o seu link de proprietário',
   '{{name}} can no longer edit, but their link still lets them read new changes. To stop that, open the project on {{server}} and move it to new keys there.': '{{name}} já não pode editar, mas o link ainda lhe permite ler as alterações novas. Para impedir isso, abra o projeto em {{server}} e mova-o para chaves novas aí.',
+  'You own this project.': "Este projeto é seu.",
 }
 
 export default pt

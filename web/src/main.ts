@@ -4,7 +4,7 @@ import { listenForShortcutsKey } from './shortcuts'
 import * as Y from 'yjs'
 import { Keys } from './crypto'
 import { Replica } from './replica'
-import { projects, projectCode, latexTitle, whenOpened, type Recent } from './projects'
+import { projects, projectCode, latexTitle, whenOpened, whoIn, type Recent } from './projects'
 import { bulkRemoveDialog, removeDialog, type RemoveScope } from './remove'
 import { prefs, setupDialog, settingsDialog, languagePicker, type Device, type SettingsTab } from './settings'
 import { createAssistantPanel } from './assistant/panel'
@@ -369,9 +369,9 @@ function projectList(): HTMLElement {
   const rows = page.length ? h('ul', { class: 'recent' }, ...page.map((r) => {
     const label = projectLabel(r)
     const code = projectCode(r.project)
-    const others = (r.people ?? []).filter((p) => p !== me && p !== r.createdBy)
+    const { owner, shared: others } = whoIn(r.createdBy, r.people, me)
     const meta: string[] = []
-    if (r.createdBy && r.createdBy !== me) meta.push(t('Owner: {{name}}', { name: r.createdBy }))
+    if (owner) meta.push(t('Owner: {{name}}', { name: owner }))
     if (others.length) meta.push(t('Shared with: {{names}}', { names: `${others.slice(0, 4).join(', ')}${others.length > 4 ? ` +${others.length - 4}` : ''}` }))
     if (r.files) meta.push(tn(r.files, '{{n}} file', '{{n}} files'))
     if (r.created && (sorting === 'newest' || sorting === 'oldest')) meta.push(t('added {{when}}', { when: whenOpened(r.created) }))

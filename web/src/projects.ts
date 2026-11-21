@@ -164,6 +164,12 @@ export const projects = {
 }
 
 /** Pull a plain-text title out of a LaTeX source, if it has \title{…}. */
+/** Who owns a project and who else is in it, from the name it was started under and the collaborators seen in it:
+ *  neither list includes `me`, and the shared one leaves out the owner. */
+export function whoIn(createdBy: string | undefined, people: string[] | undefined, me: string): { owner?: string; shared: string[] } {
+  return { owner: createdBy && createdBy !== me ? createdBy : undefined, shared: (people ?? []).filter((p) => p !== me && p !== createdBy) }
+}
+
 export function latexTitle(src: string): string | undefined {
   const m = /\\title\s*(?:\[[^\]]*\])?\s*\{((?:[^{}]|\{[^{}]*\})*)\}/.exec(src)
   if (!m) return undefined

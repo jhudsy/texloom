@@ -50,6 +50,7 @@ const de: Catalog = {
   'Moving failed: {{error}}. Nothing was retired; the project is unchanged.': 'Umstellung fehlgeschlagen: {{error}}. Nichts wurde stillgelegt; das Projekt ist unverändert.',
   'Show your owner link': 'Ihren Eigentümer-Link anzeigen',
   '{{name}} can no longer edit, but their link still lets them read new changes. To stop that, open the project on {{server}} and move it to new keys there.': '{{name}} kann nicht mehr bearbeiten, kann mit dem Link aber weiterhin neue Änderungen lesen. Um das zu verhindern, öffnen Sie das Projekt auf {{server}} und verschieben Sie es dort zu neuen Schlüsseln.',
+  'You own this project.': "Dieses Projekt gehört Ihnen.",
 }
 
 export default de
