@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""The desktop app's windows (issue #25): its main window and dialogs open and close, a dialog
+asked for from another dialog opens on top of it, and on a Mac the fixes that rely on
+undocumented AppKit and Qt behaviour are still in place.
+
+    uv run --extra app python scripts/check_app.py             # offscreen: any system, no screen needed
+    uv run --extra app python scripts/check_app.py --native    # on a Mac, also the menu bar and the Dock
+
+Offscreen (Qt's "offscreen" platform), it opens the main window, then each dialog the way the
+window's own menus do (Join, Sync between your computers, New project from a folder, Settings,
+Manage tags), checks which window it opened over, and closes it. Join opened from the project-list
+dialog must open over that dialog: a sheet opened under it was once left blocked behind it.
+
+With --native on a Mac (the real menu bar; CI's macOS runners have one), also:
+- the menu-bar icon: macOS still has NSStatusBarButton with rightMouseDown:, the app's
+  replacement for it is installed (texloom/mac.py, menu_opens_where_clicked), Qt's private
+  statusMenu still gives the icon's menu, and NSMenu still pops up at a point. If a macOS or Qt
+  update takes one of these away, the menu quietly goes back to opening on the wrong screen;
+- the Dock: with a menu-bar icon, TeXLoom leaves the Dock and ⌘-Tab when its last window closes
+  and comes back when one opens (the Accessory and Regular activation policies).
+
+Everything runs in a throwaway TEXLOOM_HOME, so the computer's own projects are never touched.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+NATIVE = "--native" in sys.argv
+if NATIVE and sys.platform != "darwin":
+    sys.exit("check_app: --native is for macOS")
+if not NATIVE:
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ["TEXLOOM_HOME"] = tempfile.mkdtemp(prefix="texloom-appcheck-")
+sys.path.insert(0, str(ROOT))
+
+from PySide6 import QtCore, QtGui, QtWidgets  # noqa: E402
+
+from texloom import app as appmod  # noqa: E402
+from texloom import mac  # noqa: E402
+from texloom.dialogs import JoinDialog, ManageTagsDialog, ProjectListDialog, SettingsDialog, ShareFolderDialog  # noqa: E402
+from texloom.ui import Engine  # noqa: E402
+
+failures: list[str] = []
+
+
+def check(ok: bool, what: str) -> None:
+    print(f"  {'✓' if ok else '✗'} {what}")
+    if not ok:
+        failures.append(what)
+
+
+def settle(ms: int = 50) -> None:
+    end = QtCore.QDeadlineTimer(ms)
+    while not end.hasExpired():
+        QtWidgets.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 10)
+
+
+def when_modal(cls: type, then) -> None:
+    """Once a modal dialog of class `cls` is up, call then(dialog); give up after 5 s."""
+    tries = [0]
+
+    def look() -> None:
+        w = QtWidgets.QApplication.activeModalWidget()
+        if isinstance(w, cls):
+            then(w)
+        elif tries[0] < 100:
+            tries[0] += 1
+            QtCore.QTimer.singleShot(50, look)
+        else:
+            check(False, f"{cls.__name__} opened")
+            if w is not None:
+                w.reject()
+    QtCore.QTimer.singleShot(50, look)
+
+
+def opens_over(open_it, cls: type, over: QtWidgets.QWidget, name: str) -> None:
+    """Open a dialog the window's way (`open_it`, which runs it modally), check it's over `over`,
+    then close it."""
+    seen: list[QtWidgets.QDialog] = []
+
+    def got(d: QtWidgets.QDialog) -> None:
+        seen.append(d)
+        check(d.isVisible(), f"{name} opens")
+        check(d.parentWidget() is over, f"{name} opens over {type(over).__name__}")
+        d.reject()
+    when_modal(cls, got)
+    open_it()
+    settle()
+    check(bool(seen) and not seen[0].isVisible(), f"{name} closes")
+
+
+def windows(win: appmod.Window) -> None:
+    print("windows:")
+    win.show_window()
+    settle()
+    check(win.isVisible(), "the main window opens")
+    check(win.windowTitle() != "", "the main window has a title")
+
+    opens_over(win.join, JoinDialog, win, "Join a project")
+    opens_over(win.project_list, ProjectListDialog, win, "Sync between your computers")
+    opens_over(win.share_folder, ShareFolderDialog, win, "New project from a folder")
+    opens_over(win.manage_tags, ManageTagsDialog, win, "Manage tags")
+    if appmod.MAC:  # a window of its own on a Mac, a dialog elsewhere
+        win.settings_window()
+        settle()
+        s = win.settings_dlg
+        check(s is not None and s.isVisible(), "Settings opens")
+        if s is not None:
+            s.close()
+            settle()
+            check(not s.isVisible(), "Settings closes")
+    else:
+        opens_over(win.settings_window, SettingsDialog, win, "Settings")
+
+    # Join from inside the project-list dialog (its "Join…"): over that dialog, not under it
+    inner: list[QtWidgets.QDialog] = []
+
+    def in_list(lst: QtWidgets.QDialog) -> None:
+        def got(j: QtWidgets.QDialog) -> None:
+            inner.append(j)
+            check(j.parentWidget() is lst, "Join opened from the project-list dialog opens over it")
+            j.reject()
+        when_modal(JoinDialog, got)
+        win.join()  # runs modally until got() closes it
+        lst.reject()
+    when_modal(ProjectListDialog, in_list)
+    win.project_list()
+    settle()
+    check(bool(inner), "Join opens from the project-list dialog")
+
+    win.hide()
+    settle()
+    check(not win.isVisible(), "the main window closes (hides: the app keeps syncing)")
+
+
+def objc():
+    """The Objective-C runtime, typed for the few calls the Mac checks make."""
+    import ctypes
+    import ctypes.util
+    o = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+    o.objc_getClass.restype = o.sel_registerName.restype = ctypes.c_void_p
+    o.objc_getClass.argtypes = o.sel_registerName.argtypes = [ctypes.c_char_p]
+    o.class_getInstanceMethod.restype = o.method_getImplementation.restype = ctypes.c_void_p
+    o.class_getInstanceMethod.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    o.method_getImplementation.argtypes = [ctypes.c_void_p]
+    o.object_getClass.restype = ctypes.c_void_p
+    o.object_getClass.argtypes = [ctypes.c_void_p]
+    send = ctypes.cast(o.objc_msgSend, ctypes.c_void_p).value
+    msg = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(send)
+    msg_arg = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(send)
+    msg_long = ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)(send)
+    msg_bool = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(send)
+    msg_idx = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong)(send)
+    return o, msg, msg_arg, msg_long, msg_bool, msg_idx
+
+
+def menu_bar(win: appmod.Window) -> None:
+    print("menu bar (macOS):")
+    import ctypes
+    if not QtWidgets.QSystemTrayIcon.isSystemTrayAvailable():
+        check(False, "a menu bar is available")
+        return
+    tray = QtWidgets.QSystemTrayIcon(QtGui.QIcon(str(ROOT / "texloom" / "assets" / "icon.png")))
+    menu = QtWidgets.QMenu()
+    menu.addAction("Open TeXLoom", win.show_window)
+    tray.setContextMenu(menu)
+    tray.show()
+    settle(300)
+
+    o, msg, msg_arg, msg_long, msg_bool, msg_idx = objc()
+    sel = o.sel_registerName
+    button_cls = o.objc_getClass(b"NSStatusBarButton")
+    check(bool(button_cls), "macOS has NSStatusBarButton")
+    check(bool(button_cls and o.class_getInstanceMethod(button_cls, sel(b"rightMouseDown:"))),
+          "NSStatusBarButton handles rightMouseDown:")
+    check(bool(o.class_getInstanceMethod(o.objc_getClass(b"NSMenu"), sel(b"popUpMenuPositioningItem:atLocation:inView:"))),
+          "NSMenu pops up at a point (popUpMenuPositioningItem:atLocation:inView:)")
+
+    mac.menu_opens_where_clicked()
+    ours = ctypes.cast(mac._right_click, ctypes.c_void_p).value if mac._right_click else None
+    imp = o.method_getImplementation(o.class_getInstanceMethod(button_cls, sel(b"rightMouseDown:"))) if button_cls else None
+    check(bool(ours) and imp == ours, "the app's right click is installed on NSStatusBarButton")
+
+    # the icon's button: somewhere in one of the app's status-bar windows (one per screen; the
+    # other screens show copies of it)
+    nsapp = msg(o.objc_getClass(b"NSApplication"), sel(b"sharedApplication"))
+    wins = msg(nsapp, sel(b"windows"))
+    buttons = []
+
+    def find(view, depth: int = 0) -> None:
+        if not view or depth > 8:
+            return
+        if msg_bool(view, sel(b"isKindOfClass:"), button_cls):
+            buttons.append(view)
+        subs = msg(view, sel(b"subviews"))
+        for k in range(msg_long(subs, sel(b"count"))):
+            find(msg_idx(subs, sel(b"objectAtIndex:"), k), depth + 1)
+    for i in range(msg_long(wins, sel(b"count"))):
+        find(msg(msg_idx(wins, sel(b"objectAtIndex:"), i), sel(b"contentView")))
+    check(bool(buttons), "the menu-bar icon's button is found")
+    if buttons:
+        b = buttons[0]
+        responds = msg_bool(b, sel(b"respondsToSelector:"), sel(b"statusMenu"))
+        check(responds, "Qt's statusMenu is there for the icon's button")
+        if responds:
+            check(bool(msg(b, sel(b"statusMenu"))), "statusMenu gives the icon's menu")
+
+    # the Dock: Regular (0) with a window open, Accessory (1) with none
+    policy = lambda: msg_long(nsapp, sel(b"activationPolicy"))  # noqa: E731
+    mac.DockFollowsWindows(QtWidgets.QApplication.instance())
+    win.show_window()
+    settle(300)
+    check(policy() == 0, "in the Dock while the window is open")
+    win.hide()
+    settle(300)
+    check(policy() == 1, "out of the Dock and ⌘-Tab once the last window closes")
+    win.show_window()
+    settle(300)
+    check(policy() == 0, "back in the Dock when the window opens again")
+    win.hide()
+    tray.hide()
+    settle()
+
+
+def quiet_qt(kind, context, message: str) -> None:
+    """Qt's own messages, without the offscreen platform's notes on what it can't do."""
+    if not message.startswith("This plugin does not support"):
+        print(f"qt: {message}", file=sys.stderr)
+
+
+def main() -> int:
+    QtCore.qInstallMessageHandler(quiet_qt)
+    app = QtWidgets.QApplication(sys.argv[:1])
+    app.setQuitOnLastWindowClosed(False)
+    engine = Engine()  # not started: nothing here syncs or goes online
+    win = appmod.Window(engine, appmod.Activity())
+    windows(win)
+    if NATIVE:
+        menu_bar(win)
+    if failures:
+        print(f"app: FAILED ({len(failures)}): " + "; ".join(failures))
+        return 1
+    print("app: all checks passed" + ("" if NATIVE else " (offscreen; --native on a Mac for the menu bar and the Dock)"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

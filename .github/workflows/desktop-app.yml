@@ -1,0 +1,57 @@
+# The desktop app's windows (scripts/check_app.py, issue #25): its main window and dialogs open and
+# close, a dialog asked for from another opens over it, and on macOS the menu-bar and Dock fixes,
+# which rely on undocumented AppKit and Qt behaviour, still hold. Offscreen on Linux and Windows,
+# with the real menu bar on macOS. When the app changes, and every week: a new macOS runner image
+# or Qt release can break the Mac fixes with no change here.
+name: Desktop app check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'texloom/**'
+      - 'scripts/check_app.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/desktop-app.yml'
+  pull_request:
+    paths:
+      - 'texloom/**'
+      - 'scripts/check_app.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/desktop-app.yml'
+  schedule:
+    - cron: '41 4 * * 1'  # Mondays
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Qt's system libraries (Linux)
+        if: runner.os == 'Linux'
+        # as in app.yml: kernel.org's Ubuntu mirror, and a few tries
+        run: |
+          sudo grep -rlE 'mirror\+file:|ubuntu\.com' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null \
+            | xargs -r sudo sed -i -E 's#mirror\+file:/etc/apt/apt-mirrors.txt/?|https?://[a-z.]*ubuntu\.com/ubuntu/?#https://mirrors.edge.kernel.org/ubuntu/#g'
+          for i in 1 2 3; do
+            sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 \
+              libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 && exit 0
+            sleep 30
+          done
+          exit 1
+      - name: Windows and dialogs (offscreen)
+        run: uv run --extra app python scripts/check_app.py
+      - name: The menu bar and the Dock (macOS)
+        if: runner.os == 'macOS'
+        run: uv run --extra app python scripts/check_app.py --native

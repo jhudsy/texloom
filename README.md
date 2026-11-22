@@ -892,6 +892,12 @@ uv run --extra server --with playwright python scripts/check_web_review.py  # th
 uv run --extra server --with playwright python scripts/check_web_dropbox.py # keeping a project in step with a Dropbox folder (stand-in: scripts/fakedropbox.py)
 ```
 
+The desktop app's windows: `uv run --extra app python scripts/check_app.py` opens the main window
+and each dialog the way its menus do (offscreen, any system), and checks a dialog asked for from
+another opens over it. On a Mac, `--native` also checks the menu-bar icon's right click and the
+Dock, which rely on undocumented AppKit and Qt behaviour; CI runs it on macOS when the app changes
+and weekly (`desktop-app.yml`), and before each release build.
+
 `scripts/check_quiet.py` refuses errors swallowed without a trace (DESIGN.md → Errors deliberately
 ignored).
 

@@ -45,10 +45,6 @@ Not broken, but costing more the longer it's left (label `tech-debt`), roughly m
 
 - **[Browser checks for the PDF view, comments from the PDF, the service worker and the arXiv
   download](https://github.com/jhudsy/texloom/issues/21)**: only the git hosts and the Review tab have kept browser checks so far.
-- **[Errors swallowed without a trace](https://github.com/jhudsy/texloom/issues/24)**: empty `catch` and broad `except`, deliberate
-  or not, leave nothing to go on when they hide a real failure.
-- **[Tests for the desktop app's windows](https://github.com/jhudsy/texloom/issues/25)**, above all the macOS menu-bar fixes, which
-  rely on undocumented AppKit and Qt behaviour.
 - **[A staging server](https://github.com/jhudsy/texloom/issues/23)** to deploy to before production; could be the standby of
   [#12](https://github.com/jhudsy/texloom/issues/12).
 - **[Cross-check the two replicas](https://github.com/jhudsy/texloom/issues/26)** (Python and TypeScript) with shared cases, as the
