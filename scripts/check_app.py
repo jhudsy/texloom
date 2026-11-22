@@ -253,6 +253,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     code = main()
+    QtCore.qInstallMessageHandler(None)  # Qt's last words on exit (Windows) mustn't call back into Python
     sys.stdout.flush()
     sys.stderr.flush()
     # Straight out: Python's teardown deletes Qt's objects in an order PySide doesn't expect, which
