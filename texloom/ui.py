@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import re
 import sys
 import threading
@@ -18,6 +19,8 @@ from .cli import load_config, run
 from .crypto import Keys
 from .daemon import Daemon
 from .i18n import _, ngettext
+
+log = logging.getLogger("texloom")
 
 ICON = Path(__file__).with_name("assets") / "icon.png"
 MAC = sys.platform == "darwin"
@@ -258,6 +261,7 @@ def folder_of(project: str) -> Path | None:
             if Keys.from_link(load_config(d)["link"])[0].project == project:
                 return d
         except Exception:  # noqa: BLE001 - a folder that has gone, or isn't set up
+            log.debug("folder %s skipped", d, exc_info=True)
             continue
     return None
 
@@ -270,7 +274,8 @@ def known_server() -> str:
     for d in registry.folders():
         try:
             return Keys.from_link(load_config(d)["link"])[1]
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 - a folder that has gone, or isn't set up
+            log.debug("folder %s skipped", d, exc_info=True)
             continue
     return DEFAULT_SERVER
 

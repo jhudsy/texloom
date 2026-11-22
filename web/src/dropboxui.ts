@@ -5,6 +5,7 @@ import { dialog, h } from './dom'
 import type { Status } from './integrationcard'
 import { t, tn } from './i18n'
 import { appHolds, approve, approvedPath, dropboxAccount, dropboxAppKey, folderPath, linkFolder, linkOf, pull, push, signIn, signInProblem, startDropbox, topFolders, unlink } from './dropbox'
+import { quiet } from './quiet'
 
 const ago = (at: number) => new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -137,7 +138,7 @@ function folderField(value = ''): HTMLInputElement {
   const input = h('input', { placeholder: '/Papers/my-paper', 'aria-label': t('Folder in your Dropbox'), spellcheck: 'false', list: id, value }) as HTMLInputElement
   const list = h('datalist', { id })
   const a = dropboxAccount.get()
-  if (a) topFolders(a).then((fs) => list.replaceChildren(...fs.map((f) => h('option', { value: f + '/' })))).catch(() => {})
+  if (a) topFolders(a).then((fs) => list.replaceChildren(...fs.map((f) => h('option', { value: f + '/' })))).catch((e) => quiet('Dropbox’s folders not listed: the field takes any path', e))
   queueMicrotask(() => input.after(list))
   return input
 }

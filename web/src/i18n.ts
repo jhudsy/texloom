@@ -1,3 +1,4 @@
+import { quiet, STORAGE } from './quiet'
 // Interface translations. The English text is the key: t('Share') shows the current
 // language's version of "Share", or the English when there is none (so text added later
 // shows in English until it is translated). Placeholders are {{name}}, so LaTeX braces in
@@ -20,11 +21,11 @@ export const LANGUAGES: { id: Lang; name: string }[] = [
 
 /** The chosen language ('auto': the browser's). */
 export function langPref(): Lang | 'auto' {
-  try { const v = localStorage.getItem(LANG_KEY); if (LANGUAGES.some((l) => l.id === v)) return v as Lang } catch {}
+  try { const v = localStorage.getItem(LANG_KEY); if (LANGUAGES.some((l) => l.id === v)) return v as Lang } catch (e) { quiet(STORAGE, e) }
   return 'auto'
 }
 export function setLangPref(v: Lang | 'auto') {
-  try { if (v === 'auto') localStorage.removeItem(LANG_KEY); else localStorage.setItem(LANG_KEY, v) } catch {}
+  try { if (v === 'auto') localStorage.removeItem(LANG_KEY); else localStorage.setItem(LANG_KEY, v) } catch (e) { quiet(STORAGE, e) }
 }
 
 function detect(): Lang {

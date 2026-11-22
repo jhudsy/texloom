@@ -2,6 +2,7 @@
 // synced into the project: API keys must not travel with a share link.
 
 import { t } from '../i18n'
+import { quiet, STORAGE } from '../quiet'
 
 export type Kind = 'anthropic' | 'openai'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -78,9 +79,9 @@ export const aiPrefs: {
   get reviewEdits(): boolean { return localStorage.getItem('texloom.ai.review') !== 'off' },
   set reviewEdits(v: boolean) { localStorage.setItem('texloom.ai.review', v ? 'on' : 'off') },
   get keepChats(): boolean { try { return localStorage.getItem('texloom.ai.keep') !== 'off' } catch { return true } },
-  set keepChats(v: boolean) { try { localStorage.setItem('texloom.ai.keep', v ? 'on' : 'off') } catch {} },
+  set keepChats(v: boolean) { try { localStorage.setItem('texloom.ai.keep', v ? 'on' : 'off') } catch (e) { quiet(STORAGE, e) } },
   get instructions(): string { try { return localStorage.getItem('texloom.ai.instructions') ?? '' } catch { return '' } },
-  set instructions(v: string) { try { if (v.trim()) localStorage.setItem('texloom.ai.instructions', v); else localStorage.removeItem('texloom.ai.instructions') } catch {} },
+  set instructions(v: string) { try { if (v.trim()) localStorage.setItem('texloom.ai.instructions', v); else localStorage.removeItem('texloom.ai.instructions') } catch (e) { quiet(STORAGE, e) } },
 }
 
 /** List models from an OpenAI-compatible /models endpoint. */

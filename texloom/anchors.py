@@ -16,9 +16,13 @@ assoc as a lib0 varint (0: sticks to the character at the index; -1: to the one 
 
 from __future__ import annotations
 
+import logging
+
 from pycrdt import Assoc, StickyIndex, Text
 
 from .textpos import U16
+
+log = logging.getLogger("texloom")
 
 
 def _varuint(n: int) -> bytes:
@@ -77,6 +81,7 @@ def index_in(text: Text, s: str, raw: bytes) -> U16 | None:
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException:  # noqa: BLE001 - pycrdt panics on some anchors (a PanicException isn't an Exception)
+        log.debug("anchor not read: placed from its quote instead", exc_info=True)
         return None
     return U16(k) if 0 <= k <= len(s) else None
 

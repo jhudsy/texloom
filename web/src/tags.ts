@@ -4,6 +4,7 @@
 import { b64e } from './crypto'
 import { locale } from './i18n'
 import { canon, emptyTags, foldTag, mergeTags, tagColour, type TagColour, type TagDoc } from './listcore'
+import { quiet, STORAGE } from './quiet'
 
 export interface Tag { id: string; name: string; colour: TagColour }
 export const MAX_TAG_NAME = 60
@@ -12,7 +13,7 @@ const KEY = 'texloom.tags'
 const read = (): TagDoc => { try { return { ...emptyTags(), ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return emptyTags() } }
 let changed: () => void = () => {}
 const write = (doc: TagDoc, quietly = false) => {
-  try { localStorage.setItem(KEY, JSON.stringify(doc)) } catch {}
+  try { localStorage.setItem(KEY, JSON.stringify(doc)) } catch (e) { quiet(STORAGE, e) }
   if (!quietly) changed()
 }
 /** Later than `prev` even if this device's clock is behind, so a change always takes effect. */

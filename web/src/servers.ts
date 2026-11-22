@@ -1,3 +1,4 @@
+import { quiet } from './quiet'
 // Projects can live on other TeXLoom servers than this one. This web app (and your project list,
 // settings and creation code) belong to the server it's loaded from, the "home" server; a project
 // from elsewhere syncs with its own server, straight from this page. Only encrypted data goes
@@ -46,6 +47,6 @@ export function fragmentOfLink(link: string): string | null {
   const frag = link.slice(i + 1)
   if (!new URLSearchParams(frag).get('p')) return null
   let origin: string | null = null
-  try { origin = new URL(link.slice(0, i)).origin } catch {}
+  try { origin = new URL(link.slice(0, i)).origin } catch (e) { quiet('not a web address: the link’s own server is used', e) }
   return fragmentFor(frag, origin ?? undefined)
 }

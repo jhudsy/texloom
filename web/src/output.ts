@@ -14,6 +14,7 @@ import { allFiles, fileBase, mainFile, isDocument } from './projectfiles'
 import { parseLog, type Problem } from './latexlog'
 import { SyncTex } from './synctex'
 import { t, tn, locale } from './i18n'
+import { quiet, STORAGE } from './quiet'
 
 export type CompileOut = { ok: boolean; log: string } | null
 type Fail = (msg: (tr: typeof t) => string) => CompileOut
@@ -67,7 +68,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     logBox.hidden = !open
     logBtn.classList.toggle('on', open)
     logBtn.setAttribute('aria-pressed', String(open))
-    try { localStorage.setItem(LOG_KEY, open ? '1' : '') } catch {}
+    try { localStorage.setItem(LOG_KEY, open ? '1' : '') } catch (e) { quiet(STORAGE, e) }
   }
   const logBtn = h('button', { title: t('Show/hide the compile log'), onclick: () => setLogOpen(!!logBox.hidden) }, t('Log'))
   const dlBtn = h('button', { class: 'iconbtn', title: t('Download the PDF'), 'aria-label': t('Download the PDF'), disabled: true, onclick: () => lastPdf && saveFile(`${pdfName ?? fileBase(r)}.pdf`, lastPdf, 'application/pdf') }, icon('download'))

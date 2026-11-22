@@ -6,6 +6,7 @@ import { cleanPath, isText, mainFile, movePath, putBinary, putText } from './pro
 import { applyText, merge3 } from './diff'
 import { addedProgramLines, latexOutput, type ProgramLine } from './texscan'
 import { tn, t, locale } from './i18n'
+import { quiet } from './quiet'
 
 const DB = 'texloom-folders'
 const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycache__', '.idea', '.vscode'])
@@ -109,7 +110,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
   const savedBase = new Map<string, string>() // path -> hash of the base kept in storage
   if (same) {
     for (const p of Object.keys(known)) {
-      const b = await kv<{ h: string; t: string }>(BKEY(p)).catch(() => undefined)
+      const b = await kv<{ h: string; t: string }>(BKEY(p)).catch((e) => quiet('a file’s last synced copy not kept: the next change is merged as a whole', e))
       if (b && b.h === known[p].h) { base.set(p, b.t); savedBase.set(p, b.h) }
     }
   }
@@ -154,7 +155,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     }
     for (const p of [...savedBase.keys()]) if (!known[p]) { await kv(BKEY(p), null); savedBase.delete(p) }
   }
-  const save = () => Promise.all([kv(KEY, known), kv(DKEY, [...knownDirs]), saveBases()]).catch(() => {})
+  const save = () => Promise.all([kv(KEY, known), kv(DKEY, [...knownDirs]), saveBases()]).catch((e) => quiet('browser storage unavailable: the folder’s records stay in memory', e))
   const sync: FolderSync = { name: root.name, stop, status: () => last, onChange: null, onPrograms: null }
   const note = (s: string) => { last = s; sync.onChange?.() }
 
@@ -188,7 +189,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     const dirs = new Set([...r.dirs.keys()])
     for (const d of dirs) { // explicit (possibly empty) folders
       if (!knownDirs.has(d) && cleanPath(d) === d) {
-        try { let h = root; for (const x of d.split('/')) h = await h.getDirectoryHandle(x, { create: true }); knownDirs.add(d); n++ } catch {}
+        try { let h = root; for (const x of d.split('/')) h = await h.getDirectoryHandle(x, { create: true }); knownDirs.add(d); n++ } catch (e) { quiet('a folder that can’t be made here (a name the system refuses, or no permission)', e) }
       }
     }
     for (const d of [...knownDirs].filter((x) => !dirs.has(x)).sort((a, b) => b.length - a.length)) { // deleted remotely
@@ -201,7 +202,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
         let empty = true
         for await (const _ of (sub as any).keys()) { empty = false; break }
         if (empty) await h.removeEntry(parts[parts.length - 1])
-      } catch {}
+      } catch (e) { quiet('a folder gone already, or not empty: left as it is', e) }
     }
     for (const p of Object.keys(known)) {
       if (want.has(p)) continue
@@ -210,7 +211,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
         let d = root
         for (const x of parts.slice(0, -1)) d = await d.getDirectoryHandle(x)
         await d.removeEntry(parts[parts.length - 1])
-      } catch {}
+      } catch (e) { quiet('a file gone from the folder already', e) }
       delete known[p]; n++
     }
     if (n) { await save(); note(tn(n, '↓ {{n}} file · {{time}}', '↓ {{n}} files · {{time}}', { time: new Date().toLocaleTimeString(locale) })) }

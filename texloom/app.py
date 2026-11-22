@@ -19,6 +19,7 @@ import functools
 import html
 import json
 import logging
+import os
 import re
 import shutil
 import sys
@@ -1184,8 +1185,8 @@ def main(argv: list[str] | None = None) -> None:
             try:
                 import ctypes
                 ctypes.windll.user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - the window then comes up behind, nothing worse
+                log.debug("AllowSetForegroundWindow failed", exc_info=True)
         sock.write(("\n".join(urls) or "show").encode())
         sock.waitForBytesWritten(1000)
         sock.disconnectFromServer()
@@ -1196,9 +1197,12 @@ def main(argv: list[str] | None = None) -> None:
     listening = bool(name) and server.listen(name)
 
     autostart.log_file().parent.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(folder)s%(message)s", datefmt="%H:%M:%S",
+    # TEXLOOM_DEBUG=1: the log file also keeps debug lines, among them errors deliberately ignored
+    logging.basicConfig(level=logging.DEBUG if os.environ.get("TEXLOOM_DEBUG") == "1" else logging.INFO,
+                        format="%(asctime)s %(folder)s%(message)s", datefmt="%H:%M:%S",
                         handlers=[logging.FileHandler(autostart.log_file(), encoding="utf-8")])
     activity = Activity()
+    activity.setLevel(logging.INFO)  # the window's activity never shows debug lines
     logging.getLogger().addHandler(activity)
     for h in logging.getLogger().handlers:
         h.addFilter(FolderTag())

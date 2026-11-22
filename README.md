@@ -892,6 +892,9 @@ uv run --extra server --with playwright python scripts/check_web_review.py  # th
 uv run --extra server --with playwright python scripts/check_web_dropbox.py # keeping a project in step with a Dropbox folder (stand-in: scripts/fakedropbox.py)
 ```
 
+`scripts/check_quiet.py` refuses errors swallowed without a trace (DESIGN.md → Errors deliberately
+ignored).
+
 The quick checks run on every push (`.github/workflows/checks.yml`). The sync-only check takes a
 few minutes, so it runs when the desktop app's sync or the server changes, every night, and on
 demand (Actions → Sync-only check), on Linux, macOS and a real Windows (`sync-only.yml`). The web

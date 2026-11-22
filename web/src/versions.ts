@@ -5,6 +5,7 @@
 // test it.
 import * as Y from 'yjs'
 import type { Replica } from './replica'
+import { quiet } from './quiet'
 
 /** Every link stays: later versions are built on it. Removing a version only unlists it. */
 export interface Link { id: string; base: string | null; snap: Uint8Array }
@@ -99,7 +100,7 @@ export function nextLink(chain: Y.Array<Link>, now: Y.Snapshot): Link {
         return { id, base: tip.id, snap }
       }
     }
-  } catch { /* an empty or damaged chain: start again from a whole snapshot */ }
+  } catch (e) { quiet('an empty or damaged chain: start again from a whole snapshot', e) }
   tipCache.set(chain, { id, snap: now, depth: 0 })
   return { id, base: null, snap: Y.encodeSnapshot(now) }
 }

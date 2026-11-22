@@ -56,6 +56,7 @@ import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from
 import { createReviewPanel, reviewExtension, type ReviewPanel } from './review'
 import './style.css'
 import { suggestMode } from './suggestmode'
+import { quiet, quieted, STORAGE } from './quiet'
 
 // The desktop app opens its projects with ?from=app (it already keeps them in a folder); the
 // address is put back as it was, so a copied link doesn't carry it.
@@ -193,7 +194,7 @@ async function createProject(choice?: NewProject) {
     if (where === 'relay') localStorage.setItem(`texloom.newRelay.${k.project}`, '1')
     localStorage.setItem(`texloom.newTemplate.${k.project}`, c.from)
     if (c.name) localStorage.setItem(`texloom.newName.${k.project}`, c.name)
-  } catch {}
+  } catch (e) { quiet(STORAGE, e) }
   location.hash = fragmentFor(k.fragment(), server)
 }
 
@@ -232,7 +233,7 @@ function tagBar(): HTMLElement | null {
   if (!all.length && !stuck) return null
   return h('div', {},
     stuck ? h('p', { class: 'muted small' }, t('Your tags are saved only in this browser until you enter a creation code here.'), ' ',
-      h('button', { class: 'small', onclick: async () => { if (await askCode()) syncList().catch(() => {}).finally(() => refreshProjects()) } }, t('Enter code'))) : null,
+      h('button', { class: 'small', onclick: async () => { if (await askCode()) syncList().catch((e) => quiet('the project list syncs again later (offline, say)', e)).finally(() => refreshProjects()) } }, t('Enter code'))) : null,
     all.length ? h('div', { class: 'tagbar', role: 'group', 'aria-label': t('Filter by tag') },
       h('span', { class: 'muted small' }, t('Filter by tag:')),
       ...all.map((tag) => h('button', { class: `utag tc-${tag.colour}${finding.tags.has(tag.id) ? ' on' : ''}`, 'data-tag': tag.id, 'aria-pressed': String(finding.tags.has(tag.id)), onclick: () => toggleFilter(tag.id) }, tag.name)),
@@ -256,7 +257,7 @@ let sorting = (() => { try { const s = localStorage.getItem(SORT_KEY); return s 
 function sortPicker(): HTMLElement {
   const select = h('select', { class: 'sorter', 'aria-label': t('Sort projects'), onchange: (e: any) => {
     sorting = e.target.value
-    try { localStorage.setItem(SORT_KEY, sorting) } catch {}
+    try { localStorage.setItem(SORT_KEY, sorting) } catch (e) { quiet(STORAGE, e) }
     finding.page = 0
     refreshProjects()
   } }, ...Object.entries(SORTS).map(([id, s]) => h('option', { value: id, ...(id === sorting ? { selected: true } : {}) }, s.label())))
@@ -265,7 +266,7 @@ function sortPicker(): HTMLElement {
 
 async function removeProject(r: Recent, scope: RemoveScope) {
   let keys: Keys | null = null
-  try { keys = Keys.fromFragment('#' + r.fragment) } catch {}
+  try { keys = Keys.fromFragment('#' + r.fragment) } catch (e) { quiet('a damaged saved link: removed from this browser only', e) }
   if (scope !== 'browser' && keys) {
     const rep = new Replica(keys, serverOr(r.server), 'live')
     await rep.open()
@@ -321,7 +322,7 @@ function goToPage(page: number, then: string) {
 function pageSizePicker(): HTMLElement {
   return h('select', { class: 'pagesize', 'aria-label': t('Projects per page'), onchange: (e: any) => {
     pageSize = Number(e.target.value)
-    try { localStorage.setItem(PAGE_KEY, String(pageSize)) } catch {}
+    try { localStorage.setItem(PAGE_KEY, String(pageSize)) } catch (e) { quiet(STORAGE, e) }
     finding.page = 0
     refreshProjects()
     document.querySelector<HTMLElement>('.pagesize')?.focus()
@@ -409,7 +410,7 @@ function projectList(): HTMLElement {
           } catch (e) { alert(e) }
         } }, icon('copy')),
         h('button', { class: 'icon forget', title: t('Remove…'), 'aria-label': t('Remove {{name}}…', { name: label }), onclick: async () => {
-          const folder = await savedFolder(r.project).catch(() => undefined)
+          const folder = await savedFolder(r.project).catch((e) => quiet('no saved folder known: the dialog doesn’t offer it', e))
           removeDialog({ name: label, code, owner: canOwn(r), onServer: hasServerCopy(r), folder: folder?.name ?? null },
             async (scope) => { await removeProject(r, scope); refreshProjects() })
         } }, icon('close'))),
@@ -431,8 +432,8 @@ async function openProject(keys: Keys, server: string) {
   // a personal link the owner revoked opens read-only
   try {
     if (keys.member && localStorage.getItem(`texloom.withdrawn.${keys.project}`)) keys = new Keys(keys.project, keys.key, null)
-  } catch {}
-  if (openedByApp) try { localStorage.setItem(inAppKey(keys.project), '1') } catch {}
+  } catch (e) { quiet(STORAGE, e) }
+  if (openedByApp) try { localStorage.setItem(inAppKey(keys.project), '1') } catch (e) { quiet(STORAGE, e) }
   let device: Device = prefs.device(keys.project)
   const r = new Replica(keys, server, device.sync)
   await r.open()
@@ -451,17 +452,17 @@ async function openProject(keys: Keys, server: string) {
     const named = localStorage.getItem(`texloom.newName.${keys.project}`)
     localStorage.removeItem(`texloom.newName.${keys.project}`)
     if (named && writable && !r.meta.get('name')) r.meta.set('name', named)
-  } catch {}
+  } catch (e) { quiet(STORAGE, e) }
   if (writable && !r.meta.get('name')) r.meta.set('name', UNTITLED)
   try {
     if (writable && localStorage.getItem(`texloom.newRelay.${keys.project}`)) {
       localStorage.removeItem(`texloom.newRelay.${keys.project}`)
       r.setStorage('relay') // chosen at creation: no server copy
     }
-  } catch {}
+  } catch (e) { quiet(STORAGE, e) }
   // a brand-new project: fill it from the chosen template (or open Import)
   let template: string | null = null
-  try { template = localStorage.getItem(`texloom.newTemplate.${keys.project}`); localStorage.removeItem(`texloom.newTemplate.${keys.project}`) } catch {}
+  try { template = localStorage.getItem(`texloom.newTemplate.${keys.project}`); localStorage.removeItem(`texloom.newTemplate.${keys.project}`) } catch (e) { quiet(STORAGE, e) }
   // Only projects made here with Create project: one opened from a link already exists, and
   // starter files added before its own arrive would clash with them (clashes.ts).
   if (template && writable && r.files.size === 0 && r.bin.size === 0 && !r.meta.get('seeded')) {
@@ -535,7 +536,7 @@ async function openProject(keys: Keys, server: string) {
       try {
         const abs = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(head), r.doc)
         if (abs && abs.type === r.files.get(file)) { setTimeout(() => editor.gotoOffset(sharedPos(abs.index)), 0); return } // a Yjs position
-      } catch {}
+      } catch (e) { quiet('a saved cursor that no longer fits the file: falls back below', e) }
     }
   }
   /** Comment on the selection, or suggest changes to it: suggest mode, keeping the selection to type over. */
@@ -639,7 +640,7 @@ async function openProject(keys: Keys, server: string) {
     if (!panes[t].firstChild && makers[t]) panes[t].append(makers[t]!())
     currentTab = t
     showInPanel(showingFile)
-    try { localStorage.setItem('texloom.tab', t) } catch {}
+    try { localStorage.setItem('texloom.tab', t) } catch (e) { quiet(STORAGE, e) }
   }
 
   // left-hand tabs: files, search across files, outline with word count, symbols
@@ -667,7 +668,7 @@ async function openProject(keys: Keys, server: string) {
     if (t === 'outline') outlinePanel.refresh()
     if (t === 'search') search.focus()
     if (t === 'symbols') palette.refresh()
-    try { localStorage.setItem('texloom.ltab', t) } catch {}
+    try { localStorage.setItem('texloom.ltab', t) } catch (e) { quiet(STORAGE, e) }
   }
 
   // ---- folder sync from the browser (Chromium) ----
@@ -731,7 +732,7 @@ async function openProject(keys: Keys, server: string) {
       if (!d) return
       if ((await folderPermission(d, false)) === 'granted') await linkFolder(d, false)
       else { pendingFolder = d; showFolder() }
-    }).catch(() => {})
+    }).catch((e) => quiet('the saved folder couldn’t be found again: the Folder button links one', e))
   }
 
   // ---- header ----
@@ -997,7 +998,7 @@ async function openProject(keys: Keys, server: string) {
       let t: ReturnType<typeof setTimeout> | undefined
       r.files.observeDeep(() => { clearTimeout(t); t = setTimeout(() => r.files.forEach((yt, p) => wellFormed(`the shared ${p}`, yt.toString())), 200) })
     }
-  } catch { /* storage blocked: no hooks */ }
+  } catch (e) { quiet('storage blocked: no hooks', e) }
   runGitHub(r, () => me.name) // keep it in step with a GitHub repository, if it's linked to one
   runDropbox(r, () => me.name) // and with a Dropbox folder
   r.meta.observe(renderMoved); renderMoved()
@@ -1013,7 +1014,7 @@ async function openProject(keys: Keys, server: string) {
   r.meta.observe(() => renderStatus()) // storage mode can change from Settings or a collaborator
   applyDevice(device)
   // Ready the in-browser engine while the project is open, so the first Compile starts sooner.
-  setTimeout(() => { if (device.compile === 'browser') r.snapshotFiles().then(warmUp).catch(() => {}) }, 4000)
+  setTimeout(() => { if (device.compile === 'browser') r.snapshotFiles().then(warmUp).catch((e) => quiet('the engine is readied at the first Compile instead', e)) }, 4000)
 
   // One button per collaborator, kept while they're here: awareness changes with every move of
   // their cursor, and a button rebuilt each time would lose the hover before its tooltip shows.
@@ -1070,7 +1071,7 @@ async function openProject(keys: Keys, server: string) {
   output.compileBtn.addEventListener('click', () => { showInPanel(false); if (layout.narrow) { layout.reveal('right'); showTab('pdf') } }) // the result is what you want to see
 
   // debugging handle, only when enabled with localStorage['texloom.debug'] = '1'
-  try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor, startFolderSync } } catch {}
+  try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor, startFolderSync, quiet: quieted } } catch (e) { quiet(STORAGE, e) }
 }
 
 // Last, so that everything above is defined by the time the page is built.

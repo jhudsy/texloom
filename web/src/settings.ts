@@ -12,6 +12,7 @@ import { zoteroSection, zoteroStatus } from './zoteroui'
 import { githubSection, gitStatus } from './githubui'
 import { dropboxSection, dropboxStatus } from './dropboxui'
 import { integrationCard } from './integrationcard'
+import { quiet, STORAGE } from './quiet'
 
 /** "Codes come from whoever runs this server", with the server's own page about them once known. */
 function codeSourceSlot(): HTMLElement {
@@ -258,7 +259,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
   } }, tabs[id].label))
   function show(id: SettingsTab) {
     current = id
-    try { localStorage.setItem(TAB_KEY, id) } catch {}
+    try { localStorage.setItem(TAB_KEY, id) } catch (e) { quiet(STORAGE, e) }
     buttons.forEach((b, i) => { const on = ids[i] === id; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1 })
     panel.setAttribute('aria-labelledby', `settings-tab-${id}`)
     panel.replaceChildren(...tabs[id].body().filter((x): x is HTMLElement => !!x))

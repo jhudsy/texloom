@@ -9,6 +9,7 @@ import type { Replica } from './replica'
 import { SYMBOLS, type Symbol } from './symbols'
 import { stripComments } from './texscan'
 import { changeOrSuggest, isSuggesting, suggested } from './suggestmode'
+import { quiet, STORAGE } from './quiet'
 
 const LABELS: Record<string, () => string> = {
   greek: () => t('Greek'), relations: () => t('Relations'), operators: () => t('Operators'), large: () => t('Large operators'), arrows: () => t('Arrows'),
@@ -96,7 +97,7 @@ export function createSymbolPalette({ r, view, file, inserted }: PaletteHost): {
         : t('This symbol needs {{line}} in your preamble.', { line })
     }
     const list = [sym.latex, ...readRecent().filter((x) => x !== sym.latex)].slice(0, MAX_RECENT)
-    try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch {}
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch (e) { quiet(STORAGE, e) }
     showRecent()
     if (!status.textContent) inserted() // on a phone, get out of the way unless there's something to read
   }

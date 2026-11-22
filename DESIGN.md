@@ -1018,6 +1018,27 @@ guard them.
   caught; both models run every case on every check before their random runs, so each stays
   exercised. A new failure gets a case.
 
+## Errors deliberately ignored
+
+Some errors are expected and harmless: browser storage blocked (private browsing, site settings)
+or full, a folder or file already gone, a page draw cancelled by a newer one, a peer that has
+left. Showing them would only alarm; dropping them silently would hide the day one of them is a
+real failure. So none is dropped without a trace:
+
+- **Web app:** `quiet(why, e)` (`web/src/quiet.ts`) instead of an empty `catch`. The last 100 are
+  kept, each with its reason; with `texloom.debug` = 1 in localStorage each also goes to the
+  console as it happens, and `window.texloom.quiet()` lists them. The commonest reason,
+  `STORAGE`, is storage blocked or full: what was being kept is then kept for this visit only.
+  The Dropbox and git sync rounds show their own errors as their status; anything that escapes
+  one is a bug, and goes to the console as an error.
+- **Desktop app and server:** a handler for any error (`except Exception`, `BaseException`, or a
+  bare `except`) logs it, raises, or passes the error on (shown, returned). The ones that can be
+  ignored log at debug level: in the desktop app's log only with `TEXLOOM_DEBUG=1` set, with the
+  command line's `-v`. Handlers for a named error (`except OSError`) are taken as deliberate.
+
+`scripts/check_quiet.py` (in CI) refuses an empty `catch`, a no-op `.catch()`, and a broad
+`except` that leaves no trace.
+
 ## Known limitations / open questions
 
 - Deleting a project for everyone stops it on its server only. Anyone with a copy can still read

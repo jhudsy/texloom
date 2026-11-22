@@ -26,6 +26,7 @@ import { cleanPath, isText } from './projectfiles'
 import { t } from './i18n'
 import { accountStore } from './accounts'
 import { EXPIRE, RENEW, type Lease } from './github'
+import { quiet, STORAGE } from './quiet'
 
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 // (quiet: each send is a new version of the changed files in Dropbox, as each save is in its own app)
@@ -63,7 +64,7 @@ function ep(): { api: string; content: string; www: string; notify: string } {
   try {
     const o = JSON.parse(localStorage.getItem('texloom.dropboxApi') || 'null')
     if (o && local()) return { notify: o.api, ...o }
-  } catch {}
+  } catch (e) { quiet('no stand-in for Dropbox (testing only)', e) }
   return { api: 'https://api.dropboxapi.com', content: 'https://content.dropboxapi.com', www: 'https://www.dropbox.com', notify: 'https://notify.dropboxapi.com' }
 }
 
@@ -84,7 +85,7 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Prom
 let keyAsked: Promise<string> | null = null
 /** This server's Dropbox app (its `dropbox_app_key` setting), or '' if it has none. */
 export function dropboxAppKey(): Promise<string> {
-  try { const k = localStorage.getItem('texloom.dropboxKey'); if (k && local()) return Promise.resolve(k) } catch {}
+  try { const k = localStorage.getItem('texloom.dropboxKey'); if (k && local()) return Promise.resolve(k) } catch (e) { quiet(STORAGE, e) }
   keyAsked ??= fetch('/api/info', { cache: 'no-store' }).then((r) => r.json()).then((j) => String(j?.dropboxAppKey ?? ''), () => '')
   return keyAsked
 }
@@ -155,7 +156,7 @@ async function send(a: DropboxAccount, url: string, init: (token: string) => Req
     if (res.ok) return res
     const text = await res.text().catch(() => '')
     let j: any = null
-    try { j = JSON.parse(text) } catch {}
+    try { j = JSON.parse(text) } catch (e) { quiet('Dropbox answered with something other than JSON: its text is used', e) }
     const summary = String(j?.error_summary ?? text ?? '')
     if (res.status === 401) throw new DropboxError(t('Dropbox no longer accepts this connection: connect again.'), 401)
     if (res.status === 429) throw new DropboxError(t('Dropbox asks to slow down: trying again later.'), 429)
@@ -296,7 +297,7 @@ export function approve(r: Replica, l: { folder: string } | null, path = '') {
   try {
     if (l) localStorage.setItem(approvedKey(r), JSON.stringify({ folder: l.folder, path, account: dropboxAccount.get()?.id ?? '' }))
     else localStorage.removeItem(approvedKey(r))
-  } catch {}
+  } catch (e) { quiet(STORAGE, e) }
 }
 
 /** A Dropbox file the project keeps: a name TeXLoom accepts, not build output, not a conflicted copy, not too big. */
@@ -314,10 +315,10 @@ const bytesOf = async (r: Replica, m: Mine) => ('text' in m ? new TextEncoder().
 function hashCache(r: Replica) {
   const key = `texloom.dropboxHash.${r.keys.project}`
   let m: Record<string, string> = {}
-  try { m = JSON.parse(localStorage.getItem(key) || '{}') } catch {}
+  try { m = JSON.parse(localStorage.getItem(key) || '{}') } catch (e) { quiet(STORAGE, e) }
   return {
     get: (h: string) => m[h],
-    set: (h: string, v: string) => { m[h] = v; try { localStorage.setItem(key, JSON.stringify(m)) } catch {} },
+    set: (h: string, v: string) => { m[h] = v; try { localStorage.setItem(key, JSON.stringify(m)) } catch (e) { quiet(STORAGE, e) } },
   }
 }
 async function hashOfMine(r: Replica, m: Mine, cache: ReturnType<typeof hashCache>): Promise<string> {
@@ -586,14 +587,14 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
       set({ busy: false })
       if (debugging() && (force || came.length || went.length)) console.debug(`[dropbox] ${force ? 'sync now' : 'round'}: ${Math.round(performance.now() - began)} ms, `
         + `${requests.n - before.n} requests to Dropbox (${Math.round(requests.ms - before.ms)} ms in all, ${PARALLEL} at once); in: ${came.join(', ') || 'nothing'}; out: ${went.join(', ') || 'nothing'}`)
-      if (again) { again = false; queueMicrotask(() => { round(true).catch(() => {}) }) }
+      if (again) { again = false; queueMicrotask(() => { round(true).catch((e) => console.error('Dropbox sync:', e)) }) }
     }
   }
   let again = false, stopped = false
-  const timer = setInterval(() => { round().catch(() => {}) }, TICK)
+  const timer = setInterval(() => { round().catch((e) => console.error('Dropbox sync:', e)) }, TICK)
   const release = () => { if (mine()) r.meta.delete('dropboxLease') }
   // leaving the tab (or closing it): send what's waiting now rather than after the quiet time
-  const hidden = () => { if (document.visibilityState === 'hidden' && dirty && mine()) round(true).catch(() => {}) }
+  const hidden = () => { if (document.visibilityState === 'hidden' && dirty && mine()) round(true).catch((e) => console.error('Dropbox sync:', e)) }
   document.addEventListener('visibilitychange', hidden)
   window.addEventListener('pagehide', release)
   // while this tab syncs, Dropbox tells it when the folder changes (long poll), so changes made
@@ -605,12 +606,12 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
       if (state.role !== 'syncing' || !cursor) { await new Promise((ok) => setTimeout(ok, TICK)); continue }
       try {
         const { changes, backoff } = await changesAfter(cursor, 120)
-        if (changes && !stopped) { nextPull = 0; await round().catch(() => {}) }
+        if (changes && !stopped) { nextPull = 0; await round().catch((e) => console.error('Dropbox sync:', e)) }
         if (backoff) await new Promise((ok) => setTimeout(ok, backoff * 1000))
       } catch { await new Promise((ok) => setTimeout(ok, 30_000)) } // offline, or Dropbox busy: the minute's round goes on
     }
   })()
-  round().catch(() => {})
+  round().catch((e) => console.error('Dropbox sync:', e))
   return {
     state,
     now: () => round(true),

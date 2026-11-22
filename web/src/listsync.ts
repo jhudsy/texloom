@@ -20,6 +20,7 @@ import type { AccountStore } from './accounts'
 import { tags } from './tags'
 import { normalServer } from './servers'
 import { APP_HEADER } from './version'
+import { quiet, STORAGE } from './quiet'
 
 /** The message is a code: needs-code, code-expired, list-full, list-retired, password-taken,
  *  wrong-password, no-prf, passkey-failed, busy or server. */
@@ -43,10 +44,10 @@ const COPIES = 'texloom.listCopies'
 type Copies = Record<string, { on: boolean; at: number }>
 const firstCopy = (server = location.origin): Copies => ({ [server]: { on: true, at: 1 } })
 function readCopies(): Copies {
-  try { const c = JSON.parse(localStorage.getItem(COPIES) || 'null'); if (c && typeof c === 'object') return c } catch {}
+  try { const c = JSON.parse(localStorage.getItem(COPIES) || 'null'); if (c && typeof c === 'object') return c } catch (e) { quiet(STORAGE, e) }
   return firstCopy()
 }
-function writeCopies(c: Copies) { try { localStorage.setItem(COPIES, JSON.stringify(c)) } catch {} }
+function writeCopies(c: Copies) { try { localStorage.setItem(COPIES, JSON.stringify(c)) } catch (e) { quiet(STORAGE, e) } }
 /** The servers keeping copies of this browser's list, this app's own first. */
 export function copyServers(): string[] {
   const c = readCopies()
@@ -56,7 +57,7 @@ export function copyServers(): string[] {
 /** Keep a copy of the list on `server`, or stop (what's there is left, marked as no longer a copy). */
 export async function setCopy(server: string, on: boolean) {
   writeCopies({ ...readCopies(), [server]: { on, at: Date.now() } })
-  if (!on) await leaveNote(server).catch(() => {})
+  if (!on) await leaveNote(server).catch((e) => quiet('the note on that server is left for its next sync (offline)', e))
   await syncNow()
 }
 /** Why a copy wasn't reached or written at the last sync (a ListError code, or 'network'). */
@@ -128,7 +129,7 @@ async function replicate<T>(key: ListKey, merge: (had: T | null, known: T) => T,
   if (!holds.size) throw failure ?? new ListError('server')
   for (const [s, held] of holds) {
     if (held === canon(known)) continue
-    try { known = await updateOn(s, key, (had) => merge(had, known), blank?.(s)) } catch { /* next sync */ }
+    try { known = await updateOn(s, key, (had) => merge(had, known), blank?.(s)) } catch (e) { quiet('next sync', e) }
   }
   return known
 }
@@ -172,7 +173,7 @@ const settingsKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 
 const accountSetting = (s: AccountStore<object>) => ({
   get: () => { const a = s.get(); return a ? JSON.stringify(a) : '' },
   at: () => s.at(),
-  set: (v: string, at: number) => { try { s.set(v ? JSON.parse(v) : null, at) } catch {} },
+  set: (v: string, at: number) => { try { s.set(v ? JSON.parse(v) : null, at) } catch (e) { quiet('a damaged setting in the list: kept as it was', e) } },
 })
 
 const SETTINGS: Record<string, { get(): string; at(): number; set(v: string, at: number): void }> = {
@@ -263,7 +264,7 @@ export function saveSecret(secret: Uint8Array | null, server = location.origin) 
   try {
     if (secret) localStorage.setItem(STORE, b64e(secret))
     else localStorage.removeItem(STORE)
-  } catch {}
+  } catch (e) { quiet(STORAGE, e) }
   writeCopies(firstCopy(server))
   copyProblems.clear()
   lastSynced = ''
@@ -304,7 +305,7 @@ export function syncNow(): Promise<void> {
     } finally { running = null }
   })())
 }
-const syncQuietly = () => { syncNow().catch(() => {}) }
+const syncQuietly = () => { syncNow().catch((e) => quiet('the project list syncs again later (offline, say)', e)) }
 
 function schedule() {
   if (!savedSecret()) return
@@ -434,7 +435,7 @@ export async function addSlot(secret: Uint8Array, unlocking: Uint8Array, kind: S
 }
 
 export async function removeSlot(secret: Uint8Array, id: string, slot: Slot) {
-  for (const server of copyServers()) await retire(id, slot.seed, server).catch(() => {}) // (one offline: copyWays, later)
+  for (const server of copyServers()) await retire(id, slot.seed, server).catch((e) => quiet('one server offline: copyWays, later', e)) // (one offline: copyWays, later)
   await changeSlots(secret, { v: 1, slots: {}, gone: { [id]: Date.now() } })
 }
 
@@ -448,7 +449,7 @@ async function copyWays(secret: Uint8Array) {
     let blob: { seq: number; data: Uint8Array } | null = null
     const lacking: string[] = []
     for (const s of servers) {
-      const got = await getRaw(s, id).catch(() => undefined)
+      const got = await getRaw(s, id).catch((e) => quiet('server unreachable: counted as neither having nor lacking it', e))
       if (got === null) lacking.push(s)
       else if (got && got !== 'retired') blob ??= got
     }
@@ -505,7 +506,7 @@ async function retireList(secret: Uint8Array) {
       for (const [id, slot] of Object.entries(slots)) await retire(id, slot.seed, server)
       for (const key of keys) await retire(key.id, key.signingSeed, server)
       done++
-    } catch { /* unreachable now */ }
+    } catch (e) { quiet('unreachable now', e) }
   }
   if (!done) throw new ListError('server')
 }

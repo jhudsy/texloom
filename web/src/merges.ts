@@ -16,6 +16,7 @@
 import * as Y from 'yjs'
 import type { Replica } from './replica'
 import { addItem, allItems, mergeText, rangeOf } from './review'
+import { quiet } from './quiet'
 
 export const MIN_APART = 30_000 // ms: edits apart for less than this aren't flagged
 const SETTLE = 1500 // ms after the last change from others before notes are added
@@ -64,7 +65,7 @@ export function watchMerges(r: Replica, myName: () => string) {
   try {
     const stored = JSON.parse(localStorage.getItem(key) ?? '{}') as Stored
     for (const [file, ps] of Object.entries(stored)) places.set(file, ps.map(([s, e, at]) => ({ s: dec(s), e: dec(e), at })))
-  } catch { /* none kept */ }
+  } catch (e) { quiet('none kept', e) }
   let saveTimer: ReturnType<typeof setTimeout> | undefined
   const save = () => {
     clearTimeout(saveTimer)
@@ -74,7 +75,7 @@ export function watchMerges(r: Replica, myName: () => string) {
         const out: Stored = {}
         for (const [file, ps] of places) out[file] = ps.map((p) => [enc(p.s), enc(p.e), p.at])
         localStorage.setItem(key, JSON.stringify(out))
-      } catch { /* storage full or blocked: kept in memory only */ }
+      } catch (e) { quiet('storage full or blocked: kept in memory only', e) }
     }, 1000)
   }
   const resolve = (yt: Y.Text, p: Place): [number, number] | null => {

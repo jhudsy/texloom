@@ -3,6 +3,7 @@
 // http, https and mailto, and only images from the project itself load (no tracking pixels).
 import { t } from './i18n'
 import { h } from './dom'
+import { quiet } from './quiet'
 
 export interface MarkdownHost {
   /** An image from the project, by its path; null if there's no such image. */
@@ -34,7 +35,7 @@ const startsBlock = (l: string) => HEADING.test(l) || FENCE.test(l) || QUOTE.tes
 /** The project path `ref` points to, seen from the file `from`; null if it leaves the project. */
 function resolvePath(from: string, ref: string): string | null {
   let clean = ref.split(/[?#]/)[0]
-  try { clean = decodeURIComponent(clean) } catch {}
+  try { clean = decodeURIComponent(clean) } catch (e) { quiet('a link with a malformed escape: kept as written', e) }
   const parts = clean.startsWith('/') ? [] : from.split('/').slice(0, -1)
   for (const seg of clean.split('/')) {
     if (seg === '' || seg === '.') continue

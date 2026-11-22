@@ -6,6 +6,7 @@ import { t, tn } from './i18n'
 import { cleanPath, fileBase, mainFile, zipOpts } from './projectfiles'
 import type { Replica } from './replica'
 import { needsBbl, submission, usedFiles, type Files } from './submission'
+import { quiet } from './quiet'
 
 const stemOf = (p: string) => p.replace(/\.[^./]+$/, '')
 
@@ -70,7 +71,7 @@ export function submissionDialog(r: Replica) {
             const res = await compileInBrowser(files, main!, { engine: r.meta.get('engine') || defaultEngine(files), bib: r.meta.get('bib') || 'auto' })
             bbl = res.bbl
             if (!res.pdf && bbl) notes.push(t('The document has errors: check the bibliography in the .zip.'))
-          } catch { /* falls back below */ }
+          } catch (e) { quiet('falls back below', e) }
         }
         if (bbl === null) {
           const own = files.get(stemOf(main!) + '.bbl')

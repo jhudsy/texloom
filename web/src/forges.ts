@@ -8,6 +8,7 @@
 // Bitbucket isn't here: its API doesn't give files' git ids, so every file would have to be
 // downloaded each minute to see what changed. The TeXLoom app's git bridge works with any host.
 import { t } from './i18n'
+import { quiet } from './quiet'
 
 export type Kind = 'github' | 'gitlab' | 'gitea'
 
@@ -126,7 +127,7 @@ function githubApi(): string {
   try {
     const o = localStorage.getItem('texloom.githubApi')
     if (o && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return o.replace(/\/+$/, '')
-  } catch {}
+  } catch (e) { quiet('no stand-in for GitHub (testing only)', e) }
   return 'https://api.github.com'
 }
 

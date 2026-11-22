@@ -8,6 +8,7 @@ import { projects, whoIn } from './projects'
 import { t, locale } from './i18n'
 import { privateServerAllows } from './storagenotice'
 import { awayServer, serverName } from './servers'
+import { quiet, STORAGE } from './quiet'
 
 function copyRow(text: string, mail?: { subject: string; body: string }) {
   const inp = h('input', { value: text, readonly: true, onfocus: (e: any) => e.target.select() })
@@ -55,7 +56,7 @@ function loadIssued(project: string): Issued {
   try { return JSON.parse(localStorage.getItem(issuedKey(project)) || '{}') } catch { return {} }
 }
 function saveIssued(project: string, v: Issued) {
-  try { localStorage.setItem(issuedKey(project), JSON.stringify(v)) } catch {}
+  try { localStorage.setItem(issuedKey(project), JSON.stringify(v)) } catch (e) { quiet(STORAGE, e) }
 }
 
 interface Person { pub: string; name: string; at: number; revoked?: boolean; verified: boolean; link?: string }
@@ -202,9 +203,9 @@ export async function rotateKeys(old: Replica, server: string) {
     await old.setStorage('relay')
     await new Promise((res) => setTimeout(res, 500))
     projects.update(keys.project, { fragment: keys.fragment(), writable: true, name: String(old.meta.get('name') ?? ''), at: Date.now() })
-    try { localStorage.setItem(`texloom.device.${keys.project}`, localStorage.getItem(`texloom.device.${old.keys.project}`) ?? '{}') } catch {}
+    try { localStorage.setItem(`texloom.device.${keys.project}`, localStorage.getItem(`texloom.device.${old.keys.project}`) ?? '{}') } catch (e) { quiet(STORAGE, e) }
     await old.close()
-    await projects.forget(old.keys.project).catch(() => {})
+    await projects.forget(old.keys.project).catch((e) => quiet('the old project is forgotten at the next clean-up', e))
     note.close()
     alert(t('Done. This is the project at its new keys: use Share to send collaborators new links.'))
     location.hash = keys.fragment()

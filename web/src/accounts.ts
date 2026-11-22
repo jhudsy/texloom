@@ -1,3 +1,4 @@
+import { quiet, STORAGE } from './quiet'
 // An account with an outside service (a Zotero key, a GitHub token): yours alone, kept in this
 // browser with when it was set, so that the latest follows the project list (listsync.ts).
 
@@ -19,7 +20,7 @@ export function accountStore<A>(key: string, valid: (a: any) => boolean): Accoun
       try {
         if (a) localStorage.setItem(key, JSON.stringify(a)); else localStorage.removeItem(key)
         localStorage.setItem(atKey, String(at))
-      } catch {}
+      } catch (e) { quiet(STORAGE, e) }
     },
   }
 }

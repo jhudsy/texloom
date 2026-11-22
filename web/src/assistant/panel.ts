@@ -10,6 +10,7 @@ import { ASSISTANT, jsonSchema, runTool, toolsFor, type Change, type ToolCtx } f
 import { locale, t, tn } from '../i18n'
 import { commonEnds, refine, wordDiff } from '../worddiff'
 import { diffPiece } from '../review'
+import { quiet } from '../quiet'
 
 const MAX_STEPS = 40 // tool round-trips per request
 const MAX_SAVED_STATE = 4 * 1024 * 1024 // past this, a conversation is kept to read but can't be continued
@@ -596,7 +597,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       if (!c.model) return
       createSession({ ...c, baseUrl: base.value.trim(), apiKey: key.value.trim(), model: model.value.trim() }, [], '').contextWindow()
         .then((n) => { found.textContent = n ? t('Found: {{n}} tokens', { n: n.toLocaleString(locale) }) : t('Not found: enter it if you know it') })
-        .catch(() => {})
+        .catch((e) => quiet('the model’s context size wasn’t found: the field stays empty', e))
     }
     detect()
     const load = h('button', {

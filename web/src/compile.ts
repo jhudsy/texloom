@@ -5,6 +5,7 @@
 import type { BusyTexRunner } from 'texlyre-busytex'
 import { stripComments } from './texscan'
 import { compileOrder, externalDocuments } from './xr'
+import { quiet, STORAGE } from './quiet'
 
 const BASE = '/core/busytex'
 let runner: Promise<BusyTexRunner> | null = null
@@ -14,7 +15,7 @@ export type Progress = { phase: 'download' | 'compile'; percent?: number; loaded
 
 /** Does the server (or the offline cache) have this TeX asset? */
 export async function hasAsset(path: string): Promise<boolean> {
-  try { if ('caches' in self && (await caches.match(path))) return true } catch {}
+  try { if ('caches' in self && (await caches.match(path))) return true } catch (e) { quiet('the cache can’t be asked: taken as not cached', e) }
   return fetch(path, { method: 'HEAD' }).then((r) => r.ok).catch(() => false)
 }
 
@@ -32,7 +33,7 @@ export async function engineCached(): Promise<boolean> {
 export async function clearEngineCache() {
   const { clearAllPackageCache } = await import('texlyre-busytex')
   await clearAllPackageCache()
-  runner?.then((r) => r.terminate()).catch(() => {})
+  runner?.then((r) => r.terminate()).catch((e) => quiet('the engine had stopped already', e))
   runner = null; runnerLevel = null
 }
 
@@ -49,7 +50,7 @@ export function texliveEndpoint(): Promise<string | null> {
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
     .then((j) => {
       const e = typeof j?.texlive?.endpoint === 'string' && j.texlive.endpoint.startsWith('/') ? new URL(j.texlive.endpoint, location.origin).href : null
-      try { if (e) localStorage.setItem(ENDPOINT_KEY, e); else localStorage.removeItem(ENDPOINT_KEY) } catch {}
+      try { if (e) localStorage.setItem(ENDPOINT_KEY, e); else localStorage.removeItem(ENDPOINT_KEY) } catch (e) { quiet(STORAGE, e) }
       return e
     })
     .catch(() => { try { return localStorage.getItem(ENDPOINT_KEY) } catch { return null } }))
@@ -115,7 +116,7 @@ async function levelFor(files: Map<string, string | Uint8Array>): Promise<Level 
 
 async function getRunner(level: Level | null): Promise<BusyTexRunner> {
   if (runner && runnerLevel === 'recommended' && level === 'extra') { // need the bigger bundle: start over
-    runner.then((r) => r.terminate()).catch(() => {})
+    runner.then((r) => r.terminate()).catch((e) => quiet('the engine had stopped already', e))
     runner = null
   }
   return (runner ??= (async () => {
@@ -169,7 +170,7 @@ export async function warmUp(files: Map<string, string | Uint8Array>) {
     if (!(await browserCompileAvailable())) return
     if (/(^|-)[23]g$/.test(net?.effectiveType ?? '') && !(await engineCached())) return
     await getRunner(await levelFor(files))
-  } catch { /* the first Compile tries again and says what went wrong */ }
+  } catch (e) { quiet('the first Compile tries again and says what went wrong', e) }
 }
 
 /** The .aux of each document compiled first for another's \externaldocument, kept while what it
@@ -200,7 +201,7 @@ export function stopBrowserCompile() {
   if (!job) return
   job.stopped = true
   if (job.inEngine) { // TeX can only be stopped by ending its worker; the next compile starts a new one
-    runner?.then((r) => r.terminate()).catch(() => {})
+    runner?.then((r) => r.terminate()).catch((e) => quiet('the engine had stopped already', e))
     runner = null
     runnerLevel = null
   }
@@ -228,7 +229,7 @@ export function compileInBrowser(
     return compiling(mine, files, main, opts, onProgress)
   })
   const done = Promise.race([run, stopped]).finally(() => { if (job === mine) job = null })
-  engineQueue = done.catch(() => {}) // stopped, it ends here at once (its engine is ended too: see stopBrowserCompile)
+  engineQueue = done.catch((e) => quiet('a stopped compile: it reports itself, the queue only waits for it', e)) // stopped, it ends here at once (its engine is ended too: see stopBrowserCompile)
   return done
 }
 

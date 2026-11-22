@@ -14,6 +14,7 @@ import { packed, unpack } from './packing'
 import { t } from './i18n'
 import { APP_VERSION } from './version'
 import type { Link } from './versions'
+import { quiet, STORAGE } from './quiet'
 
 const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
@@ -90,12 +91,12 @@ export const creationCode = {
   /** When it was entered here (0: before this was recorded), so the latest one follows the project list. */
   at(server = location.origin): number { try { return Number(localStorage.getItem(codeKey(server) + 'At')) || 0 } catch { return 0 } },
   set(v: string, at = Date.now(), server = location.origin) {
-    try { localStorage.setItem(codeKey(server), v); localStorage.setItem(codeKey(server) + 'At', String(at)) } catch {}
+    try { localStorage.setItem(codeKey(server), v); localStorage.setItem(codeKey(server) + 'At', String(at)) } catch (e) { quiet(STORAGE, e) }
   },
   /** The other servers this browser has a code for. */
   servers(): string[] {
     const out: string[] = []
-    try { for (const k of Object.keys(localStorage)) if (k.startsWith('texloom.code@') && !k.endsWith('At') && localStorage.getItem(k)) out.push(k.slice('texloom.code@'.length)) } catch {}
+    try { for (const k of Object.keys(localStorage)) if (k.startsWith('texloom.code@') && !k.endsWith('At') && localStorage.getItem(k)) out.push(k.slice('texloom.code@'.length)) } catch (e) { quiet(STORAGE, e) }
     return out.sort()
   },
 }
@@ -253,7 +254,7 @@ export class Replica {
       this.sendAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed))
     })
     let pruneTimer: ReturnType<typeof setTimeout> | undefined
-    this.out.observe(() => { clearTimeout(pruneTimer); pruneTimer = setTimeout(() => this.pruneOutputs().catch(() => {}), 3000) })
+    this.out.observe(() => { clearTimeout(pruneTimer); pruneTimer = setTimeout(() => this.pruneOutputs().catch((e) => quiet('old outputs are pruned at the next change', e)), 3000) })
     if (this.syncMode === 'live') this.connect()
     else { this.status = 'paused'; this.onStatus() }
   }
@@ -344,7 +345,7 @@ export class Replica {
     await this.p2p({ k: 'sv1', sv: b64e(Y.encodeStateVector(this.doc)) })
     this.awareness.setLocalState(this.awareness.getLocalState()) // a newer clock, so it counts as news to everyone; sent by the listener above
     if (count >= COMPACT_AFTER) await this.compact()
-    setTimeout(() => this.pruneOutputs().catch(() => {}), 5000)
+    setTimeout(() => this.pruneOutputs().catch((e) => quiet('old outputs are pruned at the next change', e)), 5000)
     this.manualDone?.(); this.manualDone = null
   }
 
@@ -821,12 +822,12 @@ export class Replica {
         added = true
         if (pub === this.keys.memberPub && !this.withdrawn) {
           this.withdrawn = true
-          try { localStorage.setItem(`texloom.withdrawn.${this.keys.project}`, '1') } catch {}
+          try { localStorage.setItem(`texloom.withdrawn.${this.keys.project}`, '1') } catch (e) { quiet(STORAGE, e) }
           this.onStatus()
         }
-      } catch {}
+      } catch (e) { quiet('a malformed or unverifiable revocation: skipped', e) }
     }
-    if (added && save) idbPut(this.db, 'kv', 'revoked', this.revocations).catch(() => {})
+    if (added && save) idbPut(this.db, 'kv', 'revoked', this.revocations).catch((e) => quiet('revocations not saved here: they come again with the document', e))
   }
   private revocations: { p: string; s: string }[] = []
 
@@ -982,7 +983,7 @@ export class Replica {
   private uploadChain: Promise<void> = Promise.resolve()
   private uploadPending(): Promise<void> {
     const run = this.uploadChain.then(() => this.uploadPendingNow())
-    this.uploadChain = run.catch(() => {})
+    this.uploadChain = run.catch((e) => quiet('the upload reports its own failure; the chain only waits for it', e))
     return run
   }
 

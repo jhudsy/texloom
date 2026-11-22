@@ -10,6 +10,7 @@ import { t } from './i18n'
 import { h } from './dom'
 import { icon } from './icons'
 import { openContextMenu, type MenuItem } from './contextmenu'
+import { quiet, STORAGE } from './quiet'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 export { pdfjs }
@@ -194,7 +195,7 @@ export class PdfView {
       this.lastClick = at
       const sel = this.selectedText()
       const where = sel && this.onComment ? this.selection() : null
-      const copy: MenuItem[] = sel ? [[t('Copy'), () => { void navigator.clipboard.writeText(sel).catch(() => {}) }]] : []
+      const copy: MenuItem[] = sel ? [[t('Copy'), () => { void navigator.clipboard.writeText(sel).catch((e) => quiet('the clipboard refused (no permission)', e)) }]] : []
       const comment: MenuItem[] = where ? [[t('Add a comment…'), () => this.commentOn(where)]] : []
       this.openMenu(e.clientX, e.clientY, [...comment, ...copy, [t('Go to source here'), () => this.onPick?.(at.page, at.x, at.y)], ...(this.menuExtras?.() ?? [])])
     })
@@ -396,7 +397,7 @@ export class PdfView {
     const page = (under >= 0 ? under : Math.max(0, this.pages.findIndex((p) => p.wrap.getBoundingClientRect().bottom > view.top))) + 1
     this.setZoom(this.pageFitZoom())
     this.fitPage = true
-    try { localStorage.setItem(ZOOM_KEY, 'page') } catch {}
+    try { localStorage.setItem(ZOOM_KEY, 'page') } catch (e) { quiet(STORAGE, e) }
     this.showZoom()
     this.goToPage(page)
   }
@@ -485,7 +486,7 @@ export class PdfView {
   private setZoom(zoom: number, x = this.el.clientWidth / 2, y = this.el.clientHeight / 2) {
     this.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
     this.fitPage = false
-    try { localStorage.setItem(ZOOM_KEY, String(this.zoom)) } catch {}
+    try { localStorage.setItem(ZOOM_KEY, String(this.zoom)) } catch (e) { quiet(STORAGE, e) }
     const across = (this.el.scrollLeft + x) / Math.max(1, this.el.scrollWidth)
     const down = (this.el.scrollTop + y) / Math.max(1, this.el.scrollHeight)
     this.showZoom()
@@ -524,7 +525,7 @@ export class PdfView {
     if (!next) return
     this.drawing = true
     const gen = this.gen
-    this.draw(next).catch(() => {}).finally(() => {
+    this.draw(next).catch((e) => quiet('a page not drawn (cancelled by a newer draw, say): the next draw does it', e)).finally(() => {
       this.drawing = false
       if (gen === this.gen) this.update() // the next one
     })
@@ -673,7 +674,7 @@ export class PdfView {
     this.drawing = true // scrolling meanwhile mustn't draw pages that aren't on screen yet
     try {
       for (const [i, p] of pages.entries()) {
-        if (tops[i] + width * p.ratio >= top - height / 2 && tops[i] <= top + height * 1.5) await this.draw(p, doc).catch(() => {})
+        if (tops[i] + width * p.ratio >= top - height / 2 && tops[i] <= top + height * 1.5) await this.draw(p, doc).catch((e) => quiet('a page not drawn (cancelled by a newer draw, say): the next draw does it', e))
         if (gen !== this.gen) return
       }
     } finally { this.drawing = false }

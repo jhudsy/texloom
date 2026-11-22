@@ -6,6 +6,7 @@
 import { $, h } from './dom'
 import { t } from './i18n'
 import { PdfView, type CommentTarget, type PdfSelection } from './pdfview'
+import { quiet } from './quiet'
 
 type Point = { page: number; x: number; y: number }
 type Message =
@@ -105,7 +106,7 @@ export function openPdfWindow(project: string) {
   }
   view.onPick = (page, x, y) => {
     say({ t: 'pick', page, x, y })
-    try { window.opener?.focus() } catch {} // browsers may not allow it: the editor still jumps
+    try { window.opener?.focus() } catch (e) { quiet('browsers may not allow it: the editor still jumps', e) } // browsers may not allow it: the editor still jumps
   }
   ch.onmessage = (e: MessageEvent<Message>) => {
     const m = e.data

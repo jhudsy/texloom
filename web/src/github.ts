@@ -27,6 +27,7 @@ import { cleanPath, isText } from './projectfiles'
 import { t } from './i18n'
 import { accountStore } from './accounts'
 import { forge, GitError, hostOf, kindOf, MOVED, type Account, type Change, type Entry, type Forge, type Kind, type Tree } from './forges'
+import { quiet, STORAGE } from './quiet'
 
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 export const RENEW = 30_000, EXPIRE = 100_000 // ms
@@ -133,7 +134,7 @@ export function approve(r: Replica, l: Target | null) {
   try {
     if (l) localStorage.setItem(approvedKey(r), JSON.stringify({ kind: kindOf(l), host: hostOf(l), repo: l.repo, branch: l.branch, dir: l.dir ?? '' }))
     else localStorage.removeItem(approvedKey(r))
-  } catch {}
+  } catch (e) { quiet(STORAGE, e) }
 }
 
 /** Whether this browser's user approved the project's link (as it is now). */
@@ -168,10 +169,10 @@ function projectFiles(r: Replica, l: Link): Map<string, Mine> {
 function shaCache(r: Replica) {
   const key = `texloom.gitsha.${r.keys.project}`
   let m: Record<string, string> = {}
-  try { m = JSON.parse(localStorage.getItem(key) || '{}') } catch {}
+  try { m = JSON.parse(localStorage.getItem(key) || '{}') } catch (e) { quiet(STORAGE, e) }
   return {
     get: (h: string) => m[h],
-    set: (h: string, sha: string) => { m[h] = sha; try { localStorage.setItem(key, JSON.stringify(m)) } catch {} },
+    set: (h: string, sha: string) => { m[h] = sha; try { localStorage.setItem(key, JSON.stringify(m)) } catch (e) { quiet(STORAGE, e) } },
   }
 }
 
@@ -438,10 +439,10 @@ export function startGitHub(r: Replica, me: () => string, onChange: () => void) 
       set({ error: e instanceof Error ? e.message : String(e) })
     } finally { set({ busy: false }) }
   }
-  const timer = setInterval(() => { round().catch(() => {}) }, TICK)
+  const timer = setInterval(() => { round().catch((e) => console.error('git sync:', e)) }, TICK)
   const release = () => { if (mine()) r.meta.delete('githubLease') }
   window.addEventListener('pagehide', release)
-  round().catch(() => {})
+  round().catch((e) => console.error('git sync:', e))
   return {
     state,
     /** Bring in and send now (Sync now), taking the lease if it's free. */

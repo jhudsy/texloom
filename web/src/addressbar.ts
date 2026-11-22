@@ -6,6 +6,7 @@ import { dialog, h } from './dom'
 import { t } from './i18n'
 import { projects, sameKeys, tabKeysItem } from './projects'
 import { fragmentFor, normalServer, serverName, serverOr } from './servers'
+import { quiet, STORAGE } from './quiet'
 
 /** Remember this tab's link, so that reloading keeps the same access. False if the browser won't store it. */
 function rememberForTab(project: string, fragment: string): boolean {
@@ -19,7 +20,7 @@ function linkKnownHere(project: string): string | null {
   try {
     const here = sessionStorage.getItem(tabKeysItem(project))
     if (here) return here
-  } catch {}
+  } catch (e) { quiet(STORAGE, e) }
   return projects.fragmentOf(project)
 }
 

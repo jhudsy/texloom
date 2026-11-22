@@ -17,6 +17,7 @@ import { addItem, allItems, ChangeMark, changeTitle, editorMarkup, onFlushTyped,
 import type { Replica } from './replica'
 import { anchor, compose, edit, loadHunks, normalize, refresh, saveHunks, settle, toShared, toView, type Hunk } from './suggestcore'
 import { commonEnds, refine, wordDiff } from './worddiff'
+import { quiet, STORAGE } from './quiet'
 
 /** Marks changes to the review map that this tab's suggesting made (not news to it). */
 const ORIGIN = { suggestMode: true }
@@ -42,7 +43,7 @@ function madeHere(project: string) {
   const key = `texloom.madehere.${project}`
   let ids: Set<string>
   try { ids = new Set(JSON.parse(localStorage.getItem(key) || '[]')) } catch { ids = new Set() }
-  const save = () => { try { localStorage.setItem(key, JSON.stringify([...ids].slice(-5000))) } catch {} }
+  const save = () => { try { localStorage.setItem(key, JSON.stringify([...ids].slice(-5000))) } catch (e) { quiet(STORAGE, e) } }
   return {
     has: (id: string) => ids.has(id),
     add(more: Iterable<string>) { const n = ids.size; for (const id of more) ids.add(id); if (ids.size !== n) save() },
@@ -62,8 +63,8 @@ function claim(project: string, file: string): { me: string; release(): void } {
     if (held && held.tab !== PAGE && Date.now() - held.at < LOCK_FRESH) return { me: PAGE, release() {} }
     const BROWSER = browserId(project)
     localStorage.setItem(key, mine())
-    const renew = setInterval(() => { try { localStorage.setItem(key, mine()) } catch {} }, LOCK_FRESH / 3)
-    return { me: BROWSER, release() { clearInterval(renew); try { if (JSON.parse(localStorage.getItem(key) || 'null')?.tab === PAGE) localStorage.removeItem(key) } catch {} } }
+    const renew = setInterval(() => { try { localStorage.setItem(key, mine()) } catch (e) { quiet(STORAGE, e) } }, LOCK_FRESH / 3)
+    return { me: BROWSER, release() { clearInterval(renew); try { if (JSON.parse(localStorage.getItem(key) || 'null')?.tab === PAGE) localStorage.removeItem(key) } catch (e) { quiet(STORAGE, e) } } }
   } catch { return { me: PAGE, release() {} } }
 }
 const SAVE_AFTER = 800 // ms after typing stops
@@ -92,7 +93,7 @@ export const suggestMode = (() => {
       v &&= allowed
       if (v === on) return
       on = v
-      try { if (on) localStorage.setItem(key, '1'); else localStorage.removeItem(key) } catch {}
+      try { if (on) localStorage.setItem(key, '1'); else localStorage.removeItem(key) } catch (e) { quiet(STORAGE, e) }
       watchers.forEach((f) => f())
     },
     watch(f: () => void) { watchers.add(f); return () => { watchers.delete(f) } },

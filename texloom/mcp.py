@@ -115,6 +115,7 @@ class Project:
             h = self._sticky(yt, s, end, end == len(s) or end > start)
             self.where = {"file": path, "cursor": {"anchor": a.to_json(), "head": h.to_json()}}
         except Exception:  # noqa: BLE001 - presence is best-effort
+            log.debug("cursor not shared: file only", exc_info=True)
             self.where = {"file": path}
         asyncio.get_event_loop().create_task(self.announce())
 
@@ -346,6 +347,7 @@ class Project:
                     try:
                         data = await asyncio.wait_for(self.r.get_blob(info["h"]), 30)
                     except Exception:  # noqa: BLE001 - compile without it, but say so
+                        log.debug("compile: %s not fetched", p, exc_info=True)
                         missing.append(p)
                         continue
                     (root / p).parent.mkdir(parents=True, exist_ok=True)
