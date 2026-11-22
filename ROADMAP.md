@@ -45,7 +45,6 @@ Not broken, but costing more the longer it's left (label `tech-debt`), roughly m
 
 - **[Browser checks for the PDF view, comments from the PDF, the service worker and the arXiv
   download](https://github.com/jhudsy/texloom/issues/21)**: only the git hosts and the Review tab have kept browser checks so far.
-- **[A release script](https://github.com/jhudsy/texloom/issues/22)**: a desktop release is several manual steps in two repositories.
 - **[Errors swallowed without a trace](https://github.com/jhudsy/texloom/issues/24)**: empty `catch` and broad `except`, deliberate
   or not, leave nothing to go on when they hide a real failure.
 - **[Tests for the desktop app's windows](https://github.com/jhudsy/texloom/issues/25)**, above all the macOS menu-bar fixes, which

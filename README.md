@@ -900,6 +900,22 @@ app's browser checks run likewise when the web app or the server changes (`web-a
 To see what a relay can take, `uv run --extra server python scripts/loadtest.py all` starts its own throwaway server
 and reports latency, CPU and memory for each scenario. Results depend on the machine.
 
+### Releasing the desktop app
+
+```bash
+uv run python scripts/release.py 0.4.41 --dry-run   # can it be made? (changes nothing)
+uv run python scripts/release.py 0.4.41
+```
+
+It refuses unless the version is newer, `main` is clean and level with GitHub, the tag is new
+and the quick checks pass. Then it sets the version in `pyproject.toml`, `texloom/__init__.py`
+and `uv.lock`, commits "Release X.Y.Z", tags `vX.Y.Z` and pushes both; the tag starts the app
+builds (`app.yml`), which make the GitHub release. Last, it writes a stub for the release into
+the website's changelog (`../texloom-web/changelog.html`, or `--web`): the entry in the list, the
+"Latest" badge moved to it, and the desktop app's commits since the last release as a comment.
+The wording is yours; commit and publish the website separately. `--no-push` stops short of
+pushing. `scripts/check_version.py`, in CI, checks the three version strings agree.
+
 ### Translations
 
 Interface text is written in English inside `t('…')` (web) or `_('…')` (desktop app); the
