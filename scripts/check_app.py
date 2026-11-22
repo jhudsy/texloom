@@ -257,5 +257,12 @@ if __name__ == "__main__":
     sys.stdout.flush()
     sys.stderr.flush()
     # Straight out: Python's teardown deletes Qt's objects in an order PySide doesn't expect, which
-    # can crash once the checks are done (and turn a pass into a failure).
+    # can crash once the checks are done (and turn a pass into a failure). On Windows even
+    # os._exit runs each library's shutdown, where Qt's fails: end the process outright there.
+    if sys.platform == "win32":
+        import ctypes
+        k = ctypes.windll.kernel32
+        k.GetCurrentProcess.restype = ctypes.c_void_p
+        k.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        k.TerminateProcess(k.GetCurrentProcess(), code)
     os._exit(code)
