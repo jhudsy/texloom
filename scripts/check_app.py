@@ -30,6 +30,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.stdout.reconfigure(encoding="utf-8")  # ✓ and ✗ on Windows consoles too
+sys.stderr.reconfigure(encoding="utf-8")
 NATIVE = "--native" in sys.argv
 if NATIVE and sys.platform != "darwin":
     sys.exit("check_app: --native is for macOS")
@@ -250,4 +252,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # Straight out: Python's teardown deletes Qt's objects in an order PySide doesn't expect, which
+    # can crash once the checks are done (and turn a pass into a failure).
+    os._exit(code)
