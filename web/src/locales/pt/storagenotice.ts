@@ -56,6 +56,16 @@ const pt: Catalog = {
   'No longer valid on this server.': 'Não é mais válido neste servidor.',
   'Unlimited storage.': 'Armazenamento ilimitado.',
   '{{used}} of {{total}} used.': '{{used}} usados de {{total}}.',
+  'Keep it on the server': 'Manter no servidor',
+  'Stop storing this project on the server?': 'Parar de guardar este projeto no servidor?',
+  'The server’s encrypted copy is deleted at once. From then on, changes pass only between people who have the project open at the same time.': 'A cópia criptografada do servidor é apagada na hora. A partir daí, as alterações só passam entre pessoas que estão com o projeto aberto ao mesmo tempo.',
+  'Someone who has the link but has never opened the project gets nothing until someone with a copy is online at the same time. Opening it on a new device works the same way.': 'Quem tem o link mas nunca abriu o projeto não recebe nada até que alguém com uma cópia esteja online ao mesmo tempo. Abrir em um dispositivo novo funciona do mesmo jeito.',
+  'A copy kept only in a browser is lost if that browser’s data is cleared. A folder on your computer, or the TeXLoom app, keeps one on disk.': 'Uma cópia guardada só em um navegador se perde se os dados dele forem apagados. Uma pasta no seu computador, ou o aplicativo TeXLoom, guarda uma no disco.',
+  'A collaborator whose copy is behind stays behind until they’re online together with someone who has the newer changes.': 'Um colaborador com a cópia desatualizada continua assim até estar online junto com alguém que tenha as alterações mais novas.',
+  'The server’s backups, if it keeps any, may hold the encrypted copy for a while.': 'Os backups do servidor, se houver, podem manter a cópia criptografada por um tempo.',
+  'Nobody else has the project open right now.': 'Ninguém mais está com o projeto aberto agora.',
+  'Delete the server’s copy': 'Apagar a cópia do servidor',
+  '{{n}} other people have the project open right now.': ['{{n}} outra pessoa está com o projeto aberto agora.', '{{n}} outras pessoas estão com o projeto aberto agora.'],
 }
 
 export default pt

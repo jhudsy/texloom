@@ -56,6 +56,16 @@ const de: Catalog = {
   'No longer valid on this server.': 'Auf diesem Server nicht mehr gültig.',
   'Unlimited storage.': 'Unbegrenzter Speicher.',
   '{{used}} of {{total}} used.': '{{used}} von {{total}} belegt.',
+  'Keep it on the server': 'Auf dem Server behalten',
+  'Stop storing this project on the server?': 'Dieses Projekt nicht mehr auf dem Server speichern?',
+  'The server’s encrypted copy is deleted at once. From then on, changes pass only between people who have the project open at the same time.': 'Die verschlüsselte Kopie auf dem Server wird sofort gelöscht. Danach gelangen Änderungen nur noch zwischen Personen, die das Projekt gleichzeitig geöffnet haben.',
+  'Someone who has the link but has never opened the project gets nothing until someone with a copy is online at the same time. Opening it on a new device works the same way.': 'Wer den Link hat, das Projekt aber nie geöffnet hat, bekommt nichts, bis jemand mit einer Kopie gleichzeitig online ist. Dasselbe gilt für das Öffnen auf einem neuen Gerät.',
+  'A copy kept only in a browser is lost if that browser’s data is cleared. A folder on your computer, or the TeXLoom app, keeps one on disk.': 'Eine Kopie, die nur in einem Browser liegt, geht verloren, wenn dessen Daten gelöscht werden. Ein Ordner auf Ihrem Computer oder die TeXLoom-App bewahrt eine auf der Festplatte auf.',
+  'A collaborator whose copy is behind stays behind until they’re online together with someone who has the newer changes.': 'Wessen Kopie veraltet ist, bleibt es, bis die Person gleichzeitig mit jemandem online ist, der die neueren Änderungen hat.',
+  'The server’s backups, if it keeps any, may hold the encrypted copy for a while.': 'Die Sicherungen des Servers, falls er welche anlegt, können die verschlüsselte Kopie noch eine Weile enthalten.',
+  'Nobody else has the project open right now.': 'Gerade hat sonst niemand das Projekt geöffnet.',
+  'Delete the server’s copy': 'Kopie auf dem Server löschen',
+  '{{n}} other people have the project open right now.': ['{{n}} weitere Person hat das Projekt gerade geöffnet.', '{{n}} weitere Personen haben das Projekt gerade geöffnet.'],
 }
 
 export default de

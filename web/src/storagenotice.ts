@@ -2,7 +2,7 @@
 // new-project flow on servers that require a creation code.
 import { creationCode, type Replica } from './replica'
 import { dialog, h } from './dom'
-import { t } from './i18n'
+import { t, tn } from './i18n'
 import { normalServer, serverName } from './servers'
 import { quiet, STORAGE } from './quiet'
 import { bytes } from './usage'
@@ -68,6 +68,29 @@ export function askCode(intro?: string, server = location.origin): Promise<boole
     )
     dlg.addEventListener('close', () => resolve(ok))
     input.focus()
+  })
+}
+
+/** Before the owner turns server storage off (issue #33): what it means for everyone, said before the
+ *  server's copy goes. Resolves true to go ahead. */
+export function confirmStopStoring(r: Replica): Promise<boolean> {
+  return new Promise((resolve) => {
+    let yes = false
+    const keep = h('button', { class: 'primary', autofocus: true, onclick: () => dlg.close() }, t('Keep it on the server'))
+    const dlg = dialog('settings',
+      h('h3', {}, t('Stop storing this project on the server?')),
+      h('p', {}, t('The server’s encrypted copy is deleted at once. From then on, changes pass only between people who have the project open at the same time.')),
+      h('ul', { class: 'small' },
+        h('li', {}, t('Someone who has the link but has never opened the project gets nothing until someone with a copy is online at the same time. Opening it on a new device works the same way.')),
+        h('li', {}, t('A copy kept only in a browser is lost if that browser’s data is cleared. A folder on your computer, or the TeXLoom app, keeps one on disk.')),
+        h('li', {}, t('A collaborator whose copy is behind stays behind until they’re online together with someone who has the newer changes.')),
+        h('li', {}, t('The server’s backups, if it keeps any, may hold the encrypted copy for a while.'))),
+      h('p', { class: 'muted small' }, r.peers > 0 ? tn(r.peers, '{{n}} other person has the project open right now.', '{{n}} other people have the project open right now.') : t('Nobody else has the project open right now.')),
+      h('div', { class: 'row end' },
+        h('button', { class: 'danger', onclick: () => { yes = true; dlg.close() } }, t('Delete the server’s copy')), keep),
+    )
+    dlg.addEventListener('close', () => resolve(yes))
+    keep.focus()
   })
 }
 

@@ -27,20 +27,12 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
 
 ## Later
 
-1. **[Say what turning off server storage means](https://github.com/jhudsy/texloom/issues/33)** before
-   the server's copy is deleted: who is left without a copy, new devices, a browser's data cleared.
-   About half a day.
-2. **[Resolve all comments at once](https://github.com/jhudsy/texloom/issues/34)** in the Review tab,
-   asking first with the count, undone in one step. About half a day.
-3. **[Select several review items and act on them together](https://github.com/jhudsy/texloom/issues/35)**:
-   ⇧/⌘-click in the list, or the comments within text selected in the editor, then resolve, accept or
-   reject them as one change. 1–2 days.
-4. **[Tell collaborators what's new](https://github.com/jhudsy/texloom/issues/3)**: unread counts,
+1. **[Tell collaborators what's new](https://github.com/jhudsy/texloom/issues/3)**: unread counts,
    changes since your last visit, `@name` mentions. 2–4 days; only while TeXLoom is open, since the
    server can't read projects.
-5. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
+2. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
-6. **[The Assistant uses tools from other MCP servers](https://github.com/jhudsy/texloom/issues/31)**:
+3. **[The Assistant uses tools from other MCP servers](https://github.com/jhudsy/texloom/issues/31)**:
    a literature search, a reference manager, a lab's own tools, added by address in ⚙. 2–3 days;
    only servers on the web that allow the page to reach them, each call asking first.
 

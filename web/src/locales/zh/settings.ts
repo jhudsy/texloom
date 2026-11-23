@@ -45,7 +45,6 @@ const zh: Catalog = {
   'Collaborators get your changes even if you’re never online at the same time. The server can’t read it.': '即使你们从未同时在线，协作者也能收到你的更改。服务器无法读取其内容。',
   'Don’t store anything on the server': '不在服务器上保存任何内容',
   'The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.': '服务器只在同时在线的人之间传递更改。选择此项将删除服务器上的副本。',
-  'Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.': '删除服务器上的加密副本？只有你们同时在线时，更改才会送达协作者。',
   'Cleared': '已清除',
   'Remove downloaded TeX engine': '移除已下载的 TeX 引擎',
   'Settings': '设置',

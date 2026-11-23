@@ -56,6 +56,16 @@ const zh: Catalog = {
   'No longer valid on this server.': '在此服务器上已失效。',
   'Unlimited storage.': '存储空间不限。',
   '{{used}} of {{total}} used.': '已用 {{used}}，共 {{total}}。',
+  'Keep it on the server': '继续保存在服务器上',
+  'Stop storing this project on the server?': '不再在服务器上存储此项目？',
+  'The server’s encrypted copy is deleted at once. From then on, changes pass only between people who have the project open at the same time.': '服务器上的加密副本会立即删除。此后，修改只会在同时打开项目的人之间传递。',
+  'Someone who has the link but has never opened the project gets nothing until someone with a copy is online at the same time. Opening it on a new device works the same way.': '有链接但从未打开过项目的人，在有副本的人同时在线之前什么也收不到。在新设备上打开也是如此。',
+  'A copy kept only in a browser is lost if that browser’s data is cleared. A folder on your computer, or the TeXLoom app, keeps one on disk.': '只保存在浏览器中的副本会在清除浏览器数据时丢失。电脑上的文件夹或 TeXLoom 应用会在磁盘上保留一份。',
+  'A collaborator whose copy is behind stays behind until they’re online together with someone who has the newer changes.': '副本落后的协作者会一直落后，直到与拥有较新修改的人同时在线。',
+  'The server’s backups, if it keeps any, may hold the encrypted copy for a while.': '服务器的备份（如有）可能会在一段时间内保留该加密副本。',
+  'Nobody else has the project open right now.': '目前没有其他人打开此项目。',
+  'Delete the server’s copy': '删除服务器上的副本',
+  '{{n}} other people have the project open right now.': { other: '另有 {{n}} 人正打开此项目。' },
 }
 
 export default zh

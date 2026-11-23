@@ -45,7 +45,6 @@ const de: Catalog = {
   'Collaborators get your changes even if you’re never online at the same time. The server can’t read it.': 'Mitwirkende erhalten Ihre Änderungen auch, wenn Sie nie gleichzeitig online sind. Der Server kann sie nicht lesen.',
   'Don’t store anything on the server': 'Nichts auf dem Server speichern',
   'The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.': 'Der Server leitet Änderungen nur zwischen Personen weiter, die gleichzeitig online sind. Diese Wahl löscht die Serverkopie.',
-  'Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.': 'Verschlüsselte Serverkopie löschen? Änderungen erreichen Mitwirkende dann nur, solange beide gleichzeitig online sind.',
   'Cleared': 'Gelöscht',
   'Remove downloaded TeX engine': 'Heruntergeladene TeX-Engine entfernen',
   'Settings': 'Einstellungen',

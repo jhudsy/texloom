@@ -233,6 +233,11 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   comments amber. You can go back to suggestions you typed on an earlier visit, in the same browser, and keep
   editing them (one tab at a time per file). If someone changes the very words you're replacing,
   your suggestion stays and accepting it asks first.
+- **Several at once:** **Resolve all…** in the Review tab resolves every open comment. To act on some,
+  ⌘/Ctrl-click cards to select them (⇧-click for a run, ⌘/Ctrl+A for all), or select text in the
+  editor and press **Select in text** for the comments and suggestions on it; a bar then offers
+  Resolve, Accept and Reject for the lot. Each is one change for everyone, with **Undo** right after.
+  Accepting several skips any suggestion whose text has changed since, to accept on its own.
 - **Problems:** after compiling, errors and warnings are listed under the PDF with their
   file and line; click one to go there. Biber and BibTeX errors (a missing `.bib`, say) are
   listed too. **Raw log** shows the whole log. **Compile from scratch** deletes LaTeX's
@@ -911,7 +916,7 @@ starts its own throwaway server; `scripts/webcheck.py` is what they share, for w
 ```bash
 (cd web && npm run build)
 uv run --extra server --with playwright python scripts/check_web_git.py     # keeping a project in step with GitHub, GitLab and Gitea (stand-ins: scripts/fakeforge.py)
-uv run --extra server --with playwright python scripts/check_web_review.py  # the Review tab: comments in reading order, several drafts at once
+uv run --extra server --with playwright python scripts/check_web_review.py  # the Review tab: comments in reading order, several drafts at once, acting on several
 uv run --extra server --with playwright python scripts/check_web_dropbox.py # keeping a project in step with a Dropbox folder (stand-in: scripts/fakedropbox.py)
 ```
 

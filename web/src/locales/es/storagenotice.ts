@@ -56,6 +56,16 @@ const es: Catalog = {
   'No longer valid on this server.': 'Ya no es válido en este servidor.',
   'Unlimited storage.': 'Almacenamiento ilimitado.',
   '{{used}} of {{total}} used.': '{{used}} usados de {{total}}.',
+  'Keep it on the server': 'Mantenerlo en el servidor',
+  'Stop storing this project on the server?': '¿Dejar de guardar este proyecto en el servidor?',
+  'The server’s encrypted copy is deleted at once. From then on, changes pass only between people who have the project open at the same time.': 'La copia cifrada del servidor se elimina de inmediato. A partir de entonces, los cambios solo pasan entre quienes tengan el proyecto abierto a la vez.',
+  'Someone who has the link but has never opened the project gets nothing until someone with a copy is online at the same time. Opening it on a new device works the same way.': 'Quien tenga el enlace pero nunca haya abierto el proyecto no recibe nada hasta que alguien con una copia esté conectado a la vez. Abrirlo en un dispositivo nuevo funciona igual.',
+  'A copy kept only in a browser is lost if that browser’s data is cleared. A folder on your computer, or the TeXLoom app, keeps one on disk.': 'Una copia guardada solo en un navegador se pierde si se borran sus datos. Una carpeta en tu ordenador, o la aplicación TeXLoom, guarda una en el disco.',
+  'A collaborator whose copy is behind stays behind until they’re online together with someone who has the newer changes.': 'Un colaborador cuya copia esté atrasada seguirá así hasta que coincida en línea con alguien que tenga los cambios más recientes.',
+  'The server’s backups, if it keeps any, may hold the encrypted copy for a while.': 'Las copias de seguridad del servidor, si las hace, pueden conservar la copia cifrada un tiempo.',
+  'Nobody else has the project open right now.': 'Ahora mismo nadie más tiene el proyecto abierto.',
+  'Delete the server’s copy': 'Eliminar la copia del servidor',
+  '{{n}} other people have the project open right now.': ['{{n}} persona más tiene el proyecto abierto ahora mismo.', '{{n}} personas más tienen el proyecto abierto ahora mismo.'],
 }
 
 export default es

@@ -725,3 +725,7 @@ dialog.settings.tabbed[open] { display: flex; flex-direction: column; }
   .right .tab.ai-busy::after, .right .tab.ai-news { animation: none; }
   .right .tab.ai-news { background: color-mix(in srgb, var(--accent) 15%, transparent); }
 }
+/* several review items selected (review.ts: ⌘/Ctrl-click, ⇧-click, Select in text) */
+.rcard.selected { outline: 2px solid var(--accent); outline-offset: -1px; background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+.rbulk { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.review-list:focus { outline: none; }

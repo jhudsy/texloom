@@ -15,6 +15,7 @@ import { integrationCard } from './integrationcard'
 import { quiet, STORAGE } from './quiet'
 import { usageBox } from './usage'
 import { moveCodeDialog } from './movecode'
+import { confirmStopStoring } from './storagenotice'
 
 /** "Codes come from whoever runs this server", with the server's own page about them once known. */
 function codeSourceSlot(): HTMLElement {
@@ -153,7 +154,10 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
     ['relay', t('Don’t store anything on the server'), t('The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.'), !own],
   ], async (v: StorageMode) => {
     if (!own) return // (only the owner can change it: the radios are disabled)
-    if (v === 'relay' && !confirm(t('Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.'))) return
+    if (v === 'relay' && !(await confirmStopStoring(r))) {
+      storageBox.replaceChildren(storageRadios()) // back to "keep a copy on the server"
+      return
+    }
     await r.setStorage(v)
   })
   storageBox.append(storageRadios())

@@ -8,7 +8,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
 import type { Replica } from './replica'
 import { b64d, b64e, signer } from './crypto'
 import { h } from './dom'
-import { t, locale } from './i18n'
+import { t, tn, locale } from './i18n'
 import { applyChange, placeOf } from './suggestcore'
 import { byReading, readingOrder } from './navigate'
 import { isWordChar, refine, wordDiff, type DiffOp } from './worddiff'
@@ -142,6 +142,47 @@ export function setResolved(r: Replica, id: string, resolved: boolean, outcome?:
   const m = r.review.get(id)
   if (!m) return
   r.doc.transact(() => { m.set('resolved', resolved); if (outcome) m.set('outcome', outcome); else m.delete('outcome') })
+}
+
+/** Acting on several items at once (issues #34, #35): one change for everyone, undone in one step. */
+export const BULK = Symbol('review-bulk')
+
+/** Resolve the open comments and reject the open suggestions among `ids` (resolve: comments only). */
+export function resolveMany(r: Replica, ids: string[], what: 'resolve' | 'reject'): number {
+  flushTyped()
+  let n = 0
+  r.doc.transact(() => {
+    for (const id of ids) {
+      const m = r.review.get(id)
+      if (!(m instanceof Y.Map) || m.get('resolved')) continue
+      const suggestion = m.get('kind') === 'suggestion'
+      if (what === 'resolve' ? suggestion : !suggestion) continue
+      m.set('resolved', true)
+      if (what === 'reject') m.set('outcome', 'rejected')
+      n++
+    }
+  }, BULK)
+  return n
+}
+
+/** Accept the open suggestions among `ids` whose text is still as suggested; the others are left
+ *  for one at a time (Accept asks about each). Returns how many were applied and left. */
+export function acceptMany(r: Replica, ids: string[]): { applied: number; left: number } {
+  flushTyped()
+  let applied = 0, left = 0
+  r.doc.transact(() => {
+    for (const id of ids) {
+      const it = itemOf(r, id), rg = rangeOf(r, id)
+      if (!it || it.kind !== 'suggestion' || it.resolved) continue
+      const yt = r.files.get(it.file)
+      if (!yt || !rg || it.conflict || yt.toString().slice(rg.from, rg.to) !== it.quote) { left++; continue }
+      applyChange(yt, rg.from, it.quote, it.text)
+      const m = r.review.get(id)!
+      m.set('resolved', true); m.set('outcome', 'accepted')
+      applied++
+    }
+  }, BULK)
+  return { applied, left }
 }
 
 /** Apply a suggestion. Returns a message if it couldn't be applied cleanly. */
@@ -368,6 +409,16 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   const drafts = new Set<{ area: HTMLTextAreaElement; close: () => void }>() // comments being written, newest first
   const replies = new Map<string, string>() // half-written replies: the list is redrawn whenever anyone comments
   const resolvedChk = h('input', { type: 'checkbox', 'aria-label': t('Show resolved'), onchange: (e: any) => { showResolved = e.target.checked; render() } })
+  // Several items at once: selected with ⌘/Ctrl-click or ⇧-click on a card, ⌘/Ctrl+A, or from the text
+  // selected in the editor; each action one change, undone in one step (issues #34, #35)
+  const selected = new Set<string>()
+  let anchor: string | null = null
+  let shown: Item[] = []
+  const bulkUndo = new Y.UndoManager([r.files, r.review], { trackedOrigins: new Set([BULK]), captureTimeout: 0 })
+  const bulkBar = h('div', { class: 'ai-bar rbulk', hidden: true })
+  const doneBar = h('div', { class: 'ai-bar rbulk', hidden: true })
+  const resolveAllBtn = h('button', { title: t('Resolve every open comment'), onclick: () => resolveAll() }, t('Resolve all…')) as HTMLButtonElement
+  const pickBtn = h('button', { title: t('Select the comments and suggestions on the text selected in the editor'), onclick: () => selectFromEditor() }, t('Select in text'))
   const modeBtn = h('button', { class: 'suggest-mode', title: t('Suggest mode: what you type in the editor becomes suggestions for others to accept or reject (⌘⌥E / Ctrl+Alt+E)'),
     onclick: () => host.suggesting.set(!host.suggesting.on()) })
   const showMode = () => {
@@ -383,9 +434,100 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
       host.writable ? h('button', { title: t('Comment on the selected text (⌘⌥M / Ctrl+Alt+M)'), onclick: () => addComment() }, t('💬 Comment')) : null,
       host.writable ? modeBtn : null,
       h('span', { class: 'spacer' }),
+      host.writable ? pickBtn : null,
+      host.writable ? resolveAllBtn : null,
       h('label', { class: 'check small' }, resolvedChk, t('Show resolved'))),
+    bulkBar,
+    doneBar,
     composer,
     list)
+  list.tabIndex = -1 // ⌘/Ctrl+A and Escape while the list has focus
+  list.addEventListener('keydown', (e) => {
+    if (!host.writable || e.target instanceof HTMLTextAreaElement) return
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); shown.filter((i) => !i.resolved).forEach((i) => selected.add(i.id)); render() }
+    else if (e.key === 'Escape' && selected.size) { selected.clear(); render() }
+  })
+
+  /** After an action on several: what it did, and Undo for the whole of it. */
+  function did(text: string) {
+    doneBar.replaceChildren(h('span', { class: 'small' }, text), h('span', { class: 'spacer' }),
+      h('button', { onclick: () => { bulkUndo.undo(); doneBar.hidden = true } }, t('Undo')),
+      h('button', { class: 'icon', 'aria-label': t('Close'), onclick: () => { doneBar.hidden = true } }, '✕'))
+    doneBar.hidden = false
+  }
+
+  function resolveAll() {
+    const open = allItems(r).filter((i) => i.kind === 'comment' && !i.resolved)
+    if (!open.length) return alert(t('No open comments.'))
+    if (!confirm(tn(open.length, 'Resolve {{n}} open comment?', 'Resolve all {{n}} open comments?'))) return
+    bulkUndo.stopCapturing()
+    const n = resolveMany(r, open.map((i) => i.id), 'resolve')
+    selected.clear()
+    did(tn(n, '{{n}} comment resolved.', '{{n}} comments resolved.'))
+  }
+
+  function selectFromEditor() {
+    const sel = host.selection()
+    if (!sel || sel.from === sel.to) return alert(t('Select some text in the editor first: the comments and suggestions on it are selected here.'))
+    selected.clear()
+    for (const it of allItems(r)) {
+      if (it.resolved || it.file !== sel.file) continue
+      const rg = rangeOf(r, it.id)
+      if (rg && rg.from < sel.to && rg.to > sel.from) selected.add(it.id)
+      else if (rg && rg.from === rg.to && rg.from >= sel.from && rg.from <= sel.to) selected.add(it.id) // an insertion inside it
+    }
+    if (!selected.size) alert(t('No open comments or suggestions on the selected text.'))
+    render()
+  }
+
+  function act(what: 'resolve' | 'accept' | 'reject', ids: string[]) {
+    bulkUndo.stopCapturing()
+    if (what === 'accept') {
+      const n = ids.filter((id) => itemOf(r, id)?.kind === 'suggestion').length
+      if (!confirm(tn(n, 'Accept {{n}} suggestion? This changes the text.', 'Accept {{n}} suggestions? This changes the text.'))) return
+      const { applied, left } = acceptMany(r, ids)
+      did(tn(applied, '{{n}} suggestion accepted.', '{{n}} suggestions accepted.') + (left ? ' ' + tn(left, '{{n}} wasn’t: its text has changed since, so accept it on its own.', '{{n}} weren’t: their text has changed since, so accept them one at a time.') : ''))
+    } else {
+      const n = resolveMany(r, ids, what)
+      did(what === 'resolve' ? tn(n, '{{n}} comment resolved.', '{{n}} comments resolved.') : tn(n, '{{n}} suggestion rejected.', '{{n}} suggestions rejected.'))
+    }
+    for (const id of ids) selected.delete(id)
+    render()
+  }
+
+  function renderBulk() {
+    const open = [...selected].map((id) => itemOf(r, id)).filter((i): i is Item => !!i && !i.resolved)
+    selected.clear(); open.forEach((i) => selected.add(i.id))
+    bulkBar.hidden = !open.length
+    if (!open.length) return
+    const comments = open.filter((i) => i.kind === 'comment').map((i) => i.id), suggestions = open.filter((i) => i.kind === 'suggestion').map((i) => i.id)
+    bulkBar.replaceChildren(...[h('b', { class: 'small' }, tn(open.length, '{{n}} selected', '{{n}} selected')), h('span', { class: 'spacer' }),
+      comments.length ? h('button', { onclick: () => act('resolve', comments) }, tn(comments.length, 'Resolve {{n}} comment', 'Resolve {{n}} comments')) : null,
+      suggestions.length ? h('button', { class: 'primary', onclick: () => act('accept', suggestions) }, tn(suggestions.length, 'Accept {{n}}', 'Accept {{n}}')) : null,
+      suggestions.length ? h('button', { onclick: () => act('reject', suggestions) }, tn(suggestions.length, 'Reject {{n}}', 'Reject {{n}}')) : null,
+      h('button', { onclick: () => { selected.clear(); render() } }, t('Clear'))].filter((x): x is HTMLElement => !!x))
+  }
+
+  /** ⌘/Ctrl-click adds or removes a card, ⇧-click selects from the last one clicked; a plain click
+   *  starts again from this one. Clicks on buttons, links and the reply box do what they do. */
+  function pick(e: MouseEvent, id: string): boolean {
+    if (!host.writable || (e.target as HTMLElement).closest('button, textarea, a, input')) return false
+    if (e.shiftKey && anchor) {
+      const ids = shown.map((i) => i.id), a = ids.indexOf(anchor), b = ids.indexOf(id)
+      if (a >= 0 && b >= 0) for (const x of ids.slice(Math.min(a, b), Math.max(a, b) + 1)) selected.add(x)
+    } else if (e.metaKey || e.ctrlKey) {
+      if (!selected.delete(id)) selected.add(id)
+      anchor = id
+    } else {
+      if (!selected.size) return false // a plain click: as before (the header shows the text)
+      selected.clear()
+      anchor = id
+    }
+    e.preventDefault()
+    window.getSelection()?.removeAllRanges() // ⇧-click would otherwise select the page's text
+    render()
+    return true
+  }
 
   function addComment() {
     let sel = host.selection()
@@ -461,6 +603,12 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   const when = (at: number) => new Date(at).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })
 
   function card(it: Item): HTMLElement {
+    const el = cardOf(it)
+    el.addEventListener('click', (e) => { if (pick(e, it.id)) e.stopPropagation() }, true) // before the header's "show in the editor"
+    return el
+  }
+
+  function cardOf(it: Item): HTMLElement {
     const rg = rangeOf(r, it.id)
     const go = () => { if (rg) host.reveal(it.file, rg.from, rg.to) }
     const grow = () => { replyIn.style.height = 'auto'; replyIn.style.height = `${replyIn.scrollHeight + 2}px` }
@@ -476,8 +624,9 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
       reply(r, it.id, replyIn.value, host.userName())
       replyIn.value = ''
     })
-    return h('div', { class: `rcard ${it.kind}${it.merge ? ' merge' : ''} ${it.resolved ? 'resolved' : ''} ${it.id === focused ? 'focused' : ''}`, 'data-id': it.id },
-      h('div', { class: 'rhead', onclick: go, title: rg ? t('Show in the editor') : t('The text it referred to was deleted') },
+    return h('div', { class: `rcard ${it.kind}${it.merge ? ' merge' : ''} ${it.resolved ? 'resolved' : ''} ${it.id === focused ? 'focused' : ''}${selected.has(it.id) ? ' selected' : ''}`, 'data-id': it.id,
+      'aria-selected': host.writable && !it.resolved ? String(selected.has(it.id)) : null },
+      h('div', { class: 'rhead', onclick: () => { anchor = it.id; go() }, title: rg ? t('Show in the editor') : t('The text it referred to was deleted') },
         h('span', { class: 'rkind' }, it.merge ? t('⚠ Check merge') : it.kind === 'comment' ? t('💬 Comment') : t('✎ Suggestion')),
         h('span', { class: 'rloc' }, it.file), h('span', { class: 'muted small' }, ' · ', author(it.by, it.signed), ` · ${when(it.at)}`)),
       it.kind === 'comment'
@@ -500,6 +649,9 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     const place = readingOrder(r)
     const at = new Map(items.map((i) => [i.id, place(i.file, rangeOf(r, i.id)?.from ?? Number.MAX_SAFE_INTEGER)])) // each found once
     items.sort((a, b) => byReading(at.get(a.id)!, at.get(b.id)!))
+    shown = items
+    renderBulk()
+    resolveAllBtn.disabled = !allItems(r).some((i) => i.kind === 'comment' && !i.resolved)
     const typing = document.activeElement instanceof HTMLTextAreaElement && list.contains(document.activeElement) ? document.activeElement : null
     const caret = typing?.selectionStart ?? 0, typingIn = typing?.getAttribute('data-reply')
     list.replaceChildren(...(items.length ? items.map(card)

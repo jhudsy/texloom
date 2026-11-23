@@ -57,8 +57,6 @@ const fr: Catalog = {
   'Don’t store anything on the server': 'Ne rien stocker sur le serveur',
   'The server only passes changes between people who are online at the same time. Choosing this deletes the server’s copy.':
     'Le serveur se contente de transmettre les modifications entre les personnes en ligne au même moment. Ce choix supprime la copie du serveur.',
-  'Delete the server’s encrypted copy? Changes will only reach collaborators while you are both online.':
-    'Supprimer la copie chiffrée du serveur ? Les modifications ne parviendront aux collaborateurs que lorsque vous serez en ligne en même temps.',
   'Cleared': 'Supprimé',
   'Remove downloaded TeX engine': 'Supprimer le moteur TeX téléchargé',
   // settings dialog: project
