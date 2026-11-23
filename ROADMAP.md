@@ -54,7 +54,6 @@ Not broken, but costing more the longer it's left (label `tech-debt`), roughly m
 - **[A removal plan for code kept for older apps and data](https://github.com/jhudsy/texloom/issues/27)**, including the `github`
   names that now cover every git host.
 - **[Split the largest files](https://github.com/jhudsy/texloom/issues/28)**, each just before its next large change.
-- **[Trim the browser's git id cache](https://github.com/jhudsy/texloom/issues/29)**, which grows with every binary file version synced.
 
 ## Parked
 

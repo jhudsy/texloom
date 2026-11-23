@@ -28,6 +28,7 @@ import { t } from './i18n'
 import { accountStore } from './accounts'
 import { forge, GitError, hostOf, kindOf, MOVED, type Account, type Change, type Entry, type Forge, type Kind, type Tree } from './forges'
 import { quiet, STORAGE } from './quiet'
+import { shaCache as gitShaCache, type ShaCache } from './gitshacache'
 
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 export const RENEW = 30_000, EXPIRE = 100_000 // ms
@@ -165,18 +166,14 @@ function projectFiles(r: Replica, l: Link): Map<string, Mine> {
   return out
 }
 
-/** Git ids of stored files, by TeXLoom id (both name the content, so this never goes stale). */
-function shaCache(r: Replica) {
-  const key = `texloom.gitsha.${r.keys.project}`
-  let m: Record<string, string> = {}
-  try { m = JSON.parse(localStorage.getItem(key) || '{}') } catch (e) { quiet(STORAGE, e) }
-  return {
-    get: (h: string) => m[h],
-    set: (h: string, sha: string) => { m[h] = sha; try { localStorage.setItem(key, JSON.stringify(m)) } catch (e) { quiet(STORAGE, e) } },
-  }
+/** Git ids of stored files, by TeXLoom id (gitshacache.ts): only the files the project has now. */
+function shaCache(r: Replica): ShaCache {
+  const now: string[] = []
+  for (const b of r.bin.values()) if (b && typeof b.h === 'string') now.push(b.h)
+  return gitShaCache(r.keys.project, now)
 }
 
-async function shaOfMine(r: Replica, f: Mine, cache: ReturnType<typeof shaCache>): Promise<string> {
+async function shaOfMine(r: Replica, f: Mine, cache: ShaCache): Promise<string> {
   if ('text' in f) return gitSha(new TextEncoder().encode(f.text))
   const known = cache.get(f.h)
   if (known) return known
