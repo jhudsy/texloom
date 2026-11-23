@@ -27,12 +27,18 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
 
 ## Later
 
-1. **[Tell collaborators what's new](https://github.com/jhudsy/texloom/issues/3)**: unread counts,
+1. **[Say what turning off server storage means](https://github.com/jhudsy/texloom/issues/33)** before
+   the server's copy is deleted: who is left without a copy, new devices, a browser's data cleared.
+   About half a day.
+2. **[Move a project to another creation code](https://github.com/jhudsy/texloom/issues/32)**: a
+   project stays with the code it was first stored under, so a lapsed code or a hand-over leaves no
+   way to keep it stored. Owner-signed, checked against the new code's room. 1–2 days.
+3. **[Tell collaborators what's new](https://github.com/jhudsy/texloom/issues/3)**: unread counts,
    changes since your last visit, `@name` mentions. 2–4 days; only while TeXLoom is open, since the
    server can't read projects.
-2. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
+4. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
-3. **[The Assistant uses tools from other MCP servers](https://github.com/jhudsy/texloom/issues/31)**:
+5. **[The Assistant uses tools from other MCP servers](https://github.com/jhudsy/texloom/issues/31)**:
    a literature search, a reference manager, a lab's own tools, added by address in ⚙. 2–3 days;
    only servers on the web that allow the page to reach them, each call asking first.
 
