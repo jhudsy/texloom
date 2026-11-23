@@ -3,14 +3,17 @@
 // signatures, uploads, revocations, refusals, peers) must be the same in both apps.
 //
 // Each case gets a fresh replica, with a stand-in connection that records what it sends, a
-// stand-in server for uploads and an in-memory stand-in for the browser's storage. Nothing
-// touches the network.
+// stand-in server for files and uploads and an in-memory stand-in for the browser's storage.
+// Nothing touches the network. Besides the server's messages, a case's steps can edit a file
+// here, drop and reopen the connection, acknowledge or refuse the last change sent, add a file,
+// and fetch one.
 //
 //     npm run check-replica [words in a case's name]
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vite'
+import * as Y from 'yjs'
 
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const out = path.join(web, 'node_modules/.cache/check-replica')
@@ -25,6 +28,7 @@ const load = async (entry) => {
 }
 const { Replica } = await load('src/replica.ts')
 const { Keys, b64d } = await load('src/crypto.ts')
+const { unpack } = await load('src/packing.ts')
 for (const k of ['log', 'info', 'warn', 'debug']) console[k] = () => {} // the cases are full of things a replica warns about
 const say = (s) => process.stdout.write(s + '\n')
 
@@ -52,12 +56,29 @@ function fakeWs() {
   return { readyState: 1, sent: [], closed: false, send(s) { this.sent.push(JSON.parse(s)) }, close() { this.closed = true } }
 }
 
-/** The server's uploads, as the case says it answers for each. */
-const fakeFetch = (uploads) => async (url) => {
-  const u = uploads[String(url).split('/').pop()]
-  const status = u ? u.status : 404
-  const body = new Uint8Array(Buffer.from(u?.body ?? '', 'hex'))
-  return { status, ok: status >= 200 && status < 300, arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) }
+/** The server's files: what it answers for each (the case's `uploads`), and what it's sent
+ *  (answered as the case's `put` says), checked as the server would: signed by a writer, and
+ *  the content the id names. */
+function fakeServer(c, keys) {
+  const received = []
+  const answer = c.put ?? { status: 200 }
+  const respond = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => JSON.parse(new TextDecoder().decode(body) || 'null'),
+    arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) })
+  const fetch = async (url, init = {}) => {
+    const id = String(url).split('/').pop()
+    const method = init.method ?? 'GET'
+    if (method === 'PUT') {
+      const data = new Uint8Array(init.body), h = init.headers ?? {}
+      let ok = false
+      try { ok = keys.verify(`blob:${id}:`, data, b64d(h['X-Sig'] ?? '')) && (await keys.blobId(await keys.decrypt(data))) === id } catch { ok = false }
+      received.push({ id, output: h['X-Kind'] === 'output', ok })
+      return respond(answer.status, new TextEncoder().encode(answer.code ? JSON.stringify({ code: answer.code }) : ''))
+    }
+    if (method !== 'GET') return respond(204, new Uint8Array())
+    const u = c.uploads[id]
+    return respond(u ? u.status : 404, new Uint8Array(Buffer.from(u?.body ?? '', 'hex')))
+  }
+  return { fetch, received }
 }
 
 async function sentTags(r, ws) {
@@ -69,7 +90,18 @@ async function sentTags(r, ws) {
   return tags.sort()
 }
 
-async function state(r, ws) {
+/** The files the changes sent to the server make, applied to an empty document. */
+async function sentFiles(r, socks) {
+  const d = new Y.Doc()
+  for (const ws of socks) for (const m of ws.sent) if (m.t === 'up') Y.applyUpdate(d, await unpack(await r.keys.decrypt(b64d(m.d))))
+  return Object.fromEntries([...d.getMap('files').entries()].map(([k, v]) => [k, v.toString()]))
+}
+const count = async (r, store) => new Promise((res) => { const q = r.db.transaction(store).objectStore(store).getAllKeys(); q.onsuccess = () => res(q.result.length) })
+
+async function state(r, socks, server, got) {
+  const ws = socks[socks.length - 1]
+  const sent = []
+  for (const w of socks) sent.push(...await sentTags(r, w))
   return {
     files: Object.fromEntries([...r.files.entries()].map(([k, v]) => [k, v.toString()])),
     since: r.since,
@@ -79,8 +111,13 @@ async function state(r, ws) {
     min: r.minVersion,
     serverMode: r.serverMode,
     storeProblem: r.storeProblem,
-    closed: ws.closed,
-    sent: await sentTags(r, ws),
+    closed: socks.some((w) => w.closed),
+    sent: sent.sort(),
+    pending: await count(r, 'outbox'),
+    sentFiles: await sentFiles(r, socks),
+    uploaded: [...server.received].sort((a, b) => a.id.localeCompare(b.id) || Number(a.output) - Number(b.output)),
+    pendingFiles: await count(r, 'pending'),
+    got: got.v ?? null,
   }
 }
 
@@ -97,19 +134,46 @@ function differences(want, got) {
 }
 const sortKeys = (o) => Object.fromEntries(Object.entries(o ?? {}).sort(([a], [b]) => a.localeCompare(b)))
 
+const lastUp = (socks) => socks.flatMap((w) => w.sent).filter((m) => m.t === 'up').pop()?.id ?? 'none'
+
 async function runCase(c, links) {
   const keys = Keys.fromFragment('#' + links[c.as])
   const r = new Replica(keys, SERVER)
-  const ws = fakeWs()
-  Object.assign(r, { db: fakeDb(), persistence: {}, ws, since: c.since })
-  globalThis.fetch = fakeFetch(c.uploads)
+  const socks = [fakeWs()]
+  // connected, as if hello had gone (the cases start from there); edits made here go out as in open()
+  Object.assign(r, { db: fakeDb(), persistence: {}, ws: socks[0], since: c.since, status: 'connecting' })
+  r.watchLocal()
+  const server = fakeServer(c, keys)
+  globalThis.fetch = server.fetch
+  const got = {}
+  let fetching = null
+  const look = async () => {
+    await settle()
+    if (fetching && !fetching.done) got.v = 'waiting'
+    return state(r, socks, server, got)
+  }
   const bad = []
   for (const [i, step] of c.steps.entries()) {
-    try { await r.handle(structuredClone(step.msg)) } catch (e) { bad.push(`step ${i + 1} raised ${e?.name}: ${e?.message}`) }
+    try {
+      if (step.msg) await r.handle(structuredClone(step.msg))
+      else if (step.edit) {
+        const { file, append } = step.edit
+        r.doc.transact(() => { const t = r.files.get(file); if (t) t.insert(t.length, append); else r.files.set(file, new Y.Text(append)) })
+      } else if ('ackLast' in step) await r.handle({ t: 'ack', id: lastUp(socks), q: step.ackLast })
+      else if (step.refuseLast) await r.handle({ t: 'err', code: step.refuseLast, id: lastUp(socks), m: 'refused' })
+      else if (step.reconnect) { r.dropped(); socks.push(fakeWs()); r.opened(socks[socks.length - 1]) }
+      else if (step.putFile) await r.putBlob(new Uint8Array(Buffer.from(step.putFile.hex, 'hex')), step.putFile.kind ?? 'file')
+      else if (step.getFile) {
+        delete got.v
+        const f = { done: false }
+        fetching = f
+        r.getBlob(step.getFile).then((b) => { got.v = Buffer.from(b).toString('hex') }, () => { got.v = 'unavailable' }).finally(() => { f.done = true })
+      }
+    } catch (e) { bad.push(`step ${i + 1} raised ${e?.name}: ${e?.message}`) }
     await settle()
-    if (step.expect) bad.push(...differences(step.expect, await state(r, ws)).map((d) => `after step ${i + 1}: ${d}`))
+    if (step.expect) bad.push(...differences(step.expect, await look()).map((d) => `after step ${i + 1}: ${d}`))
   }
-  bad.push(...differences(c.expect, await state(r, ws)))
+  bad.push(...differences(c.expect, await look()))
   return bad
 }
 

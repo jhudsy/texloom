@@ -247,14 +247,7 @@ export class Replica {
     this.heardMode = (await idbGet<StorageMode>(this.db, 'kv', 'heardMode')) ?? null
     navigator.storage?.persist?.()
 
-    this.doc.on('update', (update: Uint8Array, origin: unknown) => {
-      if (origin === REMOTE || origin === this.persistence) return
-      if (!this.keys.writable || this.deletedAt) return
-      const id = crypto.randomUUID()
-      this.pending++
-      this.onStatus()
-      idbPut(this.db, 'outbox', id, update).then(() => this.send(id, update, [id]))
-    })
+    this.watchLocal()
     // Registered before the editor's own listeners, so they only ever see cleaned states.
     this.awareness.on('change', ({ added, updated }: any, origin: unknown) => {
       if (origin !== REMOTE) return
@@ -273,6 +266,18 @@ export class Replica {
     this.out.observe(() => { clearTimeout(pruneTimer); pruneTimer = setTimeout(() => this.pruneOutputs().catch((e) => quiet('old outputs are pruned at the next change', e)), 3000) })
     if (this.syncMode === 'live') this.connect()
     else { this.status = 'paused'; this.onStatus() }
+  }
+
+  /** Changes made here go into the outbox, and out to the server (scripts: check-replica.mjs calls this too). */
+  private watchLocal() {
+    this.doc.on('update', (update: Uint8Array, origin: unknown) => {
+      if (origin === REMOTE || origin === this.persistence) return
+      if (!this.keys.writable || this.deletedAt) return
+      const id = crypto.randomUUID()
+      this.pending++
+      this.onStatus()
+      idbPut(this.db, 'outbox', id, update).then(() => this.send(id, update, [id]))
+    })
   }
 
   async close() {
@@ -316,13 +321,7 @@ export class Replica {
     this.status = 'connecting'; this.onStatus()
     const ws = new WebSocket(url)
     this.ws = ws
-    ws.onopen = () => {
-      this.backoff = 1000
-      const code = this.creationCode()
-      this.logPending = null
-      this.missing.clear() // (this catch-up finds them again if they're still missing)
-      ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ...(code ? { code } : {}) }))
-    }
+    ws.onopen = () => this.opened(ws)
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data), run = () => this.handle(m)
       // a catch-up's pages are applied one after another, in order (other messages don't wait)
@@ -330,16 +329,31 @@ export class Replica {
       done.catch((e) => console.error(e))
     }
     ws.onclose = () => {
-      this.ws = null
-      this.parts.clear()
-      this.synced = false
-      this.inflight.clear()
-      this.peers = 0
-      this.status = this.syncMode === 'manual' ? 'paused' : 'offline'; this.onStatus()
+      this.dropped()
       if (this.closed || this.deletedAt || this.syncMode !== 'live') return
       // A refusal won't change in seconds; renewing a code or entering one calls reconnect().
       this.retry = setTimeout(() => this.connect(), this.denied ? 5 * 60_000 : (this.backoff = Math.min(this.backoff * 2, 30000)))
     }
+  }
+
+  /** A connection to the server is open: start catching up (check-replica.mjs calls this too). */
+  private opened(ws: WebSocket) {
+    this.ws = ws
+    this.backoff = 1000
+    const code = this.creationCode()
+    this.logPending = null
+    this.missing.clear() // (this catch-up finds them again if they're still missing)
+    ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ...(code ? { code } : {}) }))
+  }
+
+  /** The connection closed (check-replica.mjs calls this too). */
+  private dropped() {
+    this.ws = null
+    this.parts.clear()
+    this.synced = false
+    this.inflight.clear()
+    this.peers = 0
+    this.status = this.syncMode === 'manual' ? 'paused' : 'offline'; this.onStatus()
   }
 
   /** The last page of a catch-up is in: what follows from being up to date. */
@@ -1057,6 +1071,7 @@ export class Replica {
       }
       if (!r?.ok) return
       await idbDel(this.db, 'pending', id)
+      if (this.refusal) { this.refusal = null; this.onStatus() } // stored again (as in texloom/replica.py)
     }
   }
 

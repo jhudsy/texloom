@@ -214,8 +214,8 @@ class Replica:
             log.debug("usage not asked: %s", e)
 
     async def _send_update(self, uid: str, update: bytes) -> None:
-        if self.ws is None or self.ws.closed:
-            return  # stays in outbox; flushed on reconnect
+        if self.ws is None or self.ws.closed or not self._caught_up:
+            return  # stays in the outbox: sent once caught up (sent sooner, it went twice), as in web/src/replica.ts
         update = packed(update)  # a big change goes compressed (packing.py)
         if len(update) > UPDATE_BATCH:
             if self.server_mode == "relay" or self.storage == "relay":
@@ -806,18 +806,9 @@ class Replica:
             while self.deleted_at is None:  # a deleted project stays as it is: nothing to connect to
                 try:
                     async with http.ws_connect(ws_url, heartbeat=30, max_msg_size=64 * 1024 * 1024) as ws:
-                        self.ws = ws
-                        self._caught_up = False
-                        self._log_pending = None
-                        self._missing.clear()  # (this catch-up finds them again if they're still missing)
-                        self._resync = 0 if self._resync == 1 else self._resync
                         backoff = 1
                         log.info("connected to %s", self.server)
-                        self.connected.set()
-                        hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__, "pages": 1}  # (--min-version)
-                        if self.create_code:
-                            hello["code"] = self.create_code
-                        await ws.send_json(hello)
+                        await self._opened(ws)
                         async for msg in ws:
                             if msg.type != aiohttp.WSMsgType.TEXT:
                                 continue
@@ -829,13 +820,30 @@ class Replica:
                 except (aiohttp.ClientError, OSError) as e:
                     log.info("offline (%s); retrying in %ds", e.__class__.__name__, backoff)
                 finally:
-                    self.ws = None
-                    self._parts.clear()
-                    self.connected.clear()
+                    self._dropped()
                 if self.deleted_at is not None:
                     break
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30)
+
+    async def _opened(self, ws) -> None:
+        """A connection to the server is open: start catching up (scripts/check_replica.py calls this too)."""
+        self.ws = ws
+        self._caught_up = False
+        self._log_pending = None
+        self._missing.clear()  # (this catch-up finds them again if they're still missing)
+        self._resync = 0 if self._resync == 1 else self._resync
+        self.connected.set()
+        hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__, "pages": 1}  # (--min-version)
+        if self.create_code:
+            hello["code"] = self.create_code
+        await ws.send_json(hello)
+
+    def _dropped(self) -> None:
+        """The connection closed (scripts/check_replica.py calls this too)."""
+        self.ws = None
+        self._parts.clear()
+        self.connected.clear()
 
     async def _on_caught_up(self) -> None:
         """The last page of a catch-up is in: what follows from being up to date."""
@@ -862,8 +870,8 @@ class Replica:
         self._hold_for_missing()
         self._seen = {q for q in self._seen if q > self.since}
         self._mark_seen(self.since)
+        self._caught_up = True  # (before the outbox goes: _send_update waits for it)
         await self.flush_outbox()
-        self._caught_up = True
         await self.p2p({"k": "sv1", "sv": b64e(self.doc.get_state())})
         self.synced.set()
         await self._maybe_compact(count)

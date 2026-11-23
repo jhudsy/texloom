@@ -1000,15 +1000,19 @@ What each must do the same is held by cases both run, written once:
   which entries count (signatures and their prefixes, snapshots, compressed, undecryptable,
   malformed, uploads fetched, gone or not there yet), revocations, deletion, refusals and storage
   problems, peers' changes (signed, revoked, in pieces, before catching up) and answers to a peer,
-  and snapshots of a long log. The messages are real (encrypted and signed); the expected results
-  are written by hand from the protocol, so the two apps are held to it, not to each other. Each
-  replica runs against a stand-in connection and server, so nothing touches the network.
+  and snapshots of a long log. Also what goes out: edits made here (sent once caught up, several
+  as one, kept until acknowledged, sent again after reconnecting, kept when refused) and files
+  (uploaded signed and marked as file or output, kept when refused, none for a relayed project or
+  a read-only link; fetched and checked against their id, asked of peers, given to peers). The
+  messages are real (encrypted and signed); the expected results are written by hand from the
+  protocol, so the two apps are held to it, not to each other. Each replica runs against a
+  stand-in connection and server, so nothing touches the network.
 - **The project list** (`scripts/listsync-vectors.json`), **compression** (`packing-vectors.json`)
   and **cross-references** (`xr-vectors.json`), and text handling through `check_props` on both
   sides (below).
 
-Not covered by shared cases: local edits going out and being acknowledged (the outbox), files,
-presence; the folder syncs are each checked by their own model (below). New logic goes on one
+Not covered by shared cases: the folder syncs, each checked by its own model (below), and what
+only one app does (presence is the web app's; compiling for others is the desktop's). New logic goes on one
 side where it can: the desktop app only syncs, so what is computed (an export, a merge shown to
 the user) lives in the web app and reaches the desktop as data.
 

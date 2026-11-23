@@ -129,9 +129,9 @@ ALL = {"main.tex": "Hello\nWorld\n", "b.tex": "B\n"}
 cases: list[dict] = []
 
 
-def case(what: str, steps: list, expect: dict, *, as_: str = "reader", since: int = 0, uploads: dict | None = None) -> None:
-    cases.append({"what": what, "as": as_, "since": since, "uploads": uploads or {},
-                  "steps": [s if "msg" in s else {"msg": s} for s in steps], "expect": expect})
+def case(what: str, steps: list, expect: dict, *, as_: str = "reader", since: int = 0, uploads: dict | None = None, put: dict | None = None) -> None:
+    cases.append({"what": what, "as": as_, "since": since, "uploads": uploads or {}, **({"put": put} if put else {}),
+                  "steps": [{"msg": s} if "t" in s else s for s in steps], "expect": expect})
 
 
 # -- catching up from the server's log
@@ -296,6 +296,83 @@ case("a read-only link sends a peer its state, but no changes (it can't sign the
      {"sent": ["p2p:sv1", "p2p:sv2"]})
 case("a peer that already has everything is sent nothing more",
      [log(1, [entry(1, U1)]), p2p({"k": "sv2", "sv": b64e(HAS_U1)})],
+     {"sent": ["p2p:sv1"]}, as_="member")
+
+# -- edits made here: out to the server, kept until it has them
+def edit(file: str, text: str, **more) -> dict:
+    return {"edit": {"file": file, "append": text}, **more}
+
+
+case("an edit is sent, and kept until the server acknowledges it",
+     [log(0, []), edit("main.tex", "Hi\n", expect={"pending": 1, "sent": ["p2p:sv1", "up"], "sentFiles": {"main.tex": "Hi\n"}}),
+      {"ackLast": 1}],
+     {"pending": 0, "since": 1}, as_="member")
+case("an edit made while catching up waits, and goes once caught up",
+     [edit("main.tex", "Hi\n", expect={"pending": 1, "sent": []}), log(0, [])],
+     {"pending": 1, "sent": ["p2p:sv1", "up"], "sentFiles": {"main.tex": "Hi\n"}}, as_="member")
+case("several edits waiting go as one change",
+     [edit("main.tex", "One\n"), edit("main.tex", "Two\n"), edit("b.tex", "B\n"), log(0, [])],
+     {"sent": ["p2p:sv1", "up"], "sentFiles": {"main.tex": "One\nTwo\n", "b.tex": "B\n"}}, as_="owner")
+case("an edit not acknowledged is sent again after reconnecting",
+     [log(0, []), edit("main.tex", "Hi\n"), {"reconnect": True}, log(0, [])],
+     {"pending": 1, "sent": ["p2p:sv1", "p2p:sv1", "up", "up", "hello"], "sentFiles": {"main.tex": "Hi\n"}}, as_="member")
+case("an acknowledged edit isn't sent again after reconnecting",
+     [log(0, []), edit("main.tex", "Hi\n"), {"ackLast": 1}, {"reconnect": True}, log(1, [])],
+     {"pending": 0, "since": 1, "sent": ["p2p:sv1", "p2p:sv1", "up", "hello"]}, as_="member")
+case("an edit the server won't store is kept, and the reason shown",
+     [log(0, []), edit("main.tex", "Hi\n"), {"refuseLast": "quota-full"}],
+     {"pending": 1, "storeProblem": "quota-full"}, as_="member")
+case("an edit and a change from someone else both end up in the document",
+     [log(0, []), edit("main.tex", "Mine\n"), up(entry(1, U3))],
+     {"files": {"main.tex": "Mine\n", "b.tex": "B\n"}, "sentFiles": {"main.tex": "Mine\n"}}, as_="member")
+
+# -- files: uploaded signed, fetched and checked, asked of peers
+FILE = bytes(range(256)) * 3
+FID = owner.blob_id(FILE)
+OTHER = b"some other content"
+OID = owner.blob_id(OTHER)
+case("a file added here is uploaded, signed, as a project file",
+     [log(0, []), {"putFile": {"hex": FILE.hex()}}],
+     {"uploaded": [{"id": FID, "output": False, "ok": True}], "pendingFiles": 0}, as_="member")
+case("compiled output is uploaded marked as output",
+     [log(0, []), {"putFile": {"hex": FILE.hex(), "kind": "output"}}],
+     {"uploaded": [{"id": FID, "output": True, "ok": True}], "pendingFiles": 0}, as_="member")
+case("a file added while catching up is uploaded once caught up",
+     [{"putFile": {"hex": FILE.hex()}}, log(0, [])],
+     {"uploaded": [{"id": FID, "output": False, "ok": True}], "pendingFiles": 0}, as_="member")
+case("a file the server won't store is kept to try again, and the reason shown",
+     [log(0, []), {"putFile": {"hex": FILE.hex()}}],
+     {"pendingFiles": 1, "storeProblem": "quota-full"}, as_="member", put={"status": 507, "code": "quota-full"})
+case("a file the server can't take just now is kept to try again",
+     [log(0, []), {"putFile": {"hex": FILE.hex()}}],
+     {"pendingFiles": 1, "storeProblem": None}, as_="member", put={"status": 503})
+case("a file stored again clears a storage problem",
+     [log(0, []), {"t": "err", "code": "quota-full", "id": "x", "m": "full"}, {"putFile": {"hex": FILE.hex()}}],
+     {"pendingFiles": 0, "storeProblem": None}, as_="member")
+case("a project that's only relayed uploads no files (they go peer to peer)",
+     [{**log(0, []), "mode": "relay"}, {"putFile": {"hex": FILE.hex()}}],
+     {"uploaded": []}, as_="member")
+case("a read-only link uploads nothing",
+     [log(0, []), {"putFile": {"hex": FILE.hex()}}],
+     {"uploaded": []})
+case("a file is fetched from the server",
+     [log(0, []), {"getFile": FID}],
+     {"got": FILE.hex()}, uploads={FID: {"status": 200, "body": owner.encrypt(FILE).hex()}})
+case("a file the server swapped for other content isn't taken: peers are asked instead",
+     [log(0, []), {"getFile": FID}],
+     {"got": "waiting", "sent": ["p2p:sv1", "p2p:breq"]}, uploads={FID: {"status": 200, "body": owner.encrypt(OTHER).hex()}})
+case("a file the server doesn't have is asked of peers, and a peer's answer taken",
+     [log(0, []), {"getFile": FID, "expect": {"got": "waiting", "sent": ["p2p:sv1", "p2p:breq"]}},
+      p2p({"k": "blob", "id": FID, "b": b64e(FILE)})],
+     {"got": FILE.hex()})
+case("a peer's answer with other content than asked for is ignored",
+     [log(0, []), {"getFile": FID}, p2p({"k": "blob", "id": FID, "b": b64e(OTHER)})],
+     {"got": "waiting"})
+case("a file kept here is given to a peer that asks for it",
+     [log(0, []), {"putFile": {"hex": FILE.hex()}}, p2p({"k": "breq", "id": FID})],
+     {"sent": ["p2p:sv1", "p2p:blob"]}, as_="member", put={"status": 503})
+case("a peer asking for a file not kept here gets nothing",
+     [log(0, []), p2p({"k": "breq", "id": OID})],
      {"sent": ["p2p:sv1"]}, as_="member")
 
 out = {
