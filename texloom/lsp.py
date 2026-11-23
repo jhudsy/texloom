@@ -10,10 +10,10 @@ comments arrive while it runs and it works beside the app. What it offers:
   a comment; Hint: a suggested change), with the author (✓: a personal link vouches for the name);
 - hover: the whole thread;
 - code actions: Resolve, and Open in the browser's Review tab;
-- commands: texloom.resolve [id], texloom.reply [id, text] (an editor that can ask for text, such
-  as the VS Code extension), texloom.openReview [];
+- commands: texloom.resolve [id], texloom.reply [id, text] and texloom.addComment [uri, range, text]
+  (an editor that can ask for text, such as the VS Code extension), texloom.openReview [];
 - for the VS Code extension: the request texloom/comments {uri} (a file's comments with their
-  ranges and threads) and the notification texloom/changed.
+  ranges and threads, and whether it can take new ones) and the notification texloom/changed.
 
 Where a buffer has edits that aren't saved, a comment follows its quoted text in the buffer.
 Positions are UTF-16, as LSP says by default.
@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 from .cli import DEFAULT_CONFIG, browser_link, config_path, load, load_config
-from .comments import Comment, read, reply, resolve
+from .comments import Comment, add, read, reply, resolve
 from .listsync import my_name
 from .replica import Replica
 from .textpos import length_u16
@@ -41,7 +41,7 @@ log = logging.getLogger("texloom")
 
 POLL = 2  # seconds between looks for new comments
 SOURCE = "texloom"
-COMMANDS = ["texloom.resolve", "texloom.reply", "texloom.openReview"]
+COMMANDS = ["texloom.resolve", "texloom.reply", "texloom.addComment", "texloom.openReview"]
 ERROR, WARNING, INFORMATION, HINT = 1, 2, 3, 4
 
 
@@ -258,19 +258,57 @@ class Lsp:
             raise ValueError("this folder isn't a TeXLoom folder")
         await asyncio.wait_for(r.synced.wait(), 30)
         if not r.can_write:
-            raise ValueError("this folder has a read-only link: it can't reply or resolve")
+            raise ValueError("this folder has a read-only link: it can't comment, reply or resolve")
+        result = None
         try:
             if name == "texloom.resolve":
                 resolve(r, str(args[0]))
             elif name == "texloom.reply":
                 reply(r, str(args[0]), str(args[1]), self.name)
+            elif name == "texloom.addComment":
+                result = {"id": self.new_comment(str(args[0]), args[1], str(args[2]))}
             else:
                 raise ValueError(f"unknown command {name}")
         except KeyError as e:
             raise ValueError(f"no comment with id {e.args[0]}") from None
         self.seen = None
         await self.settle()
-        return None
+        return result
+
+    def new_comment(self, uri: str, rng: dict, text: str) -> str:
+        """A new comment on what `rng` covers in the editor's buffer (on its line, if it covers no text).
+        The buffer may have edits that aren't saved or synced yet: the comment goes on the same text
+        in the project, nearest where it is in the buffer."""
+        assert self.replica
+        text = text.strip()
+        if not text:
+            raise ValueError("the comment is empty")
+        rel = self.rel(uri)
+        if rel is None or rel not in self.replica.files:
+            raise ValueError("this file isn't part of the synced project")
+        buf = self.buffer(uri, rel) or ""
+        lo, hi = sorted((offset(buf, rng["start"]), offset(buf, rng["end"])))
+        if not buf[lo:hi].strip():  # nothing selected: the line it's on
+            lo, hi = buf.rfind("\n", 0, lo) + 1, (buf.find("\n", lo) + 1 or len(buf) + 1) - 1
+        while lo < hi and buf[lo].isspace():
+            lo += 1
+        while hi > lo and buf[hi - 1].isspace():
+            hi -= 1
+        quote = buf[lo:hi]
+        if not quote:
+            raise ValueError("select some text, or comment on a line that has text")
+        proj = str(self.replica.files[rel])
+        if proj == buf:
+            at = lo
+        else:  # unsaved or unsynced edits: the same text in the project, nearest where it is here
+            at, i = -1, proj.find(quote)
+            while i >= 0:
+                if at < 0 or abs(i - lo) < abs(at - lo):
+                    at = i
+                i = proj.find(quote, i + 1)
+            if at < 0:
+                raise ValueError("that text isn't in the synced file yet: save it, let it sync, then comment")
+        return add(self.replica, "comment", rel, at, at + len(quote), text, self.name)
 
     def actions(self, uri: str, rng: dict) -> list[dict]:
         rel = self.rel(uri)
@@ -325,10 +363,11 @@ class Lsp:
             uri = p["textDocument"]["uri"] if "textDocument" in p else p["uri"]
             rel = self.rel(uri)
             if rel is None:
-                return {"comments": [], "name": self.name, "canWrite": False}
+                return {"comments": [], "name": self.name, "canWrite": False, "canComment": False}
             text = self.buffer(uri, rel)
+            writable = bool(self.replica and self.replica.can_write and self.replica.deleted_at is None)
             return {"comments": [self.describe(c, text) for c in self.comments_in(rel)], "name": self.name,
-                    "canWrite": bool(self.replica and self.replica.can_write)}
+                    "canWrite": writable, "canComment": writable and rel in self.replica.files}
         raise LookupError(method)
 
     async def notification(self, method: str, p: dict) -> None:

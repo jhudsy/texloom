@@ -1,6 +1,7 @@
 // TeXLoom comments in VS Code (issue #36). Starts `texloom lsp` (the language server in
 // texloom/lsp.py) for the folder you have open, and shows its comments as native comment threads
-// beside the text, with reply and resolve, and/or as Problems-panel entries.
+// beside the text, with reply and resolve, and/or as Problems-panel entries. New comments can be
+// started from the editor: the + in the gutter, or Add Comment with text selected.
 // All it knows of a project is what the server answers to `texloom/comments`.
 const vscode = require('vscode')
 const cp = require('child_process')
@@ -83,23 +84,36 @@ function refresh(delay = 300) {
 }
 
 async function run(cmd, args) {
+  let result = null
   try {
-    await client.sendRequest('workspace/executeCommand', { command: cmd, arguments: args })
+    result = await client.sendRequest('workspace/executeCommand', { command: cmd, arguments: args })
   } catch (e) {
     vscode.window.showErrorMessage(`TeXLoom: ${e.message}`)
   }
   refresh(0)
+  return result
+}
+
+/** Where comments can be started: anywhere in a file of a project this folder can comment on. */
+async function commentable(doc) {
+  if (!client || !SELECTOR.some((s) => s.language === doc.languageId) || doc.uri.scheme !== 'file') return []
+  try {
+    const res = await client.sendRequest('texloom/comments', { textDocument: { uri: doc.uri.toString() } })
+    return res.canComment ? [new vscode.Range(0, 0, Math.max(0, doc.lineCount - 1), 0)] : []
+  } catch { return [] }
 }
 
 function activate(context) {
-  const api = { threads } // (for the extension's own test)
+  const api = { threads, commentable } // (for the extension's own test)
   const cmd = command()
   if (!cmd) {
     vscode.window.showWarningMessage('TeXLoom comments needs the TeXLoom app or the texloom command-line helper (texloom.org/download). Install it, or set “texloom.command”.')
     return api
   }
   controller = vscode.comments.createCommentController('texloom', 'TeXLoom comments')
-  controller.options = { placeHolder: 'Reply…', prompt: 'Reply to this comment' }
+  controller.options = { placeHolder: 'Write a comment…', prompt: 'Reply…' }
+  controller.commentingRangeProvider = { provideCommentingRanges: commentable }
+  api.controller = controller
   context.subscriptions.push(controller)
 
   client = new LanguageClient('texloom', 'TeXLoom', { command: cmd, args: ['lsp'] }, {
@@ -120,6 +134,19 @@ function activate(context) {
       const id = ids.get(reply.thread)
       const text = (reply.text || '').trim()
       if (id && text) run('texloom.reply', [id, text])
+    }),
+    vscode.commands.registerCommand('texloom.createThread', async (reply) => {
+      const th = reply.thread
+      const text = (reply.text || '').trim()
+      if (!text || !th.range) return
+      const r = th.range
+      const res = await run('texloom.addComment', [th.uri.toString(), { start: { line: r.start.line, character: r.start.character }, end: { line: r.end.line, character: r.end.character } }, text])
+      if (res && res.id) { // the new thread becomes the comment's: the refresh fills it in where it landed
+        const key = `${th.uri.toString()}#${res.id}`
+        ids.set(th, res.id)
+        threads.set(key, th)
+        refresh(0)
+      } else th.dispose()
     }),
     vscode.commands.registerCommand('texloom.resolveThread', (thread) => {
       const id = ids.get(thread)

@@ -250,7 +250,8 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   **Open the Review tab** as code actions; it keeps its own copy of the project, so new comments appear
   while you work, and follows the quoted text when the buffer has unsaved edits. In VS Code,
   `editors/vscode` is an extension that starts it and shows native comment threads with reply and
-  resolve (`vsce package` there makes the .vsix). Other editors start it as an extra server for `.tex`
+  resolve, and starts new comments from the + beside a line or **Add Comment** on a selection
+  (`vsce package` there makes the .vsix). Other editors start it as an extra server for `.tex`
   files: Neovim `vim.lsp.config('texloom', { cmd = { 'texloom', 'lsp' }, filetypes = { 'tex', 'plaintex' },
   root_markers = { '.texloom' } })` then `vim.lsp.enable('texloom')` (the setting names are for Neovim
   0.11 or later); Emacs with lsp-mode `(lsp-register-client (make-lsp-client :new-connection
@@ -258,11 +259,12 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   (eglot runs one server per buffer, so use lsp-mode beside texlab); Helix a `[language-server.texloom]`
   with `command = "texloom", args = ["lsp"]` added to the `latex` language's `language-servers`; Zed,
   Sublime Text (LSP package) and Kate have a "custom server" setting that takes the same command.
-  The app's **Show comments in your editor…** (File menu, beside Connect an AI tool) shows the right command
+  The app's **Show comments in your editor…** (File menu, beside Use an AI agent on your computer) shows the right command
   and snippet for each editor. The app's Settings has a switch for each of the two servers (MCP for AI tools, and this one); when one is off
   the command refuses to start on that computer.
-  Replying needs an editor that can ask for text, as the VS Code extension does: elsewhere, use
-  `texloom comments reply`.
+  Replying and starting a comment need an editor that can ask for text, as the VS Code extension
+  does (the server's `texloom.reply` and `texloom.addComment` commands): elsewhere, use
+  `texloom comments reply`, or the web app.
 - **Several at once:** **Resolve all…** in the Review tab resolves every open comment. To act on some,
   ⌘/Ctrl-click cards to select them (⇧-click for a run, ⌘/Ctrl+A for all), or select text in the
   editor and press **Select in text** for the comments and suggestions on it; a bar then offers

@@ -19,7 +19,6 @@ import json
 import logging
 import os
 import re
-import secrets
 import shutil
 import sys
 import tempfile
@@ -27,17 +26,17 @@ import threading
 import time
 from pathlib import Path
 
-from pycrdt import Array, Assoc, Map, Text
+from pycrdt import Array, Map, Text
 
 from . import __version__
 from .anchors import index_in
 from .confine import outside_reads
-from .comments import mentions
+from .comments import add, mentions, sticky
 from .crypto import Keys, b64e, signed_name
 from .folder import apply_text, compile_externals, latexmk
 from .paths import STATE, latexmk_command, main_file, safe_rel, tex_names_refused
 from .replica import Replica
-from .textpos import Char, char_of_u16, u16_of
+from .textpos import Char, char_of_u16
 
 log = logging.getLogger("texloom")
 
@@ -117,18 +116,13 @@ class Project:
             asyncio.get_event_loop().create_task(self.announce())
             return
         try:
-            a = self._sticky(yt, s, start, start == len(s))
-            h = self._sticky(yt, s, end, end == len(s) or end > start)
+            a = sticky(yt, s, start, start == len(s))
+            h = sticky(yt, s, end, end == len(s) or end > start)
             self.where = {"file": path, "cursor": {"anchor": a.to_json(), "head": h.to_json()}}
         except Exception:  # noqa: BLE001 - presence is best-effort
             log.debug("cursor not shared: file only", exc_info=True)
             self.where = {"file": path}
         asyncio.get_event_loop().create_task(self.announce())
-
-    @staticmethod
-    def _sticky(yt: Text, s: str, i: int, before: bool):
-        at = u16_of(s, Char(i))
-        return yt.sticky_index(at, Assoc.BEFORE if before and i > 0 else Assoc.AFTER)
 
     def _anchored(self, path: str, s: str, start) -> Char | None:
         """Where a comment or suggestion starts now (a Python index into `s`), from its stored
@@ -247,26 +241,7 @@ class Project:
         return "\n".join(out) or "No matches."
 
     def _add_item(self, kind: str, path: str, start: int, end: int, text: str) -> str:
-        if self.r.deleted_at is not None:
-            raise PermissionError("The owner deleted this project for everyone: it can be read but not changed.")
-        if not self.r.can_write:
-            raise PermissionError("Comments and suggestions need an edit link.")
-        yt = self.r.files[path]
-        s = str(yt)
-        iid = f"{secrets.token_hex(4)}-{secrets.token_hex(2)}-4{secrets.token_hex(2)[1:]}-a{secrets.token_hex(2)[1:]}-{secrets.token_hex(6)}"
-        fields = {
-            "kind": kind, "file": path, "text": text[:20000], "by": self.name, "at": int(time.time() * 1000),
-            "quote": s[start:end][:20000], "resolved": False, "replies": Array(),
-        }
-        # pycrdt places anchors wrongly in non-ASCII text (anchors.py): there, the item goes without,
-        # and the web app anchors it where its quote is (merges.ts)
-        if s.isascii():
-            fields["start"] = self._sticky(yt, s, start, start == len(s)).encode()
-            fields["end"] = (self._sticky(yt, s, end, True) if end > 0 else self._sticky(yt, s, end, False)).encode()
-        # who wrote it is signed (as in web/src/review.ts): its id with the name
-        fields["s"] = b64e(self.r.keys.sign(b"review:" + f"{iid}\n{self.name}".encode()))
-        item = Map(fields)
-        self.r.local_change(lambda: self.review.__setitem__(iid, item))
+        iid = add(self.r, kind, path, start, end, text, self.name)
         self.point_at(path, start, end)
         return iid
 

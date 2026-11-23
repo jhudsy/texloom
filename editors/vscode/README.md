@@ -8,4 +8,4 @@ It needs a TeXLoom folder (one the desktop app or `texloom run` keeps in step wi
 
 Settings: `texloom.command` (where TeXLoom is, if not on your PATH), `texloom.comments` (threads, Problems panel entries, or both).
 
-Suggested changes are shown, but accepted or rejected in the web app's Review tab, where the change can be seen. Starting new comments from VS Code isn't there yet.
+Suggested changes are shown, but accepted or rejected in the web app's Review tab, where the change can be seen. To start a comment, click the **+** beside a line, or select text and use **Add Comment** (⌘K ⌘⌥C, or Ctrl+K Ctrl+Alt+C): it goes on the selected text, or on the line's text when nothing is selected. Save first if you've just typed that text: a comment can only go on text the project already has.

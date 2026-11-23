@@ -8,16 +8,17 @@ link's signature vouches for that name, and whether it mentions you (web/src/men
 """
 from __future__ import annotations
 
+import secrets
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pycrdt import Array, Map
+from pycrdt import Array, Assoc, Map, Text
 
 from .anchors import index_in
 from .crypto import b64e, signed_name
 from .replica import Replica
-from .textpos import char_of_u16
+from .textpos import Char, char_of_u16, u16_of
 
 OVERVIEW = "comments.md"  # in the folder's .texloom
 
@@ -157,6 +158,39 @@ def write_overview(folder: Path, r: Replica, me: str) -> bool:
     tmp.write_text(text, "utf-8")
     tmp.replace(path)
     return True
+
+
+def sticky(yt: Text, s: str, i: int, before: bool):
+    """A place in `yt` (whose text is `s`) that moves with edits around it: at Python index `i`,
+    kept with the text before it or after it."""
+    return yt.sticky_index(u16_of(s, Char(i)), Assoc.BEFORE if before and i > 0 else Assoc.AFTER)
+
+
+def add(r: Replica, kind: str, path: str, start: int, end: int, text: str, name: str) -> str:
+    """Add a comment (or, with kind "suggestion", a suggested change: `text` replaces start..end) on
+    `path` from Python index `start` to `end`, signed as the web app signs it (web/src/review.ts).
+    Returns its id. Used by `texloom mcp` and `texloom lsp`."""
+    if r.deleted_at is not None:
+        raise PermissionError("The owner deleted this project for everyone: it can be read but not changed.")
+    if not r.can_write:
+        raise PermissionError("Comments and suggestions need an edit link.")
+    yt = r.files[path]
+    s = str(yt)
+    iid = f"{secrets.token_hex(4)}-{secrets.token_hex(2)}-4{secrets.token_hex(2)[1:]}-a{secrets.token_hex(2)[1:]}-{secrets.token_hex(6)}"
+    fields = {
+        "kind": kind, "file": path, "text": text[:20000], "by": name, "at": int(time.time() * 1000),
+        "quote": s[start:end][:20000], "resolved": False, "replies": Array(),
+    }
+    # pycrdt places anchors wrongly in non-ASCII text (anchors.py): there, the item goes without,
+    # and the web app anchors it where its quote is (merges.ts)
+    if s.isascii():
+        fields["start"] = sticky(yt, s, start, start == len(s)).encode()
+        fields["end"] = (sticky(yt, s, end, True) if end > 0 else sticky(yt, s, end, False)).encode()
+    # who wrote it is signed (as in web/src/review.ts): its id with the name
+    fields["s"] = b64e(r.keys.sign(b"review:" + f"{iid}\n{name}".encode()))
+    item = Map(fields)
+    r.local_change(lambda: r.doc.get("review", type=Map).__setitem__(iid, item))
+    return iid
 
 
 def reply(r: Replica, iid: str, text: str, name: str) -> None:

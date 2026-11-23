@@ -192,6 +192,53 @@ async def main() -> int:
         moved = await until(lambda: (c.diagnostics(uri) or [{}])[0].get("range", {}).get("start", {}).get("line") == 4, 10)
         check("with unsaved edits the comment follows its text", moved, c.diagnostics(uri))
 
+        # a new comment from the editor, on text chosen in the buffer (which has an unsaved line above it)
+        from texloom.comments import read as read_all
+        line4 = edited.splitlines()[4]
+        res = await c.call("texloom/comments", {"textDocument": {"uri": uri}})
+        check("texloom/comments says the file can take comments", res["result"].get("canComment") is True, res)
+        sel = {"start": {"line": 4, "character": 0}, "end": {"line": 4, "character": len("Second line")}}
+        res = await c.call("workspace/executeCommand", {"command": "texloom.addComment", "arguments": [uri, sel, "  Is this clear?  "]})
+        new_id = (res.get("result") or {}).get("id")
+        def found(iid):
+            return next((x for x in read_all(web, True) if x.id == iid), None)
+        arrived = await until(lambda: found(new_id) is not None, 20)
+        x = found(new_id)
+        check("a comment from the editor reaches the collaborator, as Dana, on the selected text", arrived and x and x.by == "Dana" and x.quote == "Second line"
+              and x.text == "Is this clear?" and x.span == (MAIN.index("Second line"), MAIN.index("Second line") + 11), (res, x))
+        shown_new = await until(lambda: new_id in [d["code"] for d in c.diagnostics(uri) or []], 15)
+        check("and comes back to the editor as a comment there", shown_new, c.diagnostics(uri))
+        res = await c.call("workspace/executeCommand", {"command": "texloom.addComment", "arguments": [uri, {"start": {"line": 5, "character": 2}, "end": {"line": 5, "character": 2}}, "Whole line"]})
+        await until(lambda: found((res.get("result") or {}).get("id")) is not None, 20)
+        x = found((res.get("result") or {}).get("id"))
+        check("with nothing selected, it's on the line's text", x is not None and x.quote == "Third line.", (res, x))
+        res = await c.call("workspace/executeCommand", {"command": "texloom.addComment", "arguments": [uri, {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 18}}, "On unsaved text"]})
+        check("text that isn't in the synced file is refused, saying why", "error" in res and "isn't in the synced file" in res["error"].get("message", ""), res)
+        res = await c.call("workspace/executeCommand", {"command": "texloom.addComment", "arguments": [uri, sel, "   "]})
+        check("an empty comment is refused", "error" in res, res)
+        assert line4.startswith("Second line")
+
+        # non-ASCII text: positions are UTF-16, and the comment is placed by its quote
+        NOTES = "Café 😀 résumé — naïve.\n"
+        web.local_change(lambda: web.files.__setitem__("notes.tex", Text(NOTES)))
+        nuri = (d / "notes.tex").as_uri()
+        c.tell("textDocument/didOpen", {"textDocument": {"uri": nuri, "languageId": "latex", "version": 1, "text": NOTES}})
+        async def can_comment() -> bool:
+            return (await c.call("texloom/comments", {"textDocument": {"uri": nuri}}))["result"].get("canComment") is True
+        for _ in range(100):
+            if await can_comment():
+                break
+            await asyncio.sleep(0.2)
+        start16 = len("Café 😀 ".encode("utf-16-le")) // 2
+        res = await c.call("workspace/executeCommand", {"command": "texloom.addComment", "arguments": [nuri, {"start": {"line": 0, "character": start16}, "end": {"line": 0, "character": start16 + 6}}, "Accents?"]})
+        nid = (res.get("result") or {}).get("id")
+        await until(lambda: found(nid) is not None, 20)
+        x = found(nid)
+        check("in non-ASCII text the comment is on the right characters", x is not None and x.quote == "résumé" and x.span == (NOTES.index("résumé"), NOTES.index("résumé") + 6), (res, x))
+        res = await c.call("texloom/comments", {"textDocument": {"uri": nuri}})
+        r0 = next((y["range"] for y in res["result"]["comments"] if y["id"] == nid), None)
+        check("and its range in the editor is in UTF-16", r0 == {"start": {"line": 0, "character": start16}, "end": {"line": 0, "character": start16 + 6}}, res)
+
         res = await c.call("workspace/executeCommand", {"command": "texloom.openReview", "arguments": []})
         shown = [n for n in c.notes if n.get("method") == "window/showDocument"]
         check("open in the browser asks the editor to show the Review tab's link", shown and "tab=review" in shown[-1]["params"]["uri"] and "#" in shown[-1]["params"]["uri"], c.notes[-3:])

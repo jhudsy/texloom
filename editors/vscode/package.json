@@ -58,6 +58,11 @@
     },
     "commands": [
       {
+        "command": "texloom.createThread",
+        "title": "Comment",
+        "category": "TeXLoom"
+      },
+      {
         "command": "texloom.resolveThread",
         "title": "Resolve",
         "category": "TeXLoom",
@@ -89,6 +94,10 @@
         {
           "command": "texloom.replyThread",
           "when": "false"
+        },
+        {
+          "command": "texloom.createThread",
+          "when": "false"
         }
       ],
       "comments/commentThread/title": [
@@ -104,6 +113,11 @@
         }
       ],
       "comments/commentThread/context": [
+        {
+          "command": "texloom.createThread",
+          "group": "inline",
+          "when": "commentController == texloom && commentThreadIsEmpty"
+        },
         {
           "command": "texloom.replyThread",
           "group": "inline",

@@ -308,7 +308,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Helix: add this to your languages.toml': 'Helix：把下面的内容添加到你的 languages.toml',
     'Zed, Sublime Text (LSP package), Kate and others: add a custom language server for LaTeX files, with this command': 'Zed、Sublime Text（LSP 包）、Kate 等：为 LaTeX 文件添加自定义语言服务器，命令如下',
     'If your editor can’t find the texloom command, give its full path instead.': '如果你的编辑器找不到 texloom 命令，请改用它的完整路径。',
-    'Comments that mention you stand out, and hovering shows the whole thread. Replying needs an editor that can ask for text, as the VS Code extension does; elsewhere, reply with texloom comments reply, or in the web app. You can turn this off in Settings.': '提到你的评论会突出显示，悬停时会显示完整的讨论串。回复需要能询问文本的编辑器，VS Code 扩展就可以；在其他编辑器中，请用 texloom comments reply 回复，或在网页应用中回复。你可以在设置中关闭此功能。',
+    'Comments that mention you stand out, and hovering shows the whole thread. Replying and starting a comment need an editor that can ask for text, as the VS Code extension does; elsewhere, reply with texloom comments reply, or use the web app. You can turn this off in Settings.': '提到你的评论会突出显示，悬停时会显示完整的讨论串。回复和发表评论需要能询问文本的编辑器，VS Code 扩展就可以；在其他编辑器中，请用 texloom comments reply 回复，或使用网页应用。你可以在设置中关闭此功能。',
     'Updates': '更新',
     'Check for updates…': '检查更新…',
     'Update available': '有可用更新',

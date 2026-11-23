@@ -951,7 +951,7 @@ class EditorDialog(ConnectToolDialog):
         self.snippet = self.block(lay, 9, self.text)
         if self.command == "texloom":
             lay.addWidget(self.note(_("If your editor can’t find the texloom command, give its full path instead.")))
-        lay.addWidget(self.note(_("Comments that mention you stand out, and hovering shows the whole thread. Replying needs an editor that can ask for text, as the VS Code extension does; elsewhere, reply with texloom comments reply, or in the web app. You can turn this off in Settings.")))
+        lay.addWidget(self.note(_("Comments that mention you stand out, and hovering shows the whole thread. Replying and starting a comment need an editor that can ask for text, as the VS Code extension does; elsewhere, reply with texloom comments reply, or use the web app. You can turn this off in Settings.")))
         row = QtWidgets.QHBoxLayout()
         row.addStretch(1)
         close = QtWidgets.QPushButton(_("Close"))
