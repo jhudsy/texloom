@@ -114,15 +114,39 @@ def fork_point(versions: list[str], new: str) -> str:
 
 
 def not_project_file(rel: str, main: str = "main.tex") -> bool:
-    """Whether syncing leaves this path alone: tools' folders, LaTeX's working files, our compiled
-    PDF, and file-sync services' conflicted copies."""
+    """Whether syncing leaves this path alone: tools' folders (and anything in a dot folder: .git,
+    .github, .cache…, as for the project's folder list), LaTeX's working files, our compiled PDF,
+    and file-sync services' conflicted copies. Same rule as syncedPath in web/src/foldersync.ts;
+    scripts/folder-rules.json checks both."""
     parts = rel.split("/")
-    if any(x in IGNORE_DIRS for x in parts[:-1]) or parts[0] in IGNORE_DIRS:
+    if any(x in IGNORE_DIRS or x.startswith(".") for x in parts[:-1]) or parts[0] in IGNORE_DIRS:
         return True
     name = parts[-1]
-    if name in IGNORE_NAMES or name.startswith(".#") or name.endswith(IGNORE_SUFFIXES) or conflict_copy(name):
+    if name in IGNORE_NAMES or name.startswith(".#") or name.lower().endswith(IGNORE_SUFFIXES) or conflict_copy(name):
         return True
     return rel == main[:-4] + ".pdf"
+
+
+def synced_file(rel: str, main: str = "main.tex") -> bool:
+    """Whether a file at this path in the folder is one of the project's files."""
+    return not not_project_file(rel, main) and safe_rel(rel) is not None
+
+
+def pick_moves(gone: dict[str, str], new: dict[str, str]) -> dict[str, str]:
+    """Files renamed or moved: of the files gone from the folder (path -> the content's hash, as
+    last synced) and those new in it (path -> hash), which new one each gone one became: new path
+    -> old path. The same content moved, the same name first (a folder renamed), else the first
+    by path; each gone file goes to one new one, taken in order of path. Same rule as pickMoves in
+    web/src/foldersync.ts; scripts/folder-rules.json checks both."""
+    left = sorted(gone)
+    out: dict[str, str] = {}
+    for rel in sorted(new):
+        same = [g for g in left if gone[g] == new[rel]]
+        if same:
+            old = next((g for g in same if g.rsplit("/", 1)[-1] == rel.rsplit("/", 1)[-1]), same[0])
+            left.remove(old)
+            out[rel] = old
+    return out
 
 
 def walk(root: Path) -> Iterator[tuple[str, bool]]:
@@ -148,7 +172,7 @@ def synced_folder(rel: str) -> bool:
 
 def project_files(root: Path, main: str = "main.tex") -> list[str]:
     """What is on disk that syncing would treat as this project's files."""
-    return [rel for rel, is_dir in walk(root) if not is_dir and not not_project_file(rel, main) and safe_rel(rel)]
+    return [rel for rel, is_dir in walk(root) if not is_dir and synced_file(rel, main)]
 
 
 def copy_project_files(src: Path, dst: Path, main: str = "main.tex") -> None:
@@ -162,11 +186,9 @@ def copy_project_files(src: Path, dst: Path, main: str = "main.tex") -> None:
         shutil.copyfile(src / rel, dst / rel)
 
 
-TEXT_SUFFIXES = {
-    ".tex", ".bib", ".sty", ".cls", ".bst", ".bbx", ".cbx", ".lbx", ".dtx", ".ins", ".cfg",
-    ".def", ".clo", ".ltx", ".txt", ".md", ".csv", ".dat", ".tsv", ".tikz", ".pgf", ".py",
-    ".json", ".yaml", ".yml", ".gitignore",
-}
+# Never text, whatever they hold (a PDF can be plain ASCII): as in isText in web/src/projectfiles.ts.
+BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".eps", ".webp", ".zip", ".gz", ".ttf", ".otf",
+                   ".woff", ".woff2", ".bmp", ".tif", ".tiff"}
 MAX_TEXT = 4 * 1024 * 1024
 MAX_FILE = 50 * 1024 * 1024
 
@@ -178,10 +200,14 @@ BASE_NAME = re.compile(r"[0-9a-f]{64}")  # a text file's noted hash (sha above):
 
 
 def is_text(path: str, data: bytes) -> bool:
+    """Whether a file is kept as text (editable, merged by lines): UTF-8, not too big, no NUL near
+    the start, and not a kind that's never text. Anything else (a .tex in Latin-1, say) is kept as
+    it is, byte for byte. Same rule as isText in web/src/projectfiles.ts; scripts/folder-rules.json
+    checks both."""
     if len(data) > MAX_TEXT or b"\x00" in data[:8192]:
         return False
-    if Path(path).suffix.lower() in TEXT_SUFFIXES:
-        return True
+    if Path(path).suffix.lower() in BINARY_SUFFIXES:
+        return False
     try:
         data.decode("utf-8")
         return True
@@ -752,19 +778,15 @@ class FolderSync:
         new = [rel for rel in sorted(paths) if fresh(rel)]
         if len(new) < len(gone):  # the other half of a rename may come in a later batch
             new += [rel for rel in sorted(set(self.disk_files()) - set(paths)) if fresh(rel)]
-        out: dict[str, tuple[str, str]] = {}
+        hashes: dict[str, str] = {}
         for rel in new:
             try:
                 data = (self.root / rel).read_bytes()
             except OSError:
                 continue
-            h = sha(data) if is_text(rel, data) else self.r.keys.blob_id(data)
-            same = [g for g in gone if self.known[g].get("h") == h]
-            if same:  # the same name in another folder first, as when a folder is renamed
-                old = next((g for g in same if g.rsplit("/", 1)[-1] == rel.rsplit("/", 1)[-1]), same[0])
-                gone.remove(old)
-                out[rel] = (old, h)
-        return out
+            hashes[rel] = sha(data) if is_text(rel, data) else self.r.keys.blob_id(data)
+        moved = pick_moves({g: str(self.known[g].get("h")) for g in gone}, hashes)
+        return {rel: (old, hashes[rel]) for rel, old in moved.items()}
 
     # --- disk -> CRDT ----------------------------------------------------------
     def keep_lf(self) -> None:

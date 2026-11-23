@@ -326,6 +326,14 @@ const commands = fc.commands([
   who.map((a) => new CloseOrOpen(a)),
 ], { maxCommands: 40 })
 
+// Each step in folder-cases.json's form: a failing run prints its steps ready to add there, where both this
+// check and the desktop's (scripts/check_folder_model.py) run it.
+const shared = { EditorSaves: (c) => ['save', c.who, c.op, c.at], TypedInA: (c) => ['type', c.op, c.at], CollaboratorTypes: (c) => ['collab', c.op, c.at],
+  CollaboratorPastesWindowsText: (c) => ['collab_crlf', c.op, c.at], Deliver: (c) => ['deliver', c.src, c.dst], TimePasses: (c) => ['time', c.ms],
+  Refuse: (c) => ['refuse', c.who, c.on], OlderCopy: (c) => ['older', c.who, c.pick], CloseOrOpen: (c) => ['toggle', c.who] }
+// (fast-check wraps each step: .cmd is ours, .hasRan whether it ran)
+const asCase = (cmds) => JSON.stringify([...cmds].filter((c) => c.hasRan !== false).map((c) => c.cmd ?? c).map((c) => shared[c.constructor.name](c)))
+
 // ---- the known cases first (scripts/folder-cases.json): every failure found so far, as its steps --
 const STEP = {
   save: (who, op, at) => new EditorSaves(who, op, at), type: (op, at) => new TypedInA(op, at),
@@ -355,16 +363,20 @@ if (failed.length) { console.error('folder model (browser): FAILED known cases (
 
 const seed = Number(process.env.CHECK_SEED) || Date.UTC(2026, 0, 1) % 2 ** 31 + Math.floor(Math.random() * 1e6)
 const runs = Number(process.env.CHECK_RUNS) || 150
+let failing = null // the latest run that failed: once shrinking is done, the shortest
 try {
   await fc.assert(fc.asyncProperty(commands, async (cmds) => {
     const w = new World()
     await w.setup()
-    await fc.asyncModelRun(() => ({ model: w, real: w }), cmds)
-    await converges(w)
+    try {
+      await fc.asyncModelRun(() => ({ model: w, real: w }), cmds)
+      await converges(w)
+    } catch (e) { failing = cmds; throw e }
     for (const s of Object.values(w.syncs)) s.stop()
   }), { seed, numRuns: runs })
   console.log(`folder model (browser): every known case and every step held (${runs} random runs of up to 40 steps, seed ${seed})`)
 } catch (e) {
   console.error(`folder model (browser): FAILED (seed ${seed})\n${String(e.message).split('\n').slice(0, 30).join('\n')}\n${e.cause ? String(e.cause.stack ?? e.cause).slice(0, 1500) : ''}`)
+  if (failing) console.error(`the steps, as a case for scripts/folder-cases.json: ${asCase(failing)}`)
   process.exit(1)
 }

@@ -1,0 +1,633 @@
+{
+ "about": "Made by scripts/make_folder_rules.py; checked by scripts/check_folder_rules.py and web/scripts/check-folder-rules.mjs.",
+ "synced": [
+  {
+   "path": "main.tex",
+   "main": "main.tex",
+   "want": true
+  },
+  {
+   "path": "chapters/intro.tex",
+   "main": "main.tex",
+   "want": true
+  },
+  {
+   "path": "fig/plot.png",
+   "main": "main.tex",
+   "want": true
+  },
+  {
+   "path": "refs.bib",
+   "main": "main.tex",
+   "want": true
+  },
+  {
+   "path": "figure.pdf",
+   "main": "main.tex",
+   "want": true
+  },
+  {
+   "path": "data/table.csv",
+   "main": "main.tex",
+   "want": true
+  },
+  {
+   "path": ".gitignore",
+   "main": "main.tex",
+   "want": true
+  },
+  {
+   "path": "Makefile",
+   "main": "main.tex",
+   "want": true
+  },
+  {
+   "path": "main.pdf",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "thesis.pdf",
+   "main": "thesis.tex",
+   "want": false
+  },
+  {
+   "path": "main.pdf",
+   "main": "thesis.tex",
+   "want": true
+  },
+  {
+   "path": "sub/main.pdf",
+   "main": "main.tex",
+   "want": true
+  },
+  {
+   "path": "main.aux",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.log",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.synctex.gz",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.fdb_latexmk",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.fls",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.bbl",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.blg",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.toc",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.out",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.run.xml",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.bcf",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.xdv",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "ch/one.aux",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "MAIN.LOG",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.tex~",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": ".#main.tex",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": ".DS_Store",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "fig/.DS_Store",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "Thumbs.db",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": ".main.tex.swp",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "x.tmp",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main (Ann's conflicted copy 2026-11-20).tex",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "ch/intro (Bob's conflicted copy).tex",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "main.sync-conflict-20261120-101500-ABCDEFG.tex",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "conflicted.tex",
+   "main": "main.tex",
+   "want": true
+  },
+  {
+   "path": ".git/config",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": ".texloom/state.json",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": ".vscode/settings.json",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": ".idea/workspace.xml",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "node_modules/x/index.js",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "tools/__pycache__/a.pyc",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": ".github/workflows/build.yml",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "sub/.cache/x.tex",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "latexmkrc",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "sub/.latexmkrc",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "texmf.cnf",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "trailing.",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "PROGRA~1/x.tex",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "a:b.tex",
+   "main": "main.tex",
+   "want": false
+  }
+ ],
+ "text": [
+  {
+   "path": "main.tex",
+   "hex": "5c646f63756d656e74636c6173737b61727469636c657d0a",
+   "want": true
+  },
+  {
+   "path": "notes.md",
+   "hex": "636166c3a920f09f98800a",
+   "want": true
+  },
+  {
+   "path": "noext",
+   "hex": "706c61696e0a",
+   "want": true
+  },
+  {
+   "path": "data.csv",
+   "hex": "612c620a312c320a",
+   "want": true
+  },
+  {
+   "path": "fig.svg",
+   "hex": "3c73766720786d6c6e733d27687474703a2f2f7777772e77332e6f72672f323030302f737667272f3e",
+   "want": true
+  },
+  {
+   "path": "empty.tex",
+   "hex": "",
+   "want": true
+  },
+  {
+   "path": "latin1.tex",
+   "hex": "636166e90a",
+   "want": false
+  },
+  {
+   "path": "nul.tex",
+   "hex": "610062",
+   "want": false
+  },
+  {
+   "path": "plot.pdf",
+   "hex": "255044462d312e340a25706c61696e2061736369690a",
+   "want": false
+  },
+  {
+   "path": "photo.JPG",
+   "hex": "6173636969",
+   "want": false
+  },
+  {
+   "path": "font.woff2",
+   "hex": "6173636969",
+   "want": false
+  },
+  {
+   "path": "bin",
+   "hex": "fffe41",
+   "want": false
+  },
+  {
+   "path": "big.tex",
+   "size": 4194304,
+   "want": true
+  },
+  {
+   "path": "toobig.tex",
+   "size": 4194305,
+   "want": false
+  }
+ ],
+ "merge": [
+  {
+   "what": "only the file changed: it wins",
+   "base": "a\nb\nc\n",
+   "theirs": "a\nb\nc\n",
+   "ours": "a\nB\nc\n",
+   "want": "a\nB\nc\n"
+  },
+  {
+   "what": "only the project changed: kept",
+   "base": "a\nb\nc\n",
+   "theirs": "a\nB\nc\n",
+   "ours": "a\nb\nc\n",
+   "want": "a\nB\nc\n"
+  },
+  {
+   "what": "different lines changed: both kept",
+   "base": "a\nb\nc\n",
+   "theirs": "A\nb\nc\n",
+   "ours": "a\nb\nC\n",
+   "want": "A\nb\nC\n"
+  },
+  {
+   "what": "the same change on both sides: once",
+   "base": "a\nb\nc\n",
+   "theirs": "a\nX\nc\n",
+   "ours": "a\nX\nc\n",
+   "want": "a\nX\nc\n"
+  },
+  {
+   "what": "the same line changed differently: the file wins",
+   "base": "a\nb\nc\n",
+   "theirs": "a\nT\nc\n",
+   "ours": "a\nO\nc\n",
+   "want": "a\nO\nc\n"
+  },
+  {
+   "what": "a line deleted in the file, a line added in the project: both",
+   "base": "a\nb\nc\n",
+   "theirs": "a\nb\nc\nd\n",
+   "ours": "a\nc\n",
+   "want": "a\nc\nd\n"
+  },
+  {
+   "what": "a line changed in the file that the project deleted: the file wins",
+   "base": "a\nb\nc\n",
+   "theirs": "a\nc\n",
+   "ours": "a\nB\nc\n",
+   "want": "a\nB\nc\n"
+  },
+  {
+   "what": "no newline at the end",
+   "base": "x\ny",
+   "theirs": "X\ny",
+   "ours": "x\nY",
+   "want": "X\nY"
+  },
+  {
+   "what": "lines with accents and emoji",
+   "base": "é\n😀\nz\n",
+   "theirs": "É\n😀\nz\n",
+   "ours": "é\n😀\nZ\n",
+   "want": "É\n😀\nZ\n"
+  },
+  {
+   "what": "everything deleted in the file",
+   "base": "a\nb\n",
+   "theirs": "a\nb\n",
+   "ours": "",
+   "want": ""
+  },
+  {
+   "what": "added at the same place on both sides, differently",
+   "base": "a\n",
+   "theirs": "a\nT\n",
+   "ours": "a\nO\n",
+   "want": "a\nT\nO\n"
+  }
+ ],
+ "settle": [
+  {
+   "size": 0,
+   "times": 0,
+   "want": 0.2
+  },
+  {
+   "size": 10,
+   "times": 1,
+   "want": 0.4
+  },
+  {
+   "size": 10,
+   "times": 2,
+   "want": 0.8
+  },
+  {
+   "size": 10,
+   "times": 3,
+   "want": 1.6
+  },
+  {
+   "size": 10,
+   "times": 4,
+   "want": 2.0
+  },
+  {
+   "size": 10,
+   "times": 9,
+   "want": 2.0
+  },
+  {
+   "size": 999999,
+   "times": 0,
+   "want": 0.2
+  },
+  {
+   "size": 1000000,
+   "times": 0,
+   "want": 1.0
+  },
+  {
+   "size": 5000000,
+   "times": 1,
+   "want": 1.0
+  },
+  {
+   "size": 5000000,
+   "times": 3,
+   "want": 1.6
+  }
+ ],
+ "crlf": [
+  {
+   "hex": "610d0a620d0a",
+   "want": true
+  },
+  {
+   "hex": "610a620d0a",
+   "want": false
+  },
+  {
+   "hex": "616263",
+   "want": false
+  },
+  {
+   "hex": "0d0a",
+   "want": true
+  },
+  {
+   "hex": "0a",
+   "want": false
+  },
+  {
+   "hex": "",
+   "want": false
+  },
+  {
+   "hex": "610d620a",
+   "want": false
+  }
+ ],
+ "onDisk": [
+  {
+   "text": "a\nb\n",
+   "windows": true,
+   "want": "610d0a620d0a"
+  },
+  {
+   "text": "a\nb\n",
+   "windows": false,
+   "want": "610a620a"
+  },
+  {
+   "text": "a\nb",
+   "windows": true,
+   "want": "610d0a62"
+  },
+  {
+   "text": "",
+   "windows": true,
+   "want": ""
+  },
+  {
+   "text": "café\n",
+   "windows": true,
+   "want": "636166c3a90d0a"
+  }
+ ],
+ "moves": [
+  {
+   "what": "a file renamed",
+   "gone": {
+    "a.tex": "11111111111111111111111111111111"
+   },
+   "new": {
+    "b.tex": "11111111111111111111111111111111"
+   },
+   "want": {
+    "b.tex": "a.tex"
+   }
+  },
+  {
+   "what": "moved into a folder",
+   "gone": {
+    "a.tex": "11111111111111111111111111111111"
+   },
+   "new": {
+    "ch/a.tex": "11111111111111111111111111111111"
+   },
+   "want": {
+    "ch/a.tex": "a.tex"
+   }
+  },
+  {
+   "what": "different content isn't a move",
+   "gone": {
+    "a.tex": "11111111111111111111111111111111"
+   },
+   "new": {
+    "b.tex": "22222222222222222222222222222222"
+   },
+   "want": {}
+  },
+  {
+   "what": "two files renamed",
+   "gone": {
+    "a.tex": "11111111111111111111111111111111",
+    "b.tex": "22222222222222222222222222222222"
+   },
+   "new": {
+    "c.tex": "22222222222222222222222222222222",
+    "d.tex": "11111111111111111111111111111111"
+   },
+   "want": {
+    "c.tex": "b.tex",
+    "d.tex": "a.tex"
+   }
+  },
+  {
+   "what": "a folder renamed: each file keeps its name",
+   "gone": {
+    "x/a.tex": "11111111111111111111111111111111",
+    "x/b.tex": "11111111111111111111111111111111"
+   },
+   "new": {
+    "y/b.tex": "11111111111111111111111111111111",
+    "y/a.tex": "11111111111111111111111111111111"
+   },
+   "want": {
+    "y/a.tex": "x/a.tex",
+    "y/b.tex": "x/b.tex"
+   }
+  },
+  {
+   "what": "the same content twice, one gone: the first new one by path takes it",
+   "gone": {
+    "a.tex": "11111111111111111111111111111111"
+   },
+   "new": {
+    "c.tex": "11111111111111111111111111111111",
+    "b.tex": "11111111111111111111111111111111"
+   },
+   "want": {
+    "b.tex": "a.tex"
+   }
+  },
+  {
+   "what": "the same name preferred",
+   "gone": {
+    "x/a.tex": "11111111111111111111111111111111",
+    "y/b.tex": "11111111111111111111111111111111"
+   },
+   "new": {
+    "z/b.tex": "11111111111111111111111111111111"
+   },
+   "want": {
+    "z/b.tex": "y/b.tex"
+   }
+  },
+  {
+   "what": "otherwise the first gone by path",
+   "gone": {
+    "y/q.tex": "33333333333333333333333333333333",
+    "x/p.tex": "33333333333333333333333333333333"
+   },
+   "new": {
+    "z/r.tex": "33333333333333333333333333333333"
+   },
+   "want": {
+    "z/r.tex": "x/p.tex"
+   }
+  },
+  {
+   "what": "nothing new",
+   "gone": {
+    "a.tex": "11111111111111111111111111111111"
+   },
+   "new": {},
+   "want": {}
+  }
+ ]
+}

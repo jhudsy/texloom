@@ -1007,12 +1007,23 @@ What each must do the same is held by cases both run, written once:
   messages are real (encrypted and signed); the expected results are written by hand from the
   protocol, so the two apps are held to it, not to each other. Each replica runs against a
   stand-in connection and server, so nothing touches the network.
+- **The folder syncs' rules** (`scripts/folder-rules.json`, from `scripts/make_folder_rules.py`;
+  run by `scripts/check_folder_rules.py` and `web/scripts/check-folder-rules.mjs`): which files
+  in a folder are the project's (working files, editors' droppings, conflicted copies, tools' and
+  dot folders, the compiled PDF, refused paths), which are text (UTF-8, no NUL near the start,
+  never a PDF or image), merging a file saved while the project changed, how long a changed file
+  settles, Windows line endings, and which new file a gone one was renamed to. Each rule is one
+  named function on each side (`synced_file`/`syncedPath`, `pick_moves`/`pickMoves`…), the one
+  the sync itself uses.
+- **The folder syncs' behaviour**: `scripts/folder-cases.json` (below), run by both model checks;
+  a failing random run of either prints its steps in that form, so a failure found in one app is
+  replayed in the other.
 - **The project list** (`scripts/listsync-vectors.json`), **compression** (`packing-vectors.json`)
   and **cross-references** (`xr-vectors.json`), and text handling through `check_props` on both
   sides (below).
 
-Not covered by shared cases: the folder syncs, each checked by its own model (below), and what
-only one app does (presence is the web app's; compiling for others is the desktop's). New logic goes on one
+Not covered by shared cases: what only one app does (presence is the web app's; a folder synced
+by several computers, and compiling for others, are the desktop's). New logic goes on one
 side where it can: the desktop app only syncs, so what is computed (an export, a merge shown to
 the user) lives in the web app and reaches the desktop as data.
 

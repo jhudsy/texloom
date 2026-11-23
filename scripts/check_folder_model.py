@@ -42,7 +42,11 @@ from pathlib import Path
 
 os.environ["TEXLOOM_CHECKS"] = "1"  # the sync's own invariants, checked as it runs
 
-from hypothesis import HealthCheck, settings
+import functools
+import inspect
+import json
+
+from hypothesis import HealthCheck, note, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 from pycrdt import Doc, Map
@@ -202,11 +206,27 @@ def update_for(src: Doc, dst: Doc) -> bytes:
     return src.get_update(dst.get_state())
 
 
+def step(kind: str, *names: str):
+    """A rule's step, also kept in folder-cases.json's form: a failing run prints its steps ready to
+    add there, where both this check and the browser's (web/scripts/check-folder-model.mjs) run it."""
+    def deco(f):
+        sig = inspect.signature(f)
+
+        @functools.wraps(f)
+        def traced(self, *args, **kw):
+            given = sig.bind(self, *args, **kw).arguments
+            self.trace.append([kind, *(given[n] for n in names)])
+            return f(self, *args, **kw)
+        return traced
+    return deco
+
+
 class FolderModel(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
         BROKEN.clear()
         REFUSING.clear()
+        self.trace: list[list] = []  # the steps so far, as in folder-cases.json
         self.loop = asyncio.new_event_loop()
         self.tmp = Path(tempfile.mkdtemp(prefix="texloom-model-")).resolve()  # as the sync sees it (macOS: /private/var)
         keys = Keys.generate()
@@ -245,6 +265,7 @@ class FolderModel(RuleBasedStateMachine):
 
     # --- what can happen -----------------------------------------------------------------------
     @rule(who=st.sampled_from(["A", "B"]), op=st.integers(0, 2), at=st.integers(0, 50))
+    @step("save", "who", "op", "at")
     def editor_saves(self, who: str, op: int, at: int) -> None:
         c = self.comp(who)
         z = "edA" if who == "A" else "edB"
@@ -254,6 +275,7 @@ class FolderModel(RuleBasedStateMachine):
         c.save(render(parts))
 
     @rule(op=st.integers(0, 2), at=st.integers(0, 50))
+    @step("type", "op", "at")
     def typed_in_A(self, op: int, at: int) -> None:
         if not self.A.running:
             return  # (typing into A's project needs A's app)
@@ -266,6 +288,7 @@ class FolderModel(RuleBasedStateMachine):
         self.A.r.local_change(lambda: apply_text(self.A.r.files[F], cur, new))
 
     @rule(op=st.integers(0, 2), at=st.integers(0, 50))
+    @step("collab", "op", "at")
     def collaborator_types(self, op: int, at: int) -> None:
         t = self.C.get("files", type=Map)[F]
         cur = str(t)
@@ -276,6 +299,7 @@ class FolderModel(RuleBasedStateMachine):
         apply_text(t, cur, render_raw(head, parts))
 
     @rule(op=st.integers(0, 2), at=st.integers(0, 50))
+    @step("collab_crlf", "op", "at")
     def collaborator_pastes_windows_text(self, op: int, at: int) -> None:
         """C's older app (or a paste there) puts lines ending "\r\n" into the project."""
         t = self.C.get("files", type=Map)[F]
@@ -287,6 +311,7 @@ class FolderModel(RuleBasedStateMachine):
         apply_text(t, cur, render_raw(head, {**parts, "C": [line + "\r" for line in parts["C"]]}))
 
     @rule(src=st.sampled_from(["A", "B", "C"]), dst=st.sampled_from(["A", "B", "C"]))
+    @step("deliver", "src", "dst")
     def deliver(self, src: str, dst: str) -> None:
         if src == dst:
             return
@@ -300,6 +325,7 @@ class FolderModel(RuleBasedStateMachine):
             self.run(self.comp(dst).receive(upd))
 
     @rule(who=st.sampled_from(["A", "B"]))
+    @step("sync", "who")
     def sync_round(self, who: str) -> None:
         c = self.comp(who)
         if not c.running:
@@ -309,6 +335,7 @@ class FolderModel(RuleBasedStateMachine):
             self.seen[who].append(d)
 
     @rule(who=st.sampled_from(["A", "B"]), refuse=st.booleans())
+    @step("refuse", "who", "refuse")
     def writes_refused(self, who: str, refuse: bool) -> None:
         r = str(self.comp(who).root) + os.sep
         if refuse:
@@ -318,6 +345,7 @@ class FolderModel(RuleBasedStateMachine):
 
     @precondition(lambda self: any(len(v) > 1 for v in self.seen.values()))
     @rule(who=st.sampled_from(["A", "B"]), pick=st.integers(0, 50))
+    @step("older", "who", "pick")
     def older_copy_comes_back(self, who: str, pick: int) -> None:
         """A copy the folder held earlier is put back (a stale editor buffer, a backup tool), and
         the sync looks at once. It mustn't count as an edit: that would undo everyone's changes."""
@@ -342,6 +370,7 @@ class FolderModel(RuleBasedStateMachine):
         self.run(c.sync_round())  # the invariants then check nothing was undone
 
     @rule(who=st.sampled_from(["A", "B"]))
+    @step("toggle", "who")
     def app_quits_or_starts(self, who: str) -> None:
         c = self.comp(who)
         if c.running:
@@ -369,6 +398,8 @@ class FolderModel(RuleBasedStateMachine):
         assert not BROKEN, "the sync's own checks failed: " + "; ".join(BROKEN[:3])
 
     def teardown(self) -> None:
+        with contextlib.suppress(Exception):  # (only inside a check run: a known case has its steps already)
+            note("the steps, as a case for scripts/folder-cases.json: " + json.dumps(self.trace))
         try:
             if not hasattr(self, "A"):
                 return

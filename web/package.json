@@ -19,6 +19,7 @@
     "check-submission": "node scripts/check-submission.mjs",
     "check-packing": "node scripts/check-packing.mjs",
     "check-replica": "node scripts/check-replica.mjs",
+    "check-folder-rules": "node scripts/check-folder-rules.mjs",
     "check-mcpclient": "node scripts/check-mcpclient.mjs",
     "check-gitshacache": "node scripts/check-gitshacache.mjs"
   },

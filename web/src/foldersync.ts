@@ -18,12 +18,18 @@ export const CONFLICT_COPY = / \([^()/]*conflicted copy[^()/]*\)|\.sync-conflict
 export const BUILD = latexOutput('|bbl|idx|ilg|ind|swp|swx|tmp', String.raw`|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$`)
 const MAX = 50 * 1024 * 1024
 const SETTLE = 200, SETTLE_DOUBT = 2000, SETTLE_BIG = 1000, BIG = 1_000_000 // ms a changed file must stay unchanged before it's read; for one that became empty or went missing; for a big one (settleFor below)
+/** How long (ms) a file must stay unchanged before it's read, given its size and how many times in a
+ *  row it was found still changing: each time doubles the wait, up to SETTLE_DOUBT. Same rule as
+ *  settle_for in texloom/folder.py; scripts/folder-rules.json checks both. */
+export const settleFor = (size: number, times: number) => Math.min(SETTLE_DOUBT, Math.max(SETTLE * 2 ** times, size >= BIG ? SETTLE_BIG : 0))
+/** A project text as its file holds it: \r\n line endings if it had them (as on_disk in texloom/folder.py). */
+export const onDisk = (text: string, windows: boolean) => new TextEncoder().encode(windows ? text.replace(/\r?\n/g, '\r\n') : text)
 const sameBytes = (a: Uint8Array | null, b: Uint8Array) => !!a && a.length === b.length && a.every((x, i) => x === b[i])
 
 type Known = Record<string, { h: string; m: number; z: number; c?: boolean }> // c: the file on disk ends lines with \r\n
 
 /** Whether text ends its lines with \r\n (saved on Windows): kept that way on disk, though the project has \n. */
-function crlf(d: Uint8Array): boolean {
+export function crlf(d: Uint8Array): boolean {
   const i = d.indexOf(10)
   return i > 0 && d[i - 1] === 13
 }
@@ -53,6 +59,37 @@ async function sha(data: Uint8Array): Promise<string> {
   return Array.from(d.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
+/** Whether a file at this path in the folder is one of the project's files: not in a tools' folder
+ *  or any dot folder, not LaTeX's working files or editors' droppings, not a file-sync service's
+ *  conflicted copy, not the compiled PDF of `main`, and a path the project accepts. Same rule as
+ *  synced_file in texloom/folder.py; scripts/folder-rules.json checks both. */
+export function syncedPath(rel: string, main: string | null): boolean {
+  const parts = rel.split('/'), name = parts[parts.length - 1]
+  if (parts.slice(0, -1).some((d) => SKIP_DIRS.has(d) || d.startsWith('.'))) return false
+  if (BUILD.test(rel) || CONFLICT_COPY.test(name) || cleanPath(rel) !== rel) return false
+  return !main || rel !== main.replace(/\.tex$/, '.pdf')
+}
+
+/** Files renamed or moved: of the files gone from the folder (path -> the content's hash, as last
+ *  synced) and those new in it (path -> hash), which new one each gone one became: new path -> old
+ *  path. The same content moved, the same name first (a folder renamed), else the first by path;
+ *  each gone file goes to one new one, taken in order of path. Same rule as pick_moves in
+ *  texloom/folder.py; scripts/folder-rules.json checks both. */
+export function pickMoves(gone: Record<string, string>, fresh: Record<string, string>): Record<string, string> {
+  const name = (x: string) => x.slice(x.lastIndexOf('/') + 1)
+  const byPath = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+  const left = Object.keys(gone).sort(byPath)
+  const out: Record<string, string> = {}
+  for (const p of Object.keys(fresh).sort(byPath)) {
+    const same = left.filter((g) => gone[g] === fresh[p])
+    if (!same.length) continue
+    const from = same.find((g) => name(g) === name(p)) ?? same[0]
+    left.splice(left.indexOf(from), 1)
+    out[p] = from
+  }
+  return out
+}
+
 async function walk(dir: Dir, prefix = '', out = new Map<string, FileSystemFileHandle>(), dirs?: Set<string>) {
   for await (const [name, handle] of (dir as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
     const rel = prefix + name
@@ -61,7 +98,7 @@ async function walk(dir: Dir, prefix = '', out = new Map<string, FileSystemFileH
       dirs?.add(rel)
       await walk(handle as Dir, rel + '/', out, dirs)
     }
-    else if (!BUILD.test(rel) && !name.startsWith('.') && !CONFLICT_COPY.test(name)) out.set(rel, handle as FileSystemFileHandle)
+    else if (syncedPath(rel, null)) out.set(rel, handle as FileSystemFileHandle)
   }
   return out
 }
@@ -127,7 +164,6 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
   // A big file, or one found still changing, must stay unchanged for longer: copying one in can
   // pause for a moment, on a slow or busy disk for more than SETTLE. Each time a file is found still
   // changing doubles the wait, up to SETTLE_DOUBT (settle_for in texloom/folder.py).
-  const settleFor = (size: number, times: number) => Math.min(SETTLE_DOUBT, Math.max(SETTLE * 2 ** times, size >= BIG ? SETTLE_BIG : 0))
   const seen = new Map<string, { m: number; z: number; at: number; n: number }>() // changes noticed, not yet read; n: times in a row
   const missing = new Map<string, number>() // known files gone from the folder: since when
   const unread = new Set<string>() // written here, then changed by someone else: read before writing again
@@ -168,7 +204,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       if (cleanPath(p) !== p || BUILD.test(p)) continue
       want.add(p)
       if (unread.has(p)) continue // an editor's save is there: it's read first
-      const text = yt.toString(), data = new TextEncoder().encode(known[p]?.c ? text.replace(/\r?\n/g, '\r\n') : text)
+      const text = yt.toString(), data = onDisk(text, !!known[p]?.c)
       const h = await sha(data)
       if (known[p]?.h === h) { base.set(p, text); continue } // what disk holds, as the project has it
       if (await unreadNow(p)) continue
@@ -279,20 +315,19 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     const gone = Object.keys(known).filter((p) => !disk.has(p))
     if (gone.length) {
       const sizes = new Set(gone.map((g) => known[g].z))
-      const name = (x: string) => x.slice(x.lastIndexOf('/') + 1)
+      const fresh = new Map<string, { h: string; f: File; data: Uint8Array; text: string | null }>()
       for (const [p, fh] of disk) {
-        if (!gone.length) break
         if (cleanPath(p) !== p || known[p] || r.files.has(p) || r.bin.has(p) || p === ownPdf) continue
         const f = await fh.getFile()
         if (!sizes.has(f.size) || !settled(p, f)) continue
         const data = await bytes(f)
         if (!data) continue
         const text = isText(p, data)
-        const h = text !== null ? await sha(data) : await r.keys.blobId(data)
-        const same = gone.filter((g) => known[g].h === h)
-        if (!same.length) continue
-        const from = same.find((g) => name(g) === name(p)) ?? same[0] // the same name first, as when a folder is renamed
-        gone.splice(gone.indexOf(from), 1)
+        fresh.set(p, { h: text !== null ? await sha(data) : await r.keys.blobId(data), f, data, text })
+      }
+      const moved = pickMoves(Object.fromEntries(gone.map((g) => [g, known[g].h])), Object.fromEntries([...fresh].map(([p, x]) => [p, x.h])))
+      for (const [p, from] of Object.entries(moved)) {
+        const { h, f, data, text } = fresh.get(p)!
         movePath(r, from, p)
         if (base.has(from)) { base.set(p, base.get(from)!); base.delete(from) }
         delete known[from]; missing.delete(from)
