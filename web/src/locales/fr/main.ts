@@ -174,5 +174,6 @@ const fr: Catalog = {
   'The assistant is working…': 'L’assistant travaille…',
   'The assistant is waiting for you to apply or reject a change': 'L’assistant attend que vous appliquiez ou refusiez une modification',
   'The assistant has answered': 'L’assistant a répondu',
+  '{{n}} open comments mention you': ['{{n}} commentaire ouvert vous mentionne', '{{n}} commentaires ouverts vous mentionnent'],
 }
 export default fr

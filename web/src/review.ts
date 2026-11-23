@@ -13,6 +13,7 @@ import { applyChange, placeOf } from './suggestcore'
 import { byReading, readingOrder } from './navigate'
 import { isWordChar, refine, wordDiff, type DiffOp } from './worddiff'
 import { quiet, STORAGE } from './quiet'
+import { collaborators, mentionPicker, mentionsMe } from './mention'
 
 export type Kind = 'comment' | 'suggestion'
 export interface Item {
@@ -398,7 +399,7 @@ export interface ReviewHost {
   reveal: (file: string, from: SharedPos, to: SharedPos) => void
 }
 
-export interface ReviewPanel { el: HTMLElement; addComment(): void; focus(id: string): void }
+export interface ReviewPanel { el: HTMLElement; addComment(): void; focus(id: string): void; showMentions(): void }
 
 export function createReviewPanel(host: ReviewHost): ReviewPanel {
   const r = host.replica
@@ -409,6 +410,10 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   const drafts = new Set<{ area: HTMLTextAreaElement; close: () => void }>() // comments being written, newest first
   const replies = new Map<string, string>() // half-written replies: the list is redrawn whenever anyone comments
   const resolvedChk = h('input', { type: 'checkbox', 'aria-label': t('Show resolved'), onchange: (e: any) => { showResolved = e.target.checked; render() } })
+  // @name mentions (issue #3): the collaborators to pick from, and a filter for the ones naming you
+  let onlyMine = false
+  const names = () => collaborators(r, allItems(r), host.userName())
+  const mineChk = h('input', { type: 'checkbox', 'aria-label': t('Mentions me'), onchange: (e: any) => { onlyMine = e.target.checked; render() } }) as HTMLInputElement
   // Several items at once: selected with ⌘/Ctrl-click or ⇧-click on a card, ⌘/Ctrl+A, or from the text
   // selected in the editor; each action one change, undone in one step (issues #34, #35)
   const selected = new Set<string>()
@@ -436,6 +441,7 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
       h('span', { class: 'spacer' }),
       host.writable ? pickBtn : null,
       host.writable ? resolveAllBtn : null,
+      h('label', { class: 'check small', title: t('Only the comments and suggestions that mention you (@ and your name)') }, mineChk, t('Mentions me')),
       h('label', { class: 'check small' }, resolvedChk, t('Show resolved'))),
     bulkBar,
     doneBar,
@@ -551,7 +557,8 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     for (const d of [...drafts]) if (!d.area.value.trim()) d.close()
     const start = Y.createRelativePositionFromTypeIndex(yt, sel.from), end = Y.createRelativePositionFromTypeIndex(yt, sel.to, -1)
     const range: Pending = { file: sel.file, start, end }
-    const area = h('textarea', { class: 'review-write', rows: 4, placeholder: t('Write your comment…'), 'aria-label': t('Add a comment') }) as HTMLTextAreaElement
+    const area = h('textarea', { class: 'review-write', rows: 4, placeholder: t('Write your comment… (@ to mention someone)'), 'aria-label': t('Add a comment') }) as HTMLTextAreaElement
+    mentionPicker(area, names)
     const box = h('div', { class: 'rdraft' })
     const close = () => {
       drafts.delete(entry)
@@ -615,6 +622,7 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
     const replyIn = h('textarea', { class: 'rreply-in', rows: 1, placeholder: t('Reply…'), 'aria-label': t('Reply'), title: t('Enter to send, Shift+Enter for a new line'), 'data-reply': it.id,
       oninput: () => { replies.set(it.id, replyIn.value); grow() } }) as HTMLTextAreaElement
     replyIn.value = replies.get(it.id) ?? ''
+    mentionPicker(replyIn, names) // (its keys come before the reply's own Enter-to-send)
     if (replyIn.value) requestAnimationFrame(grow)
     replyIn.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
@@ -624,7 +632,7 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
       reply(r, it.id, replyIn.value, host.userName())
       replyIn.value = ''
     })
-    return h('div', { class: `rcard ${it.kind}${it.merge ? ' merge' : ''} ${it.resolved ? 'resolved' : ''} ${it.id === focused ? 'focused' : ''}${selected.has(it.id) ? ' selected' : ''}`, 'data-id': it.id,
+    return h('div', { class: `rcard ${it.kind}${it.merge ? ' merge' : ''} ${it.resolved ? 'resolved' : ''} ${it.id === focused ? 'focused' : ''}${selected.has(it.id) ? ' selected' : ''}${mentionsMe(it, host.userName()) ? ' mentions-me' : ''}`, 'data-id': it.id,
       'aria-selected': host.writable && !it.resolved ? String(selected.has(it.id)) : null },
       h('div', { class: 'rhead', onclick: () => { anchor = it.id; go() }, title: rg ? t('Show in the editor') : t('The text it referred to was deleted') },
         h('span', { class: 'rkind' }, it.merge ? t('⚠ Check merge') : it.kind === 'comment' ? t('💬 Comment') : t('✎ Suggestion')),
@@ -643,7 +651,7 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   }
 
   function render() {
-    const items = allItems(r).filter((i) => showResolved || !i.resolved)
+    const items = allItems(r).filter((i) => (showResolved || !i.resolved) && (!onlyMine || mentionsMe(i, host.userName())))
     // in the order the document reads (following \\input), not by file name; a comment whose text has
     // gone, at the end of its file
     const place = readingOrder(r)
@@ -668,5 +676,5 @@ export function createReviewPanel(host: ReviewHost): ReviewPanel {
   let frame = 0 // many changes at once (a collaborator's save, a reply) draw the list once
   r.review.observeDeep(() => { frame ||= requestAnimationFrame(() => { frame = 0; render() }) })
   render()
-  return { el, addComment, focus }
+  return { el, addComment, focus, showMentions: () => { onlyMine = mineChk.checked = true; render() } }
 }

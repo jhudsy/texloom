@@ -730,3 +730,9 @@ dialog.settings.tabbed[open] { display: flex; flex-direction: column; }
 .rcard.selected { outline: 2px solid var(--accent); outline-offset: -1px; background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
 .rbulk { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
 .review-list:focus { outline: none; }
+/* @name mentions (mention.ts) */
+.mention-menu { position: fixed; z-index: 1000; min-width: 160px; max-width: 320px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 25%); padding: 3px; font-size: 13px; }
+.mention-choice { padding: 3px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mention-choice.on, .mention-choice:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.mention-badge { margin-left: 5px; padding: 0 5px; border-radius: 8px; font-size: 11px; background: var(--accent); color: var(--bg); cursor: pointer; }
+.rcard.mentions-me { box-shadow: inset 3px 0 0 var(--accent); }

@@ -68,6 +68,9 @@ const de: Catalog = {
   'Resolve {{n}} comments': ['{{n}} Kommentar erledigen', '{{n}} Kommentare erledigen'],
   'Accept {{n}}': ['{{n}} übernehmen', '{{n}} übernehmen'],
   'Reject {{n}}': ['{{n}} ablehnen', '{{n}} ablehnen'],
+  'Mentions me': 'Erwähnen mich',
+  'Only the comments and suggestions that mention you (@ and your name)': 'Nur die Kommentare und Vorschläge, die Sie erwähnen (@ und Ihr Name)',
+  'Write your comment… (@ to mention someone)': 'Kommentar schreiben … (@, um jemanden zu erwähnen)',
 }
 
 export default de

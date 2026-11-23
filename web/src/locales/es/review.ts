@@ -68,6 +68,9 @@ const es: Catalog = {
   'Resolve {{n}} comments': ['Resolver {{n}} comentario', 'Resolver {{n}} comentarios'],
   'Accept {{n}}': ['Aceptar {{n}}', 'Aceptar {{n}}'],
   'Reject {{n}}': ['Rechazar {{n}}', 'Rechazar {{n}}'],
+  'Mentions me': 'Me mencionan',
+  'Only the comments and suggestions that mention you (@ and your name)': 'Solo los comentarios y sugerencias que te mencionan (@ y tu nombre)',
+  'Write your comment… (@ to mention someone)': 'Escribe tu comentario… (@ para mencionar a alguien)',
 }
 
 export default es

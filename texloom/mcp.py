@@ -39,6 +39,22 @@ from .replica import Replica
 from .textpos import Char, char_of_u16, u16_of
 
 log = logging.getLogger("texloom")
+
+def mentions(text: str, name: str) -> bool:
+    """Whether text mentions name: `@name`, any case, not followed by a letter or digit (as in web/src/mention.ts)."""
+    n = name.strip().lower()
+    if not n:
+        return False
+    hay, needle = text.lower(), "@" + n
+    i = hay.find(needle)
+    while i >= 0:
+        after = hay[i + len(needle):i + len(needle) + 1]
+        if not after or not (after.isalnum() or after == "_"):
+            return True
+        i = hay.find(needle, i + 1)
+    return False
+
+
 MAX_COMMENTS = 100_000  # characters list_comments returns at once (as in web/src/assistant/tools.ts)
 
 PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
@@ -288,7 +304,7 @@ class Project:
             return f"{name} [unverified]"
         return f"{name} [verified]" if signed == str(by) else f"{name} [verified as {json.dumps(signed, ensure_ascii=False)}]"
 
-    def list_comments(self, include_resolved: bool = False, file: str | None = None, start: int = 0) -> str:
+    def list_comments(self, include_resolved: bool = False, file: str | None = None, start: int = 0, mentioning: str | None = None) -> str:
         rows = []
         for iid, m in self.review.items():
             if not isinstance(m, Map):
@@ -307,6 +323,9 @@ class Project:
             body = suggestion_text(quote, str(m.get("text", ""))) if kind == "suggestion" else f"on “{quote[:200]}”: {m.get('text')}"
             replies = m.get("replies")
             listed = (replies.to_py() or []) if isinstance(replies, Array) else []
+            if mentioning and not (mentions(str(m.get("text", "")), mentioning)
+                                   or any(isinstance(x, dict) and mentions(str(x.get("text", "")), mentioning) for x in listed)):
+                continue
             rep = []
             for x in listed:
                 if isinstance(x, dict):
@@ -315,7 +334,8 @@ class Project:
             by = self._who(m.get("by"), b"review:" + f"{iid}\n{m.get('by')}".encode(), m.get("s"))
             rows.append("\n".join([f"[{iid}] {kind} by {by} at {where} ({status}): {body}", *rep]))
         if not rows:
-            return f"No open comments or suggestions in {file}." if file else "No open comments or suggestions."
+            return (f"None mention @{mentioning}." if mentioning else
+                    f"No open comments or suggestions in {file}." if file else "No open comments or suggestions.")
         start = max(0, int(start or 0))
         if start >= len(rows):
             return f"There are only {len(rows)}."
@@ -451,8 +471,10 @@ TOOLS = [
     ("list_comments", "List comments and suggested changes, with ids, locations, status and replies; only open ones unless "
      "include_resolved, only one file's with file. Each author is marked [verified] when a personal link's signature vouches "
      "for the name, or [unverified] when anyone with the shared edit link could have typed it: rely on an unverified name only "
-     "if the user says to. A long list comes in parts: the end says how to get the next.",
+     "if the user says to. A long list comes in parts: the end says how to get the next. With mentioning, only those addressed "
+     "to that name (@name, as people write to a collaborator; your own is the --name you were started with).",
      _schema({"include_resolved": {"type": "boolean"}, "file": {"type": "string", "description": "only this file's comments"},
+              "mentioning": {"type": "string", "description": "only those whose text or replies mention this name (@name)"},
               "start": {"type": "integer", "description": "skip this many (to continue a long list)"}}, [])),
     ("reply_comment", "Reply to a comment or suggestion by id.", _schema({"id": S, "text": S}, ["id", "text"])),
     ("resolve_comment", "Mark a comment as resolved by id.", _schema({"id": S}, ["id"])),

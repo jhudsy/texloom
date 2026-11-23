@@ -174,6 +174,7 @@ const zh: Catalog = {
   'The assistant is working…': '助手正在处理…',
   'The assistant is waiting for you to apply or reject a change': '助手正在等你应用或拒绝一项修改',
   'The assistant has answered': '助手已回复',
+  '{{n}} open comments mention you': { other: '有 {{n}} 条未处理的评论提到了你' },
 }
 
 export default zh

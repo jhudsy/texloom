@@ -8,6 +8,9 @@
 - Several at once (issues #34, #35): Resolve all resolves every open comment, and Undo reopens
   them all; ⌘/Ctrl-click and ⇧-click select cards; Select in text picks up the comments on the
   editor's selection; the bar's actions resolve and accept as one change, undone in one step.
+- Mentions (issue #3): typing @ in a reply offers the project's collaborators, and Enter puts the
+  name in without sending the reply; a comment naming you gets an @ count on the Review tab, which
+  shows just those.
 
     cd web && npm run build && cd ..
     uv run --extra server --with playwright python scripts/check_web_review.py
@@ -131,9 +134,46 @@ def several(s: webcheck.Session) -> None:
     page.close()
 
 
+def mentions(s: webcheck.Session) -> None:
+    page = s.project(PAPER)  # as "Tester"
+    # a collaborator the project knows: a personal link's name, as the owner granted it
+    page.evaluate("() => window.__texloom.r.members.set('somekey', { name: 'Bob Jones', at: 0, by: 'Tester' })")
+    add_comments(page, [("main.tex", "MAINSTART")])
+    reply = page.locator(".review-list .rreply-in").first
+    reply.click()
+    page.keyboard.type("thanks @bo")
+    page.wait_for_selector(".mention-menu", timeout=3000)
+    offered = page.eval_on_selector_all(".mention-choice", "cs => cs.map(c => c.textContent)")
+    s.check("typing @ offers the collaborators whose names start so", offered == ["@Bob Jones"], offered)
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(300)
+    s.check("Enter puts the name in, and doesn't send the reply", reply.input_value() == "thanks @Bob Jones " and page.locator(".rreply").count() == 0,
+            (reply.input_value(), page.locator(".rreply").count()))
+    page.keyboard.press("Enter")  # now it sends
+    page.wait_for_timeout(400)
+    s.check("the next Enter sends it", page.locator(".rreply").count() == 1)
+
+    s.check("nothing mentions you yet: no @ on the Review tab", page.locator(".mention-badge").count() == 0)
+    add_comments(page, [("main.tex", "MAINEND")])
+    last = page.locator(".review-list .rreply-in").last
+    last.click()
+    page.keyboard.type("@Tester can you check this")
+    page.keyboard.press("Escape")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(500)
+    badge = page.locator(".mention-badge")
+    s.check("a comment naming you puts @1 on the Review tab", badge.count() == 1 and badge.inner_text() == "@1", badge.all_inner_texts())
+    s.check("its card is marked", page.locator(".rcard.mentions-me").count() == 1)
+    badge.click()
+    shown = page.eval_on_selector_all(".review-list .rquote", "qs => qs.map(q => q.textContent.trim())")
+    s.check("the @ shows just the ones that mention you", shown == ["MAINEND"], shown)
+    page.close()
+
+
 if __name__ == "__main__":
     with webcheck.Session() as s:
         order(s)
         drafts(s)
         several(s)
+        mentions(s)
     s.done()

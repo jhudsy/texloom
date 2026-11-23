@@ -53,7 +53,8 @@ import { awayServer, fragmentFor, fragmentOfLink, serverName, serverOr } from '.
 import { folderFiles, folderPermission, folderSyncSupported, pickFolder, rememberFolder, savedFolder, startFolderSync, type FolderSync } from './foldersync'
 import { applyTemplate, chooseTemplate, importDialog, TEMPLATES, type NewProject } from './templates'
 import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from './navigate'
-import { createReviewPanel, reviewExtension, type ReviewPanel } from './review'
+import { allItems, createReviewPanel, reviewExtension, type ReviewPanel } from './review'
+import { mentionsMe } from './mention'
 import './style.css'
 import { suggestMode } from './suggestmode'
 import { quiet, quieted, STORAGE } from './quiet'
@@ -631,10 +632,13 @@ async function openProject(keys: Keys, server: string) {
     history: h('button', { class: 'tab', onclick: () => showTab('history') }, t('History')),
   }
   // the Review tab shows how many comments and suggestions are open
+  // and, with an @, how many of those mention you (issue #3): click it to see just those
   const countOpen = () => {
-    let n = 0
-    r.review.forEach((m) => { if (m instanceof Y.Map && !m.get('resolved')) n++ })
+    const open = allItems(r).filter((i) => !i.resolved)
+    const n = open.length, mine = open.filter((i) => mentionsMe(i, me.name)).length
     tabBtns.review.textContent = n ? t('Review ({{n}})', { n }) : t('Review')
+    tabBtns.review.title = mine ? tn(mine, '{{n}} open comment mentions you', '{{n}} open comments mention you') : t('Comments and suggested changes')
+    if (mine) tabBtns.review.append(h('span', { class: 'mention-badge', onclick: (e: Event) => { e.stopPropagation(); showTab('review'); reviewPanel?.showMentions() } }, `@${mine}`))
   }
   r.review.observeDeep(countOpen)
   setTimeout(countOpen, 0)

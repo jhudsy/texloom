@@ -233,6 +233,11 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   comments amber. You can go back to suggestions you typed on an earlier visit, in the same browser, and keep
   editing them (one tab at a time per file). If someone changes the very words you're replacing,
   your suggestion stays and accepting it asks first.
+- **Mentions:** typing `@` in a comment or reply offers the project's collaborators (its personal
+  links' names and everyone who has commented). When an open comment or reply mentions you, the
+  Review tab shows **@** and how many; click it, or tick **Mentions me**, to see just those. The
+  server can't read projects, so a mention is seen when the project is opened, not sent by email.
+  An agent can be asked for "the comments addressed to you" (`list_comments` with `mentioning`).
 - **Several at once:** **Resolve all…** in the Review tab resolves every open comment. To act on some,
   ⌘/Ctrl-click cards to select them (⇧-click for a run, ⌘/Ctrl+A for all), or select text in the
   editor and press **Select in text** for the comments and suggestions on it; a bar then offers

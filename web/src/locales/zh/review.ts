@@ -68,6 +68,9 @@ const zh: Catalog = {
   'Resolve {{n}} comments': { other: '解决 {{n}} 条评论' },
   'Accept {{n}}': { other: '接受 {{n}} 条' },
   'Reject {{n}}': { other: '拒绝 {{n}} 条' },
+  'Mentions me': '提到我的',
+  'Only the comments and suggestions that mention you (@ and your name)': '只显示提到你的评论和建议（@ 加你的名字）',
+  'Write your comment… (@ to mention someone)': '写下你的评论…（输入 @ 可提到某人）',
 }
 
 export default zh
