@@ -856,6 +856,7 @@ uv run --with mypy python scripts/check_textpos.py               # character, by
 uv run --with hypothesis python scripts/check_folder_model.py     # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
 uv run python scripts/check_folder_deletions.py                   # a file deleted or renamed in the folder isn't brought back by a change arriving just then
 uv run python scripts/check_folder_reads.py                       # a file is shared only as it was once it stopped changing, not mid-way through the next save
+uv run python scripts/check_folder_renames.py                     # a folder renamed or moved takes its files (and their comments) with it at once
 uv run --extra server python scripts/check_shared_folder.py       # two computers on one folder shared through a stand-in Dropbox: they take turns, nothing arrives twice
 uv run --extra server python scripts/check_files.py               # the server's file store: a folder, and Garage (S3) if installed
 uv run --extra server python scripts/check_config.py              # texloom.example.toml lists every server setting, and parses

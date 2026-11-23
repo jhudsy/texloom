@@ -839,8 +839,31 @@ class FolderSync:
         except RuntimeError:
             pass
 
+    async def changed(self, paths: set[str]) -> None:
+        """One batch of changes the folder watcher reported (project paths)."""
+        async with self.r.lock:
+            if paths:
+                await self.ingest(paths)
+            self.ingest_dirs()
+
+    def _with_contents(self, paths: set[str]) -> set[str]:
+        """`paths`, with every file under any of them that is a folder: as it is on disk now, and as
+        the sync knows it. A folder renamed, moved or deleted is reported as the folder alone (on
+        macOS), not as each file in it; without this, its files stayed in the project at their old
+        paths until the next look at the whole folder, and a write to disk in between put them back
+        there (scripts/check_folder_renames.py)."""
+        out = set(paths)
+        for rel in paths:
+            full = self.root / rel
+            if full.is_dir() and not full.is_symlink():
+                out |= {f"{rel}/{sub}" for sub, is_dir in walk(full) if not is_dir}
+            elif rel not in self.known and not full.is_file():  # perhaps a folder that's gone
+                out |= {k for k in self.known if k.startswith(rel + "/")}
+        return out
+
     async def ingest(self, paths: set[str]) -> None:
         """Push local disk changes for `paths` into the CRDT."""
+        paths = self._with_contents(paths)
         if self.standby:
             await self._track(paths)
             return
@@ -1445,7 +1468,4 @@ class FolderSync:
                     self._refused.add(rel)
                     log.warning("not sharing %s: a file-sync service made it when the file changed on two computers at once; "
                                 "merge it into the file by hand", rel)
-            async with self.r.lock:
-                if paths:
-                    await self.ingest(paths)
-                self.ingest_dirs()
+            await self.changed(paths)
