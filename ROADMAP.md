@@ -35,9 +35,6 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
    and a standalone VS Code plugin with the web app's collaboration.
 2. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
-3. **[The Assistant uses tools from other MCP servers](https://github.com/jhudsy/texloom/issues/31)**:
-   a literature search, a reference manager, a lab's own tools, added by address in ⚙. 2–3 days;
-   only servers on the web that allow the page to reach them, each call asking first.
 
 ## Testing
 

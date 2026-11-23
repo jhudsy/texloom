@@ -6,7 +6,8 @@ import type { Replica } from '../replica'
 import { dialog, h } from '../dom'
 import { aiPrefs, listModels, PRESETS, type ProviderConfig } from './providers'
 import { createSession, explainError, tokensIn, type LlmSession, type TurnEvents, type TurnResult } from './llm'
-import { ASSISTANT, jsonSchema, runTool, toolsFor, type Change, type ToolCtx } from './tools'
+import { ASSISTANT, jsonSchema, runTool, toolsFor, type Change, type ToolCtx, type ToolDef } from './tools'
+import { checkUrl, explainServerError, serverTools, testServer, toolServers, type ToolServer } from './servers'
 import { locale, t, tn } from '../i18n'
 import { commonEnds, refine, wordDiff } from '../worddiff'
 import { diffPiece } from '../review'
@@ -434,7 +435,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     render()
   }
 
-  const connectButton = () => h('button', { class: 'small connect-tool', onclick: () => connectToolDialog(host.writable, host.link) }, t('Work on this project from Claude Code or another AI tool…'))
+  const connectButton = () => h('button', { class: 'small connect-tool', title: t('Claude Code, Codex, Cursor, Claude Desktop and other tools that support MCP'),
+    onclick: () => connectToolDialog(host.writable, host.link) }, t('Use an AI agent on your computer…'))
   /** The other way to work with AI, which people took for part of this panel. */
   const otherWay = () => h('div', { class: 'ai-note ai-other' },
     h('b', {}, t('Or use an AI tool on your computer')), ' ',
@@ -474,13 +476,14 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   }
 
   // ---- review (ask before applying) ----
-  function review(c: Change, turnEl: HTMLElement): Promise<boolean> {
-    if (!aiPrefs.reviewEdits && c.after !== null) return Promise.resolve(true) // deleting a file always asks
+  /** `asking`: a call to a tool from elsewhere, allowed or not (the caller decides whether to ask). */
+  function review(c: Change, turnEl: HTMLElement, asking = false): Promise<boolean> {
+    if (!asking && !aiPrefs.reviewEdits && c.after !== null) return Promise.resolve(true) // deleting a file always asks
     return new Promise((resolve) => {
       const done = (ok: boolean) => {
         chat?.entries.push({ k: 'change', text: c.summary, ok })
         card.classList.add(ok ? 'accepted' : 'rejected')
-        btns.replaceChildren(h('span', { class: 'muted' }, ok ? t('Applied') : t('Rejected')))
+        btns.replaceChildren(h('span', { class: 'muted' }, asking ? (ok ? t('Allowed') : t('Not allowed')) : ok ? t('Applied') : t('Rejected')))
         abort?.signal.removeEventListener('abort', onAbort)
         host.status?.('busy')
         resolve(ok)
@@ -489,8 +492,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       abort?.signal.addEventListener('abort', onAbort)
       host.status?.('ask')
       const btns = h('div', { class: 'row end' },
-        h('button', { onclick: () => done(false) }, t('Reject')),
-        h('button', { class: 'primary', onclick: () => done(true) }, t('Apply')))
+        h('button', { onclick: () => done(false) }, asking ? t('Don’t allow') : t('Reject')),
+        h('button', { class: 'primary', onclick: () => done(true) }, asking ? t('Allow') : t('Apply')))
       const card = h('div', { class: 'ai-review' }, h('div', { class: 'title' }, c.summary), c.note !== undefined ? h('div', { class: 'ai-note' }, c.note) : diffView(c.before, c.after), btns)
       turnEl.append(card)
       log.scrollTop = log.scrollHeight
@@ -527,11 +530,15 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
 
   /** Everything the assistant is sent besides the conversation, to read (and copy). */
   async function sentDialog() {
-    const tools = toolsFor(host.writable)
+    const tools = [...toolsFor(host.writable), ...await serverTools(() => {})]
     const system = systemPrompt()
     const toolText = tools.map((d) => `${d.name}(${Object.keys((jsonSchema(d) as any).properties ?? {}).join(', ')})\n${d.description}`).join('\n\n')
     const fixed = tokensIn(system.length + JSON.stringify(tools.map((d) => ({ name: d.name, description: d.description, parameters: jsonSchema(d) }))).length)
     const usage = h('p', { class: 'muted small' }, t('About {{n}} tokens before any conversation.', { n: fixed.toLocaleString(locale) }))
+    const byServer = new Map<string, ToolDef[]>()
+    for (const d of tools) if (d.server) byServer.set(d.server, [...(byServer.get(d.server) ?? []), d])
+    const fromServers = [...byServer].map(([server, ds]) => h('li', {}, tn(ds.length, '{{server}}: {{n}} tool, about {{tokens}} tokens', '{{server}}: {{n}} tools, about {{tokens}} tokens',
+      { server, tokens: tokensIn(JSON.stringify(ds.map((d) => ({ name: d.name, description: d.description, parameters: jsonSchema(d) }))).length).toLocaleString(locale) })))
     const copy = (text: string) => h('button', { class: 'small', onclick: (e: any) => navigator.clipboard.writeText(text).then(() => { e.target.textContent = t('Copied') }, () => {}) }, t('Copy'))
     const dlg = dialog('settings sent',
       h('h3', {}, t('What the assistant is sent')),
@@ -540,6 +547,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       h('div', { class: 'row' }, h('h4', {}, t('Instructions')), h('span', { class: 'spacer' }), copy(system)),
       h('pre', { class: 'sent-text' }, system),
       h('div', { class: 'row' }, h('h4', {}, t('Tools')), h('span', { class: 'spacer' }), copy(toolText)),
+      fromServers.length ? h('p', { class: 'muted small' }, t('Of these, from tool servers you added:')) : '',
+      fromServers.length ? h('ul', { class: 'muted small' }, ...fromServers) : '',
       h('pre', { class: 'sent-text' }, toolText),
       h('h4', {}, t('Context block (as it would be for your next message)')),
       h('pre', { class: 'sent-text' }, contextBlock(session)),
@@ -568,8 +577,10 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     log.append(turnEl)
     log.scrollTop = log.scrollHeight
 
-    const tools = toolsFor(host.writable)
+    const tools = [...toolsFor(host.writable), ...await serverTools((name, error) =>
+      hint(t('The tool server {{name}} isn’t available: {{error}}', { name, error }), 'warn'))]
     session ??= createSession(cfg, tools, systemPrompt())
+    session.setTools(tools)
     const s = session
     const message = `${contextBlock(s)}\n\n${text}`
     const told = toldTo.get(s) ?? new Set<string>()
@@ -588,6 +599,10 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       replica: r, writable: host.writable,
       review: (ch) => review(ch, turnEl),
       compile: host.compile, lastLog: host.lastLog, agentName: `Assistant (for ${host.userName()})`.slice(0, 64),
+      // a tool from elsewhere asks first, as edits do (and always on a read-only project, which has no switch)
+      allow: (summary, detail) => (host.writable && !aiPrefs.reviewEdits ? Promise.resolve(true)
+        : review({ path: '', before: null, after: '', summary, note: detail }, turnEl, true)),
+      signal: abort.signal,
     }
     try {
       const room = await roomFor(s)
@@ -638,7 +653,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
 
         const results = []
         for (const call of res.toolCalls) {
-          const label = describe(call.name, call.input)
+          const label = tools.find((d) => d.name === call.name)?.label ?? describe(call.name, call.input)
           const chip = h('div', { class: 'ai-tool pending' }, label)
           turnEl.append(chip)
           const out = abort.signal.aborted
@@ -754,6 +769,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       h('label', { class: 'block' }, h('span', {}, t('Your instructions')), mine),
       h('p', { class: 'muted small' }, t('Sent with every request, to every model and provider, and kept when a long conversation is summarised. Stored only in this browser. Saving starts a new conversation.'),
         ' ', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); sentDialog() } }, t('What the assistant is sent…'))),
+      toolsSection(),
       otherWay(),
       h('p', { class: 'muted small' }, t('Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to the endpoint above.')),
       h('div', { class: 'row end' },
@@ -771,6 +787,69 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
           },
         }, t('Save'))),
     )
+  }
+
+  // ---- tool servers (servers.ts) ----
+  function toolsSection(): HTMLElement {
+    const list = h('div', { class: 'tool-servers' })
+    const update = (id: string, change: Partial<ToolServer>) => toolServers.save(toolServers.list().map((x) => (x.id === id ? { ...x, ...change } : x)))
+    const row = (s: ToolServer) => {
+      const status = h('span', { class: 'muted small' })
+      const test = h('button', { class: 'small', onclick: async () => {
+        status.textContent = t('Connecting…')
+        try {
+          const tools = await testServer(s)
+          status.textContent = tn(tools.length, '{{n}} tool: {{names}}', '{{n}} tools: {{names}}', { names: tools.map((x) => x.name).join(', ').slice(0, 300) })
+        } catch (e) { status.textContent = explainServerError(e) }
+      } }, t('Test'))
+      return h('div', { class: 'tool-server' },
+        h('div', { class: 'row' },
+          h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: s.on, onchange: (e: any) => update(s.id, { on: e.target.checked }) }), h('b', {}, s.name)),
+          h('span', { class: 'muted small url' }, s.url),
+          h('span', { class: 'spacer' }),
+          test,
+          h('button', { class: 'small', onclick: () => { toolServers.save(toolServers.list().filter((x) => x.id !== s.id)); render() } }, t('Remove'))),
+        h('label', { class: 'check small' }, h('input', { type: 'checkbox', checked: s.trusted, onchange: (e: any) => update(s.id, { trusted: e.target.checked }) }),
+          t('Trusted: use its tools without asking first')),
+        status)
+    }
+    const render = () => list.replaceChildren(...toolServers.list().map(row))
+    const form = h('div', { class: 'tool-server-add', hidden: true })
+    const url = h('input', { placeholder: 'https://…/mcp', 'aria-label': t('Address') }) as HTMLInputElement
+    const name = h('input', { placeholder: t('optional'), 'aria-label': t('Name') }) as HTMLInputElement
+    const token = h('input', { type: 'password', placeholder: t('optional'), autocomplete: 'off', 'aria-label': t('Token') }) as HTMLInputElement
+    const said = h('span', { class: 'muted small' })
+    const add = h('button', { class: 'primary small', onclick: async () => {
+      const address = url.value.trim()
+      const wrong = checkUrl(address)
+      if (wrong) { said.textContent = wrong; return }
+      const s: ToolServer = { id: crypto.randomUUID(), name: '', url: address, token: token.value.trim(), trusted: false, on: true }
+      said.textContent = t('Connecting…')
+      add.disabled = true
+      try {
+        const tools = await testServer(s)
+        s.name = (name.value.trim() || new URL(address).hostname).slice(0, 40)
+        toolServers.save([...toolServers.list(), s])
+        render()
+        form.hidden = true
+        url.value = name.value = token.value = ''
+        said.textContent = ''
+        list.lastElementChild?.lastElementChild?.replaceChildren(tn(tools.length, '{{n}} tool: {{names}}', '{{n}} tools: {{names}}', { names: tools.map((x) => x.name).join(', ').slice(0, 300) }))
+      } catch (e) { said.textContent = explainServerError(e) } finally { add.disabled = false }
+    } }, t('Add')) as HTMLButtonElement
+    form.append(h('div', { class: 'grid' },
+      h('span', {}, t('Address')), url,
+      h('span', {}, t('Name')), name,
+      h('span', {}, t('Token')), token),
+      h('div', { class: 'row end' }, said, h('span', { class: 'spacer' }), h('button', { class: 'small', onclick: () => { form.hidden = true } }, t('Cancel')), add))
+    render()
+    return h('div', { class: 'tool-servers-section' },
+      h('h4', {}, t('Tools for the Assistant')),
+      h('p', { class: 'muted small' }, t('Tools from other servers, for the assistant to use beside its own: a literature search, a reference manager, your lab’s own tools. They’re MCP servers on the web, reached straight from this browser; only those that allow requests from this page work. Kept only in this browser, with their tokens, and they apply from your next message.')),
+      list,
+      form,
+      h('button', { class: 'small', onclick: () => { form.hidden = false; url.focus() } }, t('Add a tool server…')),
+      h('p', { class: 'risk small' }, t('Their tools act outside this project, and what they return is text from elsewhere, which could include instructions aimed at the assistant. Unless a server is trusted, each call asks first while Ask before applying edits is on.')))
   }
 
   return panel

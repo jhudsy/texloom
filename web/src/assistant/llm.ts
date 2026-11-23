@@ -18,6 +18,8 @@ export interface LlmSession {
   addUser(text: string): void
   addToolResults(results: { id: string; content: string; isError: boolean }[]): void
   turn(ev: TurnEvents, signal: AbortSignal): Promise<TurnResult>
+  /** The tools from the next request on (the tool servers the person added can change). */
+  setTools(tools: ToolDef[]): void
   /** The conversation so far, to hand back to createSession later. */
   save(): unknown
 
@@ -106,6 +108,11 @@ class AnthropicSession implements LlmSession {
       baseURL: cfg.baseUrl,
       dangerouslyAllowBrowser: true, // the user's own key, used from their own browser
     })
+    this.tools = []
+    this.setTools(tools)
+  }
+
+  setTools(tools: ToolDef[]) {
     this.tools = tools.map((t) => ({
       name: t.name,
       description: t.description,
@@ -276,6 +283,11 @@ class OpenAISession implements LlmSession {
 
   constructor(private cfg: ProviderConfig, tools: ToolDef[], readonly system: string, history: OaiMessage[]) {
     this.messages = history.filter((m) => m.role !== 'system')
+    this.tools = []
+    this.setTools(tools)
+  }
+
+  setTools(tools: ToolDef[]) {
     this.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: jsonSchema(t) } }))
   }
 

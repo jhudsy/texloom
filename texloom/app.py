@@ -225,7 +225,7 @@ class Window(QtWidgets.QMainWindow):
         self.a_count.setToolTip(_("Count the words with TeXCount, from your own TeX installation"))
         self.a_scratch = a(_("Compile from scratch"), self.compile_from_scratch)
         self.a_scratch.setToolTip(_("Delete LaTeX’s working files (.aux, .bbl, …) in .texloom/build and compile again"))
-        self.a_mcp = a(_("Work on this project from Claude Code or another AI tool…"), self.connect_tool)
+        self.a_mcp = a(_("Use an AI agent on your computer…"), self.connect_tool)
         self.a_lsp = a(_("Show comments in your editor…"), lambda: EditorDialog(self).exec())
         self.a_leave = a(_("Leave…"), self.leave)
         self.a_activity = QtGui.QAction(_("Show activity"), self, checkable=True)

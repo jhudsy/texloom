@@ -413,7 +413,7 @@ Choosing a folder in the list shows whether it is up to date, offline or sending
 for owners **edit links for others**: one per person or group, to copy or email; revoking one
 is in the web app's Share dialog). **More** (also the **Project** menu and the right-click menu)
 has **Tags…**, **Make a copy…** (a new project, in a new folder, from this one's files),
-**Word count…**, **Work on this project from Claude Code or another AI tool…** (how to connect a tool you already use through
+**Word count…**, **Use an AI agent on your computer…** (how to connect a tool you already use through
 [MCP](#agents-mcp)) and **Leave…**, which stops syncing a folder (its files stay).
 - **Compiling:** compile with your own TeX when files change. Once that's on, **Running programs
   when compiling** is *Never* (default), *TeX Live's safe list*, or *Anything the document asks,
@@ -706,7 +706,7 @@ claude mcp add texloom -- texloom mcp '<edit link>'         # or straight from a
 
 With the downloadable app there's nothing more to install: the binary inside it runs the server
 too (`/Applications/TeXLoom.app/Contents/MacOS/TeXLoom mcp …` on a Mac, `TeXLoom.exe mcp …` in the
-app's folder on Windows). **Work on this project from Claude Code or another AI tool…** in the app gives the lines with its path.
+app's folder on Windows). **Use an AI agent on your computer…** in the app gives the lines with its path.
 App builds check that the built app answers MCP (`scripts/check_bundled_mcp.py`).
 
 The agent appears to everyone as **Claude (agent)** (change with `--name`), with its own
@@ -781,7 +781,18 @@ model is loaded), Ollama or OpenRouter; you can also enter it under ⚙ **Contex
 loaded with a small context: 16,000 tokens or more leaves room to work, since the assistant's own instructions take
 a few thousand. A model that thinks before answering can take a few minutes over a summary.
 
-**Work on this project from Claude Code or another AI tool…** in the tab shows how to connect a tool you already use through
+**Tools for the Assistant**, under ⚙, adds tools from other MCP servers for it to use beside its own: a
+literature search, a reference manager, your lab's own tools. Give the server's address (https, or http on this
+computer) and a token if it needs one, and **Test** lists its tools. The requests go straight from your browser to
+that server, so only servers on the web that allow requests from the page (CORS) work; servers that run as local
+programs (stdio) can't be reached from a page. The servers and their tokens are kept only in your browser, never
+in the project, so a collaborator's Assistant uses only the servers they added. Their tools act outside the
+project, and what they return could contain instructions aimed at the assistant: while **Ask before applying
+edits** is on, each call shows the tool and its arguments and waits for **Allow**, unless you mark that server as
+**Trusted**. Its tools are named after the server, so they can't stand in for the built-in ones, and
+**What the assistant is sent…** lists them with their size.
+
+**Use an AI agent on your computer…** in the tab shows how to connect a tool you already use through
 [MCP](#agents-mcp) instead, such as Claude Code. It runs under your own account with that tool, so it
 needs no API key here. It's separate from the tab: you talk to the tool in its own window, and its work
 shows up in the project under its name.
@@ -911,6 +922,7 @@ npm run check-pdfanchor # comments from the PDF: selected text is found in its L
 npm run check-chars     # edits never cut an emoji (or any character outside the BMP) in two
 npm run check-packing   # compressed snapshots: both apps read the same cases (scripts/packing-vectors.json; also scripts/check_packing.py)
 npm run check-submission  # the arXiv / journal .zip: files followed, comments removed, files merged
+npm run check-mcpclient    # the Assistant's MCP client, against a stand-in server: JSON and event-stream replies, sessions, tokens, errors, tool names
 npm run check-props     # random texts and edits (Windows line endings, emoji): the editor and the shared text stay identical, merges and line endings behave
 cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for the desktop, and its merge agrees with the web app's
 uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)

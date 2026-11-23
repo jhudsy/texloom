@@ -833,7 +833,7 @@ class ConnectToolDialog(QtWidgets.QDialog):
         self.access = "suggest" if self.keys.writable else "read"
         # the downloadable app runs the MCP server itself (packaging/app_main.py): nothing more to install
         self.command = sys.executable if getattr(sys, "frozen", False) else "texloom"
-        self.setWindowTitle(_("Work on this project from Claude Code or another AI tool"))
+        self.setWindowTitle(_("Use an AI agent on your computer"))
         self.setMinimumWidth(620)
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(self.note(_("Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.")))

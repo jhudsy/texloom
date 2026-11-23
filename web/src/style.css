@@ -711,6 +711,12 @@ dialog.settings.tabbed[open] { display: flex; flex-direction: column; }
 /* the PDF bar's offer of a collaborator's newer main PDF while another document's is shown (output.ts) */
 .pdfbar .newer { max-width: 24em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-other { margin-top: 8px; }
+.tool-servers-section { margin-top: 12px; }
+.tool-server { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; display: grid; gap: 4px; }
+.tool-server .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.tool-server .spacer { flex: 0 0 0; }
+.tool-server-add { border: 1px dashed var(--line); border-radius: 6px; padding: 8px; margin: 6px 0; }
+.tool-server-add[hidden] { display: none; }
 .ai-files { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .ai-file { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; padding: 0 2px 0 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); max-width: 100%; overflow-wrap: anywhere; }
 .ai-file .icon { padding: 0 4px; font-size: 10px; line-height: 16px; }

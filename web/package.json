@@ -17,7 +17,8 @@
     "check-props": "node scripts/check-props.mjs",
     "check-folder-model": "node scripts/check-folder-model.mjs",
     "check-submission": "node scripts/check-submission.mjs",
-    "check-packing": "node scripts/check-packing.mjs"
+    "check-packing": "node scripts/check-packing.mjs",
+    "check-mcpclient": "node scripts/check-mcpclient.mjs"
   },
   "keywords": [],
   "author": "",

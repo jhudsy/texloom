@@ -37,14 +37,14 @@ export function connectToolDialog(writable: boolean, link: (write: boolean) => s
     h('input', { type: 'radio', name: 'connect-runner', checked: viaApp === app, onchange: () => { viaApp = app; update() } }), label)
   install.update(); update()
   const dlg = dialog('settings',
-    h('h3', {}, t('Work on this project from Claude Code or another AI tool')),
+    h('h3', {}, t('Use an AI agent on your computer')),
     h('p', { class: 'muted small' }, t('Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.')),
     h('p', { class: 'muted small' }, t('This is separate from the Assistant tab: you talk to the tool in its own window, not there, and the two don’t share conversations. What the tool does appears in the project under its name, like a collaborator’s work.')),
     h('h4', {}, t('What your tool runs')),
     mac ? h('div', { class: 'connect-access' },
       runner(true, t('The TeXLoom app, in Applications: nothing more to install')),
       runner(false, t('The TeXLoom command-line helper, installed once'))) :
-      h('p', { class: 'muted small' }, t('If the TeXLoom desktop app is on this computer, nothing more needs installing: open this project in the app and choose Work on this project from Claude Code or another AI tool… there, for lines that run the app itself. Otherwise, install the TeXLoom command-line helper once:')),
+      h('p', { class: 'muted small' }, t('If the TeXLoom desktop app is on this computer, nothing more needs installing: open this project in the app and choose Use an AI agent on your computer… there, for lines that run the app itself. Otherwise, install the TeXLoom command-line helper once:')),
     helper,
     writable ? h('h4', {}, t('Choose what the tool may do')) : null,
     writable ? h('div', { class: 'connect-access' },

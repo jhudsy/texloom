@@ -23,6 +23,9 @@ export interface ToolCtx {
   compile: () => Promise<{ ok: boolean; log: string } | null>
   lastLog: () => string
   agentName: string // how the assistant's comments and suggestions are signed
+  /** Ask the person before a call to a tool from elsewhere: resolves true to go ahead. */
+  allow: (summary: string, detail: string) => Promise<boolean>
+  signal?: AbortSignal
 }
 
 export interface ToolDef {
@@ -31,9 +34,13 @@ export interface ToolDef {
   schema: z.ZodObject<any>
   write?: boolean // modifies the project
   run: (input: any, ctx: ToolCtx) => Promise<string>
+  /** A tool from another server (servers.ts): its own JSON schema, sent as it is, and how calls to it are shown. */
+  inputSchema?: Record<string, unknown>
+  label?: string
+  server?: string
 }
 
-class ToolError extends Error {}
+export class ToolError extends Error {}
 
 const SEARCH_LINE = 2000 // characters of each line the search tool looks at
 const SEARCH_MS = 500 // how long the search tool may run
@@ -372,6 +379,7 @@ export function toolsFor(writable: boolean): ToolDef[] {
 }
 
 export function jsonSchema(t: ToolDef): Record<string, unknown> {
+  if (t.inputSchema) return t.inputSchema
   const s = z.toJSONSchema(t.schema) as Record<string, unknown>
   delete s.$schema
   return s
