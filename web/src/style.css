@@ -20,7 +20,8 @@ button.primary { background: var(--accent); color: var(--accent-fg); border-colo
 a.button { font: inherit; padding: 4px 10px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 6px; text-decoration: none; white-space: nowrap; }
 a.button:hover { border-color: var(--muted); }
 a.button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-button[disabled] { opacity: .6; cursor: progress; }
+button[disabled] { opacity: .6; cursor: default; }
+button[disabled][aria-busy="true"] { cursor: progress; } /* one that is working, not one that can't be used */
 input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--bg); color: var(--fg); }
 .muted { color: var(--muted); }

@@ -196,6 +196,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   function renderCtx() {
     const c = host.editorContext()
     partBtn.disabled = !c?.file || !c.selection
+    partBtn.title = partBtn.disabled ? t('Select some text in the editor first') : t('Add the selected text for the assistant to consider, to gather passages from several places')
     ctxChip.textContent = !c?.file ? '' : c.selection ? t('Context: {{file}}, lines {{from}}–{{to}} selected', { file: c.file, from: c.fromLine, to: c.toLine }) : t('Context: {{file}}', { file: c.file })
   }
 

@@ -113,6 +113,7 @@ const zh: Catalog = {
   'about {{n}} tokens': '约 {{n}} 个 token',
   'Reading them takes about {{n}} tokens of the model’s context, once per conversation. A long conversation is summarised to make room.': '阅读这些文件约占模型上下文的 {{n}} 个 token，每次对话只读一次。对话过长时会被总结以腾出空间。',
   'To point it at a passage instead, select the text in the editor and press “+ Selection”.': '若要指定某段文字，请在编辑器中选中它，然后点击“+ 选中内容”。',
+  'Select some text in the editor first': '请先在编辑器中选择文本',
 }
 
 export default zh

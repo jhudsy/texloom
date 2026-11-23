@@ -113,6 +113,7 @@ const de: Catalog = {
   'about {{n}} tokens': 'etwa {{n}} Tokens',
   'Reading them takes about {{n}} tokens of the model’s context, once per conversation. A long conversation is summarised to make room.': 'Das Lesen belegt etwa {{n}} Tokens des Modellkontexts, einmal pro Unterhaltung. Eine lange Unterhaltung wird zusammengefasst, um Platz zu schaffen.',
   'To point it at a passage instead, select the text in the editor and press “+ Selection”.': 'Um es stattdessen auf eine Passage hinzuweisen, markieren Sie den Text im Editor und drücken Sie „+ Auswahl“.',
+  'Select some text in the editor first': 'Markieren Sie zuerst Text im Editor',
 }
 
 export default de
