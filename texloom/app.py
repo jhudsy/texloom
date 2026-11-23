@@ -44,6 +44,7 @@ from .ui import (GREY, ICON, MAC, RED, TAGS_ROLE, Engine, browser_link, chevron,
 from .wordcount import find_texcount, texcount_report
 
 log = logging.getLogger("texloom")
+COMMENTS_EVERY = 15  # seconds between looks at the comments (counts and mention notices)
 HELP_URL = "https://github.com/jhudsy/texloom#readme"
 SOURCE_URL = "https://github.com/jhudsy/texloom"
 RELEASES_API = "https://api.github.com/repos/jhudsy/texloom/releases/latest"
@@ -179,6 +180,14 @@ class Window(QtWidgets.QMainWindow):
         self.update_timer.timeout.connect(lambda: app_pref("check_updates", True) and self.check_updates())
         self.update_timer.start(24 * 3600 * 1000)
         QtCore.QTimer.singleShot(15_000, lambda: app_pref("check_updates", True) and self.check_updates())
+        # the Review tab's comments, for people who work here rather than in the browser: counts in the
+        # details, and a notice when a new one mentions you (the app runs on; the web app can't do that)
+        self.comment_counts: dict[Path, tuple[int, int]] = {}
+        self.mention_folder: Path | None = None  # what the last mention notice was about, for its click
+        self.comments_timer = QtCore.QTimer(self)
+        self.comments_timer.timeout.connect(self.check_comments)
+        self.comments_timer.start(COMMENTS_EVERY * 1000)
+        QtCore.QTimer.singleShot(5_000, self.check_comments)
         self.refresh()
         self.list.setFocus()  # not the search field, which would open with a focus ring and a blinking cursor
 
@@ -643,6 +652,80 @@ class Window(QtWidgets.QMainWindow):
             self.engine.submit(r.ask_usage(), lambda _res, _err: None)
         self.engine.submit(r.move_to_code(code), done)
 
+    # -- comments (texloom/comments.py)
+    def my_name_in(self, d: Path) -> str:
+        try:
+            cfg = {**DEFAULT_CONFIG, **load_config(d)}
+        except (OSError, ValueError):
+            cfg = DEFAULT_CONFIG
+        return str(cfg.get("name") or listsync.my_name()[0] or "")
+
+    def check_comments(self) -> None:
+        from .comments import counts
+        from .replica import Replica
+        for d, st in list(self.engine.daemon.states.items()):
+            if isinstance(st.replica, Replica):
+                self.engine.submit(counts(st.replica, self.my_name_in(d)), functools.partial(self.got_comments, d))
+
+    def got_comments(self, d: Path, res, err) -> None:
+        if err or res is None:
+            log.debug("comments not counted for %s: %s", d, err)
+            return
+        n, mine = res
+        self.comment_counts[d] = (n, len(mine))
+        if d == self.current():
+            self.show_comment_counts(d)
+        seen_file = state_dir(d) / "mentions-seen.json"
+        try:
+            seen = set(json.loads(seen_file.read_text()))
+        except (OSError, ValueError):
+            seen = None  # the first look: what's there already isn't news (the details show it)
+        new = [k for k in mine if seen is not None and k not in seen]
+        if set(mine) != (seen or set()):
+            try:
+                seen_file.write_text(json.dumps(sorted(mine)))
+            except OSError as e:
+                log.debug("mentions seen not saved: %s", e)
+        if new and self.tray is not None:
+            self.mention_folder = d
+            name = project_name(d, self.engine)
+            self.tray.showMessage("TeXLoom", ngettext(len(new), "A new comment in {project} mentions you.",
+                                                      "{n} new comments in {project} mention you.", n=len(new), project=name)
+                                  + " " + _("Click to see it in the browser."), QtGui.QIcon(str(ICON)), 10000)
+
+    def show_comment_counts(self, d: Path) -> None:
+        n, mine = self.comment_counts.get(d, (0, 0))
+        if not n:
+            self.comments_lbl.setText("")
+            self.comments_lbl.setVisible(False)
+            return
+        parts = [html.escape(ngettext(n, "{n} open comment", "{n} open comments", n=n))]
+        if mine:
+            parts.append("<b>" + html.escape(ngettext(mine, "{n} mentions you", "{n} mention you", n=mine)) + "</b>")
+        links = [f"<a href='review'>{html.escape(_('Review in browser'))}</a>"]
+        if (d / ".texloom" / "comments.md").is_file():
+            links.append(f"<a href='overview'>{html.escape(_('Overview file'))}</a>")
+        self.comments_lbl.setText(" · ".join(parts) + " — " + " · ".join(links))
+        self.comments_lbl.setToolTip(_("The overview file lists the open comments with their file and line, for reading in your own editor; "
+                                       "reply in the browser, or with `texloom comments`."))
+        self.comments_lbl.setVisible(True)
+
+    def comments_link(self, href: str) -> None:
+        d = self.current()
+        if d is None:
+            return
+        if href == "overview":
+            open_path(d / ".texloom" / "comments.md")
+        else:
+            self.open_review(d, mentions=bool(self.comment_counts.get(d, (0, 0))[1]))
+
+    def mention_clicked(self) -> None:
+        if self.mention_folder is not None:
+            self.open_review(self.mention_folder, mentions=True)
+
+    def open_review(self, d: Path, mentions: bool = False) -> None:
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(browser_link(d, "tab=review" + ("&mentions=1" if mentions else ""))))
+
     def copy_project(self) -> None:
         d = self.current()
         if not d:
@@ -718,7 +801,10 @@ class Window(QtWidgets.QMainWindow):
         self.usage_lbl.setWordWrap(True)
         self.usage_lbl.setStyleSheet(f"color: {GREY}")
         self.usage_asked: dict[Path, float] = {}  # when fresh figures were last asked for, per folder
-        for x in (self.title, self.path_lbl, self.status_lbl, self.usage_lbl):
+        self.comments_lbl = QtWidgets.QLabel()  # open comments, and the ones that mention you
+        self.comments_lbl.setWordWrap(True)
+        self.comments_lbl.linkActivated.connect(self.comments_link)
+        for x in (self.title, self.path_lbl, self.status_lbl, self.usage_lbl, self.comments_lbl):
             lay.addWidget(x)
         lay.addSpacing(4)
         btns = QtWidgets.QHBoxLayout()
@@ -884,6 +970,7 @@ class Window(QtWidgets.QMainWindow):
             self.path_lbl.setText("")
             self.status_lbl.setText("")
             self.usage_lbl.setText("")
+            self.comments_lbl.setText("")
             self.log.setPlainText("")
             return
         d = self.current()
@@ -899,6 +986,7 @@ class Window(QtWidgets.QMainWindow):
         usage = usage_text(r.store_info, r.storage) if r else ""
         self.usage_lbl.setText(usage)
         self.usage_lbl.setVisible(bool(usage))
+        self.show_comment_counts(d)
         if r is not None and time.time() - self.usage_asked.get(d, 0) > 60:  # fresh figures, once a minute while shown
             self.usage_asked[d] = time.time()
             self.engine.submit(r.ask_usage(), lambda _res, _err: None)
@@ -1298,6 +1386,7 @@ def main(argv: list[str] | None = None) -> None:
         # as in other menu-bar apps. Bringing the window forward as well closed that menu at once
         # when the click was on another screen's menu bar.
         tray.activated.connect(lambda reason: win.show_window() if reason == QtWidgets.QSystemTrayIcon.Trigger and not MAC else None)
+        tray.messageClicked.connect(win.mention_clicked)
         tray.show()
         win.tray = tray
         if MAC:

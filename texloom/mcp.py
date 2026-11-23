@@ -32,6 +32,7 @@ from pycrdt import Array, Assoc, Map, Text
 from . import __version__
 from .anchors import index_in
 from .confine import outside_reads
+from .comments import mentions
 from .crypto import Keys, b64e, signed_name
 from .folder import apply_text, compile_externals, latexmk
 from .paths import STATE, latexmk_command, main_file, safe_rel, tex_names_refused
@@ -39,20 +40,6 @@ from .replica import Replica
 from .textpos import Char, char_of_u16, u16_of
 
 log = logging.getLogger("texloom")
-
-def mentions(text: str, name: str) -> bool:
-    """Whether text mentions name: `@name`, any case, not followed by a letter or digit (as in web/src/mention.ts)."""
-    n = name.strip().lower()
-    if not n:
-        return False
-    hay, needle = text.lower(), "@" + n
-    i = hay.find(needle)
-    while i >= 0:
-        after = hay[i + len(needle):i + len(needle) + 1]
-        if not after or not (after.isalnum() or after == "_"):
-            return True
-        i = hay.find(needle, i + 1)
-    return False
 
 
 MAX_COMMENTS = 100_000  # characters list_comments returns at once (as in web/src/assistant/tools.ts)

@@ -352,4 +352,11 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'The server refused: only the project’s owner can move it.': '服务器拒绝了：只有项目所有者才能转移它。',
     'The project now counts against the new code.': '该项目现已计入新代码。',
     'Too many tries with wrong codes. Quit and reopen TeXLoom to try again.': '错误代码尝试次数过多。请退出并重新打开 TeXLoom 后再试。',
+    'The overview file lists the open comments with their file and line, for reading in your own editor; reply in the browser, or with `texloom comments`.': '概览文件列出所有未处理的评论及其文件和行号，可在你自己的编辑器中阅读；请在浏览器中或用 `texloom comments` 回复。',
+    'Click to see it in the browser.': '点击即可在浏览器中查看。',
+    'Review in browser': '在浏览器中审阅',
+    'Overview file': '概览文件',
+    '{n} open comments': {'other': '{n} 条未处理的评论'},
+    '{n} new comments in {project} mention you.': {'other': '{project} 中有 {n} 条新评论提到了你。'},
+    '{n} mention you': {'other': '{n} 条提到了你'},
 }

@@ -352,4 +352,11 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'The server refused: only the project’s owner can move it.': 'O servidor recusou: só o proprietário do projeto pode movê-lo.',
     'The project now counts against the new code.': 'O projeto agora conta para o novo código.',
     'Too many tries with wrong codes. Quit and reopen TeXLoom to try again.': 'Tentativas demais com códigos errados. Feche e abra o TeXLoom de novo para tentar outra vez.',
+    'The overview file lists the open comments with their file and line, for reading in your own editor; reply in the browser, or with `texloom comments`.': 'O arquivo de resumo lista os comentários abertos com arquivo e linha, para ler no seu próprio editor; responda no navegador ou com `texloom comments`.',
+    'Click to see it in the browser.': 'Clique para ver no navegador.',
+    'Review in browser': 'Revisar no navegador',
+    'Overview file': 'Arquivo de resumo',
+    '{n} open comments': ('{n} comentário aberto', '{n} comentários abertos'),
+    '{n} new comments in {project} mention you.': ('Um novo comentário em {project} menciona você.', '{n} novos comentários em {project} mencionam você.'),
+    '{n} mention you': ('{n} menciona você', '{n} mencionam você'),
 }

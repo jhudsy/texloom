@@ -869,6 +869,13 @@ async function openProject(keys: Keys, server: string) {
   if (savedLeft === 'outline' || (savedLeft === 'symbols' && writable)) showLeft(savedLeft)
   const savedTab = localStorage.getItem('texloom.tab') as Tab | null
   if (savedTab && savedTab in panes && savedTab !== 'pdf') showTab(savedTab)
+  // the desktop app's "Review in browser" and mention notices (?tab=review, &mentions=1 for just yours)
+  const asked = new URLSearchParams(location.search)
+  if (asked.get('tab') === 'review') {
+    layout.reveal('right')
+    showTab('review')
+    if (asked.get('mentions') === '1') review()?.showMentions()
+  }
   tree.start()
 
   listenForShortcutsKey() // ? lists them all

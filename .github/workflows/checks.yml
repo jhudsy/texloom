@@ -37,6 +37,8 @@ jobs:
         run: uv run --extra server python scripts/check_files.py folder
       - name: Moving a project to another creation code (a real server, with a throwaway PostgreSQL)
         run: uv run --extra server python scripts/check_move_code.py
+      - name: Comments for a synced folder (the overview, texloom comments; a real server)
+        run: uv run --extra server python scripts/check_comments.py
       - name: Positions can't be mixed up (textpos, mypy)
         run: uv run --with mypy python scripts/check_textpos.py
       - name: Web app

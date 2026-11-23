@@ -238,6 +238,13 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   Review tab shows **@** and how many; click it, or tick **Mentions me**, to see just those. The
   server can't read projects, so a mention is seen when the project is opened, not sent by email.
   An agent can be asked for "the comments addressed to you" (`list_comments` with `mentioning`).
+- **Comments in your own editor:** a synced folder keeps `.texloom/comments.md`, an overview of the
+  open comments with their file and line (and the ones that mention you marked), for reading in any
+  editor. The desktop app shows how many are open and how many mention you, with **Review in
+  browser**, and since it runs in the background it gives a system notification when a new comment
+  mentions you. From a terminal, `texloom comments DIR` lists them (`--mine`, `--all`), and
+  `texloom comments reply DIR ID TEXT` and `texloom comments resolve DIR ID` answer them; they work
+  while the app is syncing the folder.
 - **Several at once:** **Resolve all…** in the Review tab resolves every open comment. To act on some,
   ⌘/Ctrl-click cards to select them (⇧-click for a run, ⌘/Ctrl+A for all), or select text in the
   editor and press **Select in text** for the comments and suggestions on it; a bar then offers
@@ -896,6 +903,7 @@ uv run python scripts/check_folder_renames.py                     # a folder ren
 uv run --extra server python scripts/check_shared_folder.py       # two computers on one folder shared through a stand-in Dropbox: they take turns, nothing arrives twice
 uv run --extra server python scripts/check_files.py               # the server's file store: a folder, and Garage (S3) if installed
 uv run --extra server python scripts/check_move_code.py           # moving a project to another creation code, against a real server
+uv run --extra server python scripts/check_comments.py            # a folder's comments overview, and texloom comments list/reply/resolve
 uv run --extra server python scripts/check_config.py              # texloom.example.toml lists every server setting, and parses
 (cd web && npm run check-folder-model)                           # the same for the browser's folder sync, on a fake clock and folder
 ```

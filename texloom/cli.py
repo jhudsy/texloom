@@ -10,6 +10,7 @@
   texloom run   <dir> --git                       also keep the folder's git repository in step (any host)
   texloom allow <dir>                             review lines that run programs; allow them with --shell-escape
   texloom mcp   <dir|link> [--name NAME] [--suggest-only]  MCP server: an agent edits/comments as a collaborator
+  texloom comments <dir> [--mine] [--all]         the Review tab's comments; also: reply <dir> ID TEXT, resolve <dir> ID
 """
 
 from __future__ import annotations
@@ -96,6 +97,9 @@ def print_links(keys: Keys, server: str) -> None:
     print("Anyone with a link has that access. Keep the edit link private.")
 
 
+OVERVIEW_EVERY = 5  # seconds between looks at the comments, for .texloom/comments.md
+
+
 async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | str = False, git: bool = False) -> None:
     """Sync one folder (until cancelled, or one round with once=True). Holds the folder's lock
     while running, released however it ends (a cancelled task may keep its frame alive)."""
@@ -154,9 +158,21 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
         async with replica.lock:
             await fs.write_out()
     later = asyncio.create_task(after_connect())
+
+    async def keep_overview() -> None:  # .texloom/comments.md: the Review tab, for reading in any editor
+        from .comments import write_overview
+        await replica.synced.wait()
+        while True:
+            try:
+                write_overview(d, replica, name)
+            except OSError as e:
+                log.debug("comments overview not written: %s", e)
+            await asyncio.sleep(OVERVIEW_EVERY)
     if once:
         await asyncio.wait_for(replica.synced.wait(), 30)
         await asyncio.sleep(3)  # let acks and peers' replies (relay-only projects) arrive
+        from .comments import write_overview
+        write_overview(d, replica, name)
         if bridge:
             async with replica.lock:
                 await fs.write_out()
@@ -171,11 +187,71 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
         log.info(f"git: committing project changes after {bridge.quiet:g}s of quiet"
               + (f", fetching {up} every {bridge.interval:g}s and pushing to it." if up else " (no upstream: commits stay local)."))
     try:
-        await asyncio.gather(conn, fs.watch(), merges.run(), turns.run(), *([bridge.loop()] if bridge else []))
+        await asyncio.gather(conn, fs.watch(), merges.run(), turns.run(), keep_overview(), *([bridge.loop()] if bridge else []))
     finally:
         later.cancel()
         merges._save()
         replica.save()
+
+
+def comments_command(a: argparse.Namespace) -> None:
+    """`texloom comments DIR` lists from this computer's copy of the project (as up to date as its
+    last sync); `reply` and `resolve` connect with a copy of their own, as `texloom mcp` does, so
+    they work while the app or `texloom run` is syncing the folder."""
+    from .comments import read, reply, resolve
+    from .listsync import my_name
+    act = a.args[0] if a.args[0] in ("reply", "resolve") else "list"
+    rest = a.args[1:] if act != "list" else a.args
+    if not rest or (act == "reply" and len(rest) < 3) or (act == "resolve" and len(rest) != 2):
+        sys.exit("usage: texloom comments DIR | texloom comments reply DIR ID TEXT | texloom comments resolve DIR ID")
+    d = Path(rest[0])
+    keys, server = load(d)
+    cfg = {**DEFAULT_CONFIG, **load_config(d)}
+    name = cfg.get("name") or my_name()[0] or getpass.getuser()
+    if act == "list":
+        r = Replica(state_dir(d), keys, server)
+        items = [c for c in read(r, a.all) if not a.mine or c.mentions(name)]
+        if not items:
+            print("Nothing open." if not a.mine else f"Nothing mentions @{name}.")
+        for c in items:
+            where = f"{c.file}:{c.line}" if c.line else f"{c.file} (text changed)"
+            state = " [resolved]" if c.resolved else ""
+            print(f"{where}: {c.kind} by {c.by}{' ✓' if c.verified else ''}{state}  (id {c.id})")
+            body = c.text if c.kind == "comment" else (f"replace {c.quote!r} with {c.text!r}" if c.quote else f"insert {c.text!r}")
+            print("    " + body.replace("\n", "\n    "))
+            for rp in c.replies:
+                print(f"    ↳ {rp.by}{' ✓' if rp.verified else ''}: {rp.text}")
+        return
+    if not keys.writable:
+        sys.exit("this folder has a read-only link: it can't reply or resolve")
+
+    async def change() -> None:
+        state = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "texloom" / "comments" / keys.project
+        r = Replica(state, keys, server, cfg["create_code"] or None)
+        conn = asyncio.create_task(r.run())
+        try:
+            await asyncio.wait_for(r.synced.wait(), 60)
+            iid = rest[1]
+            if act == "reply":
+                reply(r, iid, " ".join(rest[2:]), name)
+            else:
+                resolve(r, iid)
+            for _ in range(200):  # until the server has it
+                if not r.outbox:
+                    break
+                await asyncio.sleep(0.1)
+            if r.outbox:
+                sys.exit("not confirmed by the server yet: it's sent when this copy next connects (run the command again)")
+        finally:
+            r.save()
+            conn.cancel()
+    try:
+        asyncio.run(change())
+    except KeyError as e:
+        sys.exit(f"no comment with id {e.args[0]}")
+    except ValueError as e:
+        sys.exit(str(e))
+    print("Replied." if act == "reply" else "Resolved.")
 
 
 async def clone_project(link: str, d: Path) -> None:
@@ -425,6 +501,11 @@ def main() -> None:
     p.add_argument("--name", default="Claude (agent)", help="how the agent appears to collaborators")
     p.add_argument("--suggest-only", action="store_true",
                    help="the agent can comment and suggest changes for people to accept, but not edit files directly")
+    p = sub.add_parser("comments", help="list the Review tab's comments, or reply to or resolve one")
+    p.add_argument("args", nargs="+", metavar="[reply|resolve] DIR [ID [TEXT]]",
+                   help="DIR to list; `reply DIR ID TEXT`; `resolve DIR ID`")
+    p.add_argument("--mine", action="store_true", help="only those that mention you (@ and your name)")
+    p.add_argument("--all", action="store_true", help="resolved ones too")
     p = sub.add_parser("links", help="print share links")
     p.add_argument("dir", type=Path, nargs="?", default=Path("."))
     a = ap.parse_args()
@@ -510,6 +591,8 @@ def main() -> None:
             asyncio.run(serve(keys, server, a.name[:64], code or None, a.suggest_only))
         except KeyboardInterrupt:
             pass
+    elif a.cmd == "comments":
+        comments_command(a)
     elif a.cmd == "projects":
         projects_command(a)
     elif a.cmd == "links":

@@ -232,12 +232,13 @@ def colour_names() -> dict[str, str]:
             "blue": _("Blue"), "indigo": _("Indigo"), "purple": _("Purple"), "pink": _("Pink"), "grey": _("Grey")}
 
 
-def browser_link(d: Path) -> str:
+def browser_link(d: Path, extra: str = "") -> str:
     """A folder's project link for opening in the browser, marked as opened by this app, so the web
-    app doesn't ask where the files should live: they're in this folder already."""
+    app doesn't ask where the files should live: they're in this folder already. `extra`: more of the
+    query, such as "tab=review" (web/src/main.ts reads it)."""
     cfg = load_config(d)
     page, _hash, keys = cfg["link"].partition("#")
-    mark = "from=app" + ("&compile=1" if cfg.get("compile") else "")  # the web app then compiles here by default
+    mark = "from=app" + ("&compile=1" if cfg.get("compile") else "") + (f"&{extra}" if extra else "")  # the web app then compiles here by default
     return f"{page}{'&' if '?' in page else '?'}{mark}#{keys}"
 
 
