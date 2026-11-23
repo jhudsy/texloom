@@ -53,6 +53,32 @@ def grant_msg(pub: bytes, name: str) -> bytes:
     return b"grant:" + pub + b":" + name.encode()
 
 
+def signed_name(project: str, msg: bytes, sig_b64: object, members) -> str | None:
+    """The name a personal link's signature over msg vouches for: as the owner granted it in the
+    project's `members` (pub -> {name, g}), else the one the link carries. None if unsigned, invalid,
+    or signed with the owner's key, which the shared edit link holds too, so it names no one.
+    As signedName in web/src/review.ts."""
+    if not isinstance(sig_b64, str):
+        return None
+    try:
+        sig = b64d(sig_b64)
+    except ValueError:
+        return None
+    pub = signer(project, msg, sig)
+    if pub is None or pub == "owner":
+        return None
+    name = sig[98:98 + sig[97]].decode()
+    m = members.get(pub) if members is not None else None
+    if isinstance(m, dict) and isinstance(m.get("g"), str):
+        granted = str(m.get("name") or "")
+        try:
+            if _ok(b64d(project), b64d(m["g"]), grant_msg(b64d(pub), granted)):
+                name = granted
+        except ValueError:
+            pass  # a malformed entry: the link's own name stands
+    return name[:64] or None
+
+
 def revoke_msg(pub_b64: str) -> bytes:
     return b"revoke:" + b64d(pub_b64)
 

@@ -685,6 +685,11 @@ edit files; **suggest** changes and **comment** (shown in the Review tab for peo
 accept or reject); list, reply to and resolve comments; and compile (with local `latexmk`)
 or read the latest compile log.
 
+Its list of comments marks each author **[verified]** when a personal link's signature vouches for
+the name, or **[unverified]** when it's a name anyone with the shared edit link could have typed, so
+"handle the comments from Alice" can't be steered by someone typing "Alice". A long list comes in
+parts, and can be narrowed to one file. The Assistant tab's list works the same way.
+
 Asking it to "suggest" rather than "edit" is only a request. To enforce it, add
 `--suggest-only`: the agent then has no way to change files directly, and every change is a
 suggestion people accept or reject. With a read-only link it can't change the project at all.
