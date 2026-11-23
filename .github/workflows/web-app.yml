@@ -15,6 +15,7 @@ on:
       - 'scripts/fakeforge.py'
       - 'scripts/fakedropbox.py'
       - 'scripts/pg.py'
+      - 'scripts/testdb.py'
       - '.github/workflows/web-app.yml'
   pull_request:
     paths:
@@ -25,6 +26,7 @@ on:
       - 'scripts/fakeforge.py'
       - 'scripts/fakedropbox.py'
       - 'scripts/pg.py'
+      - 'scripts/testdb.py'
       - '.github/workflows/web-app.yml'
   schedule:
     - cron: '47 3 * * *'  # nightly
@@ -33,6 +35,8 @@ on:
 jobs:
   web-app:
     runs-on: ubuntu-latest
+    env:
+      TEXLOOM_CHECK_DATABASE: postgresql  # the server's database here (the other checks use SQLite)
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

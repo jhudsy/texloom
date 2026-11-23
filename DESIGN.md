@@ -22,12 +22,12 @@ No accounts: a project is shared by sending a link.
                   ├──── updates over WS ────┤
  local daemon    ─┘       ┌────────┐        └─ local daemon (collaborator)
  (Python, folder  ───────▶│ server │
-  sync + latexmk)         │ relay +│  PostgreSQL: opaque ciphertext log; files: a folder or S3 bucket
+  sync + latexmk)         │ relay +│  SQLite or PostgreSQL: opaque ciphertext log; files: a folder or S3 bucket
                           │ store  │
                           └────────┘
 ```
 
-1. **Server** (`server/`, Python + aiohttp + PostgreSQL). Relays updates between connected
+1. **Server** (`server/`, Python + aiohttp + SQLite or PostgreSQL). Relays updates between connected
    peers, appends them to a per-project log (`server/store.py`), stores encrypted blobs (in a
    folder or an S3-compatible bucket, `server/files.py`; the database only records which exist),
    serves the web app. It never sees keys or plaintext. It verifies write signatures so that holders
@@ -262,7 +262,11 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   allowances from the moment it's accepted (`Store.pending`), so uploads at once can't
   together pass a limit. Folder reads and writes, and checking an upload's signature, run on
   worker threads, so a large file doesn't hold up live editing.
-- **The database:** PostgreSQL, through asyncpg, so the relay never waits on it. A project's
+- **The database:** an SQLite file or PostgreSQL (`server/db.py`), behind the same few calls:
+  execute, fetch, and transactions. Both run the same SQL, written for both, and
+  `scripts/check_store.py` holds them to the same answers. PostgreSQL goes through asyncpg; SQLite
+  runs its calls one at a time on a thread of its own; either way the relay never waits on it.
+  SQLite allows one server process per file (a second is refused), PostgreSQL several. A project's
   edits are numbered in the database: `head` is incremented and read back (`UPDATE … RETURNING`)
   in the same transaction as the log row, so numbers stay right however many servers write.
   Within one server, `Store.lock(project)` keeps a project's check-then-write steps (is this a

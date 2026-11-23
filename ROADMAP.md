@@ -13,17 +13,15 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
    second server (or a hosted PostgreSQL), stored files in a bucket, and a written switch-over; then
    automatic failover using a lease in the bucket. About 2 days for the standby; no change to the
    relay's code.
-2. **[A choice of database behind one interface](https://github.com/jhudsy/texloom/issues/30)**:
-   SQLite (nothing to install, for running your own relay) or PostgreSQL (for standbys and several
-   relays), with the notifier and locks separate, and one test suite both must pass. About a week.
-3. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:
+2. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:
    most of the traffic, off the relay. About 2 days.
-4. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
+3. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
    (TLA+, with the GitHub lease), before several servers run at once. 2–3 days.
-5. **[Several servers at once](https://github.com/jhudsy/texloom/issues/12)**: the database already
-   numbers each project's changes correctly with several writers. Left: changes reaching people
-   connected to another server (PostgreSQL LISTEN/NOTIFY), sharing what each server keeps in memory
-   (usage, deletions, storage modes, revocations), and running maintenance once. About a week.
+4. **[Several servers at once](https://github.com/jhudsy/texloom/issues/12)** (on PostgreSQL): the
+   database already numbers each project's changes correctly with several writers. Left: changes
+   reaching people connected to another server (a notifier: PostgreSQL LISTEN/NOTIFY), a lock or
+   lease for the single-writer rules, sharing what each server keeps in memory (usage, deletions,
+   storage modes, revocations), and running maintenance once. About a week.
 
 ## Later
 

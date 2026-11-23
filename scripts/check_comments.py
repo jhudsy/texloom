@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
-import pg  # noqa: E402
+import testdb  # noqa: E402
 
 from pycrdt import Text  # noqa: E402
 
@@ -68,7 +68,7 @@ async def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="texloom-comments-"))
     port = free_port()
     url = f"http://127.0.0.1:{port}"
-    database, _ = pg.start(tmp / "pg")
+    database = testdb.start(tmp / "db")
     server = subprocess.Popen([sys.executable, "-c", SERVER, "--port", str(port), "--database", database, "--data", str(tmp / "relay")],
                               cwd=ROOT, stdout=open(tmp / "server.log", "w"), stderr=subprocess.STDOUT)  # noqa: SIM115
     tasks: list[asyncio.Task] = []
@@ -136,7 +136,7 @@ async def main() -> int:
         await asyncio.gather(*tasks, return_exceptions=True)
         server.terminate()
         server.wait(10)
-        pg.stop(tmp / "pg")
+        testdb.stop(tmp / "db")
         if ok and not os.environ.get("KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
         else:

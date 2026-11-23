@@ -6,7 +6,7 @@ server serving web/dist (build it first), headless Chromium, and a new project t
         s.check("what", ok)                # PASS/FAIL lines; s.failed at the end
 
 Pages run with the web app's test hooks on (window.__texloom: the replica, the editor view, open a
-file). Needs PostgreSQL's programs (scripts/pg.py) and Playwright's Chromium:
+file). Needs Playwright's Chromium (and, with TEXLOOM_CHECK_DATABASE=postgresql, PostgreSQL's programs: scripts/testdb.py):
     uv run --with playwright python -m playwright install chromium
 """
 
@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
 
 import pg  # noqa: E402
+import testdb
 
 MOD = "Meta" if sys.platform == "darwin" else "Control"
 
@@ -47,7 +48,7 @@ class Session:
         if not (dist / "index.html").exists():
             sys.exit("Build the web app first: cd web && npm run build")
         self._tmp = tempfile.TemporaryDirectory()
-        self._pg = pg.running()
+        self._pg = testdb.running()
         db = self._pg.__enter__()
 
         async def start():

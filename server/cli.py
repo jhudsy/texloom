@@ -27,11 +27,12 @@ Without --codes-file every project may be stored (subject to the limits above). 
 refused write is still relayed live to collaborators online but not acknowledged, so
 the sender keeps it and retries later: nobody loses work.
 
-Run:              texloom-server --port 8787 --db data/texloom.db --codes-file data/codes.txt
+Run:              texloom-server --port 8787 --data data --codes-file data/codes.txt
 Add a code:       texloom-server --codes-file data/codes.txt --add-code alice --allowance 2G [--months 12]
 Renew a code:     texloom-server --codes-file data/codes.txt --renew-code CODE --months 12 [--allowance 10G]
-List codes/usage: texloom-server --codes-file data/codes.txt --list-codes --db data/texloom.db
-Purge one code:   texloom-server --codes-file data/codes.txt --purge-code CODE --db data/texloom.db
+List codes/usage: texloom-server --codes-file data/codes.txt --list-codes --data data
+Purge one code:   texloom-server --codes-file data/codes.txt --purge-code CODE --data data
+Move to Postgres: texloom-server --database postgresql:///texloom --copy-database-from sqlite:///…/texloom.db
 """
 
 from __future__ import annotations
@@ -74,9 +75,14 @@ def parser() -> argparse.ArgumentParser:
                         "Every option below can be set there by name, and as TEXLOOM_<NAME> in the environment")
     p.add_argument("--host", default="127.0.0.1", help="interface to listen on (default: localhost only)")
     p.add_argument("--port", type=int, default=8787)
-    p.add_argument("--database", "--db", dest="database", default="postgresql:///texloom", metavar="URL",
-                   help="the PostgreSQL database, e.g. postgresql:///texloom (this machine, as this user) or "
-                        "postgresql://texloom:PASSWORD@db.example.org/texloom")
+    p.add_argument("--database", "--db", dest="database", default="", metavar="URL",
+                   help="where edit logs, project records and project lists are kept: an SQLite file, which one "
+                        "server uses (default: sqlite:DIR/texloom.db, in --data; or e.g. sqlite:///var/lib/texloom/texloom.db), "
+                        "or a PostgreSQL database, which several can share: postgresql:///texloom (this machine, as "
+                        "this user) or postgresql://texloom:PASSWORD@db.example.org/texloom")
+    p.add_argument("--copy-database-from", metavar="URL",
+                   help="copy everything from this database (the one the server used until now) into --database, "
+                        "which must be new, then exit. Stop the server first")
     p.add_argument("--data", type=Path, default=Path("data"), metavar="DIR",
                    help="this server's own folder: uploads are spooled here, --min-free is kept free here, and "
                         "stored files go in DIR/files unless --files says otherwise")
@@ -209,10 +215,31 @@ async def _codes_command(a: argparse.Namespace, codes: CodeBook, files: Files) -
         await store.close()
 
 
+async def _copy_command(a: argparse.Namespace) -> None:
+    """--copy-database-from."""
+    from .db import redact
+    from .store import copy_database
+    print(f"copying {redact(a.copy_database_from)} into {redact(a.database)}", file=sys.stderr)
+    counts = await copy_database(a.copy_database_from, a.database,
+                                 lambda table, n: print(f"  {table}: {n} rows…", end="\r", file=sys.stderr))
+    for table, n in counts.items():
+        print(f"  {table}: {n} row(s)" + " " * 10)
+    print("done: point the server at the new database (database = … in its settings), then start it")
+
+
 def main() -> None:
     from .config import parse
     p = parser()
     a = parse(p)
+    if not a.database:  # an SQLite file in the server's own folder
+        a.database = f"sqlite:{(a.data / 'texloom.db').resolve()}"
+    if a.copy_database_from:
+        from .db import DatabaseError
+        try:
+            asyncio.run(_copy_command(a))
+        except DatabaseError as e:
+            sys.exit(str(e))
+        return
     try:
         files = open_files(a.files, a.data / "files",
                            {"endpoint": a.s3_endpoint, "region": a.s3_region, "key_id": a.s3_key_id, "secret": a.s3_secret})

@@ -36,7 +36,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
-import pg  # noqa: E402  (a throwaway PostgreSQL for the server)
+import testdb  # noqa: E402  (a throwaway database for the server)
 MiB = 1 << 20
 MAX_SAMPLES = 40_000  # per process and kind of latency
 TOO_SLOW_MS = 200  # a step fails if the slowest 5% of edits take longer than this to arrive
@@ -280,7 +280,7 @@ class Server:
     def __init__(self, port: int, static: Path | None = None):
         self.dir = Path(tempfile.mkdtemp(prefix="texloom-loadtest-"))
         self.port, self.static = port, static
-        self.database = ""  # a throwaway PostgreSQL in self.dir/pg, started by db()
+        self.database = ""  # a throwaway database in self.dir/db (scripts/testdb.py), started by db()
         (self.dir / "codes.txt").write_text("default unlimited\n")
         self.proc: subprocess.Popen | None = None
         self.url = f"http://127.0.0.1:{port}"
@@ -288,15 +288,15 @@ class Server:
     def db(self) -> str:
         """The server's database (started on first use)."""
         if not self.database:
-            self.database, _ = pg.start(self.dir / "pg")
+            self.database = testdb.start(self.dir / "db")
         return self.database
 
     def sql(self, query: str, *args):
         """One value from the server's database."""
-        import asyncpg
+        from server.db import connect
 
         async def ask():
-            c = await asyncpg.connect(self.db())
+            c = await connect(self.db())
             try:
                 return await c.fetchval(query, *args)
             finally:
@@ -317,7 +317,7 @@ class Server:
                 await c.executemany("INSERT INTO log(project, seq, snap, data, sig, h) VALUES ($1,1,false,$2,$3,$4)",
                                     [(f"{i:043d}", os.urandom(300), b"s" * 64, sha256(str(i).encode()).digest()) for i in range(projects)])
                 await c.executemany("INSERT INTO head(project, seq) VALUES ($1,1)", [(f"{i:043d}",) for i in range(projects)])
-            await store.pool.close()
+            await store.close()
         asyncio.run(fill())
 
     def start(self) -> float:
@@ -352,7 +352,7 @@ class Server:
     def close(self) -> None:
         self.stop()
         if self.database:
-            pg.stop(self.dir / "pg")
+            testdb.stop(self.dir / "db")
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def usage(self) -> tuple[float, float]:

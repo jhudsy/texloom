@@ -2,8 +2,9 @@
 # Install: sudo cp deploy/texloom.service /etc/systemd/system/ && sudo systemctl enable --now texloom
 [Unit]
 Description=TeXLoom relay server
-After=network-online.target postgresql.service
-Wants=network-online.target postgresql.service
+# with a PostgreSQL database on this machine, add postgresql.service to both lines
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 User=texloom

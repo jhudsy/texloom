@@ -3,7 +3,9 @@
 A TeXLoom server is one Python process: it serves the web app and the in-browser TeX files, and
 relays and stores projects' encrypted changes. It can't read any project. It needs:
 
-- **PostgreSQL** (14 or later) for the edit logs, project records and project lists;
+- **a database** for the edit logs, project records and project lists: an SQLite file, which
+  needs nothing installed (the default), or PostgreSQL (14 or later) for a standby or several
+  servers ([The database](#the-database));
 - **a place for stored files** (pictures, PDFs, uploads, all encrypted by the apps): a folder on
   the server, or an S3-compatible bucket;
 - **HTTPS** in front of it for anyone but yourself, because browsers only allow the encryption the
@@ -37,9 +39,8 @@ It works alongside other sites on the machine and only adds things:
 | what | where |
 |---|---|
 | a `texloom` system user | |
-| PostgreSQL, with a `texloom` database the `texloom` user reaches over the local socket (no password) | |
 | the app and its Python environment | `/var/www/texloom` (`TEXLOOM_DIR=…` for elsewhere) |
-| stored files, TeX Live packages fetched on demand | `/var/lib/texloom` |
+| the database (SQLite), stored files, TeX Live packages fetched on demand | `/var/lib/texloom` |
 | settings, creation codes, the admin password | `/etc/texloom/texloom.toml`, `codes.txt`, `admin-token` |
 | a sandboxed systemd service on 127.0.0.1:8787, using at most 1 GB of memory (`MemoryMax`) | `texloom.service` |
 | an nginx site with rate limits and security headers, and a Let's Encrypt certificate | `/etc/nginx/sites-available/<domain>` |
@@ -47,7 +48,9 @@ It works alongside other sites on the machine and only adds things:
 The first run prints the owner's creation code (unlimited storage) and where the admin page is.
 `texloom.toml` is written once, from then on it's yours: later runs don't change it. Options:
 `SSH_OPTS="-p 2222"`, `SKIP_CERT=1` (no certificate yet, e.g. before DNS points at the server),
-`TEXLIVE_MIRROR=https://…/systems/texlive/tlnet/` (a TeX Live mirror near the server, used first).
+`TEXLIVE_MIRROR=https://…/systems/texlive/tlnet/` (a TeX Live mirror near the server, used first),
+`DATABASE=postgresql` (first install only: PostgreSQL instead of SQLite, with a `texloom` database
+the `texloom` user reaches over the local socket, no password).
 
 Then [set up backups](#backups): the script keeps none.
 
@@ -72,9 +75,9 @@ npm run download-tex                        # in-browser TeX (~685 MB, into ../t
 cd ..
 ```
 
-Create a PostgreSQL database for it (here `texloom`, owned by the user the server runs as), write
-a settings file (copy [`texloom.example.toml`](texloom.example.toml) and change what differs;
-[Settings](#settings)), and start it:
+Write a settings file (copy [`texloom.example.toml`](texloom.example.toml) and change what differs;
+[Settings](#settings)) and start it. Its database is an SQLite file in `data` unless the settings
+name another ([The database](#the-database)).
 
 ```bash
 uv run texloom-server --config /etc/texloom/texloom.toml
@@ -89,9 +92,15 @@ uv run texloom-server --config /etc/texloom/texloom.toml --texlive-init   # ~2 s
 
 ### On your own computer
 
-For trying it out or working on it, [`scripts/pg.py`](scripts/pg.py) runs a PostgreSQL of its own
-in a folder (it needs PostgreSQL's programs: `brew install postgresql@17` or `apt install
-postgresql`, nothing set up as a service):
+For trying it out or working on it:
+
+```bash
+uv run --extra server texloom-server --data data     # its database: data/texloom.db
+```
+
+To try it with PostgreSQL, [`scripts/pg.py`](scripts/pg.py) runs one of its own in a folder (it
+needs PostgreSQL's programs: `brew install postgresql@17` or `apt install postgresql`, nothing set
+up as a service):
 
 ```bash
 uv run --extra server python scripts/pg.py data/pg -- uv run --extra server texloom-server --data data
@@ -112,7 +121,7 @@ the server doesn't know is an error, so a typo doesn't go unnoticed. After a cha
 `systemctl restart texloom`.
 
 ```toml
-database = "postgresql:///texloom?host=/var/run/postgresql"
+database = "sqlite:///var/lib/texloom/texloom.db"
 data = "/var/lib/texloom"
 codes_file = ["/etc/texloom/codes.txt"]
 admin_token_file = "/etc/texloom/admin-token"
@@ -121,7 +130,7 @@ min_free = "2G"
 
 | setting | default | what it does |
 |---|---|---|
-| `database` | `postgresql:///texloom` | the PostgreSQL database ([The database](#the-database)) |
+| `database` | `texloom.db` in `data` | an SQLite file or a PostgreSQL database ([The database](#the-database)) |
 | `data` | `data` | this server's own folder: uploads are spooled here, `min_free` is kept free here, and stored files go in `data/files` unless `files` says otherwise |
 | `files`, `[s3]` | `data/files` | where stored files go ([Stored files](#stored-files)) |
 | `host`, `port` | `127.0.0.1`, `8787` | where it listens |
@@ -147,13 +156,36 @@ the environment. On the command line they'd show in `ps`.
 
 ## The database
 
-`database` is a PostgreSQL address:
+`database` is one of:
 
-- `postgresql:///texloom?host=/var/run/postgresql`: on this machine, over the local socket, as the
-  user the server runs as (the install script's choice: no password anywhere);
-- `postgresql://texloom:PASSWORD@db.example.org:5432/texloom?sslmode=require`: elsewhere.
+- **an SQLite file**: `sqlite:///var/lib/texloom/texloom.db` (`sqlite:` and the path; a relative
+  path, `sqlite:data/texloom.db`, is from the folder the server starts in). Without the setting,
+  `texloom.db` in `data`. Nothing to install or look after, and the install script's choice. One
+  server process uses it: a second one started on the same file refuses to run (one-off commands
+  such as `--list-codes` can use it while the server runs).
+- **PostgreSQL** (14 or later), for a warm standby, replicas, or several servers sharing it:
+  - `postgresql:///texloom?host=/var/run/postgresql`: on this machine, over the local socket, as
+    the user the server runs as (no password anywhere; the install script's choice with
+    `DATABASE=postgresql`);
+  - `postgresql://texloom:PASSWORD@db.example.org:5432/texloom?sslmode=require`: elsewhere.
 
-The server creates its tables when it starts. It uses up to 10 connections.
+  The server uses up to 10 connections.
+
+The server creates its tables when it starts, either way. To move a server from one to the other
+(SQLite up to PostgreSQL, say), stop it, copy everything into the new, empty database, point the
+settings at it, and start it again:
+
+```bash
+systemctl stop texloom
+sudo -u texloom texloom-server --config /etc/texloom/texloom.toml \
+  --database "postgresql:///texloom?host=/var/run/postgresql" \
+  --copy-database-from sqlite:///var/lib/texloom/texloom.db
+# then database = "postgresql:///texloom?host=/var/run/postgresql" in texloom.toml
+systemctl start texloom
+```
+
+(After the install script, the program is `/var/www/texloom/.venv/bin/texloom-server`.) The old
+database is left as it was.
 
 ## Stored files
 
@@ -287,16 +319,19 @@ server keeps it connected but hearing nothing for ten minutes at a time instead.
 
 The install script keeps none. Back up, every night and somewhere else:
 
-- **the database**: `sudo -u postgres pg_dump --format=custom texloom > texloom.pgdump`
-  (consistent while the server runs);
+- **the database**: with SQLite, `sqlite3 /var/lib/texloom/texloom.db ".backup texloom-backup.db"`
+  (`apt install sqlite3`; consistent while the server runs: don't just copy the file, whose last
+  changes may still be in `texloom.db-wal`). With PostgreSQL, `sudo -u postgres pg_dump
+  --format=custom texloom > texloom.pgdump` (also consistent while it runs);
 - **stored files**: `texloom-server --files-for-backup DIR` prints the folder to back up: the files
   folder (without its `.incoming`), or, with a bucket, DIR, which it first makes a copy of the
   bucket (copying only what's new since last time). Files are written once and never changed, so a
   copy taken while the server runs is consistent;
 - **settings**: `/etc/texloom`.
 
-To restore: install the server, stop it, `sudo -u postgres pg_restore -d texloom --clean --if-exists
-texloom.pgdump`, put back the settings and the files (into the files folder; with a bucket,
+To restore: install the server, stop it, put back the database (SQLite: copy the backup over
+`texloom.db`, owned by `texloom`, and delete any `texloom.db-wal` and `texloom.db-shm` beside it;
+PostgreSQL: `sudo -u postgres pg_restore -d texloom --clean --if-exists texloom.pgdump`), put back the settings and the files (into the files folder; with a bucket,
 `texloom-server --files-restore <the restored copy>` puts back whatever the bucket lacks), and
 start it. Everyone's devices hold full copies
 of their projects, so edits made since the backup come back as people reconnect.

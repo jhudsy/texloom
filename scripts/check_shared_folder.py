@@ -32,7 +32,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import pg  # noqa: E402
+import testdb  # noqa: E402
 from check_synconly import PY, ROOT, SERVER, Computer, Failed, free_port, invariants, lf, wait  # noqa: E402
 
 os.environ.update({"TEXLOOM_TURN_ANNOUNCE": "2", "TEXLOOM_TURN_EXPIRE": "8"})  # (the computers inherit it)
@@ -132,7 +132,7 @@ def check(step) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     port = free_port()
     url = f"http://127.0.0.1:{port}"
-    database, _ = pg.start(tmp / "pg")
+    database = testdb.start(tmp / "db")
     server = subprocess.Popen(PY + [SERVER, "--port", str(port), "--database", database, "--data", str(tmp / "relay")],
                               cwd=ROOT, stdout=open(tmp / "server.log", "w"), stderr=subprocess.STDOUT)  # noqa: SIM115
     a, b, c = Computer("A", "unix", tmp), Computer("B", "unix", tmp), Computer("C", "unix", tmp)
@@ -226,7 +226,7 @@ def check(step) -> None:
             x.stop()
         server.terminate()
         server.wait(10)
-        pg.stop(tmp / "pg")
+        testdb.stop(tmp / "db")
         if ok:
             shutil.rmtree(tmp, ignore_errors=True)
         else:

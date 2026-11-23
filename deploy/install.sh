@@ -4,17 +4,20 @@
 #   deploy/install.sh root@server.example.org texloom.example.org
 #
 # Re-run it to update. Used for https://texloom.jhudsy.org (Ubuntu 24.04, alongside other nginx
-# sites). It only adds things: a `texloom` system user, PostgreSQL with a `texloom` database, the
-# app in /var/www/texloom (set TEXLOOM_DIR for elsewhere), its files in /var/lib/texloom, settings
+# sites). It only adds things: a `texloom` system user, the app in /var/www/texloom (set
+# TEXLOOM_DIR for elsewhere), its files and SQLite database in /var/lib/texloom, settings
 # in /etc/texloom (texloom.toml, written once: edit it there), a systemd service on 127.0.0.1:8787
 # and an nginx site for the domain, plus a Let's Encrypt certificate via certbot. Other sites are
 # left alone. It keeps no backups: see INSTALL.md. Extra ssh options can be passed in SSH_OPTS;
-# set SKIP_CERT=1 to skip certbot.
+# set SKIP_CERT=1 to skip certbot. DATABASE=postgresql on the first install uses PostgreSQL (with a
+# `texloom` database) instead of SQLite; afterwards, the settings file says which it is.
 set -euo pipefail
 
 TARGET=${1:?usage: deploy/install.sh user@host domain}
 DOMAIN=${2:?usage: deploy/install.sh user@host domain}
 SSH_OPTS=${SSH_OPTS:-}
+DATABASE=${DATABASE:-sqlite}
+case "$DATABASE" in sqlite|postgresql) ;; *) echo "DATABASE is sqlite or postgresql"; exit 1 ;; esac
 APP_DIR=${TEXLOOM_DIR:-/var/www/texloom}
 # TeX Live mirror to use first, e.g. https://mirror.example.ac.uk/ctan/systems/texlive/tlnet/
 # (default: mirror.ctan.org picks one near the server)
@@ -46,14 +49,36 @@ rsync -az --delete -e "ssh $SSH_OPTS" \
   "$HERE/" "$TARGET:$APP_DIR/"
 
 echo "==> Installing on the server"
-ssh_ DOMAIN="$DOMAIN" APP_DIR="$APP_DIR" TEXLIVE_MIRROR="$TEXLIVE_MIRROR" BUSYTEX_VERSION="$BUSYTEX_VERSION" BUSYTEX_SHA256="$BUSYTEX_SHA256" SKIP_CERT="${SKIP_CERT:-}" bash -s <<'REMOTE'
+ssh_ DOMAIN="$DOMAIN" APP_DIR="$APP_DIR" DATABASE="$DATABASE" TEXLIVE_MIRROR="$TEXLIVE_MIRROR" BUSYTEX_VERSION="$BUSYTEX_VERSION" BUSYTEX_SHA256="$BUSYTEX_SHA256" SKIP_CERT="${SKIP_CERT:-}" bash -s <<'REMOTE'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1  # leave no caches behind
 
+# the database: what the settings say, once there are settings (TEXLOOM_DATABASE in env overrides them)
+CONF=/etc/texloom/texloom.toml
+if [ -f "$CONF" ]; then
+  if grep -qsE '^\s*(database\s*=\s*"postgres|TEXLOOM_DATABASE=postgres)' "$CONF" /etc/texloom/env; then
+    DATABASE=postgresql
+  elif ! grep -qsE '^\s*(database\s*=|TEXLOOM_DATABASE=)' "$CONF" /etc/texloom/env \
+       && [ -n "$(runuser -u postgres -- psql -qtAX -c "SELECT 1 FROM pg_database WHERE datname='texloom'" 2>/dev/null)" ]; then
+    # settings from before SQLite was the default, which used PostgreSQL's `texloom` database without saying so
+    # (before any table such as [s3]: in TOML, the lines after one belong to it)
+    awk 'BEGIN { line = "# (added by deploy/install.sh: the database this server has used all along)\ndatabase = \"postgresql:///texloom?host=/var/run/postgresql\"\n" }
+         !done && /^[[:space:]]*\[/ { printf "%s\n", line; done = 1 } { print } END { if (!done) printf "\n%s", line }' "$CONF" > "$CONF.new"
+    mv "$CONF.new" "$CONF"  # (its owner and mode are set below)
+    echo "    settings: database = PostgreSQL's texloom database, as before"
+    DATABASE=postgresql
+  else
+    DATABASE=sqlite
+  fi
+fi
+echo "    database: $DATABASE"
+
 # packages (only installs what's missing)
 need=()
-for p in nginx python3-venv rsync curl postgresql; do dpkg -s "$p" >/dev/null 2>&1 || need+=("$p"); done
+pkgs=(nginx python3-venv rsync curl)
+[ "$DATABASE" = postgresql ] && pkgs+=(postgresql)
+for p in "${pkgs[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || need+=("$p"); done
 command -v certbot >/dev/null || need+=(certbot python3-certbot-nginx)
 if ((${#need[@]})); then apt-get update -qq && apt-get install -y -qq "${need[@]}"; fi
 
@@ -69,10 +94,15 @@ python3 -m venv .venv
 chown -R root:root "$APP_DIR" && chmod -R a+rX "$APP_DIR"
 
 # PostgreSQL: a `texloom` database, which the texloom user reaches over the local socket (no password)
-systemctl enable -q --now postgresql
-pg() { runuser -u postgres -- psql -qtAX "$@"; }
-[ "$(pg -c "SELECT 1 FROM pg_roles WHERE rolname='texloom'")" = 1 ] || runuser -u postgres -- createuser texloom
-[ "$(pg -c "SELECT 1 FROM pg_database WHERE datname='texloom'")" = 1 ] || runuser -u postgres -- createdb -O texloom texloom
+if [ "$DATABASE" = postgresql ]; then
+  systemctl enable -q --now postgresql
+  pg() { runuser -u postgres -- psql -qtAX "$@"; }
+  [ "$(pg -c "SELECT 1 FROM pg_roles WHERE rolname='texloom'")" = 1 ] || runuser -u postgres -- createuser texloom
+  [ "$(pg -c "SELECT 1 FROM pg_database WHERE datname='texloom'")" = 1 ] || runuser -u postgres -- createdb -O texloom texloom
+  AFTER_DB=" postgresql.service"
+else
+  AFTER_DB=""
+fi
 
 # in-browser TeX (WebAssembly TeX Live): downloaded once, ~700 MB unpacked
 if [ "$(cat tex-assets/.version 2>/dev/null)" != "$BUSYTEX_VERSION" ]; then
@@ -95,6 +125,9 @@ python3 deploy/patch-busytex.py tex-assets
 install -d -o root -g texloom -m 750 /etc/texloom
 if [ ! -f /etc/texloom/texloom.toml ]; then  # from texloom.example.toml, with this install's paths
   sed -e "s#/var/www/texloom#$APP_DIR#g" texloom.example.toml > /etc/texloom/texloom.toml
+  if [ "$DATABASE" = postgresql ]; then
+    sed -i 's#^database = .*#database = "postgresql:///texloom?host=/var/run/postgresql"#' /etc/texloom/texloom.toml
+  fi
   if [ -n "$TEXLIVE_MIRROR" ]; then
     sed -i "s#^\# texlive_mirror = .*#texlive_mirror = [\"$TEXLIVE_MIRROR\"]#" /etc/texloom/texloom.toml
   fi
@@ -123,8 +156,8 @@ runuser -u texloom -- .venv/bin/texloom-server --config /etc/texloom/texloom.tom
 cat > /etc/systemd/system/texloom.service <<UNIT
 [Unit]
 Description=TeXLoom relay server
-After=network-online.target postgresql.service
-Wants=network-online.target postgresql.service
+After=network-online.target$AFTER_DB
+Wants=network-online.target$AFTER_DB
 
 [Service]
 User=texloom

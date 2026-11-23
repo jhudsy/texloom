@@ -7,7 +7,7 @@ for the project, and the project must be within the size limit for that code. Th
 size counts against the new code, everyone connected is told, and writes refused under the old
 code go through again.
 
-Starts its own throwaway `texloom-server` (with PostgreSQL: scripts/pg.py) and drives the desktop
+Starts its own throwaway `texloom-server` (its database: scripts/testdb.py) and drives the desktop
 app's sync engine (texloom/replica.py) against it.
 
     uv run --extra server python scripts/check_move_code.py
@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
-import pg  # noqa: E402
+import testdb  # noqa: E402
 
 from pycrdt import Text  # noqa: E402
 
@@ -86,7 +86,7 @@ async def main() -> int:
     port = free_port()
     url = f"http://127.0.0.1:{port}"
     (tmp / "codes.txt").write_text(CODES)
-    database, _ = pg.start(tmp / "pg")
+    database = testdb.start(tmp / "db")
     server = subprocess.Popen([sys.executable, "-c", SERVER, "--port", str(port), "--database", database,
                                "--data", str(tmp / "relay"), "--codes-file", str(tmp / "codes.txt")],
                               cwd=ROOT, stdout=open(tmp / "server.log", "w"), stderr=subprocess.STDOUT)  # noqa: SIM115
@@ -166,7 +166,7 @@ async def main() -> int:
         await asyncio.gather(*tasks, return_exceptions=True)
         server.terminate()
         server.wait(10)
-        pg.stop(tmp / "pg")
+        testdb.stop(tmp / "db")
         if ok and not os.environ.get("KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
         else:

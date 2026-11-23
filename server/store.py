@@ -1,4 +1,5 @@
-"""The relay's store: projects' encrypted edit logs and what's known about them, in PostgreSQL.
+"""The relay's store: projects' encrypted edit logs and what's known about them, in its database
+(SQLite or PostgreSQL: db.py).
 
 What's kept per project: the log of signed, encrypted updates (and snapshots that replace part of
 it), its head and floor, the storage mode, revoked personal links, who owns it (a creation code),
@@ -12,7 +13,8 @@ stored? store it) from interleaving.
 
 Some things are also kept in memory, because they're consulted on every message: how much each
 project and owner stores, owners, deletions, last-seen times, storage modes and revocations.
-They're right for one server; several at once need them shared (see ROADMAP.md).
+They're right for one server (an SQLite database allows no more); several at once need them
+shared (see ROADMAP.md).
 """
 
 from __future__ import annotations
@@ -27,10 +29,9 @@ import time
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-import asyncpg
-
 from texloom.crypto import b64e, canonical_pub
 
+from .db import Database, DatabaseError, connect, copy_tables
 from .files import Files, FilesError, FolderFiles
 
 log = logging.getLogger("texloom.relay")
@@ -45,7 +46,6 @@ GONE_COST = 100  # bytes a remembered edit counts for
 # Rows for projects that store nothing (relay-only mode, revocations) cost nothing to create,
 # so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
 META_RATE, META_BURST = 1.0, 600
-POOL_MAX = 10  # database connections
 FACTS_KEPT = 20_000  # projects whose deletion and storage mode are kept in memory (see Store._facts)
 
 SCHEMA = """
@@ -55,8 +55,6 @@ CREATE TABLE IF NOT EXISTS log (
   h bytea NOT NULL,  -- content hash, to recognise replayed updates
   PRIMARY KEY (project, seq));
 CREATE INDEX IF NOT EXISTS log_h ON log (project, h);
--- ciphertext doesn't compress: store it as it is, out of line, without trying
-ALTER TABLE log ALTER COLUMN data SET STORAGE EXTERNAL;
 CREATE TABLE IF NOT EXISTS head (project text PRIMARY KEY, seq bigint NOT NULL);
 CREATE TABLE IF NOT EXISTS mode (project text PRIMARY KEY, relay boolean NOT NULL);
 -- Stored files; their content is in the file store under "<project>/<id>".
@@ -91,21 +89,22 @@ CREATE TABLE IF NOT EXISTS lists (
 CREATE INDEX IF NOT EXISTS lists_owner ON lists (owner, seq);
 CREATE INDEX IF NOT EXISTS lists_seen ON lists (seen);
 """
-
-
-def changed(status: str) -> int:
-    """Rows a statement changed, from its status ("DELETE 3", "INSERT 0 1", "UPDATE 0")."""
-    try:
-        return int(status.rsplit(" ", 1)[1])
-    except (IndexError, ValueError):
-        return 0
+SCHEMA_POSTGRESQL = """
+-- ciphertext doesn't compress: store it as it is, out of line, without trying
+ALTER TABLE log ALTER COLUMN data SET STORAGE EXTERNAL;
+"""
+# Each table's primary key, for copying them in order (db.copy_tables), and the boolean columns
+TABLES = {"log": ("project", "seq"), "head": ("project",), "mode": ("project",), "stored": ("project", "id"),
+          "trash": ("project", "id"), "revoked": ("project", "pub"), "projects": ("project",), "gone": ("project", "h"),
+          "floor": ("project",), "deleted": ("project",), "clients": ("app", "version"), "lists": ("id",)}
+BOOLEANS = frozenset({"snap", "relay"})
 
 
 class Store:
-    """Open with `await Store.open(dsn, ...)`; close with `await store.close()`."""
+    """Open with `await Store.open(url, ...)`; close with `await store.close()`."""
 
-    def __init__(self, pool: asyncpg.Pool, files: Files, data: Path):
-        self.pool = pool
+    def __init__(self, db: Database, files: Files, data: Path):
+        self.db = db
         self.files = files
         self.dir = data  # this server's own disk: uploads are spooled here, and it must keep room
         self._revoked: dict[str, dict[str, bytes]] = {}
@@ -125,33 +124,32 @@ class Store:
         self._locks: dict[str, list] = {}  # key -> [lock, users]
 
     @classmethod
-    async def open(cls, dsn: str, files: Files | None = None, data: Path = Path("data")) -> Store:
+    async def open(cls, url: str, files: Files | None = None, data: Path = Path("data"), serving: bool = False) -> Store:
+        """`serving`: for a server (an SQLite database allows only one), not a one-off command.
+        Exits, saying why, if the database can't be used."""
         data.mkdir(parents=True, exist_ok=True)
         try:
-            pool = await asyncpg.create_pool(dsn, min_size=1, max_size=POOL_MAX, command_timeout=120)
-        except (OSError, asyncpg.PostgresError) as e:
-            raise SystemExit(f"can't reach the database {redact(dsn)}: {e}") from None
-        async with pool.acquire() as c, c.transaction():
-            await c.execute("SELECT pg_advisory_xact_lock(7316)")  # several servers starting at once
-            await c.execute(SCHEMA)
-            # a deleted project keeps only its tombstone
-            await c.execute("DELETE FROM projects WHERE project IN (SELECT project FROM deleted)")
-        s = cls(pool, files or FolderFiles(data / "files"), data)
+            db = await connect(url, SCHEMA, SCHEMA_POSTGRESQL, serving)
+        except DatabaseError as e:
+            raise SystemExit(str(e)) from None
+        # a deleted project keeps only its tombstone
+        await db.execute("DELETE FROM projects WHERE project IN (SELECT project FROM deleted)")
+        s = cls(db, files or FolderFiles(data / "files"), data)
         await s._load()
         return s
 
     async def _load(self) -> None:
-        async with self.pool.acquire() as c:
-            for q in ("SELECT project, SUM(octet_length(data) + octet_length(sig)) FROM log GROUP BY project",
-                      "SELECT project, SUM(size) FROM stored GROUP BY project",
-                      f"SELECT project, COUNT(*) * {GONE_COST} FROM gone GROUP BY project"):
-                for project, n in await c.fetch(q):
-                    self.usage[project] += int(n or 0)
-            self.list_bytes = defaultdict(int, {r["owner"]: int(r["n"]) for r in await c.fetch(
-                "SELECT owner, SUM(octet_length(data)) AS n FROM lists GROUP BY owner")})
-            self.total = sum(self.usage.values()) + sum(self.list_bytes.values())
-            self.owners = {r["project"]: r["owner"] for r in await c.fetch("SELECT project, owner FROM projects")}
-            self.seen = {r["project"]: max(r["seen"], r["created"]) for r in await c.fetch("SELECT project, seen, created FROM projects")}
+        c = self.db
+        for q in ("SELECT project, SUM(octet_length(data) + octet_length(sig)) FROM log GROUP BY project",
+                  "SELECT project, SUM(size) FROM stored GROUP BY project",
+                  f"SELECT project, COUNT(*) * {GONE_COST} FROM gone GROUP BY project"):
+            for project, n in await c.fetch(q):
+                self.usage[project] += int(n or 0)
+        self.list_bytes = defaultdict(int, {r["owner"]: int(r["n"]) for r in await c.fetch(
+            "SELECT owner, SUM(octet_length(data)) AS n FROM lists GROUP BY owner")})
+        self.total = sum(self.usage.values()) + sum(self.list_bytes.values())
+        self.owners = {r["project"]: r["owner"] for r in await c.fetch("SELECT project, owner FROM projects")}
+        self.seen = {r["project"]: max(r["seen"], r["created"]) for r in await c.fetch("SELECT project, seen, created FROM projects")}
         for project, n in self.usage.items():
             if project in self.owners:
                 self.owner_bytes[self.owners[project]] += n
@@ -162,7 +160,7 @@ class Store:
         leftovers stay: its writers may have uploaded again since, and what's there is valid.)"""
         await self.files.check()
         log.info("stored files: %s", self.files.name)
-        left = await self.pool.fetch("SELECT DISTINCT project FROM stored WHERE project IN "
+        left = await self.db.fetch("SELECT DISTINCT project FROM stored WHERE project IN "
                                      "(SELECT project FROM deleted UNION SELECT project FROM mode WHERE relay)")
         for (project,) in left:
             await self._drop_files(project)
@@ -172,12 +170,11 @@ class Store:
         if self._reaper and not self._reaper.done():
             self._reaper.cancel()
         await self.files.close()
-        await self.pool.close()
+        await self.db.close()
 
-    @contextlib.asynccontextmanager
-    async def tx(self):
-        async with self.pool.acquire() as c, c.transaction():
-            yield c
+    def tx(self):
+        """A transaction: `async with store.tx() as c:`, and then only `c`'s calls until it ends."""
+        return self.db.tx()
 
     @contextlib.asynccontextmanager
     async def _holding(self, key: str):
@@ -202,14 +199,14 @@ class Store:
         return self.owners.get(project)
 
     async def register(self, project: str, owner: str, label: str) -> None:
-        await self.pool.execute("INSERT INTO projects(project, created, owner) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+        await self.db.execute("INSERT INTO projects(project, created, owner) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
                                 project, time.time(), owner)
         self._own(project, owner)
         log.info("registered project %s… (%s)", project[:8], label)
 
     async def claim(self, project: str, owner: str) -> None:
         """Move a project created without a code to `owner` (a private server's re-registration)."""
-        await self.pool.execute("UPDATE projects SET owner=$1 WHERE project=$2", owner, project)
+        await self.db.execute("UPDATE projects SET owner=$1 WHERE project=$2", owner, project)
         self._own(project, owner)
         log.info("project %s… now belongs to a creation code", project[:8])
 
@@ -244,7 +241,7 @@ class Store:
         if now - self.seen.get(project, 0) < 3600:
             return
         self.seen[project] = now
-        await self.pool.execute("UPDATE projects SET seen=$1, evicted=0 WHERE project=$2", now, project)
+        await self.db.execute("UPDATE projects SET seen=$1, evicted=0 WHERE project=$2", now, project)
 
     def idle(self, days: float) -> list[str]:
         """Stored projects nobody has opened for `days`."""
@@ -261,7 +258,7 @@ class Store:
             await c.execute("DELETE FROM log WHERE project=$1", project)
             await c.execute("DELETE FROM gone WHERE project=$1", project)
             await c.execute("INSERT INTO floor(project, seq) SELECT $1, COALESCE((SELECT seq FROM head WHERE project=$1), 0) "
-                            "ON CONFLICT (project) DO UPDATE SET seq=excluded.seq", project)
+                            "WHERE true ON CONFLICT (project) DO UPDATE SET seq=excluded.seq", project)
             await c.execute("UPDATE projects SET evicted=$1 WHERE project=$2", time.time(), project)
         await self._drop_files(project)
         return freed
@@ -280,7 +277,7 @@ class Store:
         return [p for p, o in self.owners.items() if o == owner and self.usage.get(p, 0) > 0]
 
     async def _recount(self, project: str) -> None:
-        n = await self.pool.fetchval(
+        n = await self.db.fetchval(
             "SELECT (SELECT COALESCE(SUM(octet_length(data) + octet_length(sig)), 0) FROM log WHERE project=$1)"
             f" + (SELECT COALESCE(SUM(size), 0) FROM stored WHERE project=$1) + {GONE_COST} * (SELECT COUNT(*) FROM gone WHERE project=$1)",
             project)
@@ -291,16 +288,16 @@ class Store:
 
     # --- log ---------------------------------------------------------------------
     async def head(self, project: str) -> int:
-        return await self.pool.fetchval("SELECT seq FROM head WHERE project=$1", project) or 0
+        return await self.db.fetchval("SELECT seq FROM head WHERE project=$1", project) or 0
 
     async def floor(self, project: str) -> int:
         """Entries up to this sequence number were dropped by eviction."""
-        return await self.pool.fetchval("SELECT seq FROM floor WHERE project=$1", project) or 0
+        return await self.db.fetchval("SELECT seq FROM floor WHERE project=$1", project) or 0
 
     async def duplicate(self, project: str, data: bytes) -> int | None:
         """A replay of an update already stored (its seq), or already compacted away (0)."""
         h = hashlib.sha256(data).digest()
-        seq = await self.pool.fetchval(
+        seq = await self.db.fetchval(
             "SELECT COALESCE((SELECT seq FROM log WHERE project=$1 AND h=$2 LIMIT 1),"
             " (SELECT 0 FROM gone WHERE project=$1 AND h=$2))", project, h)
         return None if seq is None else int(seq)
@@ -315,11 +312,11 @@ class Store:
         return int(seq)
 
     async def last_snapshot(self, project: str) -> int:
-        return await self.pool.fetchval("SELECT MAX(seq) FROM log WHERE project=$1 AND snap", project) or 0
+        return await self.db.fetchval("SELECT MAX(seq) FROM log WHERE project=$1 AND snap", project) or 0
 
     async def snapshot_delta(self, project: str, upto: int, size: int) -> int:
         """Bytes a snapshot would add (negative when it frees space)."""
-        r = await self.pool.fetchrow(
+        r = await self.db.fetchrow(
             "SELECT COALESCE(SUM(octet_length(data) + octet_length(sig)), 0) AS freed, COUNT(*) FILTER (WHERE NOT snap) AS remembered, "
             "(SELECT COUNT(*) FROM gone WHERE project=$1 AND seq<=$3) AS forgotten FROM log WHERE project=$1 AND seq<=$2",
             project, upto, upto - GONE_KEEP)
@@ -344,7 +341,7 @@ class Store:
 
     async def since_size(self, project: str, start: int) -> int:
         """Bytes that since() would return."""
-        return int(await self.pool.fetchval(
+        return int(await self.db.fetchval(
             "SELECT COALESCE(SUM(octet_length(data) + octet_length(sig)), 0) FROM log WHERE project=$1 AND seq>$2",
             project, start))
 
@@ -354,7 +351,7 @@ class Store:
         first, then only that page's rows, so a long log goes out without ever being in memory whole."""
         upto, done = None, True
         if limit:
-            sizes = await self.pool.fetch("SELECT seq, octet_length(data) + octet_length(sig) AS n FROM log"
+            sizes = await self.db.fetch("SELECT seq, octet_length(data) + octet_length(sig) AS n FROM log"
                                           " WHERE project=$1 AND seq>$2 ORDER BY seq LIMIT 4096", project, start)
             size, done = 0, len(sizes) < 4096
             for r in sizes:
@@ -364,14 +361,14 @@ class Store:
                 size, upto = size + r["n"], r["seq"]
             if upto is None:
                 return [], start, True
-        rows = await self.pool.fetch("SELECT seq, snap, data, sig FROM log WHERE project=$1 AND seq>$2 AND seq<=$3 ORDER BY seq",
+        rows = await self.db.fetch("SELECT seq, snap, data, sig FROM log WHERE project=$1 AND seq>$2 AND seq<=$3 ORDER BY seq",
                                      project, start, upto if upto is not None else 2**62)
-        out = [{"q": r["seq"], "snap": r["snap"], "d": b64e(r["data"]), "s": b64e(r["sig"])} for r in rows]
+        out = [{"q": r["seq"], "snap": bool(r["snap"]), "d": b64e(r["data"]), "s": b64e(r["sig"])} for r in rows]
         return out, (rows[-1]["seq"] if rows else start), done
 
     async def log_state(self, project: str) -> tuple[int, int, int]:
         """The log's head, floor and number of entries, in one query."""
-        r = await self.pool.fetchrow(
+        r = await self.db.fetchrow(
             "SELECT COALESCE((SELECT seq FROM head WHERE project=$1), 0) AS head,"
             " COALESCE((SELECT seq FROM floor WHERE project=$1), 0) AS floor,"
             " (SELECT COUNT(*) FROM log WHERE project=$1) AS count", project)
@@ -381,7 +378,7 @@ class Store:
     async def revoked(self, project: str) -> dict[str, bytes]:
         """Personal keys the owner revoked: canonical pub -> owner's signature."""
         if project not in self._revoked:
-            rows = await self.pool.fetch("SELECT pub, sig FROM revoked WHERE project=$1", project)
+            rows = await self.db.fetch("SELECT pub, sig FROM revoked WHERE project=$1", project)
             self._revoked[project] = {c: r["sig"] for r in rows if (c := canonical_pub(r["pub"]))}
             if len(self._revoked) > 10000:
                 self._revoked.pop(next(iter(self._revoked)))
@@ -394,7 +391,7 @@ class Store:
             return True
         if len(known) >= MAX_REVOKED:
             return False
-        await self.pool.execute("INSERT INTO revoked(project, pub, sig, at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
+        await self.db.execute("INSERT INTO revoked(project, pub, sig, at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
                                 project, pub, sig, time.time())
         self._revoked.pop(project, None)
         return True
@@ -404,10 +401,11 @@ class Store:
         if project in self._facts:
             self._facts.move_to_end(project)
             return self._facts[project]
-        r = await self.pool.fetchrow(
+        r = await self.db.fetchrow(
             "SELECT d.at, d.ts, d.sig, (SELECT relay FROM mode WHERE project=$1) AS relay "
             "FROM (SELECT 1) one LEFT JOIN deleted d ON d.project=$1", project)
-        fact = (self._deleted_msg(r["at"], r["ts"], r["sig"]) if r["sig"] is not None else None, r["relay"])
+        fact = (self._deleted_msg(r["at"], r["ts"], r["sig"]) if r["sig"] is not None else None,
+                None if r["relay"] is None else bool(r["relay"]))
         self._remember(project, fact)
         return fact
 
@@ -428,7 +426,7 @@ class Store:
         return (await self._fact(project))[1] is not None
 
     async def deleted_count(self) -> int:
-        return await self.pool.fetchval("SELECT COUNT(*) FROM deleted")
+        return await self.db.fetchval("SELECT COUNT(*) FROM deleted")
 
     async def set_mode(self, project: str, relay_only: bool) -> None:
         async with self.tx() as c:
@@ -440,7 +438,7 @@ class Store:
                 # as eviction does: nothing up to head can be stored again (a replay of an old,
                 # validly signed change or snapshot, should the project go back to server storage)
                 await c.execute("INSERT INTO floor(project, seq) SELECT $1, COALESCE((SELECT seq FROM head WHERE project=$1), 0) "
-                                "ON CONFLICT (project) DO UPDATE SET seq=excluded.seq", project)
+                                "WHERE true ON CONFLICT (project) DO UPDATE SET seq=excluded.seq", project)
         self._remember(project, ((await self._fact(project))[0], relay_only))
         if relay_only:
             await self._drop_files(project)
@@ -486,20 +484,20 @@ class Store:
 
     async def _reap(self) -> None:
         while True:
-            rows = await self.pool.fetch("SELECT project, id FROM trash LIMIT 100")
+            rows = await self.db.fetch("SELECT project, id FROM trash LIMIT 100")
             if not rows:
                 return
             for project, bid in rows:
                 key = f"{project}/{bid}"
                 async with self._holding(key):
-                    if not await self.pool.fetchval("SELECT 1 FROM trash WHERE project=$1 AND id=$2", project, bid):
+                    if not await self.db.fetchval("SELECT 1 FROM trash WHERE project=$1 AND id=$2", project, bid):
                         continue  # uploaded again meanwhile: it's a stored file once more
                     try:
                         await self.files.delete(key)
                     except (FilesError, OSError):
                         log.exception("erasing a stored file (tried again later)")
                         return
-                    await self.pool.execute("DELETE FROM trash WHERE project=$1 AND id=$2", project, bid)
+                    await self.db.execute("DELETE FROM trash WHERE project=$1 AND id=$2", project, bid)
 
     async def empty_trash(self) -> None:
         """Erase everything in the trash now (the command line's --purge-code)."""
@@ -510,7 +508,7 @@ class Store:
 
     async def blob_size(self, project: str, bid: str) -> int | None:
         """A stored file's size; None if it isn't stored (or is in the trash)."""
-        n = await self.pool.fetchval("SELECT size FROM stored WHERE project=$1 AND id=$2", project, bid)
+        n = await self.db.fetchval("SELECT size FROM stored WHERE project=$1 AND id=$2", project, bid)
         return None if n is None else int(n)
 
     async def has_blob(self, project: str, bid: str) -> bool:
@@ -549,12 +547,12 @@ class Store:
 
     async def mark_file(self, project: str, bid: str) -> None:
         """Content uploaded as a project file is a file, even if it was first stored as output."""
-        await self.pool.execute("UPDATE stored SET kind='file' WHERE project=$1 AND id=$2 AND kind<>'file'", project, bid)
+        await self.db.execute("UPDATE stored SET kind='file' WHERE project=$1 AND id=$2 AND kind<>'file'", project, bid)
 
     async def delete_blob(self, project: str, bid: str, any_kind: bool) -> bool:
         async with self.tx() as c:
-            n = changed(await c.execute("DELETE FROM stored WHERE project=$1 AND id=$2" + ("" if any_kind else " AND kind='output'"),
-                                        project, bid))
+            n = await c.execute("DELETE FROM stored WHERE project=$1 AND id=$2" + ("" if any_kind else " AND kind='output'"),
+                                project, bid)
             if n:
                 await c.execute("INSERT INTO trash(project, id) VALUES ($1,$2) ON CONFLICT DO NOTHING", project, bid)
         if n:
@@ -570,7 +568,7 @@ class Store:
     async def files_to_folder(self, dest: Path) -> tuple[int, int]:
         """Make `dest` hold exactly the stored files (<project>/<id>), copying only those it lacks
         (a file never changes, so one already there is the same). Returns (copied, removed)."""
-        want = {(r["project"], r["id"]): r["size"] for r in await self.pool.fetch("SELECT project, id, size FROM stored")}
+        want = {(r["project"], r["id"]): r["size"] for r in await self.db.fetch("SELECT project, id, size FROM stored")}
         copied = removed = 0
         for (project, bid), size in want.items():
             path = dest / project / bid
@@ -600,7 +598,7 @@ class Store:
     async def files_from_folder(self, src: Path) -> tuple[int, int]:
         """Put back into the file store every stored file it lacks, from `src` (<project>/<id>, as
         files_to_folder or a folder store leaves them). Returns (copied, still missing)."""
-        rows = await self.pool.fetch("SELECT project, id FROM stored")
+        rows = await self.db.fetch("SELECT project, id FROM stored")
         copied = missing = 0
         for project, bid in rows:
             key = f"{project}/{bid}"
@@ -616,7 +614,7 @@ class Store:
 
     # --- the admin page and app versions ----------------------------------------------
     async def note_client(self, app: str, version: str) -> None:
-        await self.pool.execute("INSERT INTO clients(app, version, n, seen) VALUES ($1,$2,1,$3) "
+        await self.db.execute("INSERT INTO clients(app, version, n, seen) VALUES ($1,$2,1,$3) "
                                 "ON CONFLICT (app, version) DO UPDATE SET n = clients.n + 1, seen = excluded.seen",
                                 app, version, time.time())
 
@@ -624,16 +622,27 @@ class Store:
         """Storage modes, project registrations, the apps that connect, and each project's latest
         snapshot's size (its log entry: a snapshot too big for a message is an upload, and its
         entry a short reference to it)."""
-        async with self.pool.acquire() as c:
-            modes = {r["project"]: r["relay"] for r in await c.fetch("SELECT project, relay FROM mode")}
-            projects = [tuple(r) for r in await c.fetch("SELECT project, created, owner, seen, evicted FROM projects")]
-            apps = [tuple(r) for r in await c.fetch("SELECT app, version, n, seen FROM clients ORDER BY seen DESC LIMIT 200")]
-            snaps = {r["project"]: r["n"] for r in await c.fetch(
-                "SELECT DISTINCT ON (project) project, octet_length(data) AS n FROM log WHERE snap ORDER BY project, seq DESC")}
+        c = self.db
+        modes = {r["project"]: bool(r["relay"]) for r in await c.fetch("SELECT project, relay FROM mode")}
+        projects = [tuple(r) for r in await c.fetch("SELECT project, created, owner, seen, evicted FROM projects")]
+        apps = [tuple(r) for r in await c.fetch("SELECT app, version, n, seen FROM clients ORDER BY seen DESC LIMIT 200")]
+        snaps = {r["project"]: r["n"] for r in await c.fetch(
+            "SELECT l.project, octet_length(l.data) AS n FROM log l JOIN (SELECT project, MAX(seq) AS seq FROM log"
+            " WHERE snap GROUP BY project) newest ON l.project = newest.project AND l.seq = newest.seq")}
         return modes, projects, apps, snaps
 
 
-def redact(dsn: str) -> str:
-    """A database address fit for logs: without its password."""
-    import re
-    return re.sub(r"(://[^:/@]*:)[^@]*@", r"\1***@", dsn)
+async def copy_database(src_url: str, dst_url: str, progress=None) -> dict[str, int]:
+    """Copy everything in one server's database into a new one (SQLite to PostgreSQL, say). Neither
+    may be in use: a server on either SQLite file is refused; for PostgreSQL, stop it first."""
+    if src_url == dst_url:
+        raise DatabaseError("that's the same database: copy into a new one")
+    src = await connect(src_url, SCHEMA, SCHEMA_POSTGRESQL, serving=True)
+    try:
+        dst = await connect(dst_url, SCHEMA, SCHEMA_POSTGRESQL, serving=True)
+        try:
+            return await copy_tables(src, dst, TABLES, BOOLEANS, progress)
+        finally:
+            await dst.close()
+    finally:
+        await src.close()

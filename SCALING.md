@@ -25,7 +25,7 @@ needed to run a relay: a small one stays one process on one machine.
 ## What runs today
 
 One relay process (aiohttp behind nginx, a systemd service), a PostgreSQL database for the edit
-logs, project records and project lists, and stored files in a folder or an S3-compatible bucket.
+logs, project records and project lists (a relay can use an SQLite file instead: below), and stored files in a folder or an S3-compatible bucket.
 Who is connected to which project, and some counters (usage, owners), are kept in the relay's
 memory, which is how a change reaches the others connected to it.
 
@@ -51,20 +51,22 @@ it can hold the small amount of shared state that two servers must agree on (bel
 
 ## The database
 
-**Today** it is PostgreSQL. **Planned** ([issue #30](https://github.com/jhudsy/texloom/issues/30)):
-a choice behind one interface, so that a relay can use:
+A relay uses one of two, behind the same few calls (`server/db.py`, [issue
+#30](https://github.com/jhudsy/texloom/issues/30)):
 
-- **SQLite**: one file, one process, nothing to install. For anyone running their own relay. It
-  allows one writing process, so it is the single-relay option, and the server should refuse a
-  second relay on the same file.
+- **SQLite**: one file, one process, nothing to install. The default, for anyone running their
+  own relay. It is the single-relay option: a second relay on the same file is refused.
 - **PostgreSQL**: replicas, a standby, several relays and, later, splitting projects across
   databases. For servers that need availability or scale.
 
-The relay then depends on a small interface rather than on SQL: the **log store** (append a
-change, read since a point, snapshots, revocations, deletion records, project lists), **accounting
-and policy** (quotas and eviction, ordinary code on top), a **notifier** ("project X has a new
-change") and a **lock or lease**. One test suite that every backend must pass keeps them
-identical, so growing means changing a setting, not rewriting.
+Both run the same SQL, and one check (`scripts/check_store.py`) holds them to the same answers,
+so growing means changing a setting, not rewriting. A relay moves from one to the other by copying
+everything across while it is stopped (`texloom-server --copy-database-from`, INSTALL.md).
+
+Accounting and policy (quotas, eviction) are ordinary code on top, kept in the relay's memory. For
+several relays at once two more pieces are needed, with PostgreSQL: a **notifier** ("project X has
+a new change", LISTEN/NOTIFY) and a **lock or lease** for the single-writer rules; and what each
+relay keeps in memory moves into shared state ([#12](https://github.com/jhudsy/texloom/issues/12)).
 
 ## Availability
 
@@ -149,6 +151,5 @@ compile service (compiling is the client's job).
 
 - The ordering model for several writers, and the lease above ([#8](https://github.com/jhudsy/texloom/issues/8)).
 - Which per-process state must be shared, and which can be rebuilt on demand.
-- How a SQLite relay later moves up to PostgreSQL (an export and import is the likely answer).
 - Whether to run the database ourselves or use a managed one: it removes most of the work of
   replication, failover and backups, at a cost, and the data is encrypted either way.

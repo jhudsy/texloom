@@ -14,7 +14,7 @@ on:
       - 'server/**'
       - 'scripts/check_synconly.py'
       - 'scripts/check_shared_folder.py'
-      - 'scripts/pg.py'
+      - 'scripts/testdb.py'
       - 'scripts/refuse_writes/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -35,7 +35,7 @@ on:
       - 'server/**'
       - 'scripts/check_synconly.py'
       - 'scripts/check_shared_folder.py'
-      - 'scripts/pg.py'
+      - 'scripts/testdb.py'
       - 'scripts/refuse_writes/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -74,12 +74,6 @@ jobs:
         run: |
           npm ci
           npm run build
-      - name: PostgreSQL's programs (the server's database; scripts/pg.py runs a throwaway one)
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" = macOS ]; then brew install postgresql@17
-          elif [ "$RUNNER_OS" = Linux ] && ! ls /usr/lib/postgresql/*/bin/initdb >/dev/null 2>&1; then sudo apt-get install -y postgresql
-          fi  # Windows runners have it, in PGBIN
       - name: Chromium for the web app's pairings
         run: uv run --with playwright python -m playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       - run: uv run --extra server --with playwright python scripts/check_synconly.py

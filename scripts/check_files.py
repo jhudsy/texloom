@@ -12,7 +12,7 @@ against a throwaway Garage, a real S3-compatible store started for the purpose:
 - an upload counts while it's under way, and the same content uploaded twice at once is stored once;
 - in a folder, files written while others in the same project's folder are erased all land.
 
-The database is a throwaway PostgreSQL (scripts/pg.py).
+The database is a throwaway one (scripts/testdb.py: SQLite, or PostgreSQL).
 
     uv run --extra server python scripts/check_files.py            # folder, and Garage if installed
     uv run --extra server python scripts/check_files.py folder     # just one
@@ -38,7 +38,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import pg
+import testdb
 
 from server.files import FolderFiles, S3Files, open_files
 from server.store import Store
@@ -116,7 +116,7 @@ async def cases(make_files, tmp: Path, db: str) -> None:
     await store._reaper
     ok(again and await read(store, q, keep) == b"new copy of the same content", "content uploaded again while in the trash is kept")
     ok(all([await gone(files, f"{q}/{i}") for i in ids[1:] + [c]]), "the rest is erased")
-    ok(await store.pool.fetchval("SELECT COUNT(*) FROM trash") == 0, "and the trash is empty")
+    ok(await store.db.fetchval("SELECT COUNT(*) FROM trash") == 0, "and the trash is empty")
     await store.close()
 
     # a stop part way: what's left in the trash is erased on the next start
@@ -244,7 +244,7 @@ def main() -> None:
             tmp = Path(d)
             if which == "folder":
                 print("folder:")
-                with pg.running() as db:
+                with testdb.running() as db:
                     asyncio.run(cases(lambda tmp=tmp: FolderFiles(tmp / "files"), tmp, db))
                 asyncio.run(folder_race(tmp / "race"))
             elif which == "garage":
@@ -257,7 +257,7 @@ def main() -> None:
                     asyncio.run(wrong_secret(env))
                     s3 = {"endpoint": env["TEXLOOM_S3_ENDPOINT"], "region": env["TEXLOOM_S3_REGION"],
                           "key_id": env["TEXLOOM_S3_KEY_ID"], "secret": env["TEXLOOM_S3_SECRET"]}
-                    with pg.running() as db:
+                    with testdb.running() as db:
                         asyncio.run(cases(lambda s3=s3: open_files("s3://texloom/check", Path(), s3), tmp, db))
             elif which.startswith("s3://"):
                 print(f"{which}:")
@@ -265,7 +265,7 @@ def main() -> None:
                 env = os.environ.get
                 s3 = {"endpoint": env("TEXLOOM_S3_ENDPOINT", ""), "region": env("TEXLOOM_S3_REGION", ""),
                       "key_id": env("TEXLOOM_S3_KEY_ID", ""), "secret": env("TEXLOOM_S3_SECRET", "")}
-                with pg.running() as db:
+                with testdb.running() as db:
                     asyncio.run(cases(lambda prefix=prefix, s3=s3: open_files(prefix, Path(), s3), tmp, db))
             else:
                 sys.exit(f"unknown store {which!r}: folder, garage or s3://bucket/prefix")

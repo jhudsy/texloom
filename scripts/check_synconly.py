@@ -55,7 +55,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-import pg  # noqa: E402  (a throwaway PostgreSQL for the server)
+import testdb  # noqa: E402  (a throwaway database for the server)
 
 PY = [sys.executable, "-c"]
 CLI = "import sys; from texloom.cli import main; sys.argv[0] = 'texloom'; main()"
@@ -200,17 +200,17 @@ def sound(*cs: Computer) -> None:
 def server_kept(server: tuple[str, Path], project: str) -> tuple[list[int], tuple | None]:
     """What the server keeps of a project: [changes, files] (files in its database and its file
     store), and its storage mode (relay-only: (True,))."""
-    import asyncpg
+    from server.db import connect
 
     async def ask():
-        c = await asyncpg.connect(server[0])
+        c = await connect(server[0])
         try:
             n = [await c.fetchval(f"SELECT COUNT(*) FROM {t} WHERE project=$1", project) for t in ("log", "stored")]  # noqa: S608
             mode = await c.fetchval("SELECT relay FROM mode WHERE project=$1", project)
         finally:
             await c.close()
         n[1] += len(list((server[1] / "files" / project).glob("*")))  # and no content in its file store
-        return n, (mode,) if mode is not None else None
+        return n, (bool(mode),) if mode is not None else None
     # on a thread of its own: the browser pairings run inside Playwright's event loop
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(1) as pool:
@@ -597,7 +597,7 @@ def main() -> None:
     port = free_port()
     url = f"http://127.0.0.1:{port}"
     (tmp / "codes.txt").write_text("CHECK-ONLY-NOT-A-REAL-CODE 1G check\n")  # stores projects only with a code
-    database, _ = pg.start(tmp / "pg")  # stopped at the end, below
+    database = testdb.start(tmp / "db")  # stopped at the end, below
     server = subprocess.Popen(PY + [SERVER, "--port", str(port), "--database", database, "--data", str(tmp / "relay"),
                                     "--codes-file", str(tmp / "codes.txt")],
                               cwd=ROOT, stdout=open(tmp / "server.log", "w"), stderr=subprocess.STDOUT)  # noqa: SIM115 - open while it runs
@@ -623,7 +623,7 @@ def main() -> None:
     finally:
         server.terminate()
         server.wait(10)
-        pg.stop(tmp / "pg")
+        testdb.stop(tmp / "db")
         if failed or args.keep:
             print(f"folders, logs and the server's database: {tmp}")
         else:

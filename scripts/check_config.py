@@ -53,7 +53,7 @@ def load(text: str, env: dict[str, str] | None = None):
 def main() -> None:
     text = EXAMPLE.read_text()
     a = load(text)
-    ok(a.database.startswith("postgresql://") and a.min_free > 0, "the example parses as it is")
+    ok(a.database.startswith("sqlite:") and a.min_free > 0, "the example parses as it is")
     everything = re.sub(r"(?m)^# ((?:\[s3\])|(?:[a-z_0-9]+ = .*))$", r"\1", text)
     b = load(everything)
     ok(b.files.startswith("s3://") and b.s3_endpoint and b.min_version and b.texlive_mirror,

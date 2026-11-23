@@ -10,9 +10,12 @@
 # After a change: systemctl restart texloom
 
 # --- where things are ------------------------------------------------------------------------
-# The PostgreSQL database: on this machine over the local socket, as the user the server runs as
-# (no password), or e.g. "postgresql://texloom:PASSWORD@db.example.org:5432/texloom?sslmode=require".
-database = "postgresql:///texloom?host=/var/run/postgresql"
+# The database (edit logs, project records, project lists). An SQLite file, which one server uses;
+# or PostgreSQL, which several can share: "postgresql:///texloom?host=/var/run/postgresql" (this
+# machine, over the local socket, as the user the server runs as) or e.g.
+# "postgresql://texloom:PASSWORD@db.example.org:5432/texloom?sslmode=require". To move from one to
+# the other: texloom-server --copy-database-from (INSTALL.md, "The database").
+database = "sqlite:///var/lib/texloom/texloom.db"
 # This server's own folder: uploads are spooled here, min_free is kept free here, and stored files
 # go in data/files unless "files" says otherwise.
 data = "/var/lib/texloom"

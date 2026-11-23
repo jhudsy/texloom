@@ -20,11 +20,12 @@ from aiohttp import WSCloseCode, WSMsgType, web
 
 from texloom.crypto import b64e, canonical_pub, revoke_msg, signer
 
+from .db import redact
 from .endpoints import MAX_BLOB, Endpoints, headers
 from .files import Files
 from .lists import Lists
 from .policy import PURGE_PAUSE, CodeBook, GiB, KiB, Limits, MiB, fmt_size
-from .store import Store, redact
+from .store import Store
 from .wire import PROJECT_RE, b64d, verify, version_tuple
 
 log = logging.getLogger("texloom.relay")
@@ -207,7 +208,7 @@ class Relay(Endpoints):
 
     def attach(self, store: Store) -> None:
         self.store = store
-        self.lists = Lists(store.pool, store.lists_grew) if self.want_lists else None
+        self.lists = Lists(store.db, store.lists_grew) if self.want_lists else None
 
     async def _admit(self, project: str, ws: web.WebSocketResponse, conn: Conn) -> dict | None:
         """On a private server a connection does nothing until its hello is accepted. Returns the hello."""
@@ -629,7 +630,7 @@ def make_app(database: str, static: Path | None, tex: Path | None = None,
     app = web.Application(middlewares=[headers], client_max_size=MAX_BLOB + 1024)
 
     async def store(_app: web.Application):
-        s = await Store.open(database, files, data)
+        s = await Store.open(database, files, data, serving=True)
         log.info("database: %s", redact(database))
         relay.attach(s)
         await s.start()
