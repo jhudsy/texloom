@@ -9,7 +9,7 @@ import { bulkRemoveDialog, removeDialog, type RemoveScope } from './remove'
 import { prefs, setupDialog, settingsDialog, languagePicker, type Device, type SettingsTab } from './settings'
 import { createAssistantPanel, type AssistantStatus } from './assistant/panel'
 import { setupLayout } from './layout'
-import { askCode, chooseNewProject, chooseServer, riskBanner, SAFARI_NOTE } from './storagenotice'
+import { askCode, chooseNewProject, chooseServer, codeBox, riskBanner, SAFARI_NOTE } from './storagenotice'
 import { $, dialog, h, saveFile, askText } from './dom'
 import { brandIcon, icon } from './icons'
 import { t, tn, tNodes, locale } from './i18n'
@@ -205,6 +205,8 @@ function startSettings() {
     h('h3', {}, t('Settings')),
     h('label', { class: 'field' }, t('Name'), nameIn),
     languagePicker(),
+    h('h4', {}, t('Creation code')),
+    codeBox(),
     h('h4', {}, t('Integrations')),
     integrationCard('Zotero', zoteroAccountStatus, zoteroAccountBox()),
     integrationCard(t('Git repositories'), gitAccountsStatus, githubAccountBox()),

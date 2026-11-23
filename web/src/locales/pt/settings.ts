@@ -121,6 +121,9 @@ const pt: Catalog = {
   "Git repositories": "Repositórios git",
   "This link is read-only, so this browser doesn’t keep a folder in sync.": "Esta ligação é só de leitura, por isso este navegador não sincroniza nenhuma pasta.",
   "This browser can’t keep a folder in sync itself: only Chrome, Edge and other Chromium browsers on a computer can, not Safari or Firefox (in Brave, turn on “File System Access API” in brave://flags). The TeXLoom app works whichever browser you use:": "Este navegador não consegue sincronizar uma pasta por si: só o Chrome, o Edge e outros navegadores Chromium num computador o conseguem, não o Safari nem o Firefox (no Brave, ative «File System Access API» em brave://flags). A app TeXLoom funciona com qualquer navegador:",
+  'Move to another code…': 'Mover para outro código…',
+  'The code this project is stored under has run out: move it to one with room.': 'O código em que este projeto está guardado se esgotou: mova-o para um com espaço.',
+  'Its storage counts against the code it was first stored with.': 'O armazenamento conta para o código com que ele foi guardado pela primeira vez.',
 }
 
 export default pt

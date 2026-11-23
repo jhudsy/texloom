@@ -119,14 +119,12 @@ async def main() -> int:
 
         # only the owner may move it
         ts = int(time.time())
-        said: list[dict] = []
         sent = {"t": "move", "c": SECOND, "ts": ts, "s": b64e(editor_keys.sign(f"move:{SECOND}:{ts}".encode()))}
         assert editor.ws is not None
         await editor.ws.send_json(sent)
         await asyncio.sleep(1)
         info_after = await usage(owner)
         check("an editor's move is refused (only the owner's signature counts)", info_after.get("ownerUsed") is not None, info_after)
-        del said, sent
 
         for code, want, why in ((LAPSED, "move-bad-code", "a lapsed code"), ("NOPE-NOPE-NOPE", "move-bad-code", "a code that doesn't exist"),
                                 (TINY, "move-no-room", "a code without room for it")):

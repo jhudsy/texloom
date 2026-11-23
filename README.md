@@ -163,7 +163,15 @@ server…** takes any address. To move another server's project to new keys, ope
 
 Your **creation code** travels with the list too: the latest one entered in any browser or in the
 app is filled in when you make a project elsewhere, such as **New project from a folder…** in the
-app. Anyone with your sync link can see it, as they can every project on the list.
+app. Anyone with your sync link can see it, as they can every project on the list. The settings on
+the Your projects page (⚙) show it, with how much of its allowance is used, and let you enter or
+change it.
+
+A stored project belongs to the code it was first stored with, whoever edits it later. Its owner can
+move it to another code with **Move to another code…** (Settings → Sync & storage in the web app, the
+Project menu in the desktop app), for example when that code has lapsed, or when the project should
+count against someone else's plan. The server checks the new code is valid and has room for the
+project; links, collaborators and history stay as they are.
 
 ### Finding and copying projects
 
@@ -872,6 +880,7 @@ uv run python scripts/check_folder_reads.py                       # a file is sh
 uv run python scripts/check_folder_renames.py                     # a folder renamed or moved takes its files (and their comments) with it at once
 uv run --extra server python scripts/check_shared_folder.py       # two computers on one folder shared through a stand-in Dropbox: they take turns, nothing arrives twice
 uv run --extra server python scripts/check_files.py               # the server's file store: a folder, and Garage (S3) if installed
+uv run --extra server python scripts/check_move_code.py           # moving a project to another creation code, against a real server
 uv run --extra server python scripts/check_config.py              # texloom.example.toml lists every server setting, and parses
 (cd web && npm run check-folder-model)                           # the same for the browser's folder sync, on a fake clock and folder
 ```

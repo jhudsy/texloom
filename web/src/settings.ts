@@ -14,6 +14,7 @@ import { dropboxSection, dropboxStatus } from './dropboxui'
 import { integrationCard } from './integrationcard'
 import { quiet, STORAGE } from './quiet'
 import { usageBox } from './usage'
+import { moveCodeDialog } from './movecode'
 
 /** "Codes come from whoever runs this server", with the server's own page about them once known. */
 function codeSourceSlot(): HTMLElement {
@@ -211,6 +212,11 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       own ? null : whose(t('Only the project’s owner can change this.')),
       storageBox,
       usageBox(r),
+      own && r.storage === 'server' && !noStorage ? h('div', { class: 'row' }, // (registered may not be known yet: the server says if there's nothing to move)
+        h('button', { onclick: () => moveCodeDialog(r) }, t('Move to another code…')),
+        h('span', { class: 'muted small' }, r.storeProblem === 'code-expired' || r.storeProblem === 'quota-full'
+          ? t('The code this project is stored under has run out: move it to one with room.')
+          : t('Its storage counts against the code it was first stored with.'))) : null,
       codeRow = noStorage ? h('div', { class: 'row' },
         h('button', { onclick: async () => {
           const { askCode } = await import('./storagenotice')

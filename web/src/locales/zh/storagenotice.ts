@@ -46,6 +46,16 @@ const zh: Catalog = {
   'Not syncing: this server needs a newer version of TeXLoom ({{version}} or later). Reload the page to get it.': '未同步：此服务器需要更新版本的 TeXLoom（{{version}} 或更高）。请重新加载页面以获取。',
   'Not syncing: this project’s server needs a newer version of TeXLoom ({{version}} or later) than this server’s web app. Open the project from {{server}} instead.': '未同步：此项目的服务器需要比此服务器的网页应用更新的 TeXLoom 版本（{{version}} 或更高）。请改为从 {{server}} 打开该项目。',
   'Reload': '重新加载',
+  'Used when you create a project, so the server keeps an encrypted copy of it. It follows your project list to your other devices. To move a project you own onto it, open that project’s Settings → Sync & storage.': '创建项目时使用，以便服务器保存一份加密副本。它会随项目列表同步到你的其他设备。要把你拥有的项目转移到此代码，请在该项目中打开设置 → 同步与存储。',
+  'Your creation code': '你的创建码',
+  'Change code…': '更改代码…',
+  'Enter code…': '输入创建码…',
+  'None entered. This server stores new projects without one.': '尚未输入。此服务器无需代码即可存储新项目。',
+  'None entered: new projects are sync-only until you enter one.': '尚未输入：在输入代码前，新项目仅同步、不存储。',
+  'Couldn’t reach the server.': '无法连接服务器。',
+  'No longer valid on this server.': '在此服务器上已失效。',
+  'Unlimited storage.': '存储空间不限。',
+  '{{used}} of {{total}} used.': '已用 {{used}}，共 {{total}}。',
 }
 
 export default zh

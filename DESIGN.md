@@ -118,6 +118,7 @@ without compiling.
 | `{t:"p2p", d, s?, to?}` | encrypted peer-to-peer payload (below); relayed to one peer or all, never stored |
 | `{t:"mode", m, ts, s}` | set storage mode `"server"` or `"relay"`; `s` signs `"mode:<m>:<ts>"`, valid for 10 min; only from the owner |
 | `{t:"revoke", p, s}` | owner only: revoke personal key `p`; `s` signs `"revoke:" ‖ p` |
+| `{t:"move", c, ts, s}` | owner only: move the stored project to creation code `c` (issue #32); `s` signs `"move:<c>:<ts>"`, valid for 10 min. The server checks the code is valid and not lapsed, has room for the project and that the project is within the size limit for it, then makes it the project's owner code and recounts both codes. Answered with `moved`, or an `err` whose code is `move-bad-code`, `move-no-room` (with `need`, `free`), `move-too-big` (`need`, `max`), `move-not-stored`, `move-rejected` or `move-busy` (after five wrong codes on one connection). On a private server, someone holding a valid code may connect to a project whose code lapsed, so that it can be moved |
 | `{t:"delete", ts, s}` | owner only: delete the project for everyone; `s` signs `"delete:<ts>"`, valid for 10 min. The server erases what it stores, keeps a tombstone (the `deleted` table, which purges never touch; its `projects` row goes) and from then on answers the project's connections with `deleted` and its file requests with 410 |
 
 | server → client | meaning |
@@ -130,6 +131,8 @@ without compiling.
 | `{t:"left", from}` | that connection closed: stop showing the awareness it sent |
 | `{t:"p2p", d, s?, from}` | a peer's payload |
 | `{t:"mode", m}` | storage mode changed |
+| `{t:"moved"}` | your `move` is done |
+| `{t:"usage", store, moved: true}` | to everyone connected, after a move: the new figures (`ownerUsed` only to a connection holding the new code); a write refused for the old code (`quota-full`, `code-expired`, `project-full`) is sent again |
 | `{t:"rv", p, s}` | a personal key was revoked |
 | `{t:"deleted", at, ts, s}` | the owner deleted the project for everyone (at, ms), with the owner's signature `s` over `"delete:<ts>"`, which clients check, so a server can't fake it; the connection then closes. Clients keep their copy read-only and stop connecting (web: `deleted` in the replica's kv store; helper: `state.json`) |
 

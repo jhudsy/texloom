@@ -39,7 +39,7 @@ from .dialogs import (ConnectToolDialog, CopyFolderDialog, JoinDialog, LinksDial
 from .i18n import _, app_pref, ngettext, set_app_pref
 from .mac import DockFollowsWindows, menu_opens_where_clicked, nsapp
 from .paths import state_dir, use_tex_on_path
-from .ui import (GREY, ICON, MAC, RED, TAGS_ROLE, Engine, browser_link, chevron, default_parent, describe, dot, usage_text,
+from .ui import (GREY, ICON, MAC, RED, TAGS_ROLE, Engine, browser_link, chevron, default_parent, describe, dot, move_refusal_text, usage_text,
                  grey_note, open_path, project_name, red, short_path, tag_hex, theme_icon)
 from .wordcount import find_texcount, texcount_report
 
@@ -210,6 +210,8 @@ class Window(QtWidgets.QMainWindow):
         self.a_copy = a(_("Make a copy…"), self.copy_project)
         self.a_store = a(_("Keep a copy on the server…"), self.keep_on_server)
         self.a_store.setToolTip(_("This project is sync-only: with a creation code, the server keeps an encrypted copy"))
+        self.a_move = a(_("Move to another code…"), self.move_to_code)
+        self.a_move.setToolTip(_("Its storage counts against the code it was first stored with."))
         self.a_count = a(_("Word count…"), self.word_count)
         self.a_count.setToolTip(_("Count the words with TeXCount, from your own TeX installation"))
         self.a_scratch = a(_("Compile from scratch"), self.compile_from_scratch)
@@ -229,7 +231,7 @@ class Window(QtWidgets.QMainWindow):
         for act in (self.a_new, self.a_join, self.a_add):
             self.add_menu.addAction(act)
         self.more_menu = QtWidgets.QMenu(self)
-        for act in (self.a_tags, self.a_copy, self.a_store, self.a_count, self.a_mcp, None, self.a_leave):
+        for act in (self.a_tags, self.a_copy, self.a_store, self.a_move, self.a_count, self.a_mcp, None, self.a_leave):
             self.more_menu.addSeparator() if act is None else self.more_menu.addAction(act)
 
     def build_toolbar(self) -> None:
@@ -263,7 +265,7 @@ class Window(QtWidgets.QMainWindow):
                     self.a_settings, self.a_close, self.a_quit):
             m.addSeparator() if act is None else m.addAction(act)
         m = mb.addMenu(_("Project"))
-        for act in (self.a_open, self.a_web, self.a_share, None, self.a_tags, self.a_copy, self.a_store, self.a_count,
+        for act in (self.a_open, self.a_web, self.a_share, None, self.a_tags, self.a_copy, self.a_store, self.a_move, self.a_count,
                     self.a_scratch, self.a_mcp, None, self.a_leave):
             m.addSeparator() if act is None else m.addAction(act)
         m = mb.addMenu(_("View"))
@@ -550,7 +552,7 @@ class Window(QtWidgets.QMainWindow):
             m.addSeparator()
         m.addAction(self.a_tags)
         if one:
-            for act in (self.a_copy, self.a_store, self.a_count, self.a_mcp):
+            for act in (self.a_copy, self.a_store, self.a_move, self.a_count, self.a_mcp):
                 if act.isVisible():
                     m.addAction(act)
         m.addSeparator()
@@ -613,6 +615,33 @@ class Window(QtWidgets.QMainWindow):
             self.statusBar().showMessage(_("Uploading a copy to the server…"), 5000)
 
         self.engine.submit(code_ok(server, code), checked)
+
+    def move_to_code(self) -> None:
+        """The owner moves a stored project to another creation code (issue #32)."""
+        d = self.current()
+        st = self.engine.daemon.states.get(d) if d else None
+        r = st.replica if st else None
+        if not d or r is None:
+            return
+        title = _("Move to another creation code")
+        code = ask_code(self, self.engine, r.server, title,
+                        _("This project’s storage counts against the creation code it was first stored with. Move it to another code, "
+                          "for example when that code has lapsed, or when someone else’s plan should hold the project. "
+                          "Links, collaborators and history stay as they are."), listsync.code_for(r.server))
+        code = (code or "").strip()
+        if not code:
+            return
+
+        def done(no, err) -> None:
+            if err or no:
+                QtWidgets.QMessageBox.warning(self, title, move_refusal_text(no) if no else _("Couldn't reach the server: {err}", err=err))
+                return
+            update_config(d, create_code=code)  # this copy holds the project's code from now on
+            if not listsync.code_for(r.server):
+                listsync.remember_code(r.server, code)
+            self.statusBar().showMessage(_("The project now counts against the new code."), 5000)
+            self.engine.submit(r.ask_usage(), lambda _res, _err: None)
+        self.engine.submit(r.move_to_code(code), done)
 
     def copy_project(self) -> None:
         d = self.current()
@@ -845,6 +874,8 @@ class Window(QtWidgets.QMainWindow):
         st = self.engine.daemon.states.get(picked[0]) if one else None
         r = st.replica if st else None
         self.a_store.setVisible(bool(r and r.storage == "relay" and r.keys.seed and r.deleted_at is None))
+        self.a_move.setVisible(bool(r and r.storage == "server" and r.keys.seed and r.deleted_at is None
+                                    and (r.store_info or {}).get("registered")))
         for b in self.buttons:
             b.setEnabled(one)
         self.options.setVisible(not several)

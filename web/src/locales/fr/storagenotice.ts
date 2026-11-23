@@ -67,6 +67,16 @@ const fr: Catalog = {
   'Not syncing: this server needs a newer version of TeXLoom ({{version}} or later). Reload the page to get it.': 'Pas de synchronisation : ce serveur a besoin d’une version plus récente de TeXLoom ({{version}} ou ultérieure). Rechargez la page pour l’obtenir.',
   'Not syncing: this project’s server needs a newer version of TeXLoom ({{version}} or later) than this server’s web app. Open the project from {{server}} instead.': 'Pas de synchronisation : le serveur de ce projet a besoin d’une version plus récente de TeXLoom ({{version}} ou ultérieure) que l’application web de ce serveur. Ouvrez plutôt le projet depuis {{server}}.',
   'Reload': 'Recharger',
+  'Used when you create a project, so the server keeps an encrypted copy of it. It follows your project list to your other devices. To move a project you own onto it, open that project’s Settings → Sync & storage.': 'Utilisé quand vous créez un projet, pour que le serveur en garde une copie chiffrée. Il suit votre liste de projets sur vos autres appareils. Pour y déplacer un projet dont vous êtes propriétaire, ouvrez Paramètres → Synchronisation et stockage de ce projet.',
+  'Your creation code': 'Votre code de création',
+  'Change code…': 'Changer de code…',
+  'Enter code…': 'Saisir un code…',
+  'None entered. This server stores new projects without one.': 'Aucun code saisi. Ce serveur stocke les nouveaux projets sans code.',
+  'None entered: new projects are sync-only until you enter one.': 'Aucun code saisi : les nouveaux projets sont en synchronisation seule jusqu’à ce que vous en saisissiez un.',
+  'Couldn’t reach the server.': 'Impossible de joindre le serveur.',
+  'No longer valid on this server.': 'N’est plus valide sur ce serveur.',
+  'Unlimited storage.': 'Stockage illimité.',
+  '{{used}} of {{total}} used.': '{{used}} utilisés sur {{total}}.',
 }
 
 export default fr

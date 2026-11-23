@@ -283,6 +283,24 @@ def known_server() -> str:
 KB, MB, GB = 1024, 1024 ** 2, 1024 ** 3
 
 
+def move_refusal_text(no: dict) -> str:
+    """Why the server didn't move a project to another creation code (Replica.move_to_code), as the
+    web app says it (web/src/movecode.ts)."""
+    code = no.get("code")
+    if code == "move-bad-code":
+        return _("That code isn’t valid on this server, or has expired.")
+    if code == "move-no-room":
+        return _("That code hasn’t room for this project: it needs {need}, and the code has {free} free.",
+                 need=size_text(no.get("need") or 0), free=size_text(no.get("free") or 0))
+    if code == "move-too-big":
+        return _("This project is larger than a project may be with that code ({max}).", max=size_text(no.get("max") or 0))
+    if code == "move-not-stored":
+        return _("The server doesn’t keep a copy of this project, so there’s nothing to move.")
+    if code == "move-rejected":
+        return _("The server refused: only the project’s owner can move it.")
+    return _("Too many tries with wrong codes. Quit and reopen TeXLoom to try again.")
+
+
 def size_text(n: float) -> str:
     """A size for people: KB, MB or GB, with the language's decimal mark and unit names."""
     from .i18n import lang

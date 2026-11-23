@@ -5,6 +5,7 @@ import { dialog, h } from './dom'
 import { t } from './i18n'
 import { normalServer, serverName } from './servers'
 import { quiet, STORAGE } from './quiet'
+import { bytes } from './usage'
 
 const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent)
 export const SAFARI_NOTE = isSafari ? ' ' + t('Safari may also delete a site’s data after about 7 days without a visit.') : ''
@@ -68,6 +69,33 @@ export function askCode(intro?: string, server = location.origin): Promise<boole
     dlg.addEventListener('close', () => resolve(ok))
     input.focus()
   })
+}
+
+/** The start page's settings: this browser's creation code for this server (a code goes with the
+ *  person rather than a project), what it allows, and a way to enter or change it. */
+export function codeBox(): HTMLElement {
+  const box = h('div', { class: 'codebox' })
+  const shown = (code: string) => (code.length > 10 ? `${code.slice(0, 4)}…${code.slice(-4)}` : code)
+  async function render() {
+    const code = creationCode.get()
+    const status = h('span', { class: 'muted small' })
+    const source = h('span', {})
+    box.replaceChildren(
+      h('p', { class: 'muted small' }, t('Used when you create a project, so the server keeps an encrypted copy of it. It follows your project list to your other devices. To move a project you own onto it, open that project’s Settings → Sync & storage.')),
+      code ? h('div', { class: 'row' }, h('code', { title: t('Your creation code') }, shown(code)), status) : status,
+      h('div', { class: 'row' }, h('button', { onclick: async () => { if (await askCode()) render() } }, code ? t('Change code…') : t('Enter code…')), source))
+    const info = await serverInfo()
+    source.replaceChildren(codeSource(info))
+    if (!code) {
+      status.textContent = info?.creation === 'open' ? t('None entered. This server stores new projects without one.') : t('None entered: new projects are sync-only until you enter one.')
+      return
+    }
+    const r = await checkCode(location.origin, code)
+    status.textContent = !r ? t('Couldn’t reach the server.') : !r.ok ? t('No longer valid on this server.')
+      : r.allowance == null ? t('Unlimited storage.') : t('{{used}} of {{total}} used.', { used: bytes(r.used ?? 0), total: bytes(r.allowance) })
+  }
+  render()
+  return box
 }
 
 /** "Create project": on servers that need a code, ask for one or offer a project without a server copy. */

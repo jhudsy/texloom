@@ -121,6 +121,9 @@ const zh: Catalog = {
   "Git repositories": "Git 仓库",
   "This link is read-only, so this browser doesn’t keep a folder in sync.": "此链接为只读，因此此浏览器不会同步文件夹。",
   "This browser can’t keep a folder in sync itself: only Chrome, Edge and other Chromium browsers on a computer can, not Safari or Firefox (in Brave, turn on “File System Access API” in brave://flags). The TeXLoom app works whichever browser you use:": "此浏览器无法自行同步文件夹：只有电脑上的 Chrome、Edge 和其他 Chromium 浏览器可以，Safari 和 Firefox 不行（在 Brave 中，请在 brave://flags 里开启“File System Access API”）。TeXLoom 应用适用于任何浏览器：",
+  'Move to another code…': '转移到另一个代码…',
+  'The code this project is stored under has run out: move it to one with room.': '存储此项目的代码已用尽或过期：请转移到一个有空间的代码。',
+  'Its storage counts against the code it was first stored with.': '它的存储计入首次存储时所用的代码。',
 }
 
 export default zh
