@@ -42,6 +42,10 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const pdfWindow = pdfWindowLink(r.keys.project, () => String(r.meta.get('name') ?? ''), (at) => pdfView.onPick?.(at.page, at.x, at.y),
     writable ? (sel) => commentTarget(sel) : null)
   const info = h('div', { class: 'pdfinfo muted' }, t('No PDF yet.'))
+  // While this browser shows another document's PDF (main_short.tex, say), a collaborator's new PDF of
+  // the main document doesn't replace it: this offers it instead.
+  const newer = h('button', { class: 'small newer', hidden: true, title: t('Show the main document’s newest PDF in place of this one'),
+    onclick: () => { showingOther = null; renderLatest().catch(console.error) } })
   const progress = h('div', { class: 'progress', hidden: true }, h('div', { class: 'bar' }), h('span', {}))
   const logPre = h('pre', { class: 'log', hidden: true })
   const problemList = h('ul', { class: 'problems' })
@@ -99,7 +103,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   const summary = h('button', { class: 'psummary', title: t('Show problems'), hidden: true, onclick: () => { setLogOpen(true); showLogView(false) } })
 
   const pane = h('div', { class: 'pane output' },
-    h('div', { class: 'pdfbar' }, info, summary, h('span', { class: 'spacer' }),
+    h('div', { class: 'pdfbar' }, info, newer, summary, h('span', { class: 'spacer' }),
       h('span', { class: 'pdftools' }, pdfView.controls, windowBtn, dlBtn, logBtn)),
     progress, pdfView.el, logBox)
   verticalResizer(logSplit, logBox, 'texloom.logHeight', 60, 180)
@@ -175,6 +179,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   }
 
   let pdfName: string | null = null // the file name for downloading a PDF that isn't the main document's
+  let showingOther: string | null = null // the document shown, when it isn't the main one (compiled here only)
   function show(pdf: Uint8Array | null, log: string, text: string, ok: boolean, stx?: Uint8Array | null) {
     if (stx !== undefined) { synctexBytes = stx; synctex = null }
     if (pdf) {
@@ -196,9 +201,15 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
 
   // collaborators' (or the folder helper's) latest published output
   const renderLatest = async () => {
-    pdfName = null
     const o = r.out.get('latest')
     if (!o) return
+    if (showingOther) { // keep the document this browser is looking at; say there's a newer main PDF
+      newer.textContent = t('{{name}} compiled {{file}} · Show it', { name: o.by, file: o.main ?? mainFile(r) ?? '' })
+      newer.hidden = false
+      return
+    }
+    newer.hidden = true
+    pdfName = null
     const dec = new TextDecoder()
     const [pdf, log, stx] = await Promise.all([
       o.pdf ? r.getBlob(o.pdf) : null,
@@ -237,6 +248,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     if (d.compile === 'none') return interactive ? fail((t) => t('Compiling is turned off on this device (⚙ Settings → Compiling).')) : null
     const main = target(interactive ? file : undefined)
     if (!main) return fail((t) => t('No .tex file with \\documentclass found.'))
+    if (main === mainFile(r)) { showingOther = null; newer.hidden = true } // back to the main document: its PDFs show again
     if (stopRunning || starting) { // one at a time: asked again meanwhile, it compiles once more when this one ends, with the text as it is then
       if (!interactive) return fail((t) => t('A compile is already running; try again in a moment.'))
       again = { fromScratch: again?.fromScratch || fromScratch, file }
@@ -266,6 +278,8 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       const secs = ((performance.now() - t0) / 1000).toFixed(1)
       const another = main !== mainFile(r) // shown here only: collaborators keep the main document
       pdfName = another ? main.slice(main.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '') : null
+      showingOther = another ? main : null
+      if (!another) newer.hidden = true
       show(res.pdf, res.log, `${res.pdf ? '✓' : t('✗ errors')} · ${another ? `${main} · ` : ''}${t('in browser')} · ${t('{{secs}}s', { secs })}`, !!res.pdf, res.synctex)
       if (writable && res.pdf && !another) { // publish so collaborators see it without compiling
         const [pdfId, logId, stxId] = await Promise.all([r.putBlob(res.pdf, 'output'), r.putBlob(new TextEncoder().encode(res.log), 'output'),

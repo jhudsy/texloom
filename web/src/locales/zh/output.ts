@@ -60,6 +60,8 @@ const zh: Catalog = {
   'Couldn’t find where this text is in the source.': '找不到这段文字在源码中的位置。',
   'Couldn’t add the comment.': '无法添加评论。',
   'Comment added on {{where}}.': '已在 {{where}} 添加评论。',
+  '{{name}} compiled {{file}} · Show it': '{{name}} 编译了 {{file}} · 显示',
+  'Show the main document’s newest PDF in place of this one': '显示主文档的最新 PDF，替换当前这个',
 }
 
 export default zh

@@ -60,5 +60,7 @@ const fr: Catalog = {
   'Couldn’t find where this text is in the source.': 'Impossible de trouver où se trouve ce texte dans la source.',
   'Couldn’t add the comment.': 'Impossible d’ajouter le commentaire.',
   'Comment added on {{where}}.': 'Commentaire ajouté à {{where}}.',
+  '{{name}} compiled {{file}} · Show it': '{{name}} a compilé {{file}} · L’afficher',
+  'Show the main document’s newest PDF in place of this one': 'Afficher le PDF le plus récent du document principal à la place de celui-ci',
 }
 export default fr

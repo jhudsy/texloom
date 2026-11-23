@@ -60,6 +60,8 @@ const es: Catalog = {
   'Couldn’t find where this text is in the source.': 'No se encontró dónde está este texto en el código fuente.',
   'Couldn’t add the comment.': 'No se pudo añadir el comentario.',
   'Comment added on {{where}}.': 'Comentario añadido en {{where}}.',
+  '{{name}} compiled {{file}} · Show it': '{{name}} compiló {{file}} · Mostrarlo',
+  'Show the main document’s newest PDF in place of this one': 'Mostrar el PDF más reciente del documento principal en lugar de este',
 }
 
 export default es

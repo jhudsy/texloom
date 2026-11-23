@@ -706,3 +706,6 @@ dialog.settings.tabbed[open] { display: flex; flex-direction: column; }
 .usage-box p { margin: 0.4em 0; }
 .usage { margin: 0.3em 0 0.6em; }
 .usage meter { display: block; width: 100%; max-width: 22em; height: 0.7em; }
+
+/* the PDF bar's offer of a collaborator's newer main PDF while another document's is shown (output.ts) */
+.pdfbar .newer { max-width: 24em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
