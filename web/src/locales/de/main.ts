@@ -171,6 +171,9 @@ const de: Catalog = {
   "Kept in step with the Dropbox folder {{folder}}": "Mit dem Dropbox-Ordner {{folder}} abgeglichen",
   "Kept in step with {{repo}} on {{service}}": "Mit {{repo}} auf {{service}} abgeglichen",
   'Remove the tag “{{tag}}” from {{name}}': 'Das Schlagwort „{{tag}}“ von {{name}} entfernen',
+  'The assistant is working…': 'Der Assistent arbeitet …',
+  'The assistant is waiting for you to apply or reject a change': 'Der Assistent wartet darauf, dass Sie eine Änderung übernehmen oder ablehnen',
+  'The assistant has answered': 'Der Assistent hat geantwortet',
 }
 
 export default de

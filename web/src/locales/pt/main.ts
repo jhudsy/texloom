@@ -171,6 +171,9 @@ const pt: Catalog = {
   "Kept in step with the Dropbox folder {{folder}}": "Sincronizado com a pasta do Dropbox {{folder}}",
   "Kept in step with {{repo}} on {{service}}": "Sincronizado com {{repo}} em {{service}}",
   'Remove the tag “{{tag}}” from {{name}}': 'Remover a etiqueta “{{tag}}” de {{name}}',
+  'The assistant is working…': 'O assistente está trabalhando…',
+  'The assistant is waiting for you to apply or reject a change': 'O assistente está esperando você aplicar ou rejeitar uma alteração',
+  'The assistant has answered': 'O assistente respondeu',
 }
 
 export default pt

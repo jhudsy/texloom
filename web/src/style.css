@@ -714,3 +714,14 @@ dialog.settings.tabbed[open] { display: flex; flex-direction: column; }
 .ai-file { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; padding: 0 2px 0 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); max-width: 100%; overflow-wrap: anywhere; }
 .ai-file .icon { padding: 0 4px; font-size: 10px; line-height: 16px; }
 .ai-files > button { white-space: nowrap; }
+/* the Assistant tab while another is open: working, then answered or waiting for you (main.ts markAssistant) */
+.right .tab.ai-busy::after, .right .tab.ai-news::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; vertical-align: middle; background: var(--muted); animation: ai-pulse 1.4s ease-in-out infinite; }
+.right .tab.ai-news { color: var(--fg); animation: ai-glow 2.4s ease-in-out infinite; }
+.right .tab.ai-news::after { background: var(--accent); animation: none; }
+.right .tab.ai-ask::after { background: var(--warn); }
+@keyframes ai-pulse { 50% { opacity: 0.25; } }
+@keyframes ai-glow { 50% { background: color-mix(in srgb, var(--accent) 22%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .right .tab.ai-busy::after, .right .tab.ai-news { animation: none; }
+  .right .tab.ai-news { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+}

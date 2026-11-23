@@ -73,7 +73,11 @@ export interface PanelHost {
   userName: () => string
   link: (write: boolean) => string // the project's edit or read-only link
   onContextChange: (f: () => void) => void // the open file or the selection changed
+  /** What the assistant is up to, for its tab to show while another is open: working, answered, or
+   *  waiting for the person to apply or reject an edit (null: nothing to show). */
+  status?: (s: AssistantStatus) => void
 }
+export type AssistantStatus = 'busy' | 'done' | 'ask' | null
 
 // --- tiny, safe markdown (escape first, then a few constructs) ----------------
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
@@ -477,10 +481,12 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
         card.classList.add(ok ? 'accepted' : 'rejected')
         btns.replaceChildren(h('span', { class: 'muted' }, ok ? t('Applied') : t('Rejected')))
         abort?.signal.removeEventListener('abort', onAbort)
+        host.status?.('busy')
         resolve(ok)
       }
       const onAbort = () => done(false)
       abort?.signal.addEventListener('abort', onAbort)
+      host.status?.('ask')
       const btns = h('div', { class: 'row end' },
         h('button', { onclick: () => done(false) }, t('Reject')),
         h('button', { class: 'primary', onclick: () => done(true) }, t('Apply')))
@@ -571,6 +577,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     toldTo.set(s, told)
     abort = new AbortController()
     sendBtn.textContent = t('Stop')
+    host.status?.('busy')
     historyBtn.disabled = true
     undo.stopCapturing() // this request's edits become one undo step
     const stackBefore = undo.undoStack.length
@@ -658,6 +665,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
         session = null // provider history may be inconsistent after a failure
       }
     } finally {
+      host.status?.(abort.signal.aborted ? null : 'done') // (an error is an answer too)
       if (abort.signal.aborted) {
         hint(t('Stopped.'), 'note')
         session = null // an interrupted tool round leaves the history incomplete

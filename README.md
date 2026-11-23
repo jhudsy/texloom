@@ -742,6 +742,9 @@ To point the assistant at more than the open file, **+ Files** adds files (each 
 once per conversation, with its size in tokens) and **+ Selection** adds the selected passage (quoted once).
 It can also find and read any file by itself when a question needs it.
 
+While another tab is open, the Assistant tab shows a pulsing dot as the assistant works, and glows once it
+has answered or is waiting for you to apply or reject a change (the browser tab's title gets a dot too).
+
 API keys and provider settings are stored only in your browser. They are not part of
 the project and never pass through the TeXLoom server: requests go straight from your
 browser to the provider.

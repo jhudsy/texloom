@@ -7,7 +7,7 @@ import { Replica } from './replica'
 import { projects, projectCode, latexTitle, whenOpened, whoIn, type Recent } from './projects'
 import { bulkRemoveDialog, removeDialog, type RemoveScope } from './remove'
 import { prefs, setupDialog, settingsDialog, languagePicker, type Device, type SettingsTab } from './settings'
-import { createAssistantPanel } from './assistant/panel'
+import { createAssistantPanel, type AssistantStatus } from './assistant/panel'
 import { setupLayout } from './layout'
 import { askCode, chooseNewProject, chooseServer, riskBanner, SAFARI_NOTE } from './storagenotice'
 import { $, dialog, h, saveFile, askText } from './dom'
@@ -565,6 +565,9 @@ async function openProject(keys: Keys, server: string) {
   type Tab = 'pdf' | 'ai' | 'review' | 'history'
   const preview = new FilePreview(r)
   let currentTab: Tab = 'pdf'
+  let pageTitle = APP, titleDot = false
+  /** The browser tab's title; with a dot when the assistant has news (see markAssistant). */
+  const setTitle = (dot = titleDot) => { titleDot = dot; document.title = (dot ? '● ' : '') + pageTitle }
   let showingFile = false // the PDF tab is showing a file from the project, not the compiled PDF
   /** What the PDF tab shows: the compiled PDF, or a file from the project. */
   function showInPanel(file: boolean) {
@@ -608,6 +611,7 @@ async function openProject(keys: Keys, server: string) {
       compile: () => output.compile(false), lastLog: output.lastLog, userName: () => me.name,
       link: (write) => keys.link(server, write && writable),
       onContextChange: editor.onContextChange,
+      status: (s) => { aiStatus = s; markAssistant() },
     }),
     review: () => (reviewPanel = createReviewPanel({
       replica: r, writable, userName: () => me.name, selection: () => editor.selection(), suggesting: suggestMode,
@@ -632,6 +636,22 @@ async function openProject(keys: Keys, server: string) {
   }
   r.review.observeDeep(countOpen)
   setTimeout(countOpen, 0)
+  // The Assistant tab says what the assistant is up to while another tab is open: a pulsing dot while it
+  // works, and a slow glow once it has answered or waits for an edit to be applied or rejected. The
+  // browser tab's title gets a dot too, for someone who went to another window meanwhile.
+  let aiStatus: AssistantStatus = null
+  function markAssistant() {
+    const seen = currentTab === 'ai' && !document.hidden
+    if (aiStatus === 'done' && seen) aiStatus = null // answered, and looked at
+    const news = (aiStatus === 'done' || aiStatus === 'ask') && !seen
+    tabBtns.ai.classList.toggle('ai-busy', aiStatus === 'busy' && currentTab !== 'ai')
+    tabBtns.ai.classList.toggle('ai-news', news)
+    tabBtns.ai.classList.toggle('ai-ask', news && aiStatus === 'ask')
+    tabBtns.ai.title = aiStatus === 'busy' ? t('The assistant is working…') : !news ? '' :
+      aiStatus === 'ask' ? t('The assistant is waiting for you to apply or reject a change') : t('The assistant has answered')
+    setTitle(news)
+  }
+  document.addEventListener('visibilitychange', markAssistant)
   function showTab(t: Tab) {
     for (const k of Object.keys(panes) as Tab[]) {
       panes[k].hidden = k !== t
@@ -639,6 +659,7 @@ async function openProject(keys: Keys, server: string) {
     }
     if (!panes[t].firstChild && makers[t]) panes[t].append(makers[t]!())
     currentTab = t
+    markAssistant()
     showInPanel(showingFile)
     try { localStorage.setItem('texloom.tab', t) } catch (e) { quiet(STORAGE, e) }
   }
@@ -1060,7 +1081,8 @@ async function openProject(keys: Keys, server: string) {
   const renderMeta = () => {
     const name: string = r.meta.get('name') || ''
     title.value = name === UNTITLED ? t('Untitled project') : name
-    document.title = `${title.value} — ${APP}`
+    pageTitle = `${title.value} — ${APP}`
+    setTitle()
     if (!removing) projects.update(keys.project, {
       fragment: keys.fragment(), server: awayServer(server), writable, at: Date.now(), name,
       createdBy: r.meta.get('createdBy'), storage: r.storage,

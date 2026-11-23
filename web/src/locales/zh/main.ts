@@ -171,6 +171,9 @@ const zh: Catalog = {
   "Kept in step with the Dropbox folder {{folder}}": "与 Dropbox 文件夹 {{folder}} 保持同步",
   "Kept in step with {{repo}} on {{service}}": "与 {{service}} 上的 {{repo}} 保持同步",
   'Remove the tag “{{tag}}” from {{name}}': '从 {{name}} 移除标签“{{tag}}”',
+  'The assistant is working…': '助手正在处理…',
+  'The assistant is waiting for you to apply or reject a change': '助手正在等你应用或拒绝一项修改',
+  'The assistant has answered': '助手已回复',
 }
 
 export default zh
