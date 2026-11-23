@@ -30,7 +30,7 @@ export const toolServers = {
   },
   save(list: ToolServer[]) {
     try { localStorage.setItem(KEY, JSON.stringify(list)) } catch (e) { quiet(STORAGE, e) }
-    for (const [k, c] of connections) if (!list.some((s) => key(s) === k)) { connections.delete(k); c.then((x) => x.client.close(), () => {}) }
+    for (const [k, c] of connections) if (!list.some((s) => key(s) === k)) { connections.delete(k); c.then((x) => x.client.close(), (e) => quiet('a removed server had never connected: nothing to close', e)) }
   },
 }
 

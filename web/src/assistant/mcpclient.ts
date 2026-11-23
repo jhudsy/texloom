@@ -1,7 +1,8 @@
 // A small MCP client for the browser (Streamable HTTP transport): initialise, list tools, call one.
 // The requests go from this browser straight to the server the person added, never through the
 // texloom server, so only servers on the web that allow this page (CORS) can be reached.
-// No imports: scripts/check-mcpclient.mjs runs it in node against a stand-in server.
+// Imports nothing that needs a page: scripts/check-mcpclient.mjs runs it in node against a stand-in server.
+import { quiet } from '../quiet'
 
 export const PROTOCOL = '2025-06-18'
 const CLIENT = { name: 'texloom-assistant', version: '1' }
@@ -62,7 +63,7 @@ export class McpClient {
 
   private async notify(method: string): Promise<void> {
     const r = await this.post({ jsonrpc: '2.0', method })
-    await r.body?.cancel().catch(() => {})
+    await r.body?.cancel().catch((e) => quiet('a notification’s empty reply wasn’t read to the end', e))
   }
 
   async connect(signal?: AbortSignal): Promise<McpServerInfo> {
@@ -99,7 +100,7 @@ export class McpClient {
   /** Ends the session on the server, if it keeps one (best effort). */
   async close(): Promise<void> {
     if (!this.sessionId) return
-    await this.fetcher(this.url, { method: 'DELETE', headers: this.headers() }).catch(() => {})
+    await this.fetcher(this.url, { method: 'DELETE', headers: this.headers() }).catch((e) => quiet('ending an MCP session is best effort: the server drops it in time', e))
     this.sessionId = null
   }
 }
@@ -132,7 +133,7 @@ async function fromStream(r: Response, id: number): Promise<any> {
       }
     }
   } finally {
-    reader.cancel().catch(() => {})
+    reader.cancel().catch((e) => quiet('the rest of an event stream after its reply isn’t needed', e))
   }
 }
 
