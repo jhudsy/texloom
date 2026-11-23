@@ -36,7 +36,7 @@
     "commands": [
       { "command": "texloom.resolveThread", "title": "Resolve", "category": "TeXLoom", "icon": "$(check)" },
       { "command": "texloom.replyThread", "title": "Reply", "category": "TeXLoom" },
-      { "command": "texloom.openReview", "title": "Open the Review tab in the browser", "category": "TeXLoom", "icon": "$(link-external)" },
+      { "command": "texloom.showReview", "title": "Open the Review tab in the browser", "category": "TeXLoom", "icon": "$(link-external)" },
       { "command": "texloom.refresh", "title": "Refresh comments", "category": "TeXLoom" }
     ],
     "menus": {
@@ -46,7 +46,7 @@
       ],
       "comments/commentThread/title": [
         { "command": "texloom.resolveThread", "group": "navigation@1", "when": "commentController == texloom && commentThread == texloom-open" },
-        { "command": "texloom.openReview", "group": "navigation@2", "when": "commentController == texloom" }
+        { "command": "texloom.showReview", "group": "navigation@2", "when": "commentController == texloom" }
       ],
       "comments/commentThread/context": [
         { "command": "texloom.replyThread", "group": "inline", "when": "commentController == texloom && commentThread == texloom-open" }

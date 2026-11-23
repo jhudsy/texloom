@@ -92,10 +92,11 @@ async function run(cmd, args) {
 }
 
 function activate(context) {
+  const api = { threads } // (for the extension's own test)
   const cmd = command()
   if (!cmd) {
     vscode.window.showWarningMessage('TeXLoom comments needs the TeXLoom app or the texloom command-line helper (texloom.org/download). Install it, or set “texloom.command”.')
-    return
+    return api
   }
   controller = vscode.comments.createCommentController('texloom', 'TeXLoom comments')
   controller.options = { placeHolder: 'Reply…', prompt: 'Reply to this comment' }
@@ -124,12 +125,13 @@ function activate(context) {
       const id = ids.get(thread)
       if (id) run('texloom.resolve', [id])
     }),
-    vscode.commands.registerCommand('texloom.openReview', () => run('texloom.openReview', [])),
+    vscode.commands.registerCommand('texloom.showReview', () => run('texloom.openReview', [])), // (the server's own command is texloom.openReview)
     vscode.commands.registerCommand('texloom.refresh', () => refresh(0)),
     vscode.window.onDidChangeVisibleTextEditors(() => refresh()),
     vscode.workspace.onDidChangeTextDocument((e) => { if (e.document.uri.scheme === 'file') refresh(500) }),
     vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration('texloom.comments')) refresh(0) }),
   )
+  return api
 }
 
 function deactivate() { return client && client.stop() }
