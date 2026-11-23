@@ -68,6 +68,11 @@ if [ -f "$CONF" ]; then
     mv "$CONF.new" "$CONF"  # (its owner and mode are set below)
     echo "    settings: database = PostgreSQL's texloom database, as before"
     DATABASE=postgresql
+  elif ! grep -qsE '^\s*(database\s*=|TEXLOOM_DATABASE=)' "$CONF" /etc/texloom/env && dpkg -s postgresql >/dev/null 2>&1; then
+    # no database in the settings, PostgreSQL installed, but its texloom database couldn't be checked:
+    # don't guess (the server would start on a new, empty SQLite file)
+    echo "$CONF names no database, and PostgreSQL's texloom database couldn't be checked: add database = … there, then run this again"
+    exit 1
   else
     DATABASE=sqlite
   fi
