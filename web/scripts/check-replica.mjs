@@ -118,6 +118,9 @@ async function state(r, socks, server, got) {
     uploaded: [...server.received].sort((a, b) => a.id.localeCompare(b.id) || Number(a.output) - Number(b.output)),
     pendingFiles: await count(r, 'pending'),
     got: got.v ?? null,
+    last: r.last,
+    lastSeq: r.last ? r.last[0] : null,
+    helloLast: [...socks].reverse().flatMap((w) => [...w.sent].reverse()).find((m) => m.t === 'hello')?.last ?? null,
   }
 }
 

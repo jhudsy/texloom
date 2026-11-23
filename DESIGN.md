@@ -111,7 +111,7 @@ without compiling.
 
 | client → server | meaning |
 |---|---|
-| `{t:"hello", since, app, v, pages?}` | send me everything after sequence number `since`; `pages: 1` = a long log may come in pages (below); `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes (one without `v` can't understand that, so it is first held for 10 minutes, hearing nothing, rather than letting it reconnect at once). Project lists check `X-TeXLoom: app/version` the same way (426). |
+| `{t:"hello", since, app, v, pages?, last?}` | send me everything after sequence number `since`; `pages: 1` = a long log may come in pages (below); `last` = `[q, sha256]`, the newest change (not a snapshot) this copy has from the server, received or acknowledged, with the SHA-256 of its `d` (base64url): the server answers `lost` if its log ends before `q` or holds another change there; `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes (one without `v` can't understand that, so it is first held for 10 minutes, hearing nothing, rather than letting it reconnect at once). Project lists check `X-TeXLoom: app/version` the same way (426). |
 | `{t:"up", d, s}` | encrypted Yjs update `d` with signature `s`; stored and broadcast |
 | `{t:"snap", upto, d, s}` | compaction: encrypted full state replacing log entries ≤ `upto`; `s` signs `"snap:<upto>:" ‖ d` |
 | `{t:"aw", d}` | ephemeral, encrypted awareness (cursors, names); relayed, never stored |
@@ -123,7 +123,7 @@ without compiling.
 
 | server → client | meaning |
 |---|---|
-| `{t:"log", entries:[{q,d,s}], head, floor, mode, you, peers, store, rv, more?}` | catch-up reply to `hello` (a snapshot, if any, comes first); `you` = this connection's peer id; `floor` = entries up to here were evicted; `rv` = revocations; `more` = the rest follows as `logmore` |
+| `{t:"log", entries:[{q,d,s}], head, floor, mode, you, peers, store, rv, more?}` | catch-up reply to `hello` (a snapshot, if any, comes first); `you` = this connection's peer id; `floor` = entries up to here were evicted; `rv` = revocations; `lost` = this log isn't the one the hello's `last` came from (the app catches up from the start, as after eviction); `more` = the rest follows as `logmore` |
 | `{t:"logmore", entries, more?}` | the next page of a catch-up, to an app whose `hello` had `pages: 1`; the last has no `more` |
 | `{t:"up", q, d, s}` | someone else's update |
 | `{t:"ack", q}` | your update was stored at sequence `q` |
@@ -1175,6 +1175,12 @@ only the new one, and carry a `compat(data …)` marker on the old name until it
   keep counting, and a writer whose `since` is at or below the reported `floor`
   re-uploads its whole state and files. Link
   holders with no copy can't open an evicted project until a writer returns.
+- A server restored from a backup numbers changes again from where the backup ends, so a
+  number an app saw before may now name another change. Each app sends the newest change it
+  has (`last`: number and content hash); when the server's log ends before it or holds another
+  change there, it says `lost`, and the app catches up from the start and re-uploads, as after
+  eviction (`scripts/check_restore.py`). It can't tell once that change has been compacted away
+  and forgotten (`GONE_KEEP` changes later), nor for apps from before 0.4.52, which don't send it.
 - Browser storage can be evicted: request persistent storage; the server copy and
   daemon copies are the backup.
 

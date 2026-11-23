@@ -18,6 +18,7 @@ cases change (encryption is random, so every run writes different bytes):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -28,7 +29,7 @@ sys.path.insert(0, str(ROOT))
 
 from pycrdt import Doc, Map, Text
 
-from texloom.crypto import Keys, b64e, revoke_msg
+from texloom.crypto import Keys, b64d, b64e, revoke_msg
 from texloom.packing import pack
 
 REF = b"\x00texloom-ref\x00"
@@ -191,6 +192,29 @@ case("the server lost its copy (we're at or below what it dropped): caught up to
 case("an editor whose server lost the copy sends the whole document again",
      [log(0, [])],
      {"since": 0, "sent": ["p2p:sv1", "up"]}, as_="member", since=4)
+
+
+# -- a server put back from a backup numbers changes again from where the backup ends: each copy
+# says which change it last has (number and content hash), and the server says when its log
+# isn't the one that came from
+def mark(e: dict) -> list:
+    return [e["q"], b64e(hashlib.sha256(b64d(e["d"])).digest())]
+
+
+E1, E2, E3 = entry(1, U1), entry(2, U2), entry(3, U3)
+case("it remembers the newest change it has from the server, and says so on reconnecting",
+     [log(3, [E1, E2, E3]), {"reconnect": True}],
+     {"since": 3, "last": mark(E3), "helloLast": mark(E3)})
+S4 = entry(4, SNAP, snap=True)
+case("not a snapshot, which the server replaces: the newest change before it",
+     [log(4, [E3, S4])],
+     {"since": 4, "last": mark(E3)}, since=2)
+case("the server's log isn't the one it last saw: caught up from the start, remembering the new log",
+     [log(3, [E1, E2, E3], lost=True)],
+     {"files": ALL, "since": 3, "last": mark(E3), "sent": ["p2p:sv1"]}, since=5)
+case("an editor whose server's log isn't the one it last saw sends the whole document again",
+     [log(3, [E1, E2, E3], lost=True)],
+     {"since": 3, "sent": ["p2p:sv1", "up"], "sentFiles": ALL}, as_="member", since=2)
 case("a project that's only relayed: nothing is lost, and it stays caught up where it was",
      [{**log(0, []), "mode": "relay"}],
      {"since": 5, "serverMode": "relay"}, since=5)
@@ -319,6 +343,9 @@ case("an edit not acknowledged is sent again after reconnecting",
 case("an acknowledged edit isn't sent again after reconnecting",
      [log(0, []), edit("main.tex", "Hi\n"), {"ackLast": 1}, {"reconnect": True}, log(1, [])],
      {"pending": 0, "since": 1, "sent": ["p2p:sv1", "p2p:sv1", "up", "hello"]}, as_="member")
+case("an acknowledged edit counts as the newest change it has from the server",
+     [log(0, []), edit("main.tex", "Hi\n"), {"ackLast": 1}, {"reconnect": True}],
+     {"since": 1, "lastSeq": 1}, as_="member")
 case("an edit the server won't store is kept, and the reason shown",
      [log(0, []), edit("main.tex", "Hi\n"), {"refuseLast": "quota-full"}],
      {"pending": 1, "storeProblem": "quota-full"}, as_="member")

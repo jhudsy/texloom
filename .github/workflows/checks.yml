@@ -44,6 +44,8 @@ jobs:
         run: uv run --extra server python scripts/check_store.py --postgresql
       - name: The server's file store (a folder; S3 is checked locally against Garage)
         run: uv run --extra server python scripts/check_files.py folder
+      - name: A server restored from a backup, and an app that saw later changes (a real server)
+        run: uv run --extra server python scripts/check_restore.py
       - name: Moving a project to another creation code (a real server)
         run: uv run --extra server python scripts/check_move_code.py
       - name: Comments for a synced folder (the overview, texloom comments; a real server)

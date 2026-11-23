@@ -422,6 +422,22 @@ class Relay(Endpoints):
         except TimeoutError:
             pass
 
+    async def _not_as_seen(self, project: str, last) -> bool:
+        """An app's hello says which change it last has here ("last": [its number, its content's
+        SHA-256]). True when this server's log isn't the one it got that from: the log ends before
+        that number, or has another change there (a server restored from a backup, which numbers
+        changes again from where the backup ends)."""
+        if not (isinstance(last, list) and len(last) == 2 and isinstance(last[0], int) and not isinstance(last[0], bool)
+                and last[0] > 0 and isinstance(last[1], str)):
+            return False
+        try:
+            h = b64d(last[1])
+        except ValueError:
+            return False
+        if last[0] > await self.store.head(project):
+            return True
+        return await self.store.same_entry(project, last[0], h) is False
+
     async def handle(self, project: str, ws, conn: Conn, t: str, msg: dict) -> None:
         if await self.store.deleted(project):  # deleted while this connection was closing: nothing more
             return
@@ -444,6 +460,11 @@ class Relay(Endpoints):
                 conn.code_tried = True
                 conn.code = self.codes.check(field(msg, "code", str))
             since = max(0, min(field(msg, "since", int, 0), 2**62))
+            # Is the log here the one the app last saw? Not if it was put back from a backup since:
+            # the app then starts again from the beginning and sends all it has (as after eviction)
+            lost = not relay_only and await self._not_as_seen(project, msg.get("last"))
+            if lost:
+                since = 0
             start = await self.store.catch_up_start(project, since)
             size = await self.store.since_size(project, start)
             # An app that takes pages ("pages" in its hello) gets a long log a page at a time, so a
@@ -461,7 +482,7 @@ class Relay(Endpoints):
                      "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
                      "store": self.store_status(project, conn),
                      "rv": [{"p": p, "s": b64e(sig)} for p, sig in (await self.store.revoked(project)).items()],
-                     **({} if done else {"more": True})}), CATCHUP_TIMEOUT)
+                     **({"lost": True} if lost else {}), **({} if done else {"more": True})}), CATCHUP_TIMEOUT)
                 while not done:
                     del entries
                     entries, last, done = await self.store.since(project, last, PAGE)

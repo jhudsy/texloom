@@ -7,6 +7,7 @@ WebSocket connection. Folder syncing is layered on top (see folder.py).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -52,6 +53,11 @@ P2P_HELD, P2P_PER_SENDER, P2P_STALE = 128 * 1024 * 1024, 2, 60.0
 P2P_WINDOW, P2P_RATE = 10.0, 96 * 1024 * 1024
 
 
+def _sha(data: bytes) -> str:
+    """A change's content hash, as the server records it (to recognise replays, and a restored log)."""
+    return b64e(hashlib.sha256(data).digest())
+
+
 class Replica:
     def __init__(self, state_dir: Path, keys: Keys, server: str, create_code: str | None = None):
         self.dir = state_dir
@@ -91,6 +97,10 @@ class Replica:
         self._missing_tries = 0
         self._missing_retry: asyncio.Task | None = None
         self._seen: set[int] = set()  # seqs received above `since` (out of order)
+        # The newest change this copy has from the server: (its number, its SHA-256), sent with each
+        # hello so that a server restored from a backup, which numbers changes again, is noticed
+        self.last: tuple[int, str] | None = None
+        self._sent_h: dict[str, str] = {}  # change sent -> its SHA-256, until acknowledged
         self.ws: aiohttp.ClientWebSocketResponse | None = None
         self.http: aiohttp.ClientSession | None = None
         self.on_remote: Callable[[], Awaitable[None]] | None = None
@@ -163,6 +173,8 @@ class Replica:
         if (p := self.dir / "state.json").exists():
             s = json.loads(p.read_text())
             self.since = s.get("since", 0)
+            if isinstance(last := s.get("last"), list) and len(last) == 2 and isinstance(last[0], int) and isinstance(last[1], str):
+                self.last = (last[0], last[1])
             self.pending_mode = s.get("pending_mode")
             self.heard_mode = s.get("heard_mode") if s.get("heard_mode") in ("relay", "server") else None
             self.outbox = {k: b64d(v) for k, v in s.get("outbox", {}).items()}
@@ -176,7 +188,8 @@ class Replica:
     def save(self) -> None:
         (self.dir / "doc.bin.tmp").write_bytes(self.doc.get_update())
         (self.dir / "doc.bin.tmp").replace(self.dir / "doc.bin")
-        state = {"since": self.since, "pending_mode": self.pending_mode, "heard_mode": self.heard_mode,
+        state = {"since": self.since, **({"last": list(self.last)} if self.last else {}),
+                 "pending_mode": self.pending_mode, "heard_mode": self.heard_mode,
                  "outbox": {k: b64e(v) for k, v in self.outbox.items()}, "revoked": self._revocations,
                  **({"refs": self.refs} if self.refs else {}),
                  **({"deleted": self.deleted_at} if self.deleted_at is not None else {})}
@@ -232,6 +245,7 @@ class Replica:
             update = REF + json.dumps({"b": ref}).encode()
         data = self.keys.encrypt(update)
         sig = self.keys.sign(b"upd:" + data)
+        self._sent_h[uid] = _sha(data)
         try:
             await self.ws.send_json({"t": "up", "id": uid, "d": b64e(data), "s": b64e(sig)})
         except ConnectionError:
@@ -367,6 +381,8 @@ class Replica:
             if not self.keys.verify(prefix + data, sig):
                 log.warning("dropping update %s with bad signature", q)
                 continue
+            if not e.get("snap"):
+                self._note_last(q, _sha(data))
             try:
                 update = self.keys.decrypt(data)
             except (InvalidTag, ValueError):
@@ -407,6 +423,10 @@ class Replica:
         self.save()
         if self.ws is not None:
             await self.ws.close()
+
+    def _note_last(self, q, h: str) -> None:
+        if isinstance(q, int) and q > (self.last[0] if self.last else 0):
+            self.last = (q, h)
 
     def _mark_seen(self, q: int) -> None:
         """Advance `since` only over contiguous sequence numbers, so nothing is skipped."""
@@ -835,6 +855,8 @@ class Replica:
         self._resync = 0 if self._resync == 1 else self._resync
         self.connected.set()
         hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__, "pages": 1}  # (--min-version)
+        if self.last:
+            hello["last"] = list(self.last)
         if self.create_code:
             hello["code"] = self.create_code
         await ws.send_json(hello)
@@ -871,6 +893,8 @@ class Replica:
         self._hold_for_missing()
         self._seen = {q for q in self._seen if q > self.since}
         self._mark_seen(self.since)
+        if lost:
+            self.save()  # (what it last had from the server is forgotten: not to be sent again)
         self._caught_up = True  # (before the outbox goes: _send_update waits for it)
         await self.flush_outbox()
         await self.p2p({"k": "sv1", "sv": b64e(self.doc.get_state())})
@@ -903,9 +927,11 @@ class Replica:
             self._revoked(m.get("rv", []))
             # the server dropped its copy (idle eviction): everything up to `floor` is gone
             floor = m.get("floor") or 0
-            lost = m.get("mode") != "relay" and (m["head"] < self.since or 0 < self.since <= floor)
+            # (or the server's log isn't the one this copy last saw: it was put back from a backup)
+            lost = m.get("mode") != "relay" and (m["head"] < self.since or 0 < self.since <= floor or m.get("lost") is True)
             if lost:
                 self._seen = set()  # numbered afresh; `since` moves back once every page is in
+                self.last = None
             await self._apply_entries(m["entries"])
             if self._resync == 1:
                 await self._catch_up_again()
@@ -950,7 +976,10 @@ class Replica:
             self._revoked([m])
         elif t == "ack":
             ref = self._ref_sent.pop(m.get("id"), None)
+            h = self._sent_h.pop(m.get("id"), None)
             if m["q"]:
+                if h:
+                    self._note_last(m["q"], h)
                 self._mark_seen(m["q"])
                 self.store_refusal = None  # stored again
                 if ref:

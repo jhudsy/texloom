@@ -114,6 +114,10 @@ async def steps(url: str, tmp: Path) -> list:
     ok(note("after snap", [(e["q"], e["snap"]) for e in (await store.since(a, 0))[0]]) == [(6, True)] + [(i, False) for i in range(7, 11)],
        "it stands for the entries it replaced")
     ok(note("gone", await store.duplicate(a, blob(1, 300))) == 0, "a replay of a replaced edit is recognised (0)")
+    h2, h8 = (hashlib.sha256(blob(i, 300)).digest() for i in (1, 7))
+    ok(note("same entry", (await store.same_entry(a, 2, h2), await store.same_entry(a, 8, h8), await store.same_entry(a, 8, h2),
+                           await store.same_entry(a, 6, h2), await store.same_entry(a, 99, h2)))
+       == (True, True, False, False, None), "an app's last change is recognised by number and hash, in the log or replaced by a snapshot")
     ok(note("catch up", (await store.catch_up_start(a, 2), await store.catch_up_start(a, 8))) == (5, 8),
        "a catch-up from before the snapshot starts with it")
     ok(note("usage after", store.usage[a]) == usage + delta, "and the project's size is what the snapshot said")

@@ -311,6 +311,16 @@ class Store:
         self._grew(project, len(data) + len(sig))
         return int(seq)
 
+    async def same_entry(self, project: str, seq: int, h: bytes) -> bool | None:
+        """Is the change numbered `seq` here the one with content hash `h` (a client's record of the
+        last change it has)? None when it can't be told: no change of that number is known any
+        more (compacted long ago, evicted), or it is a snapshot's number."""
+        rows = await self.db.fetch("SELECT h FROM log WHERE project=$1 AND seq=$2 AND NOT snap"
+                                   " UNION ALL SELECT h FROM gone WHERE project=$1 AND seq=$2", project, seq)
+        if not rows:
+            return None
+        return any(bytes(r["h"]) == h for r in rows)
+
     async def last_snapshot(self, project: str) -> int:
         return await self.db.fetchval("SELECT MAX(seq) FROM log WHERE project=$1 AND snap", project) or 0
 

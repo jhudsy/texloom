@@ -141,6 +141,9 @@ def state(r: Replica, socks: list[FakeWS], http: FakeHttp, got: dict) -> dict:
         "uploaded": sorted(http.received, key=lambda u: (u["id"], u["output"])),
         "pendingFiles": len(list(pending.iterdir())) if pending.exists() else 0,
         "got": got.get("v", None),
+        "last": list(r.last) if r.last else None,
+        "lastSeq": r.last[0] if r.last else None,
+        "helloLast": next((m.get("last") for w in reversed(socks) for m in reversed(w.sent) if m.get("t") == "hello"), None),
     }
 
 

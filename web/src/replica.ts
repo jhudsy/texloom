@@ -114,6 +114,11 @@ export type StorageMode = 'server' | 'relay'
 /** Why the server didn't move a project to another code (moveToCode). */
 export interface MoveRefusal { code: 'move-bad-code' | 'move-no-room' | 'move-too-big' | 'move-not-stored' | 'move-rejected' | 'move-busy'; need?: number; free?: number; max?: number }
 
+/** A change's content hash, as the server records it (to recognise replays, and a restored log). */
+async function sha(data: Uint8Array): Promise<string> {
+  return b64e(new Uint8Array(await crypto.subtle.digest('SHA-256', data as BufferSource)))
+}
+
 export class Replica {
   // gc off: deleted text is kept, so past versions can be reconstructed (History)
   readonly doc = new Y.Doc({ gc: false })
@@ -178,6 +183,10 @@ export class Replica {
   private ws: WebSocket | null = null
   private since = 0
   private seen = new Set<number>()
+  // The newest change this copy has from the server: [its number, its SHA-256], sent with each
+  // hello so that a server restored from a backup, which numbers changes again, is noticed
+  private last: [number, string] | null = null
+  private sentHash = new Map<string, string>() // sent id -> its SHA-256, until acknowledged
   /** The server's log (and its list of revocations) has been applied since connecting. */
   private synced = false
   private inflight = new Map<string, string[]>() // sent id -> outbox ids it covers
@@ -236,6 +245,7 @@ export class Replica {
     this.persistence = new IndexeddbPersistence(`texloom-doc-${this.keys.project}`, this.doc)
     await this.persistence.whenSynced
     this.since = (await idbGet<number>(this.db, 'kv', 'since')) ?? 0
+    this.last = (await idbGet<[number, string]>(this.db, 'kv', 'last')) ?? null
     this.refs = (await idbGet<Record<number, string>>(this.db, 'kv', 'refs')) ?? {}
     // revocations learned earlier, before anything arrives from peers
     this.learnRevoked((await idbGet<{ p: string; s: string }[]>(this.db, 'kv', 'revoked')) ?? [], false)
@@ -343,7 +353,8 @@ export class Replica {
     const code = this.creationCode()
     this.logPending = null
     this.missing.clear() // (this catch-up finds them again if they're still missing)
-    ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ...(code ? { code } : {}) }))
+    ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ...(this.last ? { last: this.last } : {}),
+      ...(code ? { code } : {}) }))
   }
 
   /** The connection closed (check-replica.mjs calls this too). */
@@ -389,9 +400,10 @@ export class Replica {
         this.storeInfo = m.store ?? null
         this.learnRevoked(m.rv ?? [])
         if (this.storeInfo?.registered && this.refusal === 'needs-code') this.refusal = null
-        // the server dropped its copy (idle eviction): everything up to `floor` is gone
-        const lost = m.mode !== 'relay' && (m.head < this.since || (this.since > 0 && this.since <= (m.floor ?? 0)))
-        if (lost) this.seen.clear() // numbered afresh; `since` moves back once every page is in
+        // the server dropped its copy (idle eviction): everything up to `floor` is gone; or its log
+        // isn't the one this copy last saw (it was put back from a backup)
+        const lost = m.mode !== 'relay' && (m.head < this.since || (this.since > 0 && this.since <= (m.floor ?? 0)) || m.lost === true)
+        if (lost) { this.seen.clear(); this.last = null; await idbPut(this.db, 'kv', 'last', null) } // numbered afresh; `since` moves back once every page is in
         await this.apply(m.entries)
         if (this.resync === 1) { await this.catchUpAgain(); break }
         // a long log comes in pages ("pages" in the hello): the rest follow as `logmore`
@@ -425,6 +437,9 @@ export class Replica {
       case 'ack': {
         const ref = this.refSent.get(m.id)
         this.refSent.delete(m.id)
+        const h = this.sentHash.get(m.id)
+        this.sentHash.delete(m.id)
+        if (m.q && h) await this.noteLast(m.q, h)
         if (m.q && ref) { this.refs[m.q] = ref; await idbPut(this.db, 'kv', 'refs', this.refs) }
         if (m.q) this.markSeen(m.q)
         if (m.q && this.refusal) { this.refusal = null; this.onStatus() }
@@ -505,6 +520,12 @@ export class Replica {
     ;(this.ws as WebSocket | null)?.close() // onclose reconnects; hello carries the new code
   }
 
+  private async noteLast(q: number, h: string) {
+    if (!Number.isInteger(q) || q <= (this.last?.[0] ?? 0)) return
+    this.last = [q, h]
+    await idbPut(this.db, 'kv', 'last', this.last)
+  }
+
   private markSeen(q: number) {
     if (q > this.since) this.seen.add(q)
     while (this.seen.has(this.since + 1) && !this.missing.has(this.since + 1)) this.seen.delete(++this.since)
@@ -519,6 +540,7 @@ export class Replica {
       if (!this.keys.verify(e.snap ? `snap:${e.q}:` : 'upd:', data, sig)) {
         console.warn('dropping update with bad signature', e.q); continue
       }
+      if (!e.snap) await this.noteLast(e.q, await sha(data))
       let update: Uint8Array
       try { update = await this.keys.decrypt(data) } catch (err) { console.warn('dropping undecryptable update', e.q, err); continue }
       if (isRef(update)) {
@@ -559,6 +581,7 @@ export class Replica {
     }
     const d = await this.keys.encrypt(update)
     this.inflight.set(id, covers)
+    this.sentHash.set(id, await sha(d))
     this.ws.send(JSON.stringify({ t: 'up', id, d: b64e(d), s: b64e(this.keys.sign('upd:', d)) }))
   }
 
