@@ -26,6 +26,8 @@ jobs:
         run: uv run python scripts/check_quiet.py
       - run: uv run python scripts/check_i18n.py
       - run: uv run python scripts/check_compat.py
+      - name: What each server keeps in memory, and its addresses, are listed for several servers (issue 12)
+        run: uv run python scripts/check_server_state.py
       - run: uv run python scripts/check_listsync.py
       - run: uv run python scripts/check_xr.py
       - run: uv run python scripts/check_packing.py

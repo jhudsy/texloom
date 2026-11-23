@@ -17,11 +17,11 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
    most of the traffic, off the relay. About 2 days.
 3. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
    (TLA+, with the GitHub lease), before several servers run at once. 2–3 days.
-4. **[Several servers at once](https://github.com/jhudsy/texloom/issues/12)** (on PostgreSQL): the
-   database already numbers each project's changes correctly with several writers. Left: changes
-   reaching people connected to another server (a notifier: PostgreSQL LISTEN/NOTIFY), a lock or
-   lease for the single-writer rules, sharing what each server keeps in memory (usage, deletions,
-   storage modes, revocations), and running maintenance once. About a week.
+4. **[Several servers at once](https://github.com/jhudsy/texloom/issues/12)** (on PostgreSQL), each
+   project's connections all sent to one server (SCALING.md, "Several relays: route by project"):
+   totals across projects (an owner's usage, the server's total) into the database, servers telling
+   each other when one changes a project another holds, and maintenance run once. About 3–4 days.
+   Until then, new code keeps to "Keeping several servers possible" there.
 
 ## Later
 

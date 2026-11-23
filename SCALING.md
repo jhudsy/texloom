@@ -126,11 +126,10 @@ extra capacity.
 
 ### Growing, in order
 
-1. **Several identical relays** behind a load balancer, sharing one PostgreSQL primary. Route by
-   project id so collaborators on a project usually reach the same relay; a PostgreSQL
-   LISTEN/NOTIFY message ("project X has a new change", and each relay then reads it) covers the
-   rest. Counters and caches kept in a relay's memory move into shared state, and maintenance (the
-   reaper, eviction) runs once, not once per relay.
+1. **Several identical relays** behind a load balancer, sharing one PostgreSQL primary, with every
+   connection to a project sent to the same relay (below). Totals across projects move into the
+   database, relays tell each other when one changes a project another holds, and maintenance (the
+   reaper, eviction, purges) runs once, not once per relay.
 2. **When the database starts to feel it**, in this order: batch edits for a few hundred
    milliseconds so a burst of typing is one write; put read replicas (the standbys) to work on
    catch-ups; add a connection pooler (PgBouncer, transaction pooling) if the number of relays
@@ -139,6 +138,57 @@ extra capacity.
    page and PostgreSQL's statistics show trouble long before users do.
 3. **Only if one primary is not enough**, split projects across several databases by project id,
    each with its own standby. Projects don't talk to each other, so this needs no redesign.
+
+### Several relays: route by project
+
+A relay passes more than stored edits between a project's connections: cursors and presence, and
+every change of a sync-only project, go from one connection to the others and are never stored.
+So "project X has a new change, read it from the database" can't carry them, and forwarding them
+between relays would mean every message crossing (LISTEN/NOTIFY carries at most 8 KB), plus a lock
+per project held in the database across several steps, and the ordering questions of
+[#8](https://github.com/jhudsy/texloom/issues/8).
+
+Instead, every connection to a project goes to the same relay: the project is in each of its
+addresses (`/ws/{project}`, `/blob/{project}/…`), and the front end picks the relay from it
+(nginx: `hash … consistent` on the project part of the address). A project's room, its lock and its counters then stay in that
+relay's memory, as now. When a relay stops, its projects move to the others and people reconnect,
+as after a restart today. What is left for several relays
+([#12](https://github.com/jhudsy/texloom/issues/12), about 3–4 days):
+
+- **Totals across projects into the database**: an owner's usage, the server's total, project
+  lists' sizes. Kept as rows updated in the same transaction as each write, worked out once from
+  what is stored when moving to them.
+- **Telling the other relays**: maintenance, a purge, or another relay's admin command can change
+  a project another relay holds (its usage, owner, deletion, storage mode). A small LISTEN/NOTIFY
+  message ("drop what you know of project X") makes that relay read it again.
+- **Maintenance once**: the reaper, eviction and purges run on whichever relay holds a PostgreSQL
+  advisory lock.
+- **A check with two relays on one database**: routing, totals across both, a relay stopping, and a
+  project changed by the other relay.
+- Each relay keeps its own rate limits (they add up across relays), and every relay needs the same
+  codes file.
+
+### Keeping several servers possible
+
+Until then, new code keeps to these rules, so that none of this gets harder:
+
+- **Anything about a project is reached through its address.** A new address that reads or writes
+  a project's data has `{project}` in its path. One that doesn't (project lists, `/api/info`)
+  keeps its state in the database, with changes that check what they replace (as project lists do).
+- **State in a relay's memory is one of:** a setting; about its own connections; deliberately its
+  own (memory budget, caches of public files, rate limits); about one project (a copy another relay
+  could be told to drop); a total across projects (to move into the database); or background work
+  (to run once). `scripts/check_server_state.py` lists every piece and fails on a new one until
+  it is put in one of these, which makes it a decision rather than an accident.
+- **Totals across projects are worked out from what is stored**, so that moving them into the
+  database later is a change of where they are kept, not of what they mean.
+- **Background work is safe to run on one relay only**, and safe to repeat (a purge or eviction
+  that stops half-way is finished next time).
+- **Nothing a relay must know is only in its own files**: stored files go through the file store,
+  and the database holds the rest. Its own folder is for spooling uploads and caches.
+- **Edits are numbered by the database**, never in a relay's memory.
+- **SQL works on both databases** (`scripts/check_store.py`); what only PostgreSQL can do for
+  several relays (LISTEN/NOTIFY, advisory locks) stays in its class in `server/db.py`.
 
 ### What we are deliberately not doing
 
@@ -150,6 +200,5 @@ compile service (compiling is the client's job).
 ## Open questions
 
 - The ordering model for several writers, and the lease above ([#8](https://github.com/jhudsy/texloom/issues/8)).
-- Which per-process state must be shared, and which can be rebuilt on demand.
 - Whether to run the database ourselves or use a managed one: it removes most of the work of
   replication, failover and backups, at a cost, and the data is encrypted either way.

@@ -275,7 +275,9 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   it; different projects go on at once. What every message consults is also kept in memory:
   usage per project and owner, owners, revocations, last-seen times, and the deletion and
   storage mode of the 20,000 projects used most recently (the rest are read when needed).
-  That's right for one server; several at once need them shared (ROADMAP.md, SCALING.md).
+  That's right for one server. Several at once would each hold the projects sent to them, with
+  totals across projects in the database (SCALING.md, "Several relays: route by project"); new
+  state follows the rules there, and `scripts/check_server_state.py` lists it all.
 - **Erasing:** when a project is evicted, purged, made relay-only or deleted for everyone, or a
   file is deleted, its stored files stop counting and can no longer be fetched at once: their
   rows move to the table `trash`, and their content is erased in the background

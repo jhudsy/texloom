@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""What each relay keeps in its own memory, and which addresses it serves: every piece is listed
+here with what it would mean for several relays at once (issue 12), so that a new one is a
+decision, not an accident. See "Keeping several servers possible" in SCALING.md.
+
+It reads server/*.py and fails on:
+- an attribute set on `self` in a server class (or a mutable value at module level, other than a
+  constant in capitals) not listed in STATE below, or listed but gone;
+- a route added in make_app (server/relay.py) not listed in ROUTES, or listed but gone; and a
+  route listed as "project" without {project} in its path.
+
+The kinds of state:
+  setting      the same on every relay: settings, handles to the database or file store
+  connection   belongs to connections on this relay
+  per-server   meant to be each relay's own (its memory, its caches of public files, rate limits
+               that then add up across relays)
+  project      about one project: right while every connection to a project reaches the same
+               relay (routing by project id). Anything another relay changes about the project
+               (maintenance, a purge) must tell this one to drop its copy
+  shared       totals across projects (an owner's usage, the server's total): with several relays
+               they move into the database
+  maintenance  background work: with several relays, only one runs it
+
+    uv run python scripts/check_server_state.py
+"""
+
+from __future__ import annotations
+
+import ast
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SERVER = ROOT / "server"
+KINDS = {"setting", "connection", "per-server", "project", "shared", "maintenance"}
+
+# "Class.attribute" (or "Class.*" for every attribute of a class, "module:NAME" for module level)
+STATE = {
+    # settings and handles
+    "Relay.min_version": "setting", "Relay.codes_url": "setting", "Relay.dropbox_app_key": "setting",
+    "Relay.private": "setting", "Relay.want_lists": "setting", "Relay.limits": "setting",
+    "Relay.codes": "setting",  # the codes file: every relay needs the same one
+    "Relay.store": "setting", "Relay.lists": "setting", "Relay.texlive": "setting",
+    "Store.db": "setting", "Store.files": "setting", "Store.dir": "setting",
+    "Lists.*": "setting", "Admin.*": "setting", "CodeBook.*": "setting",
+    "Database.*": "setting", "PostgreSQL.*": "setting", "SQLite.*": "setting", "_PgCalls.*": "setting",
+    "_SqliteCalls.*": "setting", "FolderFiles.*": "setting", "S3Files.*": "setting",
+    # connections on this relay
+    "Relay.rooms": "connection", "Relay.conns": "connection", "Relay._next_id": "connection",
+    "Conn.*": "connection", "Metered.*": "connection",
+    # each relay's own
+    "Relay.memory": "per-server", "Relay.held": "per-server", "Relay.stopping": "per-server", "Budget.*": "per-server",
+    "Store.meta_tokens": "per-server", "Store.meta_at": "per-server",  # the budget for rows that store nothing
+    "ArxivFetcher.*": "per-server",  # arXiv's rate limits, per relay
+    "TexLive.*": "per-server",  # a cache of public TeX Live files
+    # per project
+    "Store.usage": "project", "Store.owners": "project", "Store.seen": "project", "Store.pending": "project",
+    "Store._facts": "project", "Store._revoked": "project",
+    "Store._locks": "project",  # one project's steps in order: needs all its writes on one relay
+    # across projects: into the database for several relays
+    "Store.total": "shared", "Store.owner_bytes": "shared", "Store.list_bytes": "shared",
+    # background work
+    "Store._reaper": "maintenance",
+}
+
+# Every address make_app serves: "project" ones carry the project in the path, so a front end can
+# send them to the project's relay; "any" ones work on any relay (the database, or public files).
+ROUTES = {
+    "GET /ws/{project}": "project", "PUT /blob/{project}/{id}": "project", "GET /blob/{project}/{id}": "project",
+    "DELETE /blob/{project}/{id}": "project",
+    "GET /api/info": "any", "POST /api/code": "any", "GET /api/arxiv/{id}": "any", "GET /admin": "any",
+    "GET /api/list/{id}": "any", "PUT /api/list/{id}": "any", "DELETE /api/list/{id}": "any",  # compare-and-swap in the database
+    "GET /texlive/{year}/{fmt}/{name}": "any", "STATIC /core": "any", "GET /": "any", "STATIC /": "any",
+}
+
+MUTABLE_CALLS = {"dict", "list", "set", "defaultdict", "OrderedDict", "deque"}
+
+
+def found_state() -> set[str]:
+    out = set()
+    for f in sorted(SERVER.glob("*.py")):
+        tree = ast.parse(f.read_text())
+        for node in tree.body:  # module level: mutable containers
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                value = node.value
+                mutable = isinstance(value, (ast.Dict, ast.List, ast.Set)) or (
+                    isinstance(value, ast.Call) and getattr(value.func, "id", getattr(value.func, "attr", "")) in MUTABLE_CALLS)
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for t in targets:
+                    if mutable and isinstance(t, ast.Name) and not t.id.isupper():  # (capitals: a constant)
+                        out.add(f"module:{f.stem}.{t.id}")
+        for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+            for n in ast.walk(cls):
+                targets = n.targets if isinstance(n, ast.Assign) else [n.target] if isinstance(n, (ast.AnnAssign, ast.AugAssign)) else []
+                for t in targets:
+                    for x in [t, *(t.elts if isinstance(t, ast.Tuple) else [])]:
+                        if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id == "self":
+                            out.add(f"{cls.name}.{x.attr}")
+    return out
+
+
+def found_routes() -> set[str]:
+    tree = ast.parse((SERVER / "relay.py").read_text())
+    out = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr.startswith("add_") \
+                and n.args and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str):
+            verb = n.func.attr.removeprefix("add_").upper()
+            out.add(f"{verb} {n.args[0].value}")
+    return out
+
+
+def main() -> int:
+    problems = []
+    for key, kind in STATE.items():
+        if kind not in KINDS:
+            problems.append(f"{key}: unknown kind {kind!r}")
+    state = found_state()
+    covered = set()
+    for name in state:
+        cls = name.split(".")[0]
+        if name in STATE:
+            covered.add(name)
+        elif f"{cls}.*" in STATE:
+            covered.add(f"{cls}.*")
+        else:
+            problems.append(f"{name}: new state kept in a relay's memory. Add it to STATE in this script with its kind "
+                            "(see SCALING.md, \"Keeping several servers possible\")")
+    problems += [f"{k}: listed in STATE but not in the code any more" for k in STATE if k not in covered]
+    routes = found_routes()
+    problems += [f"{r}: a new address. Add it to ROUTES in this script: \"project\" (with {{project}} in its path) or \"any\""
+                 for r in sorted(routes - ROUTES.keys())]
+    problems += [f"{r}: listed in ROUTES but not served any more" for r in sorted(ROUTES.keys() - routes)]
+    problems += [f"{r}: a project's address needs {{project}} in its path, so a front end can route it"
+                 for r, kind in ROUTES.items() if kind == "project" and "{project}" not in r]
+    if problems:
+        print("server state:", *problems, sep="\n  ")
+        return 1
+    by_kind = {k: sum(1 for v in STATE.values() if v == k) for k in sorted(KINDS)}
+    print(f"server state: {len(state)} attributes, {len(routes)} addresses, all accounted for "
+          f"({', '.join(f'{n} {k}' for k, n in by_kind.items())})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
