@@ -27,9 +27,10 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
 
 ## Later
 
-1. **[Tell collaborators what's new](https://github.com/jhudsy/texloom/issues/3)**: unread counts,
-   changes since your last visit, `@name` mentions. 2–4 days; only while TeXLoom is open, since the
-   server can't read projects.
+1. **[`@name` mentions](https://github.com/jhudsy/texloom/issues/3)** in comments and replies: pick a
+   collaborator as you type `@`, "N comments mention you" on opening a project, a Mentions me filter;
+   shown as from someone only when their name is signed. 1–2 days; seen when the project is opened,
+   since the server can't read projects.
 2. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
 3. **[The Assistant uses tools from other MCP servers](https://github.com/jhudsy/texloom/issues/31)**:
