@@ -14,6 +14,7 @@ to stderr; stdout carries only protocol messages.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ import secrets
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -451,6 +453,9 @@ ANNOTATIONS = {
 class Server:
     def __init__(self, project: Project, suggest_only: bool = False):
         self.p = project
+        # MCP is UTF-8, one message per line; a pipe on Windows would be the locale's code page, with \r\n
+        if isinstance(sys.stdout, io.TextIOWrapper):
+            sys.stdout.reconfigure(encoding="utf-8", newline="\n")
         self.out = sys.stdout
         self.suggest_only = suggest_only
 
@@ -527,7 +532,18 @@ class Server:
     async def serve(self) -> None:
         loop = asyncio.get_running_loop()
         reader = asyncio.StreamReader(limit=64 * 1024 * 1024)
-        await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
+        if sys.platform == "win32":
+            # Windows' event loop can only watch pipes opened for overlapped I/O, and the pipe an MCP
+            # client starts us with isn't one ("The handle is invalid"): read it on a thread instead.
+            def read_stdin() -> None:
+                try:
+                    while chunk := sys.stdin.buffer.readline():
+                        loop.call_soon_threadsafe(reader.feed_data, chunk)
+                finally:
+                    loop.call_soon_threadsafe(reader.feed_eof)
+            threading.Thread(target=read_stdin, name="mcp-stdin", daemon=True).start()
+        else:
+            await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
         while line := await reader.readline():
             line = line.strip()
             if not line:

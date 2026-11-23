@@ -52,6 +52,8 @@ jobs:
           exit 1
       - name: Windows and dialogs (offscreen)
         run: uv run --extra app python scripts/check_app.py
+      - name: The MCP server over standard input and output
+        run: uv run python scripts/check_bundled_mcp.py texloom
       - name: The menu bar and the Dock (macOS)
         if: runner.os == 'macOS'
         run: uv run --extra app python scripts/check_app.py --native
