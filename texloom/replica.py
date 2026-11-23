@@ -935,6 +935,8 @@ class Replica:
             await self._on_p2p(m)
         elif t == "mode":
             self._heard(m["m"])
+            if m["m"] == "relay":
+                self.store_refusal = None  # not storing is the point (as in web/src/replica.ts)
         elif t == "rv":
             self._revoked([m])
         elif t == "ack":

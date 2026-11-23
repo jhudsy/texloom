@@ -459,6 +459,8 @@ export class Replica {
           this.denied = m.code
           this.minVersion = typeof m.min === 'string' ? m.min : ''
           this.onStatus()
+        } else if (m.code === 'needs-code' && this.storage === 'relay') {
+          // sent before the switch to sync-only: it's sent again (as in texloom/replica.py)
         } else if (STORE_PROBLEMS.has(m.code)) {
           // Not stored, but already relayed to anyone online. Keep it in the outbox; retry later.
           if (m.id) this.inflight.delete(m.id)
@@ -495,8 +497,10 @@ export class Replica {
   }
 
   private async apply(entries: { q: number; d: string; s: string; snap?: boolean }[]) {
+    // One bad entry is skipped, as in texloom/replica.py: stopping there would stop every catch-up at it.
     for (const e of entries) {
-      const data = b64d(e.d), sig = b64d(e.s)
+      let data: Uint8Array, sig: Uint8Array
+      try { data = b64d(e.d); sig = b64d(e.s) } catch { console.warn('dropping a malformed update'); continue }
       if (!this.keys.verify(e.snap ? `snap:${e.q}:` : 'upd:', data, sig)) {
         console.warn('dropping update with bad signature', e.q); continue
       }
@@ -1016,8 +1020,11 @@ export class Replica {
   private async reseed() {
     console.info('the server has no copy of this project any more: re-uploading it')
     for (const [, b] of this.bin) if (b?.h && (await idbGet(this.db, 'blobs', b.h))) await idbPut(this.db, 'pending', b.h, 1)
-    await this.uploadPending()
-    await this.send(crypto.randomUUID(), Y.encodeStateAsUpdate(this.doc), [])
+    // In the outbox, as in texloom/replica.py: sent with the rest once online (onCaughtUp uploads the
+    // files first), and again on reconnecting until the server has it. (Sent from here, before the
+    // connection counted as online, it was dropped.)
+    await idbPut(this.db, 'outbox', crypto.randomUUID(), Y.encodeStateAsUpdate(this.doc))
+    this.pending = (await idbKeys(this.db, 'outbox')).length
   }
 
   /** Uploads run one at a time: overlapping runs would send the same item twice, the second

@@ -1,0 +1,1556 @@
+{
+ "about": "Made by scripts/make_replica_vectors.py; checked by scripts/check_replica.py and web/scripts/check-replica.mjs.",
+ "links": {
+  "owner": "p=DRIhN_3IQC9sEHdBIuFR4knZ2HjmkfoesCawidhZZsE&k=irGQQspegwD4Iq39-OogdS9rfG8r0uZvFZqcuzoajoI&w=1TabcYVwC3uQRl9rmEDZxKmr-G3jfDth4lwj84iP1YU",
+  "member": "p=DRIhN_3IQC9sEHdBIuFR4knZ2HjmkfoesCawidhZZsE&k=irGQQspegwD4Iq39-OogdS9rfG8r0uZvFZqcuzoajoI&m=2-PW8SH5Z93BBTZTwr-9ahDow4y0KMp2y0h3jPX3m3w&g=ftZAJWYyCuf4xbregdxqxm3hruumaEx6AIzE-oi0Jlg2qOmT3v_cg9i_-e8LbkGoHB5CGGQfsc-ls5gNUUqPDg&n=",
+  "reader": "p=DRIhN_3IQC9sEHdBIuFR4knZ2HjmkfoesCawidhZZsE&k=irGQQspegwD4Iq39-OogdS9rfG8r0uZvFZqcuzoajoI"
+ },
+ "cases": [
+  {
+   "what": "a log's changes are applied, and it has caught up to the head",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 3,
+      "count": 3,
+      "entries": [
+       {
+        "q": 1,
+        "d": "O0xeVMD4zSrgTKNot1T0E24n_kM_nJik0zrqvD2Q9CJrGRG5I58Ie-_QXP3ekCzjAskDuqNMl2fWfV35brR6YpOfhs89mb9T9wYAjA",
+        "s": "Aq99tWZDNQZ-Wdoi2kOEQkGCRhWcM_C2Njp2itv-FQbyhgBn68lkY1F21oyHY3sfH--Lxe8wGrr6dc05ZY9oCg"
+       },
+       {
+        "q": 2,
+        "d": "rabWuijzEt13FQD07zyKSzKGEznQUW8Yfrb-hFYkE9sVX1Uerbnu7TvGHmQqNy4_iwJT3iCwW3PV",
+        "s": "BP132PzjYTm56pT20rxviqbU43ShzFvQ2onurEeoHkk4mckVxmFW_ACr32mDaFD740PluHCQ5jYvOIn2vRqEBg"
+       },
+       {
+        "q": 3,
+        "d": "oxVysTTmTX1Ph9sdPRVz7nwHULZ5zA9ToLw-gubKNjvoFicKhIvKfJcCHs9It04YEiSa6axAKjvW2Pf4T37ifBlNqP74",
+        "s": "DU51hjwvC5EKoS9UzBO_e2Lq0k4Z23_-5eNU4F_P0tQEEG-2k2SKrErHKlhtJAlElTgfrXmaqb62sP1C--9YAw"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\nWorld\n",
+     "b.tex": "B\n"
+    },
+    "since": 3,
+    "sent": [
+     "p2p:sv1"
+    ]
+   }
+  },
+  {
+   "what": "a change with a bad signature is left out, the rest applied",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 2,
+      "count": 2,
+      "entries": [
+       {
+        "q": 1,
+        "d": "wvjGQCvtSCLvYhOHSkIZYfU_R6IP7XBD1iCuVFfsF4MNOOvX1mUeVluwet3_Zu_lBxm05HjyWWTweF8U1vGeahDjqo6wB-u8nmL7sg",
+        "s": "FhDE3DDe7iiK3nrILYrBEL3WtSb45glS34c3y0rbyCzsufINXrioV4SCTAUBUdc_u_n0MJl8oMMukKssX_23Ag"
+       },
+       {
+        "q": 2,
+        "d": "kTA4GJlnsaPoWDZHM1G72bwzOC8ekcZIPNIUGxNcnG5MpJ7d6iIM7VpSlmnntQybgeLgNRTcBzHx1e76r_JOFZcOltN9",
+        "s": "cja3UFQk_hIuYzwVPGn-ONIz2TbVZR3s4CKCMqohCvYVGfWlH80BnnYCkSloD4tcYRD-tQlqM8yYnNq6AiVJDQ"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "b.tex": "B\n"
+    },
+    "since": 2
+   }
+  },
+  {
+   "what": "a change signed as a snapshot is left out (the prefix is part of what's signed)",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 2,
+      "count": 2,
+      "entries": [
+       {
+        "q": 1,
+        "d": "8WUZx2YGzboEMynwujzKQE4vYSYhh-p9REyyZXojog2mkfAblaElUJRXYvWMp3VVGUOyAAjhgKSvKyXozZ8zD6Z_7rZAx-b2o0g26g",
+        "s": "E-xT_kOZJ36-30AMBlgV70BS3b8TdhuImj1XUn0G4_Q4x69eMltsuoPzUQJv5qectNhUHJyCjFqcKONhFRUnCg"
+       },
+       {
+        "q": 2,
+        "d": "VDgNZQK-UzIwSnUUE72keeySLhIj1NfFukpKjaoMY4twMW50nrrM9Ra3Q_ssvroZJw3jd_UsQqOTYDqH2Q28w-CTQEKg",
+        "s": "wIwz1cl8wQqVzsBXZkNOM4QspbujQfBCDt3Oh_9rRFY_MptB6VZtldb9q2sKcbeYWyg143vE5cavZFaHCxvQCA"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "b.tex": "B\n"
+    },
+    "since": 2
+   }
+  },
+  {
+   "what": "a snapshot is applied",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 4,
+      "count": 1,
+      "entries": [
+       {
+        "q": 4,
+        "d": "6Fx-PRXEkleB7kasDQPSibM62q80v_lNYeBZwfcXgY1HdM2xFWHZfGsOEqjq1wjVTPDoxBu0weCi67vnBoIheXOClwZxzb5tMHbXDajczLQCbOn7r8PygRZutPi4Gse8ngXOe8HGNb2-S9Csg0WiyI-4t-iYyK5y2g",
+        "s": "rh5xpVOery-1-f3ZlDZMmqyPsbKfO7c8Fc_sRWpLGITZCRu2hzrjfyeRis99OESFI4SjQum9q-mciqToho4dBw",
+        "snap": true
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\nWorld\n",
+     "b.tex": "B\n"
+    },
+    "since": 4
+   }
+  },
+  {
+   "what": "a snapshot signed for another position is left out",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 4,
+      "count": 1,
+      "entries": [
+       {
+        "q": 4,
+        "d": "_VQiNaQP_ZqRAVjfUrHZ4-ulrgdoFnUl139emLcWMAPIgti6hhk0RRlh3WFc5AXzfKErvHvhgHGPvLDc2d-PWzvtv5ZAMZ95P-TRlrDXvTfVTrWA6G1nrHrVkgUOkyV-Xd0tzaQr6ikBLsDNKmw0_1KF-OH2GMVVgA",
+        "s": "3ZAdtiEYMpO6eiT2XRH9YuNFvGVAF4EutK8KQuewMaqsiMA5F2UH1MDVKCoFilOHENEPnOdO6r3ifhG_zVTPAg",
+        "snap": true
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {},
+    "since": 4
+   }
+  },
+  {
+   "what": "a change that doesn't decrypt is left out, the rest applied",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 2,
+      "count": 2,
+      "entries": [
+       {
+        "q": 1,
+        "d": "2ozadprbaAfHB_uvhzCuLIV4p9Z5DGWcePQyLEiNzDyERIzCfWGll5P3NVoBzyLjOrp57foot_IfKRjs",
+        "s": "nGbPFGjWXr2xtVi0mnuUpNudIilNEv057kwyKPu2eBk4OvOoAZ4gPZp2c4CDXDy4nZo0O6I5k01KFciRnhpQBQ"
+       },
+       {
+        "q": 2,
+        "d": "_JG25QOf8lu7qSuhvVH67Ov7RRBVmaWwxh06wwOyk6DwYrS5vsChK5knoXX4Ay0Y-1VuiiGDZoaM_QPJOCpip56Z2pMe",
+        "s": "wK3lDGdtA-zGz7G5iMd3V48WLuqLEhTl63k9rAwbcaWnYiiBjBMyrOlKcHNRH7GKst26ULAhloWIvlPKoXIZAw"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "b.tex": "B\n"
+    },
+    "since": 2
+   }
+  },
+  {
+   "what": "a compressed change is applied",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 1,
+      "count": 1,
+      "entries": [
+       {
+        "q": 1,
+        "d": "DqSwZg19_q53tJW7xhczzQnocdAuhOUHdJ404KhQS3qZEucLHiUg7JAy3CkbOvH-Xc9ack2r_vR1P8izzubwGrq8u93h6XETWyQ9R8RCZr95",
+        "s": "xLEDuo6i96gYTC2EAfZTChz4GXijC3AJCuG9ybUSlNLDJ8Z-tE3cnfFF2vOhGmQ5vIcLEsDVpTms6W5O2tiGAA"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\n"
+    },
+    "since": 1
+   }
+  },
+  {
+   "what": "something that isn't a change is left out, the rest applied",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 2,
+      "count": 2,
+      "entries": [
+       {
+        "q": 1,
+        "d": "8zczMgEwTtAX7yYcVTBm1sXk1FpGCF8wz9mycWU-Zvwom3-L90oCOPlFANFqXKU",
+        "s": "FebI7T9kB6thfoqZ6CVOgMdVJFMwLraRa2qRkljd-87iek54imnnqqIRT3Dspqj9GY5OXkfWmFLnYZ177l8CDQ"
+       },
+       {
+        "q": 2,
+        "d": "2rsvTDSKBw10TrBylwl7i88y7V2utIKIbZgyBEBQhyrlNdkeg_4sFc-wli0I-oQcPc4imFEoFhjnxiRMzc63L6wtSgwy",
+        "s": "S1k5QK0SzAmKYXut76Lh1ZgjvnRefV7E6JzCg536KqrMCpNqTdaFA22KfDGDz02XW0njf2oxQu_0RK9R6sPOAw"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "b.tex": "B\n"
+    },
+    "since": 2
+   }
+  },
+  {
+   "what": "a malformed entry is left out, the rest applied",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 2,
+      "count": 2,
+      "entries": [
+       {
+        "q": 1,
+        "d": "sudIb0WLa3JD6yA0Okswqx9FCBTMy7ApXHYEwBz-brcwYo1UTiJGaaa1TDmm8FWAuQzQ5JwTrAomdSpBzp-EOY4GfifeMO2S5Y4eYA"
+       },
+       {
+        "q": 2,
+        "d": "9EQH-Os-OKE8f2dQW7YkgDrghJ79lDnXlJd2SjYFbtcrh5l_pzLlSQoO_v9q0iVg94kiJcAxDy2wgB_ibtr0YP3k_aF_",
+        "s": "BS-iy5BL8uuSI5UAVeNpho4-S3RnzZN2A7mykeWngb-HtPutgbWI84Sx9ljfzfWav1JdUO80Mtut0mpucv4TDQ"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "b.tex": "B\n"
+    },
+    "since": 2
+   }
+  },
+  {
+   "what": "a change from a revoked personal link, stored before it was revoked, is applied",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 1,
+      "count": 1,
+      "entries": [
+       {
+        "q": 1,
+        "d": "rSD4NDnMi12DgdoOPZ09Hj6urF4opsu-4U1ebiGSfocJDnS6fI6UidoryRmvjBVauoJHZa7koxL7DoSiBT2f4IMNi408N8Bb5Yerlw",
+        "s": "TQ78dMOujzQoV0ePZvDw4BwECdJzRP0l5L4E0dJd03sDGqzSysiLhPi_JNJWqJrijacYsaaKkbYlUBV2FfVpFsCI-laPy-ZkRtLMzSMRPg5cZeojcAvT3HlzoEfKEf8UAgBxckF2mirGOAc0VLngH5O3Lmr2HBlyDWXtkStrF_5MchdxsFWUEyn7hkk87FQXtA1pWCnkK0obvcsnJwW20s8K"
+       }
+      ],
+      "mode": "server",
+      "rv": [
+       {
+        "p": "Dvx0w66PNChXR49m8PDgHAQJ0nNE_SXkvgTR0l3TewM",
+        "s": "dGQQLW6G8564toPuLbETVzi2WBjlxr0tozhr179V_WBBfaRx1awVSM_mujZfKdm0ymBB2fYMoG78_zQgnSPeDQ"
+       }
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\n"
+    },
+    "since": 1
+   }
+  },
+  {
+   "what": "a log in pages: caught up only after the last",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 2,
+      "count": 1,
+      "entries": [
+       {
+        "q": 1,
+        "d": "IcEC8AGIVUt1woudFyUxkE-VnMt8emsiIe-6BY9Q-LvxNCDLT-a8TqbnaK4205OW_ZAAwm6CWxmCJGtE58AF_3bAYHwhGCDbfwHKHw",
+        "s": "W39G8ddJxQtcZgE6xUHoVUyXsFlEx1nxqYuVhH068wTIbt_OV57Bcuv2l4BU-949Gr4Nb4Fb-WnRZ3NwKS0YBg"
+       }
+      ],
+      "mode": "server",
+      "more": true
+     },
+     "expect": {
+      "files": {
+       "main.tex": "Hello\n"
+      },
+      "since": 0
+     }
+    },
+    {
+     "msg": {
+      "t": "logmore",
+      "entries": [
+       {
+        "q": 2,
+        "d": "CPCsZuFLzuuDt54P7C6D79DCaL0g4yx9tns-ctMMoyUicm9zbDEk0tjqibl-n4pnHAdUh55y3tN6",
+        "s": "TBcN5spg-gQMDzRuagFbydzECmfvpip3eHRKH3SFF3ukPZsi3gAoOkMI-8orYRlWrXj9jvT-t_GjPIUaAJCuDQ"
+       }
+      ],
+      "more": false
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\nWorld\n"
+    },
+    "since": 2,
+    "sent": [
+     "p2p:sv1"
+    ]
+   }
+  },
+  {
+   "what": "a page that comes without a log first is ignored",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "logmore",
+      "entries": [
+       {
+        "q": 1,
+        "d": "OfYUyGv-rBOn2_XJ4dU600BVlDO0GaXxIP0lSOAWxRG53ln3wtgQy-yKSY5sctMJf71G8dISTpYm7eO4WA5Q-DgF5Eo7SdcJ3bXkVg",
+        "s": "lpfVhlNzIQdX3NNiwSt92_1SL6TfcG4yUDSpr_HZnbn9W--iB7rz2zwdI6nJIqE4jI2MpjWwtF3Yk30BEbbADw"
+       }
+      ],
+      "more": false
+     }
+    }
+   ],
+   "expect": {
+    "files": {},
+    "since": 0,
+    "sent": []
+   }
+  },
+  {
+   "what": "changes out of order: caught up only as far as nothing is missing",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "up",
+      "q": 2,
+      "d": "FTwzSFWqDogP4lPuZWEvk8dBJ0BbmFHw3Qop4A3ECPOodpJ1U4vZQm2uBEefLAPkAz5dgLhzTn4UszlMEuRilNHROLaV",
+      "s": "4-tmgmaonarzBVItwWPzU9HTgCwBozj9ouB4iTyM38X-CTgsVTYqZbXPfCNS-qOid1M_aZ_yqQd4yCkAlwcfAg"
+     },
+     "expect": {
+      "files": {
+       "b.tex": "B\n"
+      },
+      "since": 0
+     }
+    },
+    {
+     "msg": {
+      "t": "up",
+      "q": 1,
+      "d": "zj6RQDCjyafB09dTSvwF2cimbJWxJ6GB3Tf2zrK69yEEB1AXCGAcsvxv6vyefKKELWUghhw8eodxACkJLRGmeu-dXFwbDxJfM2VYKQ",
+      "s": "9CGOwKt-XAblkoX9L3BUKVuljZV449BnMD6kyr3uvaIxsa6FFrp_N2ZcWsHJEp_Wv4uibRP33kg8omG18vUNCw"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\n",
+     "b.tex": "B\n"
+    },
+    "since": 2
+   }
+  },
+  {
+   "what": "an acknowledgement counts as received",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "ack",
+      "id": "x",
+      "q": 1
+     }
+    }
+   ],
+   "expect": {
+    "since": 1
+   }
+  },
+  {
+   "what": "the server lost its copy (its log ends before ours): caught up to its head",
+   "as": "reader",
+   "since": 5,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 2,
+      "count": 2,
+      "entries": [
+       {
+        "q": 1,
+        "d": "5gfwAkvdGTYbSElbL7A5Hko02mcaG0ApQZQ0xpQKOLyU9ZT6Tv3fys5rkZGjDWORrERw9JXFELh1dEHKSQBSw0VbR1ZB-IXv3RFY8g",
+        "s": "OV4-Vf5ejO7DlcS-ZG8t5C2HqSAXY-XxLNQ751RpfAUYcZ7LrV6VtgpFF8gzyiLMUBhYeVKVaLen2v9JRsZvBg"
+       },
+       {
+        "q": 2,
+        "d": "r_cNaUdFZSHIJkvBJdH0LyTWo0V9o2mq1ZqgZGeLfuWk09AO3zMzftJ_9zmcxsMZ0tpQCxLvOgOQFJxxDPi8exCiMxYB",
+        "s": "vqyOnnIKDBokoHOnOgfTBJjxbeFFAvfsKq9rfg7-I0paZiGYNPNcK-d9izGo4kb1UcXDNkdgnSnbVM5XrK_HCg"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\n",
+     "b.tex": "B\n"
+    },
+    "since": 2
+   }
+  },
+  {
+   "what": "the server lost its copy (we're at or below what it dropped): caught up to its head",
+   "as": "reader",
+   "since": 3,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 5,
+      "count": 1,
+      "entries": [
+       {
+        "q": 5,
+        "d": "n3ji_9n9VqqbsBWZJcHIFIU_SX_jLUrzom0VqJMMcJzyGHH1jOPeevgv8IkRwkNXS2sk9JJDYs-8ozE6121g0PujXbEk",
+        "s": "BBeY_rBw_QBIMiaZ_dS3qj4W3EcU10LcWc1OVebzMv7QorVa8EMpDvMKLJrIQMZVwX4BoZHaXlHefQgYJC9MBw"
+       }
+      ],
+      "mode": "server",
+      "floor": 4
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "b.tex": "B\n"
+    },
+    "since": 5
+   }
+  },
+  {
+   "what": "an editor whose server lost the copy sends the whole document again",
+   "as": "member",
+   "since": 4,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "since": 0,
+    "sent": [
+     "p2p:sv1",
+     "up"
+    ]
+   }
+  },
+  {
+   "what": "a project that's only relayed: nothing is lost, and it stays caught up where it was",
+   "as": "reader",
+   "since": 5,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "relay"
+     }
+    }
+   ],
+   "expect": {
+    "since": 5,
+    "serverMode": "relay"
+   }
+  },
+  {
+   "what": "an editor replaces a long log with a snapshot",
+   "as": "member",
+   "since": 299,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 300,
+      "count": 300,
+      "entries": [
+       {
+        "q": 300,
+        "d": "pfAdhnanPtzhBa8pgPdUizE1c68YYmvTPPbs4STiY3ubnYAA77G11O2X6zLdWs-xPf70GmE2ArFCTY84ubk_k7IhPerH4O0eOAEwNA",
+        "s": "PohuAY918wljtm_20IAoXZyJOrVtkxyqHjXF7rqAB09lUAstGlV_yTyMhEgJnbN3GOt0MLXR-tU9TfWZ2sL_Cw"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\n"
+    },
+    "since": 300,
+    "sent": [
+     "p2p:sv1",
+     "snap"
+    ]
+   }
+  },
+  {
+   "what": "a read-only link doesn't make snapshots",
+   "as": "reader",
+   "since": 299,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 300,
+      "count": 300,
+      "entries": [
+       {
+        "q": 300,
+        "d": "0ekmStRzZ28z1oP937j9kvU7GDciMYPBn-JHWO0GRD1-4G4aTMH3DbDwbn-sAmT63DE4wCEXVdTr30ySuHXlodVLXLMAUzXev5H-yg",
+        "s": "cGWiwQiT7QhSbah4OjrSFDh6bCUv8Kdo5ACuHAer133TLGt9wpzQ3dMns4E0Uj9cuswVKGxtAPIcLkVJ1DAOAA"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "since": 300,
+    "sent": [
+     "p2p:sv1"
+    ]
+   }
+  },
+  {
+   "what": "a short log isn't replaced",
+   "as": "member",
+   "since": 299,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 300,
+      "count": 299,
+      "entries": [
+       {
+        "q": 300,
+        "d": "5xjglDNOxmd0qLMgxvSBY58QXN3n1tpz3L6t_cppkBmohG5bQYxeXWXKGRo9PlLb11TlAYXDE7VR2K55poWDzVP1TgJcZiuXJfDs9g",
+        "s": "WT8SgeidpfYQWUcU50xdto4CgadcvhKmZ5kNybNiTQCuKyryOMh6aYu5eey3ApgCjvmK4kngs1_dr7PY3kDfAw"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "since": 300,
+    "sent": [
+     "p2p:sv1"
+    ]
+   }
+  },
+  {
+   "what": "a project that's only relayed has no log to replace",
+   "as": "member",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 300,
+      "entries": [
+       {
+        "q": 1,
+        "d": "Qyil0jMzLtYEcJow_HTYwsHHvUhHRnFEtHFXkJdOuGSjp9FW1l5qmBE7V-_zKWSrAzerC0mCJkHTZcy7v6EqRV__g9-Y-mXlIq6OTw",
+        "s": "HUcVkWbCLoTryFmtkmjtCYu9uPLKfd8LuPs438WZyhrPNU05PpyHw7U00A4qzqwp12JriY207hRVk7nQ-c_rDQ"
+       }
+      ],
+      "mode": "relay"
+     }
+    }
+   ],
+   "expect": {
+    "sent": [
+     "p2p:sv1"
+    ]
+   }
+  },
+  {
+   "what": "no snapshot while a change's upload is missing (it would leave the change out)",
+   "as": "member",
+   "since": 0,
+   "uploads": {
+    "e8e3c652d0f7b4ae58ca582e8661cea0": {
+     "status": 503
+    }
+   },
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 2,
+      "count": 300,
+      "entries": [
+       {
+        "q": 1,
+        "d": "oVQOy9Q1E3Zxr_-7hMNJR0YDeZypFUSbgUo3uClkcMj9RMhx47lEqoDqhaU7UbhThvVV4NM7joYiYSyrOG0LphpnWNJV",
+        "s": "x-t3kOLR1mR-JtLodTisWX3n9aVlwRQGCZvOVAC4G7mvLjgB4qt3SIHyQJO02Ih5gqLCnB60FeHZkoezAkevDg"
+       },
+       {
+        "q": 2,
+        "d": "hwtAYPVPLQKKryBzlo1EYMzpgjQHy_iLM_D5lW03nV1m-Ccs2BWh-l-sPxPJZ8Wsg9NV7f2iR9nXuaUqk05Ws9Iq3_Iz2yG2cWHEMFbsI6liJg",
+        "s": "lW-u19avPYmybmMEfQ-BltiCeWKS7QQpkTGOpYmcrOrm9SKOJ7Ksr0KZBfCnsUuU1TKt7ZfAE3sR7rq9NLFFCw"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "since": 1,
+    "sent": [
+     "p2p:sv1"
+    ]
+   }
+  },
+  {
+   "what": "a change kept as an upload is fetched and applied",
+   "as": "reader",
+   "since": 0,
+   "uploads": {
+    "d87f63480cb9217dd6efd156aa185b2e": {
+     "status": 200,
+     "body": "611077903723ce0d1cbf1df5de049f4c89518a84f2ad3b13f3ad061bb5a704af73de6266f94f4c297dcb932efc46b60963ca73a2e2842c9ec4b7d2137c7218e6f4ce4693546f5ea4593005b4"
+    }
+   },
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 1,
+      "count": 1,
+      "entries": [
+       {
+        "q": 1,
+        "d": "1XK433c8oqWIaZPUg--iUHeQcPlFmRQo9DUHvnl1pYDQtTROUgAeK4-b2pZ9gcVu81brSZP_TB_SWTNWRll_02sz5XuYKwtIib1bkt3iSPh9nA",
+        "s": "77ZcF29R7nl9esfQvyE0ta1jlLMiOLC5f3yvqjHSrmh47HWqE6yADiJDu8MyHFz2Q38q0faBboCWjiDM7tx6CQ"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\n"
+    },
+    "since": 1
+   }
+  },
+  {
+   "what": "a change whose upload is gone: catch up again from the start",
+   "as": "reader",
+   "since": 0,
+   "uploads": {
+    "d87f63480cb9217dd6efd156aa185b2e": {
+     "status": 404
+    }
+   },
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 2,
+      "count": 2,
+      "entries": [
+       {
+        "q": 1,
+        "d": "r9WTVqsQ00Wvhn7s7Al51hTlmtQWn3FlfVx_CMF9FBo_UKNAsCKKiJ1DDcrfA9O6NWe0e0FIsE_rxn69Gvoc83afsI51_ubZdGIubNX9UZ_dcQ",
+        "s": "6PmkR4MEa_-f9tDVVDhqA1PU7EOHUmk7JftOhmYQKbgMlW0YaZbYqipyvTEPRR6pUAdsTN_tg6TTM2iUXrlkAA"
+       },
+       {
+        "q": 2,
+        "d": "iWx8hX1JPH02rkJR3YC7sGmp1wKsDiwopce_kyA00oO4xObMe_g60z8NppYDSgKRY9Ffx6RmPSb7MUPzPS7JXzGx2JEG",
+        "s": "Fh3KqlRVt5VZJBujJQZCh8khLU3T3QgKbwyv-gj-SKZ5SbEovELrFx6KVhuJFtyUeUuf6Vc7X3AsKb8uNrslCQ"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "since": 0,
+    "closed": true
+   }
+  },
+  {
+   "what": "a change whose upload can't be fetched just now: caught up only to just before it",
+   "as": "reader",
+   "since": 0,
+   "uploads": {
+    "d87f63480cb9217dd6efd156aa185b2e": {
+     "status": 503
+    }
+   },
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 3,
+      "count": 3,
+      "entries": [
+       {
+        "q": 1,
+        "d": "3QABeExE9yF0uRIomCP8Oi4ZyMWcttawvhAOFYcbKnk3j4Nqy9jP_3O93fC_Uo4cAD5cjndvMSSzt4gu4cVORclrOql_",
+        "s": "DeAAJXfWb0Gx8mN7XUQ6CMn85NKOW5hnXNsbkcJIzMxSn0-yBIsixb5mavO4Ov7CwDJGjsrTULoEXLe8m3HaCA"
+       },
+       {
+        "q": 2,
+        "d": "9E-5SEgbPOQ_47KqzbacO0dfb8og6tjqRGf2r1za8F1Y4p-FVlpV2TZLYIY9gBhQtXEXy9TtDeLROpNgWyu8JhsMaT_jZtSH6g1nPv3v033qug",
+        "s": "MYlVanuM6qlio96nf_Zp6lZ_KcAafDypNRj6NNRTF5_vg8aR5QnGyw_5mTitbWvjzmLZ_TCMjX8oq3H2kiVZDg"
+       },
+       {
+        "q": 3,
+        "d": "OVGkh8mFPjMJgpA6iEUuHFB_kL6Ch3MWNMxaCOA-KlpquWKg_lKB-hgq_YlESqY7SYInkNypghxnLWlfMrQVYg0iHx3nyLlro6k9rg",
+        "s": "QsLO_dObtEn7s1iPjvrECLVUorYqN9Kp0TtyaAKrG45In86Gzlw-75LzNFux1VwzP3P6WSAnw_JpbEztEGSUAQ"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\n",
+     "b.tex": "B\n"
+    },
+    "since": 1
+   }
+  },
+  {
+   "what": "an upload that isn't what the change names counts as gone",
+   "as": "reader",
+   "since": 0,
+   "uploads": {
+    "7abd1a52d22e3e0fca3875b37c7fef10": {
+     "status": 200,
+     "body": "611077903723ce0d1cbf1df5de049f4c89518a84f2ad3b13f3ad061bb5a704af73de6266f94f4c297dcb932efc46b60963ca73a2e2842c9ec4b7d2137c7218e6f4ce4693546f5ea4593005b4"
+    }
+   },
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 1,
+      "count": 1,
+      "entries": [
+       {
+        "q": 1,
+        "d": "tkEVuwAMB9kcROqO7bhIhmYSmSm-ZioSjJzqa51Y3q6R4VidAllPHIDf4nIiu0oY03RSqWOCWKDA8r4duHJ0O2oF3pIiorvIqT8rnGb6dSCjKg",
+        "s": "MqMYJjM5dfs2lLWoZ8Mzr2vFd46GDB0_dZCax6cuLP7ewXRmi6C-tCGfOGRyH0UVxvc4J4rQ8pr47w32rtOiCw"
+       }
+      ],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "since": 0,
+    "closed": true
+   }
+  },
+  {
+   "what": "a revocation signed by the owner is kept",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server",
+      "rv": [
+       {
+        "p": "Dvx0w66PNChXR49m8PDgHAQJ0nNE_SXkvgTR0l3TewM",
+        "s": "dGQQLW6G8564toPuLbETVzi2WBjlxr0tozhr179V_WBBfaRx1awVSM_mujZfKdm0ymBB2fYMoG78_zQgnSPeDQ"
+       }
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "revoked": [
+     "Dvx0w66PNChXR49m8PDgHAQJ0nNE_SXkvgTR0l3TewM"
+    ]
+   }
+  },
+  {
+   "what": "a revocation arriving on its own is kept",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "rv",
+      "p": "Dvx0w66PNChXR49m8PDgHAQJ0nNE_SXkvgTR0l3TewM",
+      "s": "dGQQLW6G8564toPuLbETVzi2WBjlxr0tozhr179V_WBBfaRx1awVSM_mujZfKdm0ymBB2fYMoG78_zQgnSPeDQ"
+     }
+    }
+   ],
+   "expect": {
+    "revoked": [
+     "Dvx0w66PNChXR49m8PDgHAQJ0nNE_SXkvgTR0l3TewM"
+    ]
+   }
+  },
+  {
+   "what": "a revocation not signed by the owner is ignored",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server",
+      "rv": [
+       {
+        "p": "Dvx0w66PNChXR49m8PDgHAQJ0nNE_SXkvgTR0l3TewM",
+        "s": "TRTLtu6Vc76l62eO5K7iHDWNOUGHSX1pD1kFADZJqzRbftZAJWYyCuf4xbregdxqxm3hruumaEx6AIzE-oi0Jlg2qOmT3v_cg9i_-e8LbkGoHB5CGGQfsc-ls5gNUUqPDgD58w0_sfDSaOfDPn0aZaXLBQxJcPifF26WlZ9LzdLsVDSh9-i12cWGJqHDaMBvOW858MUicqCcA2yrals2MaQL"
+       }
+      ]
+     }
+    },
+    {
+     "msg": {
+      "t": "rv",
+      "p": "Dvx0w66PNChXR49m8PDgHAQJ0nNE_SXkvgTR0l3TewM",
+      "s": "21u9yPwuI8pUJA5lfGGynHOu7jbN2-ue4Wk4XiTMC8vPaR_3Abw3__NDida30W7kL9pufn_PqdFkRCA3uU7BBA"
+     }
+    }
+   ],
+   "expect": {
+    "revoked": []
+   }
+  },
+  {
+   "what": "a deletion signed by the owner: the project is deleted here",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "deleted",
+      "ts": 1700000000,
+      "at": 1700000000000,
+      "s": "Fu4AEIxBU7UwABRaZPOVN6-94S1NilodMpbi56f1SdOxoIKKqZjv3zgcR2IARk0pcZ56tDy0UB2GTvwKteC_Bg"
+     }
+    }
+   ],
+   "expect": {
+    "deleted": true
+   }
+  },
+  {
+   "what": "a deletion not signed by the owner is ignored",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "deleted",
+      "ts": 1700000000,
+      "at": 1700000000000,
+      "s": "TRTLtu6Vc76l62eO5K7iHDWNOUGHSX1pD1kFADZJqzRbftZAJWYyCuf4xbregdxqxm3hruumaEx6AIzE-oi0Jlg2qOmT3v_cg9i_-e8LbkGoHB5CGGQfsc-ls5gNUUqPDgCE5pKi-4h735l-rjaBjgOcBl7fk1MgwkKj14mEQgUk_2ycBA-54MEhbo7VjzK3YCV-KyvpGkilVFCcj-WvpfUC"
+     }
+    }
+   ],
+   "expect": {
+    "deleted": false
+   }
+  },
+  {
+   "what": "a server that turns away old apps: refused, with the version it needs",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "err",
+      "code": "update-needed",
+      "denied": true,
+      "min": "9.9.9",
+      "m": "update needed"
+     }
+    }
+   ],
+   "expect": {
+    "denied": "update-needed",
+    "min": "9.9.9"
+   }
+  },
+  {
+   "what": "a log clears an earlier refusal",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "err",
+      "code": "needs-code",
+      "denied": true,
+      "m": "needs a code"
+     }
+    },
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    }
+   ],
+   "expect": {
+    "denied": null
+   }
+  },
+  {
+   "what": "the server not storing changes is remembered, and cleared once one is stored",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "err",
+      "code": "quota-full",
+      "id": "x",
+      "m": "full"
+     },
+     "expect": {
+      "storeProblem": "quota-full"
+     }
+    },
+    {
+     "msg": {
+      "t": "ack",
+      "id": "y",
+      "q": 1
+     }
+    }
+   ],
+   "expect": {
+    "storeProblem": null,
+    "since": 1
+   }
+  },
+  {
+   "what": "the server saying it only relays the project clears a storage problem",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "err",
+      "code": "needs-code",
+      "id": "x",
+      "m": "needs a code"
+     }
+    },
+    {
+     "msg": {
+      "t": "mode",
+      "m": "relay"
+     }
+    }
+   ],
+   "expect": {
+    "storeProblem": null,
+    "serverMode": "relay"
+   }
+  },
+  {
+   "what": "a project that's only relayed needs no creation code",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "relay"
+     }
+    },
+    {
+     "msg": {
+      "t": "err",
+      "code": "needs-code",
+      "id": "x",
+      "m": "needs a code"
+     }
+    }
+   ],
+   "expect": {
+    "storeProblem": null,
+    "serverMode": "relay"
+   }
+  },
+  {
+   "what": "a signed change from a peer is applied once caught up",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "LeOKeJfhJVGf-H7ZgU9AUIR0keXlp0EKOrtlIb3sexh5sSamlupwIaYlNPXVuiAIEYL2eH1Y9gxHHUIwUd12_hAPuVTl4crhZdaATtly5gT0XwA4h5QQ1XDKKGBBMBd6_FZegwlXP9LVcKN4Zp8cqlE",
+      "from": 7,
+      "s": "TRTLtu6Vc76l62eO5K7iHDWNOUGHSX1pD1kFADZJqzRbftZAJWYyCuf4xbregdxqxm3hruumaEx6AIzE-oi0Jlg2qOmT3v_cg9i_-e8LbkGoHB5CGGQfsc-ls5gNUUqPDgAJJUcqmtGw1dNlc7l1RJObUDJSb-rDSMxrYfYh3DRyQKpiRVlJE5NsAI8i-ohBAGHcqlxzqrokhYBLcoTKcR8B"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\n"
+    }
+   }
+  },
+  {
+   "what": "a compressed change from a peer is applied",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "cfwgNuViIoTo1S479FU4rLztmHu6ZWGp7gop7o5U7mGUeNU2Q2pCHV97MhMHbu17tp_rxeiRWnKhodbQ1LXuyD9WzMydVPM1PG0e8QXLWs4GKaeDyEGZCovSYYkfJiicNIVE8XbEYB-U3LWSTrj7aguezChUhnO6",
+      "from": 7,
+      "s": "TRTLtu6Vc76l62eO5K7iHDWNOUGHSX1pD1kFADZJqzRbftZAJWYyCuf4xbregdxqxm3hruumaEx6AIzE-oi0Jlg2qOmT3v_cg9i_-e8LbkGoHB5CGGQfsc-ls5gNUUqPDgAhwlN83M0bZGoq-3OY7WqKtqrHaJfIm9nG3CY_9DuIDKsBm0eUBq3q-r8-CCLb6vGOw_E6MuOttBbAG5NWpwEG"
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\n"
+    }
+   }
+  },
+  {
+   "what": "a change from a peer before catching up is ignored (revocations aren't in yet)",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "UNDSGymSnrPEm7RUhWcgXC9-2rVvyF8OMuQ9Yu6OfdGga0pA3rkrG3ROgylFnDVMVCDJuKskcGutkQgUhtLOq3cww3eSho-SVCP6kq-m3jjLKOuV04qzVzDX0g-qQ6jS5EeDcpihHhs9w_t-JUelWig",
+      "from": 7,
+      "s": "TRTLtu6Vc76l62eO5K7iHDWNOUGHSX1pD1kFADZJqzRbftZAJWYyCuf4xbregdxqxm3hruumaEx6AIzE-oi0Jlg2qOmT3v_cg9i_-e8LbkGoHB5CGGQfsc-ls5gNUUqPDgA1FdReM5M_FidY9Hav2EwRZdJmTv6s6SFZCB17sbZ9m7AgtRVDa4dBxw89LV5MlNca4CyP7u9RB_hmXENmC2EP"
+     }
+    }
+   ],
+   "expect": {
+    "files": {}
+   }
+  },
+  {
+   "what": "an unsigned change from a peer is ignored",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "gOJ39TQJmbzFMxs0dNOnBHKt6CqWovvFEAGK2-xeWueWTiRIB2FcYI_szuj6-cwm_hUgQebjOWaid66OCzzISKezQxfqZm7qz31zc7ynXyNpvYGJSOy0q-4TDmVpCUKL8Eweawgs5k1iwGX6WTGWNNg",
+      "from": 7
+     }
+    }
+   ],
+   "expect": {
+    "files": {}
+   }
+  },
+  {
+   "what": "a change from a peer signed by a revoked personal link is ignored",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server",
+      "rv": [
+       {
+        "p": "Dvx0w66PNChXR49m8PDgHAQJ0nNE_SXkvgTR0l3TewM",
+        "s": "dGQQLW6G8564toPuLbETVzi2WBjlxr0tozhr179V_WBBfaRx1awVSM_mujZfKdm0ymBB2fYMoG78_zQgnSPeDQ"
+       }
+      ]
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "DYDx6BYoZyZA0WBtUlIjHdWPoJPIfHvQTBGnl8na6HeOhEuwsxMpi1o5QcqgzD17OG4iHuj1MfljqoSwaFN9LI29UwHXLBB_jft940z-rrBlc1ophnhFbciVtdE-HagvhH_5F3oxq1y4HAd8BQehz6o",
+      "from": 7,
+      "s": "TQ78dMOujzQoV0ePZvDw4BwECdJzRP0l5L4E0dJd03sDGqzSysiLhPi_JNJWqJrijacYsaaKkbYlUBV2FfVpFsCI-laPy-ZkRtLMzSMRPg5cZeojcAvT3HlzoEfKEf8UAgCprmUgizJFCtBRb9rHM31d_DuIbn7t1_p7hv5fHg8MT43ebBF6GTZr9QNZzHh7D_ECIjWyeVl8i4C4QOnPUBYP"
+     }
+    }
+   ],
+   "expect": {
+    "files": {}
+   }
+  },
+  {
+   "what": "a change from a peer signed by another project's key is ignored",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "2tNFW6DUCWvM8nSphQzl9e_lI5Vu5nBQij5E2c3ab4_y_NbfGxiwnjYs77KwNv5CXyliwa_QLI2yQ70Zc0PdHSvgGqm1CNDyDU3_Ib1XW6RhZxSunr5z608u_GLNnuAhcw3fEYRc2Bl0fRnAGNwgQEY",
+      "from": 7,
+      "s": "AqGCP4a18yP7vVuiNFn7UN-Ln3MttXjNe4XhC9gxT0vskosEGCtTCaaYGEWuB-Md1JxOexp972N7dfNBimuVDg"
+     }
+    }
+   ],
+   "expect": {
+    "files": {}
+   }
+  },
+  {
+   "what": "a change from a peer in pieces is put together and applied",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "5UAuh_8P-zVtFDj_5wJYas9YBeKrqnm9EOLTdvaiHyDcCZ99s0Ka5pGHFwPH3VGcTODUavbFgNM7xgDKXslLL_RtfC62gVMqbq_Cvf4r0Dc_5LRvJNYLN4W5waZXicWCDEUWrgZqtzPnMXuduk2x3yQpVFmDzx_0iZ8o9RtnHpijsq3e7cV8wxhEsrweqkU",
+      "from": 7
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "jsikV63NQ3owJsxdpjSubrgTi_LUkxSDzNb7VcIlF_nNk2Jf5lBVXOvCZIfjsgoQTfbOTofjY04HgeXJf2CgHVl2wkVHyLl0uM1YX0plnfuAxDHllYzIU7U8UP4i9nxGPh-uKR4amjJOxjY6Vrjo8pzJQVDzmDvFGz-a7V7fOUgSAt5y11cn8bm-q2BPuvk",
+      "from": 7
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "O5IfWHtX8sxlCbRxjb6p8gCX31P0uvOUd3M4xjHDTwZ_IDpcw3niwmkI5E7F1IHNcvedW5wcyuVz3pY66Fp9kDzT-BLZoQTX-cHfr7ky4QyOSXqmThowGQ8WYajm3eT2AGThbvfo7J0SQC0ImZimM9J1z4rogpNX6gtBLzc3XRkZjvZZ_xgYmRIPVCDO9onQJsR2xCKIonYKcZwGYzz8CT4DkpAPPLfOd7Xx9sRLt4x0UTHXzhe-NAjopxJsYukYt4b3zHrXHj97Dwd-Oz4yad_25T3bzr05Thzd0OrWSNCcEAVWjzh2IH1mRQKZoEaLCeAYr3o3usWR3pNXp1sjvgivI8gQYGgoz-hS6UJjppxqwalFjv-FzdyPVaibFrFKkITqEZRXukfa3C8TGwOwJuNvOvDpB7pnUT1Mq-2CL0mA_wedRSmdF57O8RDrLWJXG78Ohgyc-ykPGe-yOulkB4hEafiRWJFh-f-HURRP",
+      "from": 7
+     }
+    }
+   ],
+   "expect": {
+    "files": {
+     "main.tex": "Hello\n"
+    }
+   }
+  },
+  {
+   "what": "a peer's message that doesn't decrypt is ignored",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 0,
+      "count": 0,
+      "entries": [],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "Z2llfHnIQBMnyVDTFiV9fHqmecc21-WvcwzXIVF2JuyQBWKrhk6h_q6bTFzAgtqHreLpnXXzgx2rxPu8yxLZkTDTX-NZF5C2IYuIAybPYMw",
+      "from": 7
+     }
+    }
+   ],
+   "expect": {
+    "files": {},
+    "sent": [
+     "p2p:sv1"
+    ]
+   }
+  },
+  {
+   "what": "an editor answers a peer that just connected: its state, and what the peer lacks",
+   "as": "member",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 1,
+      "count": 1,
+      "entries": [
+       {
+        "q": 1,
+        "d": "otvGNzK7TTLJ9JMHjYE5S2RTi3cFrlkzs7LtwKyjXNXfNFSTidYkuIhGW_DCNxwyZHRbf-MxyFvbMBNP-97GMoVYfK5XMvaSjuCYng",
+        "s": "b_cL0_zeuP91oisY209GYUN-PEuha39WECJTgAmGvtX2U0C0uZnKvP9mFQktt9r_MNANWDa2woDGtNvArtuUCg"
+       }
+      ],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "Qv0dky5IO-0iD-A4wptDK1e7lxHmq9Kpz81ktpqT7pr0OB6Lckiv8MtBc1axBvmgmbb3rQ",
+      "from": 7
+     }
+    }
+   ],
+   "expect": {
+    "sent": [
+     "p2p:sv1",
+     "p2p:sv2",
+     "p2p:upd"
+    ]
+   }
+  },
+  {
+   "what": "a read-only link sends a peer its state, but no changes (it can't sign them)",
+   "as": "reader",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 1,
+      "count": 1,
+      "entries": [
+       {
+        "q": 1,
+        "d": "vOT2OXhImMT882kmdFR1E63vtCbFDcDqv-pe-vFHOnWgfZvNq1MP0EAuFJHzOmot2HH3e0-Mhd874p9jVQRR0f3N3BPQ0ZLLzyyLbw",
+        "s": "qnjhN2ZosajqS2QrIJQsNM3u-htB2PGRoxYY2ObAKJAr52PDYfq3g3BY46Yi5mQLKkKX5Q20L1VMuK2caI_CAQ"
+       }
+      ],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "1AmzbncAwd0-IKU6UDQ7H2KBVjW-zbKC4NcD0bVTh4oyVo7_nkkSKifSlrwUJ0FsQ90e4g",
+      "from": 7
+     }
+    }
+   ],
+   "expect": {
+    "sent": [
+     "p2p:sv1",
+     "p2p:sv2"
+    ]
+   }
+  },
+  {
+   "what": "a peer that already has everything is sent nothing more",
+   "as": "member",
+   "since": 0,
+   "uploads": {},
+   "steps": [
+    {
+     "msg": {
+      "t": "log",
+      "head": 1,
+      "count": 1,
+      "entries": [
+       {
+        "q": 1,
+        "d": "yenG64d7I33yUrqRFuzSSRzF0CNLB2kMQbr_dUx1IplRx8Pi0lYdP7bjJHUnBDIaCilR2kAO5-PBDJbarHwcBAyqXySyiolpsoWyDg",
+        "s": "NDBT0onIfd2pZrph6azzcvmG1AGII4JfJGuaBRLAI_DyRc6CR2gCizIxSNlFycbG6WG8VZuwWU1Mai-NDPoaAw"
+       }
+      ],
+      "mode": "server"
+     }
+    },
+    {
+     "msg": {
+      "t": "p2p",
+      "d": "PkbOqU-gcj4eMGPldUpJkdBId9LRiG8GQeyf8M9-0d69AYgAdNcEeDcCTt6dIoHod_OAy1Iuk_h-AyOpLFjCfA",
+      "from": 7
+     }
+    }
+   ],
+   "expect": {
+    "sent": [
+     "p2p:sv1"
+    ]
+   }
+  }
+ ]
+}

@@ -49,8 +49,6 @@ Not broken, but costing more the longer it's left (label `tech-debt`), roughly m
   download](https://github.com/jhudsy/texloom/issues/21)**: only the git hosts and the Review tab have kept browser checks so far.
 - **[A staging server](https://github.com/jhudsy/texloom/issues/23)** to deploy to before production; could be the standby of
   [#12](https://github.com/jhudsy/texloom/issues/12).
-- **[Cross-check the two replicas](https://github.com/jhudsy/texloom/issues/26)** (Python and TypeScript) with shared cases, as the
-  project list and compression already are.
 - **[A removal plan for code kept for older apps and data](https://github.com/jhudsy/texloom/issues/27)**, including the `github`
   names that now cover every git host.
 - **[Split the largest files](https://github.com/jhudsy/texloom/issues/28)**, each just before its next large change.

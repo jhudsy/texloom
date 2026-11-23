@@ -28,6 +28,8 @@ jobs:
       - run: uv run python scripts/check_listsync.py
       - run: uv run python scripts/check_xr.py
       - run: uv run python scripts/check_packing.py
+      - name: The desktop's replica against the cases the web app's is checked against (issue #26)
+        run: uv run python scripts/check_replica.py
       - run: uv run python scripts/check_folder_deletions.py
       - run: uv run python scripts/check_folder_reads.py
       - run: uv run python scripts/check_folder_renames.py
@@ -55,6 +57,7 @@ jobs:
           npm run check-pdfanchor
           npm run check-xr
           npm run check-packing
+          npm run check-replica
           npm run check-chars
           npm run check-props
           npm run check-folder-model

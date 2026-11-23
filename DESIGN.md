@@ -988,6 +988,30 @@ can read a project can copy it. A copy of a project with no server copy has none
 app copies a folder's project files (not `.texloom`, tools' folders, LaTeX's working files or
 symlinks) into a new folder and shares that as a new project with the same settings.
 
+## Two replicas, one behaviour
+
+The core is written twice: `texloom/*.py` for the desktop app and `web/src/*.ts` for the browser.
+What each must do the same is held by cases both run, written once:
+
+- **The replica** (`scripts/replica-vectors.json`, from `scripts/make_replica_vectors.py`; run by
+  `scripts/check_replica.py` and `web/scripts/check-replica.mjs`): a fresh replica, opened with the
+  owner's, a personal or a read-only link, gets the server's messages and must end as the case
+  says: catching up (pages, out of order, the server having lost its copy, a relayed project),
+  which entries count (signatures and their prefixes, snapshots, compressed, undecryptable,
+  malformed, uploads fetched, gone or not there yet), revocations, deletion, refusals and storage
+  problems, peers' changes (signed, revoked, in pieces, before catching up) and answers to a peer,
+  and snapshots of a long log. The messages are real (encrypted and signed); the expected results
+  are written by hand from the protocol, so the two apps are held to it, not to each other. Each
+  replica runs against a stand-in connection and server, so nothing touches the network.
+- **The project list** (`scripts/listsync-vectors.json`), **compression** (`packing-vectors.json`)
+  and **cross-references** (`xr-vectors.json`), and text handling through `check_props` on both
+  sides (below).
+
+Not covered by shared cases: local edits going out and being acknowledged (the outbox), files,
+presence; the folder syncs are each checked by their own model (below). New logic goes on one
+side where it can: the desktop app only syncs, so what is computed (an export, a merge shown to
+the user) lives in the web app and reaches the desktop as data.
+
 ## Guarding text handling
 
 Text goes wrong at boundaries, where two parts count positions differently. Three kinds of check
