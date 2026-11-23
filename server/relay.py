@@ -406,7 +406,7 @@ class Relay(Endpoints):
                 await self.broadcast(project, {"t": "left", "from": conn.id})
         return ws
 
-    # compat(app 0.4.30): apps too old to send their version are held, not just refused: remove _hold, HOLD_UNVERSIONED and its use in handle
+    # compat(refused 0.4.30): apps too old to say their version ("unknown" on the admin page): remove _hold and HOLD_UNVERSIONED
     async def _hold(self, project: str, ws, conn: Conn) -> None:
         """Keep a refused app that's too old to say its version (before 0.4.30) connected, hearing
         nothing, for a while. It doesn't understand the refusal, and after a connection that opened it

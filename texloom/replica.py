@@ -205,9 +205,8 @@ class Replica:
             pass  # no loop yet: sent from the outbox on connect
 
     async def ask_usage(self) -> None:
-        """Ask the server how much it keeps now (the answer updates store_info). Only servers that
-        know the request are asked: their figures include ownerUsed."""
-        if self.ws is None or self.ws.closed or not self.store_info or "ownerUsed" not in self.store_info:
+        """Ask the server how much it keeps now (the answer updates store_info)."""
+        if self.ws is None or self.ws.closed or not self.store_info:
             return
         try:
             await self.ws.send_json({"t": "usage"})

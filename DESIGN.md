@@ -1098,12 +1098,15 @@ Every place that handles something older carries a marker just above it, saying 
 before it can go (issue 27):
 
 ```
-# compat(app 0.4.30): apps too old to send their version are held, not just refused
+# compat(app 0.4.33): apps that don't take pages get a long log whole
 // compat(data 0.4.35): the plain, unsigned storage value; converted on read: its owner signs it
 ```
 
 - **app X**: apps older than X. Apps reach the server, and each other, only through a server, so
   this goes once every server's `--min-version` is X or later.
+- **refused X**: apps older than X that servers turn away, handled so that they don't keep
+  retrying. Raising the minimum version doesn't end this: they are already refused. It goes once
+  they stop connecting. The admin page shows when each app version last connected.
 - **server X**: servers older than X. This goes once every server people use runs X or later.
 - **data X**: something written before X that is still stored somewhere. Raising the minimum
   version doesn't make it go away, so it is **converted when it is read**, where that's possible,

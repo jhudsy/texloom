@@ -105,9 +105,8 @@ export const creationCode = {
 export type StoreProblem = 'needs-code' | 'quota-full' | 'code-expired' | 'project-full' | 'server-full' | null
 const STORE_PROBLEMS = new Set(['needs-code', 'quota-full', 'code-expired', 'project-full', 'server-full'])
 /** What the server keeps of this project, and its limits. `ownerUsed`: all that the project's creation code
- *  stores (its other projects and project lists too), only for a browser holding that code; absent from
- *  servers older than the usage request. */
-export interface StoreInfo { registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number | null; allowance: number | null; ownerUsed?: number | null }
+ *  stores (its other projects and project lists too), only for a browser holding that code. */
+export interface StoreInfo { registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number | null; allowance: number | null; ownerUsed: number | null }
 
 export type Status = 'offline' | 'connecting' | 'online' | 'paused'
 export type SyncMode = 'live' | 'manual'
@@ -159,11 +158,10 @@ export class Replica {
   onUsage: () => void = () => {}
 
   /** Ask the server how much it keeps now: the figures in storeInfo are from when this browser
-   *  connected. Only servers that know the request (their status has ownerUsed) are asked. */
+   *  connected. */
   askUsage(): boolean {
     const ws = this.ws
-    // compat(server 0.4.41): servers that don't know the usage request: always ask
-    if (!ws || ws.readyState !== WebSocket.OPEN || !this.storeInfo || !('ownerUsed' in this.storeInfo)) return false
+    if (!ws || ws.readyState !== WebSocket.OPEN || !this.storeInfo) return false
     ws.send(JSON.stringify({ t: 'usage' }))
     return true
   }

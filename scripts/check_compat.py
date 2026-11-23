@@ -9,6 +9,8 @@ Each place is marked with a comment just above it:
 KIND says what has to happen before the code can go:
   app     apps older than VERSION: removable once every server's --min-version is VERSION or later
           (apps only reach each other through a server, so this covers what they send each other too)
+  refused apps older than VERSION that servers turn away, handled so they don't retry in a loop: removable
+          once they stop connecting (the admin page shows when each app version last did), not by --min-version
   server  servers older than VERSION: removable once every server people use runs VERSION or later
   data    data written before VERSION (in projects, links, lists or a computer's own files): an app
           or server that reads it should convert it ("converted on read: …"), or say why it can't
@@ -35,7 +37,7 @@ PLACES = ("texloom", "server", "web/src", "editors/vscode")
 SUFFIXES = {".py", ".ts", ".js"}
 SKIP = ("node_modules", "locales", "dist", "out")
 LOOSE = re.compile(r"(?:#|//)\s*compat\b")
-MARK = re.compile(r"(?:#|//) compat\((app|server|data) (\d+\.\d+\.\d+)\): (\S.*)$")
+MARK = re.compile(r"(?:#|//) compat\((app|refused|server|data) (\d+\.\d+\.\d+)\): (\S.*)$")
 CONVERTED = re.compile(r"\b(converted on read|converted as|not converted)\b")
 
 
@@ -63,7 +65,7 @@ def main() -> int:
             where = f"{p.relative_to(ROOT)}:{n}"
             m = MARK.search(line)
             if not m:
-                problems.append(f"{where}: not a marker: compat(app|server|data X.Y.Z): …")
+                problems.append(f"{where}: not a marker: compat(app|refused|server|data X.Y.Z): …")
                 continue
             kind, version, text = m.groups()
             if vt(version) > vt(__version__):
@@ -72,7 +74,7 @@ def main() -> int:
                 problems.append(f"{where}: a data marker says whether it is converted (\"converted on read: …\" or \"not converted: …\")")
             marks.append((kind, vt(version), version, where, text))
 
-    for kind, title in (("app", "older apps"), ("server", "older servers"), ("data", "older data")):
+    for kind, title in (("app", "older apps"), ("refused", "refused apps"), ("server", "older servers"), ("data", "older data")):
         group = sorted(m for m in marks if m[0] == kind)
         if not group:
             continue
