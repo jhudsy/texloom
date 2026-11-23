@@ -28,9 +28,11 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
 ## Later
 
 1. **[Comments in your own editor](https://github.com/jhudsy/texloom/issues/36)**: `texloom lsp` and
-   the VS Code extension (editors/vscode) are written; left is publishing the extension on the
-   Marketplace and Open VSX (needs the maintainer's publisher accounts), and starting a comment
-   from the editor (needs a way to say what an anchor is made from). About a day.
+   the VS Code extension (editors/vscode) are in 0.4.44. Left: publishing the extension on the
+   Marketplace and Open VSX (needs the maintainer's publisher accounts and tokens), and starting a
+   comment from the editor (move comment creation from the MCP server into `comments.py`, add a
+   `texloom.addComment` command and the gutter "+"; about half a day). Later, if used: live updates
+   and a standalone VS Code plugin with the web app's collaboration.
 2. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
 3. **[The Assistant uses tools from other MCP servers](https://github.com/jhudsy/texloom/issues/31)**:
