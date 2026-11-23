@@ -97,6 +97,22 @@ const zh: Catalog = {
   '✓ Resolving a comment': '✓ 正在解决评论',
   "… and more": "……以及更多",
   "From line {{n}}": "从第 {{n}} 行起",
+  'Add files for the assistant to consider': '添加需要助手参考的文件',
+  '+ Files': '+ 文件',
+  'Also:': '另外：',
+  'Remove {{file}}': '移除 {{file}}',
+  'Filter': '筛选',
+  'No file matches.': '没有匹配的文件。',
+  'The project has no text files.': '该项目没有文本文件。',
+  'Files for the assistant': '供助手参考的文件',
+  'The assistant reads the files you choose before answering, as well as the file that’s open. It can also find and read any other file in the project by itself when a question needs it.': '助手在回答前会阅读你选择的文件以及当前打开的文件。需要时，它也能自行查找并阅读项目中的其他任何文件。',
+  'Or use an AI tool on your computer': '或使用你电脑上的 AI 工具',
+  'Claude Code, Cursor and other tools that support MCP can work on this project too. You talk to such a tool in its own window, not here, and it uses your account with that tool rather than an API key. Its edits and comments appear here under its name, like a collaborator’s.': 'Claude Code、Cursor 以及其他支持 MCP 的工具也能处理这个项目。你在该工具自己的窗口里与它对话，而不是在这里；它使用你在该工具上的账号，而不是 API 密钥。它的修改和评论会以它的名字显示在这里，就像协作者的一样。',
+  'Add the selected text for the assistant to consider, to gather passages from several places': '添加选中的文本供助手参考，可汇集多处的段落',
+  '+ Selection': '+ 选中内容',
+  'about {{n}} tokens': '约 {{n}} 个 token',
+  'Reading them takes about {{n}} tokens of the model’s context, once per conversation. A long conversation is summarised to make room.': '阅读这些文件约占模型上下文的 {{n}} 个 token，每次对话只读一次。对话过长时会被总结以腾出空间。',
+  'To point it at a passage instead, select the text in the editor and press “+ Selection”.': '若要指定某段文字，请在编辑器中选中它，然后点击“+ 选中内容”。',
 }
 
 export default zh

@@ -97,6 +97,22 @@ const es: Catalog = {
   '✓ Resolving a comment': '✓ Resolviendo un comentario',
   "… and more": "… y más",
   "From line {{n}}": "Desde la línea {{n}}",
+  'Add files for the assistant to consider': 'Añade archivos para que el asistente los tenga en cuenta',
+  '+ Files': '+ Archivos',
+  'Also:': 'También:',
+  'Remove {{file}}': 'Quitar {{file}}',
+  'Filter': 'Filtrar',
+  'No file matches.': 'Ningún archivo coincide.',
+  'The project has no text files.': 'El proyecto no tiene archivos de texto.',
+  'Files for the assistant': 'Archivos para el asistente',
+  'The assistant reads the files you choose before answering, as well as the file that’s open. It can also find and read any other file in the project by itself when a question needs it.': 'El asistente lee los archivos que elijas antes de responder, además del archivo abierto. También puede encontrar y leer por sí mismo cualquier otro archivo del proyecto cuando una pregunta lo necesite.',
+  'Or use an AI tool on your computer': 'O usa una herramienta de IA en tu ordenador',
+  'Claude Code, Cursor and other tools that support MCP can work on this project too. You talk to such a tool in its own window, not here, and it uses your account with that tool rather than an API key. Its edits and comments appear here under its name, like a collaborator’s.': 'Claude Code, Cursor y otras herramientas compatibles con MCP también pueden trabajar en este proyecto. Hablas con esa herramienta en su propia ventana, no aquí, y usa tu cuenta de esa herramienta en lugar de una clave API. Sus cambios y comentarios aparecen aquí con su nombre, como los de un colaborador.',
+  'Add the selected text for the assistant to consider, to gather passages from several places': 'Añade el texto seleccionado para que el asistente lo tenga en cuenta y reúne pasajes de varios sitios',
+  '+ Selection': '+ Selección',
+  'about {{n}} tokens': 'unos {{n}} tokens',
+  'Reading them takes about {{n}} tokens of the model’s context, once per conversation. A long conversation is summarised to make room.': 'Leerlos ocupa unos {{n}} tokens del contexto del modelo, una vez por conversación. Una conversación larga se resume para hacer sitio.',
+  'To point it at a passage instead, select the text in the editor and press “+ Selection”.': 'Para señalarle un pasaje, selecciona el texto en el editor y pulsa «+ Selección».',
 }
 
 export default es

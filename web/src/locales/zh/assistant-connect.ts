@@ -16,6 +16,7 @@ const zh: Catalog = {
   'If your tool can’t find the texloom command, give its full path instead. If this project is also in a folder on this computer, you can use the folder’s path instead of the link.': '如果您的工具找不到 texloom 命令，请改用其完整路径。如果此项目也位于这台电脑的某个文件夹中，可以用该文件夹的路径代替链接。',
   'These lines contain this project’s link, and your tool saves it in its settings. Anyone who can read those settings can open the project.': '这些内容包含此项目的链接，您的工具会将其保存在设置中。任何能读取这些设置的人都可以打开此项目。',
   'The tool reads text other people wrote in this project, which could include instructions aimed at it. On shared projects, suggesting is the safer choice.': '该工具会读取他人在此项目中写的文字，其中可能包含针对它的指令。在共享项目中，选择“提出建议”更安全。',
+  'This is separate from the Assistant tab: you talk to the tool in its own window, not there, and the two don’t share conversations. What the tool does appears in the project under its name, like a collaborator’s work.': '这与“助手”标签页是分开的：你在该工具自己的窗口里与它对话，而不是在那里，两者也不共享对话。该工具所做的事会以它的名字显示在项目中，就像协作者的工作一样。',
 }
 
 export default zh

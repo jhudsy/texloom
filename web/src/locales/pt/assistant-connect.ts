@@ -16,6 +16,7 @@ const pt: Catalog = {
   'If your tool can’t find the texloom command, give its full path instead. If this project is also in a folder on this computer, you can use the folder’s path instead of the link.': 'Se a sua ferramenta não encontrar o comando texloom, informe o caminho completo. Se este projeto também estiver em uma pasta deste computador, você pode usar o caminho da pasta em vez do link.',
   'These lines contain this project’s link, and your tool saves it in its settings. Anyone who can read those settings can open the project.': 'Estas linhas contêm o link deste projeto, e a sua ferramenta o salva nas configurações dela. Quem puder ler essas configurações poderá abrir o projeto.',
   'The tool reads text other people wrote in this project, which could include instructions aimed at it. On shared projects, suggesting is the safer choice.': 'A ferramenta lê textos escritos por outras pessoas neste projeto, que podem incluir instruções direcionadas a ela. Em projetos compartilhados, sugerir é a opção mais segura.',
+  'This is separate from the Assistant tab: you talk to the tool in its own window, not there, and the two don’t share conversations. What the tool does appears in the project under its name, like a collaborator’s work.': 'Isso é separado da aba Assistente: você conversa com a ferramenta na janela dela, não lá, e as duas não compartilham conversas. O que a ferramenta faz aparece no projeto com o nome dela, como o trabalho de um colaborador.',
 }
 
 export default pt

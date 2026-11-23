@@ -613,6 +613,9 @@ A chat panel (`web/src/assistant/`) that acts on the project like another collab
   made under. **What the assistant is sent…** shows the prompt, the tools and the next context block.
 - **Context:** the system prompt is static, so it caches. Each user message starts with
   a `<context>` block: project, main file, open file and current selection.
+  The person can add files (**+ Files**) and passages (**+ Selection**) for it to consider as well. To spare
+  the model's context, a file is only named, with a request to read it the first time a conversation sees it,
+  and a passage is quoted once and then named; summarising takes over if the reading fills the room.
 - **Keys** live in `localStorage` only; they never enter the Yjs document or pass
   through the texloom server.
 

@@ -709,3 +709,8 @@ dialog.settings.tabbed[open] { display: flex; flex-direction: column; }
 
 /* the PDF bar's offer of a collaborator's newer main PDF while another document's is shown (output.ts) */
 .pdfbar .newer { max-width: 24em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-other { margin-top: 8px; }
+.ai-files { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.ai-file { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; padding: 0 2px 0 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); max-width: 100%; overflow-wrap: anywhere; }
+.ai-file .icon { padding: 0 4px; font-size: 10px; line-height: 16px; }
+.ai-files > button { white-space: nowrap; }

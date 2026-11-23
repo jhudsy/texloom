@@ -97,6 +97,22 @@ const pt: Catalog = {
   '✓ Resolving a comment': '✓ Resolvendo um comentário',
   "… and more": "… e mais",
   "From line {{n}}": "A partir da linha {{n}}",
+  'Add files for the assistant to consider': 'Adicionar arquivos para o assistente considerar',
+  '+ Files': '+ Arquivos',
+  'Also:': 'Também:',
+  'Remove {{file}}': 'Remover {{file}}',
+  'Filter': 'Filtrar',
+  'No file matches.': 'Nenhum arquivo corresponde.',
+  'The project has no text files.': 'O projeto não tem arquivos de texto.',
+  'Files for the assistant': 'Arquivos para o assistente',
+  'The assistant reads the files you choose before answering, as well as the file that’s open. It can also find and read any other file in the project by itself when a question needs it.': 'O assistente lê os arquivos que você escolher antes de responder, além do arquivo aberto. Ele também pode encontrar e ler sozinho qualquer outro arquivo do projeto quando uma pergunta precisar.',
+  'Or use an AI tool on your computer': 'Ou use uma ferramenta de IA no seu computador',
+  'Claude Code, Cursor and other tools that support MCP can work on this project too. You talk to such a tool in its own window, not here, and it uses your account with that tool rather than an API key. Its edits and comments appear here under its name, like a collaborator’s.': 'Claude Code, Cursor e outras ferramentas compatíveis com MCP também podem trabalhar neste projeto. Você conversa com essa ferramenta na janela dela, não aqui, e ela usa a sua conta nessa ferramenta em vez de uma chave de API. As edições e comentários dela aparecem aqui com o nome dela, como os de um colaborador.',
+  'Add the selected text for the assistant to consider, to gather passages from several places': 'Adicionar o texto selecionado para o assistente considerar, reunindo trechos de vários lugares',
+  '+ Selection': '+ Seleção',
+  'about {{n}} tokens': 'cerca de {{n}} tokens',
+  'Reading them takes about {{n}} tokens of the model’s context, once per conversation. A long conversation is summarised to make room.': 'Lê-los ocupa cerca de {{n}} tokens do contexto do modelo, uma vez por conversa. Uma conversa longa é resumida para abrir espaço.',
+  'To point it at a passage instead, select the text in the editor and press “+ Selection”.': 'Para indicar um trecho, selecione o texto no editor e clique em “+ Seleção”.',
 }
 
 export default pt

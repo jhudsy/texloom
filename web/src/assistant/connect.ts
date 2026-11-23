@@ -27,6 +27,7 @@ export function connectToolDialog(writable: boolean, link: (write: boolean) => s
   const dlg = dialog('settings',
     h('h3', {}, t('Connect an AI tool via MCP')),
     h('p', { class: 'muted small' }, t('Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.')),
+    h('p', { class: 'muted small' }, t('This is separate from the Assistant tab: you talk to the tool in its own window, not there, and the two don’t share conversations. What the tool does appears in the project under its name, like a collaborator’s work.')),
     h('h4', {}, t('Install the TeXLoom command-line helper once')),
     install.el,
     h('p', { class: 'muted small' }, h('a', { href: 'https://docs.astral.sh/uv/getting-started/installation/', target: '_blank', rel: 'noopener' }, t('How to install uv'))),
