@@ -205,6 +205,13 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
         replica.save()
 
 
+def refuse_if_off(pref: str, what: str) -> None:
+    """The app's Settings can turn a server off for this computer: it then won't start."""
+    from .i18n import app_pref
+    if not app_pref(pref, True):
+        sys.exit(f"TeXLoom: {what} is turned off on this computer. Turn it on in the TeXLoom app's Settings.")
+
+
 def comments_command(a: argparse.Namespace) -> None:
     """`texloom comments DIR` lists from this computer's copy of the project (as up to date as its
     last sync); `reply` and `resolve` connect with a copy of their own, as `texloom mcp` does, so
@@ -592,6 +599,7 @@ def main() -> None:
         asyncio.run(run(a.dir, False, once=True))  # connecting aligns the server with the setting
         print(f"storage mode: {a.mode}")
     elif a.cmd == "mcp":
+        refuse_if_off("allow_mcp", "AI tools connecting to your projects (MCP)")
         from .mcp import serve
         if "#" in a.target:
             keys, server = Keys.from_link(a.target)
@@ -605,6 +613,7 @@ def main() -> None:
         except KeyboardInterrupt:
             pass
     elif a.cmd == "lsp":
+        refuse_if_off("allow_lsp", "editors showing comments (the language server)")
         from .lsp import serve as serve_lsp
         try:
             asyncio.run(serve_lsp(a.dir))
