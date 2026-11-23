@@ -34,7 +34,7 @@ from . import __version__, autostart, listsync, registry, tags
 from .app_links import SCHEME, instance_socket, parse_url, register_url_scheme
 from .cli import DEFAULT_CONFIG, code_ok, load, load_config, update_config
 from .daemon import CURRENT, FOLDER, FolderTag
-from .dialogs import (ConnectToolDialog, CopyFolderDialog, JoinDialog, LinksDialog, ManageTagsDialog, ProgramsDialog,
+from .dialogs import (ConnectToolDialog, CopyFolderDialog, EditorDialog, JoinDialog, LinksDialog, ManageTagsDialog, ProgramsDialog,
                       ProjectListDialog, SettingsDialog, ShareFolderDialog, TagsDialog, ask_code)
 from .i18n import _, app_pref, ngettext, set_app_pref
 from .mac import DockFollowsWindows, menu_opens_where_clicked, nsapp
@@ -226,6 +226,7 @@ class Window(QtWidgets.QMainWindow):
         self.a_scratch = a(_("Compile from scratch"), self.compile_from_scratch)
         self.a_scratch.setToolTip(_("Delete LaTeX’s working files (.aux, .bbl, …) in .texloom/build and compile again"))
         self.a_mcp = a(_("Connect an AI tool via MCP…"), self.connect_tool)
+        self.a_lsp = a(_("Show comments in your editor…"), lambda: EditorDialog(self).exec())
         self.a_leave = a(_("Leave…"), self.leave)
         self.a_activity = QtGui.QAction(_("Show activity"), self, checkable=True)
         self.a_activity.setChecked(bool(app_pref("show_activity", False)))
@@ -240,7 +241,7 @@ class Window(QtWidgets.QMainWindow):
         for act in (self.a_new, self.a_join, self.a_add):
             self.add_menu.addAction(act)
         self.more_menu = QtWidgets.QMenu(self)
-        for act in (self.a_tags, self.a_copy, self.a_store, self.a_move, self.a_count, self.a_mcp, None, self.a_leave):
+        for act in (self.a_tags, self.a_copy, self.a_store, self.a_move, self.a_count, self.a_mcp, self.a_lsp, None, self.a_leave):
             self.more_menu.addSeparator() if act is None else self.more_menu.addAction(act)
 
     def build_toolbar(self) -> None:
@@ -275,7 +276,7 @@ class Window(QtWidgets.QMainWindow):
             m.addSeparator() if act is None else m.addAction(act)
         m = mb.addMenu(_("Project"))
         for act in (self.a_open, self.a_web, self.a_share, None, self.a_tags, self.a_copy, self.a_store, self.a_move, self.a_count,
-                    self.a_scratch, self.a_mcp, None, self.a_leave):
+                    self.a_scratch, self.a_mcp, self.a_lsp, None, self.a_leave):
             m.addSeparator() if act is None else m.addAction(act)
         m = mb.addMenu(_("View"))
         self.sort_menu = m.addMenu(_("Sort by"))

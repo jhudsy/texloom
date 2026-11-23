@@ -924,6 +924,64 @@ class ConnectToolDialog(QtWidgets.QDialog):
             copy.setText(_("Copy"))
 
 
+class EditorDialog(ConnectToolDialog):
+    """How to show a project's comments in the person's own editor, through `texloom lsp` (texloom/lsp.py).
+    Not tied to a folder: the editor starts the server in its workspace folder."""
+
+    def __init__(self, parent=None) -> None:
+        QtWidgets.QDialog.__init__(self, parent)
+        self.command = sys.executable if getattr(sys, "frozen", False) else "texloom"
+        self.setWindowTitle(_("Show comments in your editor"))
+        self.setMinimumWidth(620)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(self.note(_("Your editor can show a synced folder’s comments beside the text they are about, through TeXLoom’s language server. The editor starts it when it needs it, in the folder you open.")))
+        lay.addWidget(self.heading(_("Choose your editor")))
+        self.notes = {
+            "VS Code": _("Install the TeXLoom extension (it isn’t in the Marketplace yet: build it with vsce package in editors/vscode of the TeXLoom source, then use Install from VSIX in the Extensions view), and add this to your settings:"),
+            "Neovim": _("Neovim 0.11 or later: add this to your init.lua"),
+            "Emacs": _("Emacs with lsp-mode (eglot runs one server per buffer, so use lsp-mode if you also use texlab): add this to your init file"),
+            "Helix": _("Helix: add this to your languages.toml"),
+            "Zed, Sublime Text, Kate…": _("Zed, Sublime Text (LSP package), Kate and others: add a custom language server for LaTeX files, with this command"),
+        }
+        self.pick = QtWidgets.QComboBox()
+        self.pick.addItems(list(self.notes))
+        lay.addWidget(self.pick)
+        self.what = self.note("")
+        lay.addWidget(self.what)
+        self.snippet = self.block(lay, 9, self.text)
+        if self.command == "texloom":
+            lay.addWidget(self.note(_("If your editor can’t find the texloom command, give its full path instead.")))
+        lay.addWidget(self.note(_("Comments that mention you stand out, and hovering shows the whole thread. Replying needs an editor that can ask for text, as the VS Code extension does; elsewhere, reply with texloom comments reply, or in the web app. You can turn this off in Settings.")))
+        row = QtWidgets.QHBoxLayout()
+        row.addStretch(1)
+        close = QtWidgets.QPushButton(_("Close"))
+        close.clicked.connect(self.accept)
+        row.addWidget(close)
+        lay.addLayout(row)
+        self.pick.currentIndexChanged.connect(self.show_snippet)
+        self.show_snippet()
+
+    def text(self) -> str:
+        q = json.dumps(self.command, ensure_ascii=False)  # (a double-quoted string: the same in JSON, Lua, Lisp and TOML)
+        match self.pick.currentText():
+            case "VS Code":
+                return json.dumps({"texloom.command": self.command}, indent=2, ensure_ascii=False)
+            case "Neovim":
+                return ("vim.lsp.config('texloom', {\n  cmd = { %s, 'lsp' },\n  filetypes = { 'tex', 'plaintex' },\n  root_markers = { '.texloom' },\n})\nvim.lsp.enable('texloom')" % q)
+            case "Emacs":
+                return ("(require 'lsp-mode)\n(lsp-register-client\n (make-lsp-client :new-connection (lsp-stdio-connection '(%s \"lsp\"))\n                  :major-modes '(latex-mode LaTeX-mode)\n                  :server-id 'texloom :add-on? t))" % q)
+            case "Helix":
+                return ("[language-server.texloom]\ncommand = %s\nargs = [\"lsp\"]\n\n[[language]]\nname = \"latex\"\nlanguage-servers = [\"texlab\", \"texloom\"]" % q)
+            case _:
+                return " ".join(self.quoted(a) for a in (self.command, "lsp"))
+
+    def show_snippet(self) -> None:
+        self.what.setText(self.notes[self.pick.currentText()])
+        box, copy, text = self.snippet
+        box.setPlainText(text())
+        copy.setText(_("Copy"))
+
+
 class CopyFolderDialog(Dialog):
     """Start a new project from a folder's current files."""
 

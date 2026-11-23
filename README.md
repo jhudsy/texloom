@@ -258,7 +258,8 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   (eglot runs one server per buffer, so use lsp-mode beside texlab); Helix a `[language-server.texloom]`
   with `command = "texloom", args = ["lsp"]` added to the `latex` language's `language-servers`; Zed,
   Sublime Text (LSP package) and Kate have a "custom server" setting that takes the same command.
-  The app's Settings has a switch for each of the two servers (MCP for AI tools, and this one); when one is off
+  The app's **Show comments in your editor…** (File menu, beside Connect an AI tool) shows the right command
+  and snippet for each editor. The app's Settings has a switch for each of the two servers (MCP for AI tools, and this one); when one is off
   the command refuses to start on that computer.
   Replying needs an editor that can ask for text, as the VS Code extension does: elsewhere, use
   `texloom comments reply`.
