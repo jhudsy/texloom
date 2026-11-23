@@ -112,6 +112,8 @@ export interface StoreInfo { registered: boolean; creation: 'open' | 'code'; can
 export type Status = 'offline' | 'connecting' | 'online' | 'paused'
 export type SyncMode = 'live' | 'manual'
 export type StorageMode = 'server' | 'relay'
+/** Why the server didn't move a project to another code (moveToCode). */
+export interface MoveRefusal { code: 'move-bad-code' | 'move-no-room' | 'move-too-big' | 'move-not-stored' | 'move-rejected' | 'move-busy'; need?: number; free?: number; max?: number }
 
 export class Replica {
   // gc off: deleted text is kept, so past versions can be reconstructed (History)
@@ -438,9 +440,13 @@ export class Replica {
         this.onStatus()
         break
       }
-      case 'usage': // the answer to askUsage()
+      case 'usage': // the answer to askUsage(), or news that the project moved to another code
         this.storeInfo = m.store ?? this.storeInfo
         this.onUsage()
+        if (m.moved && (this.refusal === 'quota-full' || this.refusal === 'code-expired' || this.refusal === 'project-full')) this.retryStore()
+        break
+      case 'moved': // moveToCode() done
+        this.moveAck?.(null)
         break
       case 'mode':
         this.heard(m.m)
@@ -448,7 +454,8 @@ export class Replica {
         this.onStatus()
         break
       case 'err':
-        if (m.denied) {
+        if (typeof m.code === 'string' && m.code.startsWith('move-') && this.moveAck) this.moveAck(m)
+        else if (m.denied) {
           this.denied = m.code
           this.minVersion = typeof m.min === 'string' ? m.min : ''
           this.onStatus()
@@ -902,6 +909,23 @@ export class Replica {
   }
 
   private deleteAck: ((error: string | null) => void) | null = null
+  private moveAck: ((refusal: MoveRefusal | null) => void) | null = null
+
+  /** Owner: move the stored project to another creation code (issue #32). Resolves null once the
+   *  server has moved it, else with its refusal; rejects if the server can't be reached. */
+  async moveToCode(code: string, timeoutMs = 20000): Promise<MoveRefusal | null> {
+    if (!this.keys.owner) throw new Error(t('only the owner can move the project to another code'))
+    const ws = this.ws
+    if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error(t('the server can’t be reached'))
+    code = code.trim()
+    const done = new Promise<MoveRefusal | null>((resolve, reject) => {
+      const timer = setTimeout(() => { this.moveAck = null; reject(new Error(t('the server didn’t confirm'))) }, timeoutMs)
+      this.moveAck = (refusal) => { clearTimeout(timer); this.moveAck = null; resolve(refusal) }
+    })
+    const ts = Math.floor(Date.now() / 1000)
+    ws.send(JSON.stringify({ t: 'move', c: code, ts, s: b64e(this.keys.sign(`move:${code}:${ts}`, new Uint8Array())) }))
+    return done
+  }
 
   /** Owner: delete the project for everyone. The server erases its copy and from then on refuses
    *  the project to anyone, so collaborators' apps keep their copy read-only. Resolves once the

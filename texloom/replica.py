@@ -58,6 +58,7 @@ class Replica:
         self.keys = keys
         self.server = server.rstrip("/")
         self.create_code = create_code  # needed only to store a *new* project on some servers
+        self._move_reply: asyncio.Future | None = None  # move_to_code() waiting for the server
         self._warned: set[str] = set()
         self._parts: dict[tuple, dict] = {}
         self._answered: dict[str, float] = {}  # what (connection, or connection:file) -> when it was answered
@@ -735,6 +736,26 @@ class Replica:
                 (pending / b.name).touch()
             await self.upload_pending()
 
+    async def move_to_code(self, code: str, timeout: float = 20) -> dict | None:
+        """The owner moves the stored project to another creation code (issue #32). None once the
+        server has moved it, else its refusal: {"code": "move-bad-code" | "move-no-room" |
+        "move-too-big" | "move-not-stored" | "move-rejected" | "move-busy", …}. Needs a connection."""
+        if self.keys.seed is None:
+            raise PermissionError("only the owner can move the project to another code")
+        if self.ws is None or self.ws.closed:
+            raise ConnectionError("not connected to the server")
+        code = code.strip()
+        ts = int(time.time())
+        self._move_reply = asyncio.get_running_loop().create_future()
+        try:
+            await self.ws.send_json({"t": "move", "c": code, "ts": ts, "s": b64e(self.keys.sign(f"move:{code}:{ts}".encode()))})
+            refused = await asyncio.wait_for(self._move_reply, timeout)
+            if refused is None:
+                self.create_code = code  # this copy holds the project's code now (the caller saves it)
+            return refused
+        finally:
+            self._move_reply = None
+
     def set_storage(self, mode: str) -> None:
         """The owner changed the project's storage mode; tell the server on next connect."""
         if self.keys.seed is None:
@@ -926,11 +947,20 @@ class Replica:
             self.outbox.pop(m.get("id"), None)
             self.refused = None
             self.save()
-        elif t == "usage":  # the answer to ask_usage()
+        elif t == "usage":  # the answer to ask_usage(), or news that the project moved to another code
             if isinstance(m.get("store"), dict):
                 self.store_info = m["store"]
+            if m.get("moved") and self.store_refusal in ("quota-full", "code-expired", "project-full"):
+                self.store_refusal = None  # the new code may have room: send what's waiting again
+                self._warned.discard("quota-full"); self._warned.discard("code-expired"); self._warned.discard("project-full")
+                asyncio.get_running_loop().create_task(self.flush_outbox())
+        elif t == "moved":  # move_to_code() done
+            if self._move_reply is not None and not self._move_reply.done():
+                self._move_reply.set_result(None)
         elif t == "err":
-            if m.get("denied"):
+            if str(m.get("code", "")).startswith("move-") and self._move_reply is not None and not self._move_reply.done():
+                self._move_reply.set_result(m)
+            elif m.get("denied"):
                 self.denied = str(m.get("code"))
                 self.min_version = str(m.get("min") or "")
                 if self.denied == "update-needed" and "denied" not in self._warned:

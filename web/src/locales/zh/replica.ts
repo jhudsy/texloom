@@ -13,6 +13,7 @@ const zh: Catalog = {
   "the server refused to delete it": "服务器拒绝删除",
   "only the owner can delete the project for everyone": "只有所有者可以为所有人删除该项目",
   'Only the owner can change where the project is kept.': '只有所有者可以更改项目的存放位置。',
+  'only the owner can move the project to another code': '只有项目所有者才能将项目转到另一个代码',
 }
 
 export default zh

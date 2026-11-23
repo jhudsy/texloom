@@ -79,7 +79,7 @@ MAX_BLOB = 50 * MiB  # uploaded over HTTP
 # in pieces of 4 MiB, each encrypted and base64-encoded: at most about 5.4 MiB a frame.
 MAX_FRAME = 16 * MiB
 P2P_FRAME = 6 * MiB
-FRAME_LIMITS = {"hello": 4 * KiB, "aw": 64 * KiB, "mode": 4 * KiB, "delete": 4 * KiB, "up": MAX_UPDATE * 4 // 3 + KiB,
+FRAME_LIMITS = {"hello": 4 * KiB, "aw": 64 * KiB, "mode": 4 * KiB, "move": 4 * KiB, "delete": 4 * KiB, "up": MAX_UPDATE * 4 // 3 + KiB,
                 "snap": MAX_SNAPSHOT * 4 // 3 + KiB, "p2p": P2P_FRAME, "revoke": 4 * KiB}
 RATE_WINDOW, RATE_MSGS, RATE_BYTES = 10.0, 600, 160 * MiB  # per connection
 HELLOS_PER_WINDOW = 5  # a log reply can be large: don't let one connection ask for it in a loop
@@ -89,6 +89,7 @@ CLOSE_WAIT = 5.0  # seconds to let connections close cleanly when the server sto
 SHUTDOWN_WAIT = 10.0  # then seconds to let other requests (an upload, say) finish
 PURGE_PAUSE = 0.01  # seconds between deleted projects: lets live editing through
 MODE_SKEW = 600  # seconds a signed mode-change command stays valid
+MOVE_TRIES = 5  # wrong codes a connection may offer to move a project to (each is a guess at one)
 SEND_TIMEOUT = 20  # seconds; a peer that doesn't read is disconnected rather than holding up others
 PEER_BUFFER_MAX = 8 * MiB  # bytes waiting to go to one peer: beyond this it isn't reading, and is cut off
 OUT_MAX = 128 * MiB  # bytes waiting to go out on all connections: beyond this, peers holding a lot are cut off
@@ -377,6 +378,7 @@ class Conn:
         self.transport = None  # to cut off a peer that stops reading (a polite close would wait for it)
         self.code: str | None = None
         self.code_tried = False
+        self.moves = 0  # wrong codes offered to move a project to (MOVE_TRIES)
         self.counted = False  # its app and version noted (note_client)
         self.hellos: list[float] = []
         self.recheck = 0.0  # private servers: when to check the project's code again
@@ -531,7 +533,9 @@ class Relay:
             return None
         owner = self.store.owner(project)
         if owner and owner != "default":
-            return "code-expired" if self.codes.lapsed(owner) else None
+            # someone with a valid code of their own may still connect: to move the project onto it
+            # (the owner's signed `move`), as they could relay a project they created with it anyway
+            return "code-expired" if self.codes.lapsed(owner) and not self.codes.check(code) else None
         valid = self.codes.check(code)
         if not valid:
             return "needs-code"
@@ -591,6 +595,30 @@ class Relay:
                 return "server-full"
         if self.store.owner(project) is None:
             await self.store.register(project, owner, self.codes.label(owner) if code else "default")
+        return None
+
+    async def move(self, project: str, code: str) -> dict | None:
+        """Move a stored project to another creation code (its owner asked; see `move` in handle).
+        None if done, else the refusal to send: the code isn't valid (or has lapsed), or hasn't room."""
+        owner = self.store.owner(project)
+        if owner is None:
+            return {"code": "move-not-stored", "m": "the server doesn't store this project"}
+        new = self.codes.check(code)
+        if not new:
+            return {"code": "move-bad-code", "m": "that code isn't valid on this server"}
+        if new == owner:
+            return None
+        need, allowance = self.store.usage.get(project, 0), self.codes.allowance(new)
+        if allowance != UNLIMITED:
+            if need > self.limits.project_max:
+                return {"code": "move-too-big", "m": "the project is larger than a project may be with that code",
+                        "need": need, "max": self.limits.project_max}
+            free = allowance - self.store.owner_usage(new)
+            if need > free:
+                return {"code": "move-no-room", "m": "that code hasn't room for this project", "need": need, "free": max(0, int(free))}
+        async with self.store.lock(project):
+            await self.store.claim(project, new)
+        log.info("project %s… moved to another creation code (%s)", project[:8], self.codes.label(new))
         return None
 
     async def purge(self, owner: str) -> tuple[int, int, int]:
@@ -963,6 +991,26 @@ class Relay:
                 await self.store.set_mode(project, mode == "relay")
             log.info("project %s… storage mode -> %s", project[:8], mode)
             await self.broadcast(project, {"t": "mode", "m": mode})
+        elif t == "move":  # the owner moves the project to another creation code (issue #32)
+            code, ts, sig = field(msg, "c", str)[:64], field(msg, "ts", int), b64d(field(msg, "s", str))
+            if abs(time.time() - ts) > MODE_SKEW or signer(project, f"move:{code}:{ts}".encode(), sig) != "owner":
+                await ws.send_json({"t": "err", "code": "move-rejected", "m": "rejected move"})
+                return
+            if conn.moves >= MOVE_TRIES:  # each move checks a code: not a way to try many
+                await ws.send_json({"t": "err", "code": "move-busy", "m": "too many tries: reconnect and try again"})
+                return
+            no = await self.move(project, code)
+            if no:
+                conn.moves += no["code"] == "move-bad-code"
+                await ws.send_json({"t": "err", **no})
+                return
+            conn.code = self.codes.check(code)  # proven to hold it: it sees the code's usage now
+            await ws.send_json({"t": "moved"})
+            # everyone connected: what's stored and the limits have changed (a refusal may be over)
+            for peer in list(self.rooms.get(project, ())):
+                c = self.conns.get(peer)
+                if c is not None:
+                    await self.send(peer, json.dumps({"t": "usage", "store": self.store_status(project, c), "moved": True}))
         elif t == "delete":  # the owner deletes the project for everyone
             ts, sig = field(msg, "ts", int), b64d(field(msg, "s", str))
             if abs(time.time() - ts) > MODE_SKEW or signer(project, f"delete:{ts}".encode(), sig) != "owner":
