@@ -35,7 +35,7 @@ from pycrdt import Text  # noqa: E402
 from texloom.crypto import Keys, b64e  # noqa: E402
 from texloom.replica import Replica  # noqa: E402
 
-SERVER = "import sys; from server.relay import main; sys.argv[0] = 'texloom-server'; main()"
+SERVER = "import sys; from server.cli import main; sys.argv[0] = 'texloom-server'; main()"
 CODES = """\
 FIRS-TCOD-EAAA  70K   first
 SECO-NDCO-DEBB  1M    second

@@ -59,7 +59,7 @@ import pg  # noqa: E402  (a throwaway PostgreSQL for the server)
 
 PY = [sys.executable, "-c"]
 CLI = "import sys; from texloom.cli import main; sys.argv[0] = 'texloom'; main()"
-SERVER = "import sys; from server.relay import main; sys.argv[0] = 'texloom-server'; main()"
+SERVER = "import sys; from server.cli import main; sys.argv[0] = 'texloom-server'; main()"
 PAIRS = ["unix/unix", "windows/windows", "windows/unix", "unix/windows"]
 BROWSER_PAIRS = ["unix/browser", "windows/browser"]  # the desktop makes the project, the web app joins
 

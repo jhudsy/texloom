@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks texloom.example.toml against the server's options (server/config.py, server/relay.py):
+"""Checks texloom.example.toml against the server's options (server/config.py, server/cli.py):
 
 - it parses as it is, and with every commented-out setting uncommented, as someone would;
 - every setting of texloom-server is in it, so a new one can't go undocumented;
@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from server.config import COMMANDS, parse
-from server.relay import parser
+from server.cli import parser
 
 EXAMPLE = ROOT / "texloom.example.toml"
 failures: list[str] = []

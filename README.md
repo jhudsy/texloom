@@ -877,7 +877,11 @@ it runs a database of its own from the folder, nothing installed as a service.
 
 | path | what |
 |---|---|
-| `server/relay.py` | relay (aiohttp): connections, signatures, storage modes, allowances, limits, the command line |
+| `server/relay.py` | relay (aiohttp): the WebSocket protocol (connections, catch-up, updates, storage modes), memory limits |
+| `server/policy.py` | storage rules: creation codes and allowances, limits, what may be stored and by whom |
+| `server/endpoints.py` | the relay's HTTP endpoints: stored files, `/api/info`, project lists, code checks; response headers |
+| `server/wire.py` | what clients send: ids, base64, signatures, app versions |
+| `server/cli.py` | the server's command line (`texloom-server`): options, creation codes, backups |
 | `server/store.py` | what the relay stores, in PostgreSQL: edit logs, projects, which files are stored |
 | `server/files.py` | where stored files' content goes: a folder or an S3-compatible bucket |
 | `server/config.py` | the server's settings: the settings file, `TEXLOOM_*` variables, the command line |

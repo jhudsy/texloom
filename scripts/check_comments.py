@@ -32,7 +32,7 @@ from texloom.crypto import Keys  # noqa: E402
 from texloom.mcp import Project  # noqa: E402
 from texloom.replica import Replica  # noqa: E402
 
-SERVER = "import sys; from server.relay import main; sys.argv[0] = 'texloom-server'; main()"
+SERVER = "import sys; from server.cli import main; sys.argv[0] = 'texloom-server'; main()"
 MAIN = "\\documentclass{article}\n\\begin{document}\nFirst line.\nSecond line, with a typo.\nThird line.\n\\end{document}\n"
 
 ok = True

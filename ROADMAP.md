@@ -51,8 +51,6 @@ Not broken, but costing more the longer it's left (label `tech-debt`), roughly m
   [#12](https://github.com/jhudsy/texloom/issues/12).
 - **[A removal plan for code kept for older apps and data](https://github.com/jhudsy/texloom/issues/27)**, including the `github`
   names that now cover every git host.
-- **[Split the server's relay.py](https://github.com/jhudsy/texloom/issues/28)** (the storage rules and HTTP endpoints apart from the
-  WebSocket protocol), as the first step of [#30](https://github.com/jhudsy/texloom/issues/30). The other large files are split.
 
 ## Parked
 

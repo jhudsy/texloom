@@ -15,7 +15,7 @@ dependencies = [
 
 [project.scripts]
 texloom = "texloom.cli:main"
-texloom-server = "server.relay:main"
+texloom-server = "server.cli:main"
 
 [project.gui-scripts]
 texloom-app = "texloom.app:main"
