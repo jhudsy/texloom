@@ -1,0 +1,65 @@
+{
+  "name": "texloom",
+  "displayName": "TeXLoom comments",
+  "description": "The comments and suggestions of a TeXLoom project, in your own editor: as threads beside the text, with reply and resolve.",
+  "version": "0.1.0",
+  "publisher": "texloom",
+  "license": "AGPL-3.0-or-later",
+  "repository": { "type": "git", "url": "https://github.com/jhudsy/texloom.git", "directory": "editors/vscode" },
+  "engines": { "vscode": "^1.82.0" },
+  "categories": ["Other"],
+  "keywords": ["latex", "tex", "comments", "review", "collaboration"],
+  "activationEvents": ["onLanguage:latex", "onLanguage:bibtex", "onLanguage:tex", "workspaceContains:**/*.tex"],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "TeXLoom",
+      "properties": {
+        "texloom.command": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "How to start TeXLoom, if `texloom` isn't on your PATH: the helper's path, or the app's (on a Mac `/Applications/TeXLoom.app/Contents/MacOS/TeXLoom`). Empty: look for `texloom`, then for the app."
+        },
+        "texloom.comments": {
+          "type": "string",
+          "enum": ["threads", "problems", "both"],
+          "default": "threads",
+          "enumDescriptions": [
+            "Comment threads beside the text, as in a pull request review, with reply and resolve.",
+            "Entries in the Problems panel, with squiggles under the text (the language server's own view).",
+            "Both."
+          ],
+          "description": "How a folder's comments are shown."
+        }
+      }
+    },
+    "commands": [
+      { "command": "texloom.resolveThread", "title": "Resolve", "category": "TeXLoom", "icon": "$(check)" },
+      { "command": "texloom.replyThread", "title": "Reply", "category": "TeXLoom" },
+      { "command": "texloom.openReview", "title": "Open the Review tab in the browser", "category": "TeXLoom", "icon": "$(link-external)" },
+      { "command": "texloom.refresh", "title": "Refresh comments", "category": "TeXLoom" }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "texloom.resolveThread", "when": "false" },
+        { "command": "texloom.replyThread", "when": "false" }
+      ],
+      "comments/commentThread/title": [
+        { "command": "texloom.resolveThread", "group": "navigation@1", "when": "commentController == texloom && commentThread == texloom-open" },
+        { "command": "texloom.openReview", "group": "navigation@2", "when": "commentController == texloom" }
+      ],
+      "comments/commentThread/context": [
+        { "command": "texloom.replyThread", "group": "inline", "when": "commentController == texloom && commentThread == texloom-open" }
+      ]
+    }
+  },
+  "scripts": {
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "3.2.1"
+  }
+}

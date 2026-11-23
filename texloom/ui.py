@@ -15,7 +15,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from . import listsync, registry
-from .cli import load_config, run
+from .cli import browser_link, load_config, run
 from .crypto import Keys
 from .daemon import Daemon
 from .i18n import _, ngettext
@@ -230,16 +230,6 @@ def tag_hex(colour: str) -> str:
 def colour_names() -> dict[str, str]:
     return {"red": _("Red"), "orange": _("Orange"), "yellow": _("Yellow"), "green": _("Green"), "teal": _("Teal"),
             "blue": _("Blue"), "indigo": _("Indigo"), "purple": _("Purple"), "pink": _("Pink"), "grey": _("Grey")}
-
-
-def browser_link(d: Path, extra: str = "") -> str:
-    """A folder's project link for opening in the browser, marked as opened by this app, so the web
-    app doesn't ask where the files should live: they're in this folder already. `extra`: more of the
-    query, such as "tab=review" (web/src/main.ts reads it)."""
-    cfg = load_config(d)
-    page, _hash, keys = cfg["link"].partition("#")
-    mark = "from=app" + ("&compile=1" if cfg.get("compile") else "") + (f"&{extra}" if extra else "")  # the web app then compiles here by default
-    return f"{page}{'&' if '?' in page else '?'}{mark}#{keys}"
 
 
 def open_path(p: Path | str) -> None:

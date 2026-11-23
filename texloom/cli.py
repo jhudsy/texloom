@@ -10,6 +10,7 @@
   texloom run   <dir> --git                       also keep the folder's git repository in step (any host)
   texloom allow <dir>                             review lines that run programs; allow them with --shell-escape
   texloom mcp   <dir|link> [--name NAME] [--suggest-only]  MCP server: an agent edits/comments as a collaborator
+  texloom lsp [dir]                               language server: the Review tab's comments in your editor
   texloom comments <dir> [--mine] [--all]         the Review tab's comments; also: reply <dir> ID TEXT, resolve <dir> ID
 """
 
@@ -46,6 +47,16 @@ def load(d: Path) -> tuple[Keys, str]:
 
 def load_config(d: Path) -> dict:
     return json.loads(config_path(d).read_text())
+
+
+def browser_link(d: Path, extra: str = "") -> str:
+    """A folder's project link for opening in the browser, marked as opened by this app, so the web
+    app doesn't ask where the files should live: they're in this folder already. `extra`: more of the
+    query, such as "tab=review" (web/src/main.ts reads it)."""
+    cfg = load_config(d)
+    page, _hash, keys = cfg["link"].partition("#")
+    mark = "from=app" + ("&compile=1" if cfg.get("compile") else "") + (f"&{extra}" if extra else "")  # the web app then compiles here by default
+    return f"{page}{'&' if '?' in page else '?'}{mark}#{keys}"
 
 
 DEFAULT_CONFIG = {
@@ -501,6 +512,8 @@ def main() -> None:
     p.add_argument("--name", default="Claude (agent)", help="how the agent appears to collaborators")
     p.add_argument("--suggest-only", action="store_true",
                    help="the agent can comment and suggest changes for people to accept, but not edit files directly")
+    p = sub.add_parser("lsp", help="run a language server (stdio) that shows the Review tab's comments in your editor")
+    p.add_argument("dir", type=Path, nargs="?", help="a texloom folder (default: the editor's workspace folder)")
     p = sub.add_parser("comments", help="list the Review tab's comments, or reply to or resolve one")
     p.add_argument("args", nargs="+", metavar="[reply|resolve] DIR [ID [TEXT]]",
                    help="DIR to list; `reply DIR ID TEXT`; `resolve DIR ID`")
@@ -589,6 +602,12 @@ def main() -> None:
             code = load_config(d).get("create_code", "")
         try:
             asyncio.run(serve(keys, server, a.name[:64], code or None, a.suggest_only))
+        except KeyboardInterrupt:
+            pass
+    elif a.cmd == "lsp":
+        from .lsp import serve as serve_lsp
+        try:
+            asyncio.run(serve_lsp(a.dir))
         except KeyboardInterrupt:
             pass
     elif a.cmd == "comments":

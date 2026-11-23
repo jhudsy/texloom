@@ -58,21 +58,28 @@ class Comment:
     at: int  # ms
     resolved: bool
     replies: list[Reply] = field(default_factory=list)
+    span: tuple[int, int] | None = None  # the text it's on, as character offsets into the project's file
 
     def mentions(self, name: str) -> bool:
         return mentions(self.text, name) or any(mentions(r.text, name) for r in self.replies)
 
 
-def _line(r: Replica, path: str, start, quote: str) -> int | None:
+def _span(r: Replica, path: str, start, end, quote: str) -> tuple[int, int] | None:
+    """The text a comment is on, as character offsets in the project's file; None if it can't be told."""
     if path not in r.files:
         return None
-    s = str(r.files[path])
+    t = r.files[path]
+    s = str(t)
     if isinstance(start, (bytes, bytearray)):
-        at = index_in(r.files[path], s, bytes(start))
-        if at is not None:
-            return s.count("\n", 0, char_of_u16(s, at)) + 1
+        a = index_in(t, s, bytes(start))
+        if a is not None:
+            b = index_in(t, s, bytes(end)) if isinstance(end, (bytes, bytearray)) else None
+            ca = char_of_u16(s, a)
+            cb = char_of_u16(s, b) if b is not None and b >= a else ca + len(quote)
+            return ca, min(cb, len(s))
     if quote and quote in s:  # (where the anchor can't be told: the quote's first place)
-        return s.count("\n", 0, s.index(quote)) + 1
+        i = s.index(quote)
+        return i, i + len(quote)
     return None
 
 
@@ -92,8 +99,10 @@ def read(r: Replica, include_resolved: bool = False) -> list[Comment]:
                 ok = signed_name(r.keys.project, b"reply:" + f"{iid}\n{x.get('at')}\n{x.get('by')}".encode(), x.get("s"), r.members) == rb
                 replies.append(Reply(rb, int(x.get("at") or 0), str(x.get("text") or ""), ok))
         verified = signed_name(r.keys.project, b"review:" + f"{iid}\n{m.get('by')}".encode(), m.get("s"), r.members) == by
-        out.append(Comment(iid, "suggestion" if m.get("kind") == "suggestion" else "comment", path, _line(r, path, m.get("start"), quote),
-                           quote, str(m.get("text") or ""), by, verified, int(m.get("at") or 0), bool(m.get("resolved")), replies))
+        span = _span(r, path, m.get("start"), m.get("end"), quote)
+        line = str(r.files[path]).count("\n", 0, span[0]) + 1 if span else None
+        out.append(Comment(iid, "suggestion" if m.get("kind") == "suggestion" else "comment", path, line,
+                           quote, str(m.get("text") or ""), by, verified, int(m.get("at") or 0), bool(m.get("resolved")), replies, span))
     out.sort(key=lambda c: (c.file, c.line if c.line is not None else 1 << 30, c.at))
     return out
 
