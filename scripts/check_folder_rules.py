@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks texloom/folder.py's rules against scripts/folder-rules.json, the cases
+"""Checks texloom/folderrules.py's rules (and folder.py's settle_for) against scripts/folder-rules.json, the cases
 web/scripts/check-folder-rules.mjs checks web/src/foldersync.ts against: which files are the
 project's, which are text, merging a file saved while the project changed, how long a changed
 file settles, Windows line endings, and renames.
@@ -16,7 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from texloom.folder import crlf, is_text, merge3, on_disk, pick_moves, settle_for, synced_file
+from texloom.folder import settle_for
+from texloom.folderrules import crlf, is_text, merge3, on_disk, pick_moves, synced_file
 
 v = json.loads((ROOT / "scripts/folder-rules.json").read_text())
 bad: list[str] = []

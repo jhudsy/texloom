@@ -29,7 +29,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .folder import IGNORE_DIRS, FolderSync
+from .folder import FolderSync
+from .folderrules import IGNORE_DIRS
 from .paths import safe_rel, state_dir
 from .scan import SCANNED, added
 

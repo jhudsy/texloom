@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes scripts/folder-rules.json: the rules the two folder syncs (texloom/folder.py and
+"""Writes scripts/folder-rules.json: the rules the two folder syncs (texloom/folderrules.py, with folder.py, and
 web/src/foldersync.ts) must apply alike, as inputs and what they must give. Checked by
 scripts/check_folder_rules.py and web/scripts/check-folder-rules.mjs.
 

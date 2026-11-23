@@ -44,7 +44,10 @@ from PySide6 import QtCore, QtGui, QtWidgets  # noqa: E402
 
 from texloom import app as appmod  # noqa: E402
 from texloom import mac  # noqa: E402
-from texloom.dialogs import JoinDialog, ManageTagsDialog, ProjectListDialog, SettingsDialog, ShareFolderDialog  # noqa: E402
+from texloom.dialogs import SettingsDialog  # noqa: E402
+from texloom.dialogs_list import ProjectListDialog  # noqa: E402
+from texloom.dialogs_share import JoinDialog, ShareFolderDialog  # noqa: E402
+from texloom.dialogs_tags import ManageTagsDialog  # noqa: E402
 from texloom.ui import Engine  # noqa: E402
 
 failures: list[str] = []

@@ -12,9 +12,9 @@ const DB = 'texloom-folders'
 const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycache__', '.idea', '.vscode'])
 // copies a file-sync service makes when a file changed on two computers at once (Dropbox's
 // "x (Ann's conflicted copy 2026-11-20).tex", Syncthing's "x.sync-conflict-…"): never shared, left
-// for a person to merge (as CONFLICT_COPY in texloom/folder.py)
+// for a person to merge (as CONFLICT_COPY in texloom/folderrules.py)
 export const CONFLICT_COPY = / \([^()/]*conflicted copy[^()/]*\)|\.sync-conflict-\d{8}-\d{6}/i
-// Build output and editor droppings: never synced. Same list as IGNORE_* in texloom/folder.py.
+// Build output and editor droppings: never synced. Same list as IGNORE_* in texloom/folderrules.py.
 export const BUILD = latexOutput('|bbl|idx|ilg|ind|swp|swx|tmp', String.raw`|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$`)
 const MAX = 50 * 1024 * 1024
 const SETTLE = 200, SETTLE_DOUBT = 2000, SETTLE_BIG = 1000, BIG = 1_000_000 // ms a changed file must stay unchanged before it's read; for one that became empty or went missing; for a big one (settleFor below)
@@ -22,7 +22,7 @@ const SETTLE = 200, SETTLE_DOUBT = 2000, SETTLE_BIG = 1000, BIG = 1_000_000 // m
  *  row it was found still changing: each time doubles the wait, up to SETTLE_DOUBT. Same rule as
  *  settle_for in texloom/folder.py; scripts/folder-rules.json checks both. */
 export const settleFor = (size: number, times: number) => Math.min(SETTLE_DOUBT, Math.max(SETTLE * 2 ** times, size >= BIG ? SETTLE_BIG : 0))
-/** A project text as its file holds it: \r\n line endings if it had them (as on_disk in texloom/folder.py). */
+/** A project text as its file holds it: \r\n line endings if it had them (as on_disk in texloom/folderrules.py). */
 export const onDisk = (text: string, windows: boolean) => new TextEncoder().encode(windows ? text.replace(/\r?\n/g, '\r\n') : text)
 const sameBytes = (a: Uint8Array | null, b: Uint8Array) => !!a && a.length === b.length && a.every((x, i) => x === b[i])
 
@@ -62,7 +62,7 @@ async function sha(data: Uint8Array): Promise<string> {
 /** Whether a file at this path in the folder is one of the project's files: not in a tools' folder
  *  or any dot folder, not LaTeX's working files or editors' droppings, not a file-sync service's
  *  conflicted copy, not the compiled PDF of `main`, and a path the project accepts. Same rule as
- *  synced_file in texloom/folder.py; scripts/folder-rules.json checks both. */
+ *  synced_file in texloom/folderrules.py; scripts/folder-rules.json checks both. */
 export function syncedPath(rel: string, main: string | null): boolean {
   const parts = rel.split('/'), name = parts[parts.length - 1]
   if (parts.slice(0, -1).some((d) => SKIP_DIRS.has(d) || d.startsWith('.'))) return false
@@ -74,7 +74,7 @@ export function syncedPath(rel: string, main: string | null): boolean {
  *  synced) and those new in it (path -> hash), which new one each gone one became: new path -> old
  *  path. The same content moved, the same name first (a folder renamed), else the first by path;
  *  each gone file goes to one new one, taken in order of path. Same rule as pick_moves in
- *  texloom/folder.py; scripts/folder-rules.json checks both. */
+ *  texloom/folderrules.py; scripts/folder-rules.json checks both. */
 export function pickMoves(gone: Record<string, string>, fresh: Record<string, string>): Record<string, string> {
   const name = (x: string) => x.slice(x.lastIndexOf('/') + 1)
   const byPath = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
@@ -311,7 +311,7 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     const ownPdf = main ? main.replace(/\.tex$/, '.pdf') : null // compiled on this computer: output, not source
     // Renamed or moved in the folder: a file gone from it whose last synced content is now in a
     // file the project doesn't have yet has moved there. It moves as renaming here does
-    // (movePath), so comments and suggestions on it follow. Same rule as _moves() in texloom/folder.py.
+    // (movePath), so comments and suggestions on it follow. Same rule as pick_moves in texloom/folderrules.py.
     const gone = Object.keys(known).filter((p) => !disk.has(p))
     if (gone.length) {
       const sizes = new Set(gone.map((g) => known[g].z))

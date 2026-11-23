@@ -31,7 +31,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from texloom import textpos
-from texloom.folder import apply_text, crlf, lf, merge3, on_disk, strip_cr
+from texloom.folder import apply_text, strip_cr
+from texloom.folderrules import crlf, lf, merge3, on_disk
 from texloom.merges import shift
 from texloom.textpos import Byte, Char
 

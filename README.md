@@ -884,11 +884,15 @@ it runs a database of its own from the folder, nothing installed as a service.
 | `texloom/crypto.py` | keys, links, AES-GCM, Ed25519 (mirrors `web/src/crypto.ts`) |
 | `texloom/replica.py` | folder helper's replica: pycrdt document, outbox, peer handshake, blobs |
 | `texloom/folder.py` | two-way folder ⇄ CRDT sync, path safety, locked-down latexmk |
+| `texloom/folderrules.py` | the folder sync's rules: which files are the project's, text, merging, line endings, renames (as `web/src/foldersync.ts`) |
 | `texloom/gitsync.py` | `--git`: a synced folder's git repository kept in step, taking turns with browsers |
 | `texloom/cli.py` | command line |
 | `texloom/mcp.py` | MCP server (stdio JSON-RPC): tools, presence, comments and suggestions |
+| `texloom/app.py`, `app_list.py`, `app_detail.py`, `app_updates.py` | the desktop app's window: menus and actions; the list of projects; the chosen project; updates |
+| `texloom/dialogs.py`, `dialogs_share.py`, `dialogs_list.py`, `dialogs_tags.py`, `dialogs_tools.py` | its dialogs: settings and copying; sharing and joining; the project list; tags; AI tools and editors |
 | `server/arxiv.py`, `server/admin.py` | arXiv source import proxy; read-only admin page |
-| `web/src/main.ts` | start page and project view wiring |
+| `web/src/main.ts` | entry: the start page or a project, as the address asks |
+| `web/src/startpage.ts`, `projectview.ts`, `appinfo.ts` | the start page and its list; a project open in the editor; what both share |
 | `web/src/replica.ts` | browser replica: Yjs + IndexedDB, outbox, peer handshake, awareness, blobs |
 | `web/src/filetree.ts`, `projectfiles.ts` | folders and files, moves, zip export |
 | `web/src/editor.ts`, `latex.ts` | CodeMirror editor; LaTeX completion, shortcuts, reference checks |
