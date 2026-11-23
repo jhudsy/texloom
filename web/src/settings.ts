@@ -13,6 +13,7 @@ import { githubSection, gitStatus } from './githubui'
 import { dropboxSection, dropboxStatus } from './dropboxui'
 import { integrationCard } from './integrationcard'
 import { quiet, STORAGE } from './quiet'
+import { usageBox } from './usage'
 
 /** "Codes come from whoever runs this server", with the server's own page about them once known. */
 function codeSourceSlot(): HTMLElement {
@@ -209,6 +210,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
       h('h4', {}, t('Server storage'), h('small', { class: 'muted' }, ' — ' + t('shared with everyone in the project'))),
       own ? null : whose(t('Only the project’s owner can change this.')),
       storageBox,
+      usageBox(r),
       codeRow = noStorage ? h('div', { class: 'row' },
         h('button', { onclick: async () => {
           const { askCode } = await import('./storagenotice')

@@ -280,6 +280,38 @@ def known_server() -> str:
     return DEFAULT_SERVER
 
 
+KB, MB, GB = 1024, 1024 ** 2, 1024 ** 3
+
+
+def size_text(n: float) -> str:
+    """A size for people: KB, MB or GB, with the language's decimal mark and unit names."""
+    from .i18n import lang
+
+    def num(x: float, digits: int) -> str:
+        t = f"{x:.{digits}f}".rstrip("0").rstrip(".") if digits else f"{x:.0f}"
+        return t.replace(".", ",") if lang() in ("fr", "de", "es", "pt") else t
+    if n >= GB:
+        return _("{n} GB", n=num(n / GB, 1))
+    if n >= MB:
+        return _("{n} MB", n=num(n / MB, 0 if n >= 100 * MB else 1))
+    return _("{n} KB", n=num(max(n, KB if n > 0 else 0) / KB, 0))
+
+
+def usage_text(info: dict | None, storage: str) -> str:
+    """How much the server keeps of a project, and of its creation code's allowance when this
+    computer holds the code (the web app's usage.ts says the same)."""
+    if not info or storage == "relay" or not info.get("registered"):
+        return ""
+    used, cap = info.get("used") or 0, info.get("projectMax")
+    lines = [_("This project takes {used} on the server (up to {max} per project).", used=size_text(used), max=size_text(cap))
+             if cap else _("This project takes {used} on the server.", used=size_text(used))]
+    total, mine = info.get("allowance"), info.get("ownerUsed")
+    if total is not None and mine is not None:
+        lines.append(_("Your creation code: {used} of {total} used, {left} left (all its projects and project lists).",
+                       used=size_text(mine), total=size_text(total), left=size_text(max(0, total - mine))))
+    return "\n".join(lines)
+
+
 def short_path(d: Path) -> str:
     """A folder as people read it: ~/Papers/thesis, and the middle left out if it's long."""
     try:

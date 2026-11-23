@@ -334,4 +334,10 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Standing by': '待命',
     '{name} keeps this folder in step. The folder is shared with that computer through a file-sync service (Dropbox, iCloud…), which brings its changes here; this computer takes over if it stops.': '{name} 正在同步此文件夹。该文件夹通过文件同步服务（Dropbox、iCloud…）与那台电脑共享，该服务会把它的更改带到这里；如果它停止，这台电脑会接手。',
     'This folder is shared through a file-sync service (Dropbox, iCloud…) with another computer that runs TeXLoom. One computer at a time keeps it in step; this one is waiting to hear from the others.': '此文件夹通过文件同步服务（Dropbox、iCloud…）与另一台运行 TeXLoom 的电脑共享。每次只有一台电脑同步它；这台电脑正在等待其他电脑的消息。',
+    '{n} GB': '{n} GB',
+    '{n} MB': '{n} MB',
+    '{n} KB': '{n} KB',
+    'This project takes {used} on the server (up to {max} per project).': '此项目在服务器上占用 {used}（每个项目最多 {max}）。',
+    'This project takes {used} on the server.': '此项目在服务器上占用 {used}。',
+    'Your creation code: {used} of {total} used, {left} left (all its projects and project lists).': '你的创建码：已用 {used}，共 {total}，剩余 {left}（包括其所有项目和项目列表）。',
 }

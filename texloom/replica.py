@@ -101,6 +101,10 @@ class Replica:
         self.store_refusal: str | None = None  # what the server last said
         self.denied: str | None = None  # the server turned this project away: why (private server, or update-needed)
         self.min_version = ""  # with update-needed: the oldest version the server accepts
+        # What the server keeps of the project, and its limits, as it last said (see the relay's
+        # store_status): used, projectMax, allowance, and ownerUsed when this computer holds the
+        # project's creation code. Fresh figures on ask_usage().
+        self.store_info: dict | None = None
         self.deleted_at: float | None = None  # the owner deleted the project for everyone (seconds): read-only from then on
         self.refused: str | None = None  # the server's reason for rejecting the last change sent
         self._blob_waiters: dict[str, list[asyncio.Future]] = {}
@@ -197,6 +201,16 @@ class Replica:
             asyncio.get_running_loop().create_task(self._send_update(uid, update))
         except RuntimeError:
             pass  # no loop yet: sent from the outbox on connect
+
+    async def ask_usage(self) -> None:
+        """Ask the server how much it keeps now (the answer updates store_info). Only servers that
+        know the request are asked: their figures include ownerUsed."""
+        if self.ws is None or self.ws.closed or not self.store_info or "ownerUsed" not in self.store_info:
+            return
+        try:
+            await self.ws.send_json({"t": "usage"})
+        except (ConnectionError, RuntimeError) as e:
+            log.debug("usage not asked: %s", e)
 
     async def _send_update(self, uid: str, update: bytes) -> None:
         if self.ws is None or self.ws.closed:
@@ -854,6 +868,7 @@ class Replica:
             return
         if t == "log":
             self.denied = None
+            self.store_info = m.get("store") if isinstance(m.get("store"), dict) else None
             self._heard(m.get("mode", "server"))
             self._revoked(m.get("rv", []))
             # the server dropped its copy (idle eviction): everything up to `floor` is gone
@@ -911,6 +926,9 @@ class Replica:
             self.outbox.pop(m.get("id"), None)
             self.refused = None
             self.save()
+        elif t == "usage":  # the answer to ask_usage()
+            if isinstance(m.get("store"), dict):
+                self.store_info = m["store"]
         elif t == "err":
             if m.get("denied"):
                 self.denied = str(m.get("code"))

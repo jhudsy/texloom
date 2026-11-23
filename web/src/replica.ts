@@ -104,7 +104,10 @@ export const creationCode = {
 /** Why the server isn't storing this project's changes (they still reach people online). */
 export type StoreProblem = 'needs-code' | 'quota-full' | 'code-expired' | 'project-full' | 'server-full' | null
 const STORE_PROBLEMS = new Set(['needs-code', 'quota-full', 'code-expired', 'project-full', 'server-full'])
-export interface StoreInfo { registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number | null; allowance: number | null }
+/** What the server keeps of this project, and its limits. `ownerUsed`: all that the project's creation code
+ *  stores (its other projects and project lists too), only for a browser holding that code; absent from
+ *  servers older than the usage request. */
+export interface StoreInfo { registered: boolean; creation: 'open' | 'code'; canCreate: boolean; used: number; projectMax: number | null; allowance: number | null; ownerUsed?: number | null }
 
 export type Status = 'offline' | 'connecting' | 'online' | 'paused'
 export type SyncMode = 'live' | 'manual'
@@ -150,6 +153,17 @@ export class Replica {
   /** Why the server isn't storing changes. */
   get storeProblem(): StoreProblem { return this.refusal }
   onStatus: () => void = () => {}
+  /** Fresh figures arrived for storeInfo (askUsage). */
+  onUsage: () => void = () => {}
+
+  /** Ask the server how much it keeps now: the figures in storeInfo are from when this browser
+   *  connected. Only servers that know the request (their status has ownerUsed) are asked. */
+  askUsage(): boolean {
+    const ws = this.ws
+    if (!ws || ws.readyState !== WebSocket.OPEN || !this.storeInfo || !('ownerUsed' in this.storeInfo)) return false
+    ws.send(JSON.stringify({ t: 'usage' }))
+    return true
+  }
   onCompileAck: (info: { by: string }) => void = () => {}
   /** Folders the TeXLoom app syncs on other computers, by folder id: when last heard, whether that
    *  computer keeps the folder in step, its name (texloom/sharedfolder.py; the Dropbox link stands
@@ -424,6 +438,10 @@ export class Replica {
         this.onStatus()
         break
       }
+      case 'usage': // the answer to askUsage()
+        this.storeInfo = m.store ?? this.storeInfo
+        this.onUsage()
+        break
       case 'mode':
         this.heard(m.m)
         if (m.m === 'relay') { this.refusal = null; this.modeAck?.(null) } // not storing is the point

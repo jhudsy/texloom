@@ -221,6 +221,14 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
 - **Owner:** the first stored write to a project registers it to the creation code sent
   in `hello` or `X-Create-Code`, or to `default`.
 - **Allowance:** an owner's allowance is the sum over all its projects.
+- **What's used, shown:** each project's status (`store` in the `log` reply, and on request:
+  `{"t": "usage"}` answered with `{"t": "usage", "store": …}`) says what the server keeps of the
+  project, its per-project limit and the owner's allowance. `ownerUsed`, all that the owner's code
+  stores (its other projects and project lists too), goes only to a connection that sent that
+  code: anyone else would learn how much the owner keeps elsewhere. The web app shows the figures
+  in Settings ▸ Sync & storage (`usage.ts`), the desktop app under the project's status, each
+  asking for fresh ones as it shows them (an older server, whose status lacks `ownerUsed`, isn't
+  asked).
 - **Expiry:** after its `until` day (UTC) a code counts as removed: its projects fall back to
   `default`, and it no longer registers new projects. `--purge-expired-after DAYS` evicts
   (as idle eviction does) the stored projects of codes expired longer than that; re-uploads

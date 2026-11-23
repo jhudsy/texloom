@@ -39,7 +39,7 @@ from .dialogs import (ConnectToolDialog, CopyFolderDialog, JoinDialog, LinksDial
 from .i18n import _, app_pref, ngettext, set_app_pref
 from .mac import DockFollowsWindows, menu_opens_where_clicked, nsapp
 from .paths import state_dir, use_tex_on_path
-from .ui import (GREY, ICON, MAC, RED, TAGS_ROLE, Engine, browser_link, chevron, default_parent, describe, dot,
+from .ui import (GREY, ICON, MAC, RED, TAGS_ROLE, Engine, browser_link, chevron, default_parent, describe, dot, usage_text,
                  grey_note, open_path, project_name, red, short_path, tag_hex, theme_icon)
 from .wordcount import find_texcount, texcount_report
 
@@ -685,7 +685,11 @@ class Window(QtWidgets.QMainWindow):
         self.path_lbl.linkActivated.connect(lambda _href: self.open_folder())
         self.status_lbl = QtWidgets.QLabel()
         self.status_lbl.setWordWrap(True)
-        for x in (self.title, self.path_lbl, self.status_lbl):
+        self.usage_lbl = QtWidgets.QLabel()  # how much the server keeps (ui.usage_text)
+        self.usage_lbl.setWordWrap(True)
+        self.usage_lbl.setStyleSheet(f"color: {GREY}")
+        self.usage_asked: dict[Path, float] = {}  # when fresh figures were last asked for, per folder
+        for x in (self.title, self.path_lbl, self.status_lbl, self.usage_lbl):
             lay.addWidget(x)
         lay.addSpacing(4)
         btns = QtWidgets.QHBoxLayout()
@@ -848,6 +852,7 @@ class Window(QtWidgets.QMainWindow):
             self.title.setText(ngettext(len(picked), "{n} folder selected", "{n} folders selected", n=len(picked)))
             self.path_lbl.setText("")
             self.status_lbl.setText("")
+            self.usage_lbl.setText("")
             self.log.setPlainText("")
             return
         d = self.current()
@@ -858,6 +863,14 @@ class Window(QtWidgets.QMainWindow):
         self.path_lbl.setText(f"<a href='open' style='color:{GREY}; text-decoration:none'>{html.escape(short_path(d))}</a>")
         self.path_lbl.setToolTip(_("Open folder") + f": {d}")
         self.status_lbl.setText(f"<span style='color:{colour}'>●</span> <b>{html.escape(short)}</b>" + (f" — {html.escape(longer)}" if longer else ""))
+        st = self.engine.daemon.states.get(d)
+        r = st.replica if st else None
+        usage = usage_text(r.store_info, r.storage) if r else ""
+        self.usage_lbl.setText(usage)
+        self.usage_lbl.setVisible(bool(usage))
+        if r is not None and time.time() - self.usage_asked.get(d, 0) > 60:  # fresh figures, once a minute while shown
+            self.usage_asked[d] = time.time()
+            self.engine.submit(r.ask_usage(), lambda _res, _err: None)
         try:
             cfg = {**DEFAULT_CONFIG, **load_config(d)}
         except (OSError, ValueError):

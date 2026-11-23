@@ -701,3 +701,8 @@ dialog.settings.tabbed[open] { display: flex; flex-direction: column; }
 .icard > .ibody > :first-child { margin-top: 10px; }
 .icard > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 10px; }
 @media (max-width: 560px) { .icard > .ibody { padding-left: 14px; } .icard .istatus { max-width: 46vw; } }
+
+/* Settings ▸ Sync & storage: how much the server keeps (usage.ts) */
+.usage-box p { margin: 0.4em 0; }
+.usage { margin: 0.3em 0 0.6em; }
+.usage meter { display: block; width: 100%; max-width: 22em; height: 0.7em; }

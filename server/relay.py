@@ -630,6 +630,10 @@ class Relay:
         return not self.private and self.codes.open_creation
 
     def store_status(self, project: str, conn: Conn) -> dict:
+        """What the server keeps of a project, and its limits. `ownerUsed` (all that the project's
+        creation code stores, its other projects and project lists included) goes only to a
+        connection that holds that code: to anyone else it would tell how much the owner keeps
+        elsewhere."""
         owner = self.store.owner(project)
         allowance = self.codes.allowance(owner or conn.code or "default")
         return {
@@ -639,6 +643,7 @@ class Relay:
             "used": self.store.usage.get(project, 0),
             "projectMax": self.limits.project_max if allowance != UNLIMITED else None,
             "allowance": None if allowance == UNLIMITED else allowance,
+            "ownerUsed": self.store.owner_usage(owner) if owner is not None and conn.code == owner else None,
         }
 
     # --- websocket ---------------------------------------------------------------------
@@ -941,6 +946,8 @@ class Relay:
                     c = self.conns.get(peer)
                     if c and c.id == to:
                         await self.send(peer, json.dumps(out))  # cut off, rather than waited on, if it isn't reading
+        elif t == "usage":  # the figures above, fresh (an app showing how much is used asks when it shows them)
+            await ws.send_json({"t": "usage", "store": self.store_status(project, conn)})
         elif t == "mode":
             mode, ts, sig = field(msg, "m", str), field(msg, "ts", int), b64d(field(msg, "s", str))
             who = signer(project, f"mode:{mode}:{ts}".encode(), sig)

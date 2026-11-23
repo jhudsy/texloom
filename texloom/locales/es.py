@@ -334,4 +334,10 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Standing by': 'En espera',
     '{name} keeps this folder in step. The folder is shared with that computer through a file-sync service (Dropbox, iCloud…), which brings its changes here; this computer takes over if it stops.': '{name} mantiene esta carpeta sincronizada. La carpeta se comparte con ese ordenador mediante un servicio de sincronización (Dropbox, iCloud…), que trae aquí sus cambios; este ordenador toma el relevo si se detiene.',
     'This folder is shared through a file-sync service (Dropbox, iCloud…) with another computer that runs TeXLoom. One computer at a time keeps it in step; this one is waiting to hear from the others.': 'Esta carpeta se comparte mediante un servicio de sincronización (Dropbox, iCloud…) con otro ordenador que usa TeXLoom. Solo un ordenador a la vez la mantiene sincronizada; este espera noticias de los demás.',
+    '{n} GB': '{n} GB',
+    '{n} MB': '{n} MB',
+    '{n} KB': '{n} KB',
+    'This project takes {used} on the server (up to {max} per project).': 'Este proyecto ocupa {used} en el servidor (hasta {max} por proyecto).',
+    'This project takes {used} on the server.': 'Este proyecto ocupa {used} en el servidor.',
+    'Your creation code: {used} of {total} used, {left} left (all its projects and project lists).': 'Tu código de creación: {used} usados de {total}, quedan {left} (todos sus proyectos y listas de proyectos).',
 }
