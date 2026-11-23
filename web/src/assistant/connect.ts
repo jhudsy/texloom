@@ -5,6 +5,10 @@ import { t } from '../i18n'
 
 type Access = 'suggest' | 'edit' | 'read'
 const INSTALL = 'uv tool install git+https://github.com/jhudsy/texloom'
+// The downloadable app runs the MCP server itself (packaging/app_main.py). Where it is is known only on a
+// Mac; elsewhere it's wherever its folder was unpacked, and the app's own dialog gives its path.
+const MAC_APP = '/Applications/TeXLoom.app/Contents/MacOS/TeXLoom'
+const onMac = () => /Mac/i.test(navigator.platform || navigator.userAgent)
 
 function codeBlock(text: () => string): { el: HTMLElement; update(): void } {
   const pre = h('pre', {})
@@ -15,29 +19,40 @@ function codeBlock(text: () => string): { el: HTMLElement; update(): void } {
 /** `link(true)` is the edit link, `link(false)` the read-only one. */
 export function connectToolDialog(writable: boolean, link: (write: boolean) => string) {
   let access: Access = writable ? 'suggest' : 'read'
+  const mac = onMac()
+  let viaApp = mac
+  const command = () => (viaApp ? MAC_APP : 'texloom')
   const args = (name: string) => ['mcp', ...(access === 'suggest' ? ['--suggest-only'] : []), '--name', name, link(access !== 'read')]
   const quoted = (a: string) => (/^[\w.-]+$/.test(a) ? a : `"${a}"`) // double quotes work in every common shell, and the link has nothing they'd expand
-  const claude = codeBlock(() => `claude mcp add texloom -- texloom ${args('Claude Code').map(quoted).join(' ')}`)
-  const other = codeBlock(() => JSON.stringify({ mcpServers: { texloom: { command: 'texloom', args: args('AI agent') } } }, null, 2))
-  const update = () => { claude.update(); other.update() }
+  const claude = codeBlock(() => `claude mcp add texloom -- ${[command(), ...args('Claude Code')].map(quoted).join(' ')}`)
+  const other = codeBlock(() => JSON.stringify({ mcpServers: { texloom: { command: command(), args: args('AI agent') } } }, null, 2))
+  const install = codeBlock(() => INSTALL)
+  const helper = h('div', {}, install.el,
+    h('p', { class: 'muted small' }, h('a', { href: 'https://docs.astral.sh/uv/getting-started/installation/', target: '_blank', rel: 'noopener' }, t('How to install uv'))),
+    h('p', { class: 'muted small' }, t('If your tool can’t find the texloom command, give its full path instead.')))
+  const update = () => { claude.update(); other.update(); helper.hidden = viaApp }
   const choice = (value: Access, label: string) => h('label', { class: 'check' },
     h('input', { type: 'radio', name: 'connect-access', value, checked: access === value, onchange: () => { access = value; update() } }), label)
-  const install = codeBlock(() => INSTALL)
+  const runner = (app: boolean, label: string) => h('label', { class: 'check' },
+    h('input', { type: 'radio', name: 'connect-runner', checked: viaApp === app, onchange: () => { viaApp = app; update() } }), label)
   install.update(); update()
   const dlg = dialog('settings',
     h('h3', {}, t('Connect an AI tool via MCP')),
     h('p', { class: 'muted small' }, t('Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.')),
     h('p', { class: 'muted small' }, t('This is separate from the Assistant tab: you talk to the tool in its own window, not there, and the two don’t share conversations. What the tool does appears in the project under its name, like a collaborator’s work.')),
-    h('h4', {}, t('Install the TeXLoom command-line helper once')),
-    install.el,
-    h('p', { class: 'muted small' }, h('a', { href: 'https://docs.astral.sh/uv/getting-started/installation/', target: '_blank', rel: 'noopener' }, t('How to install uv'))),
+    h('h4', {}, t('What your tool runs')),
+    mac ? h('div', { class: 'connect-access' },
+      runner(true, t('The TeXLoom app, in Applications: nothing more to install')),
+      runner(false, t('The TeXLoom command-line helper, installed once'))) :
+      h('p', { class: 'muted small' }, t('If the TeXLoom desktop app is on this computer, nothing more needs installing: open this project in the app and choose Connect an AI tool via MCP… there, for lines that run the app itself. Otherwise, install the TeXLoom command-line helper once:')),
+    helper,
     writable ? h('h4', {}, t('Choose what the tool may do')) : null,
     writable ? h('div', { class: 'connect-access' },
       choice('suggest', t('Suggest changes for people to accept')), choice('edit', t('Edit files directly')), choice('read', t('Read the project only'))) : null,
     h('h4', {}, t('Add it to your tool')),
     h('p', { class: 'small' }, t('Claude Code: run this in a terminal')), claude.el,
     h('p', { class: 'small' }, t('Other tools: add this to their MCP settings')), other.el,
-    h('p', { class: 'muted small' }, t('If your tool can’t find the texloom command, give its full path instead. If this project is also in a folder on this computer, you can use the folder’s path instead of the link.')),
+    h('p', { class: 'muted small' }, t('If this project is also in a folder on this computer, you can use the folder’s path instead of the link.')),
     h('p', { class: 'risk small' }, t('These lines contain this project’s link, and your tool saves it in its settings. Anyone who can read those settings can open the project.')),
     h('p', { class: 'muted small' }, t('The tool reads text other people wrote in this project, which could include instructions aimed at it. On shared projects, suggesting is the safer choice.')),
     h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => dlg.close() }, t('Close'))),

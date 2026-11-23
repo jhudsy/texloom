@@ -661,6 +661,11 @@ claude mcp add texloom -- texloom mcp ~/papers/demo        # a folder from texlo
 claude mcp add texloom -- texloom mcp '<edit link>'         # or straight from a link
 ```
 
+With the downloadable app there's nothing more to install: the binary inside it runs the server
+too (`/Applications/TeXLoom.app/Contents/MacOS/TeXLoom mcp …` on a Mac, `TeXLoom.exe mcp …` in the
+app's folder on Windows). **Connect an AI tool via MCP…** in the app gives the lines with its path.
+App builds check that the built app answers MCP (`scripts/check_bundled_mcp.py`).
+
 The agent appears to everyone as **Claude (agent)** (change with `--name`), with its own
 cursor and its lines credited in "who wrote this". Its tools: list, read, search, write and
 edit files; **suggest** changes and **comment** (shown in the Review tab for people to
@@ -730,7 +735,12 @@ a few thousand. A model that thinks before answering can take a few minutes over
 
 **Connect an AI tool via MCP…** in the tab shows how to connect a tool you already use through
 [MCP](#agents-mcp) instead, such as Claude Code. It runs under your own account with that tool, so it
-needs no API key here.
+needs no API key here. It's separate from the tab: you talk to the tool in its own window, and its work
+shows up in the project under its name.
+
+To point the assistant at more than the open file, **+ Files** adds files (each named, for it to read
+once per conversation, with its size in tokens) and **+ Selection** adds the selected passage (quoted once).
+It can also find and read any file by itself when a question needs it.
 
 API keys and provider settings are stored only in your browser. They are not part of
 the project and never pass through the TeXLoom server: requests go straight from your

@@ -172,6 +172,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Connect an AI tool via MCP…': '通过 MCP 连接 AI 工具…',
     'Connect an AI tool via MCP': '通过 MCP 连接 AI 工具',
     'If your tool can’t find the texloom command, give its full path instead.': '如果您的工具找不到 texloom 命令，请改用其完整路径。',
+    'Your tool runs the TeXLoom app for this, so there’s nothing else to install. If you move the app, connect your tool again.': '你的工具会为此运行 TeXLoom 应用，因此无需再安装其他东西。如果移动了应用，请重新连接你的工具。',
     'Suggesting and editing use this folder’s path. Reading uses a read-only link, which your tool saves in its settings, so anyone who can read those settings can read the project.': '提出建议和编辑使用此文件夹的路径。读取使用只读链接，您的工具会将其保存在设置中，因此任何能读取这些设置的人都可以读取此项目。',
     'Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.': '支持 MCP 的工具（如 Claude Code、Claude Desktop 或 Cursor）可以像协作者一样处理此项目。它们在您的电脑上使用您自己的账户运行，因此这里无需 API 密钥。',
     'Install the TeXLoom command-line helper once': '安装一次 TeXLoom 命令行工具',

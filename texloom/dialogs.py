@@ -831,15 +831,21 @@ class ConnectToolDialog(QtWidgets.QDialog):
         self.folder = folder.resolve()
         self.keys, self.server = load(folder)
         self.access = "suggest" if self.keys.writable else "read"
+        # the downloadable app runs the MCP server itself (packaging/app_main.py): nothing more to install
+        self.command = sys.executable if getattr(sys, "frozen", False) else "texloom"
         self.setWindowTitle(_("Connect an AI tool via MCP"))
         self.setMinimumWidth(620)
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(self.note(_("Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.")))
-        lay.addWidget(self.heading(_("Install the TeXLoom command-line helper once")))
-        self.install = self.block(lay, 1, lambda: self.INSTALL)
-        how = self.note(f'<a href="https://docs.astral.sh/uv/getting-started/installation/">{_("How to install uv")}</a>')
-        how.setOpenExternalLinks(True)
-        lay.addWidget(how)
+        self.install = None
+        if self.command == "texloom":
+            lay.addWidget(self.heading(_("Install the TeXLoom command-line helper once")))
+            self.install = self.block(lay, 1, lambda: self.INSTALL)
+            how = self.note(f'<a href="https://docs.astral.sh/uv/getting-started/installation/">{_("How to install uv")}</a>')
+            how.setOpenExternalLinks(True)
+            lay.addWidget(how)
+        else:
+            lay.addWidget(self.note(_("Your tool runs the TeXLoom app for this, so there’s nothing else to install. If you move the app, connect your tool again.")))
         if self.keys.writable:
             lay.addWidget(self.heading(_("Choose what the tool may do")))
             for access, label in (("suggest", _("Suggest changes for people to accept")), ("edit", _("Edit files directly")), ("read", _("Read the project only"))):
@@ -850,10 +856,11 @@ class ConnectToolDialog(QtWidgets.QDialog):
                 lay.addWidget(radio)
         lay.addWidget(self.heading(_("Add it to your tool")))
         lay.addWidget(self.note(_("Claude Code: run this in a terminal")))
-        self.claude = self.block(lay, 3, lambda: "claude mcp add texloom -- texloom " + " ".join(self.quoted(a) for a in self.args("Claude Code")))
+        self.claude = self.block(lay, 3, lambda: "claude mcp add texloom -- " + " ".join(self.quoted(a) for a in (self.command, *self.args("Claude Code"))))
         lay.addWidget(self.note(_("Other tools: add this to their MCP settings")))
-        self.other = self.block(lay, 9, lambda: json.dumps({"mcpServers": {"texloom": {"command": "texloom", "args": self.args("AI agent")}}}, indent=2, ensure_ascii=False))
-        lay.addWidget(self.note(_("If your tool can’t find the texloom command, give its full path instead.")))
+        self.other = self.block(lay, 9, lambda: json.dumps({"mcpServers": {"texloom": {"command": self.command, "args": self.args("AI agent")}}}, indent=2, ensure_ascii=False))
+        if self.install:
+            lay.addWidget(self.note(_("If your tool can’t find the texloom command, give its full path instead.")))
         lay.addWidget(self.note(_("Suggesting and editing use this folder’s path. Reading uses a read-only link, which your tool saves in its settings, so anyone who can read those settings can read the project.")))
         lay.addWidget(self.note(_("The tool reads text other people wrote in this project, which could include instructions aimed at it. On shared projects, suggesting is the safer choice.")))
         row = QtWidgets.QHBoxLayout()
@@ -912,7 +919,7 @@ class ConnectToolDialog(QtWidgets.QDialog):
             self.show_commands()
 
     def show_commands(self) -> None:
-        for box, copy, text in (self.install, self.claude, self.other):
+        for box, copy, text in filter(None, (self.install, self.claude, self.other)):
             box.setPlainText(text())
             copy.setText(_("Copy"))
 
