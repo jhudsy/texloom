@@ -937,6 +937,7 @@ npm run check-gitshacache  # the git id cache keeps only the project's current f
 npm run check-props     # random texts and edits (Windows line endings, emoji): the editor and the shared text stay identical, merges and line endings behave
 cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for the desktop, and its merge agrees with the web app's
 uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
+uv run python scripts/check_compat.py                              # code kept for older apps, servers and data: listed, markers well formed (DESIGN.md)
 uv run --with hypothesis python scripts/check_folder_model.py     # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
 uv run python scripts/check_folder_deletions.py                   # a file deleted or renamed in the folder isn't brought back by a change arriving just then
 uv run python scripts/check_folder_reads.py                       # a file is shared only as it was once it stopped changing, not mid-way through the next save

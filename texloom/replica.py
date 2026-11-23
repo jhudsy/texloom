@@ -137,6 +137,7 @@ class Replica:
                     return v["m"]
             except (ValueError, TypeError):
                 pass
+        # compat(data 0.4.35): the plain, unsigned storage value (v == 'relay'); converted on read: its owner signs it
         return self.heard_mode or ("relay" if v == "relay" else "server")
 
     def _heard(self, mode: object) -> None:
@@ -864,6 +865,7 @@ class Replica:
             await self.send_mode(self.pending_mode)
         old = self.meta.get("storage")
         if self.keys.seed is not None and not self.pending_mode and old is not None and not isinstance(old, dict):
+            # compat(data 0.4.35): converted on read: the owner signs an unsigned storage value
             self._sign_storage(self.server_mode)  # a project from before 0.4.35: its owner signs what the server does
         await self.upload_pending()  # blobs first, so peers can fetch what updates reference
         self.since = head if lost else max(self.since, head)

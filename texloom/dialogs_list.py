@@ -192,6 +192,7 @@ class ProjectListDialog(QtWidgets.QDialog):
             elsewhere = entry.get("s") if isinstance(entry.get("s"), str) and entry["s"].rstrip("/") != server.rstrip("/") else None  # on another server
             where = f"  ·  {urlparse(elsewhere).netloc}" if elsewhere else ""
             item = QtWidgets.QListWidgetItem(title + where + (f"  ·  {', '.join(names)}" if names else ""))
+            # compat(data 0.4.29): list entries without their server (s); not converted: read as the server that keeps the list
             there = entry.get("s") if isinstance(entry.get("s"), str) and entry["s"].startswith(("https://", "http://")) else server
             item.setData(Qt.UserRole, f"{there.rstrip('/')}/#{entry['f']}")  # on its own server
             self.items.addItem(item)

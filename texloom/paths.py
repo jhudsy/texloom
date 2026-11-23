@@ -30,6 +30,7 @@ def state_dir(folder: Path) -> Path:
     from .registry import computer_id
     top = folder / STATE
     mine = top / "computers" / computer_id()
+    # compat(data 0.4.40): a folder's records in .texloom itself; converted on read: moved the first time
     if (top / "config.json").is_file() and not (mine / "config.json").exists():
         mine.mkdir(parents=True, exist_ok=True)
         # config.json last: until it has moved, this runs again and finishes the move

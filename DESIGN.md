@@ -1092,6 +1092,57 @@ real failure. So none is dropped without a trace:
 `scripts/check_quiet.py` (in CI) refuses an empty `catch`, a no-op `.catch()`, and a broad
 `except` that leaves no trace.
 
+## Code kept for older apps, servers and data
+
+Every place that handles something older carries a marker just above it, saying what must happen
+before it can go (issue 27):
+
+```
+# compat(app 0.4.30): apps too old to send their version are held, not just refused
+// compat(data 0.4.35): the plain, unsigned storage value; converted on read: its owner signs it
+```
+
+- **app X**: apps older than X. Apps reach the server, and each other, only through a server, so
+  this goes once every server's `--min-version` is X or later.
+- **server X**: servers older than X. This goes once every server people use runs X or later.
+- **data X**: something written before X that is still stored somewhere. Raising the minimum
+  version doesn't make it go away, so it is **converted when it is read**, where that's possible,
+  and the marker says how, or why it can't be.
+
+`scripts/check_compat.py` lists them (`--min-version` and `--servers` say which app and server
+ones could go), and CI checks every marker is well formed and that each data marker says
+whether it is converted. When a server's minimum version moves up, remove a batch.
+
+**Converting data when it's read.** Who can convert something depends on where it is kept:
+
+- *In a project* (the shared document, and the server's log of it). The server can't convert
+  it: everything in the log is encrypted, so it can't even see what form a value has. An app
+  can. When an app that may write opens the project and finds the old form, it writes the new
+  form as an ordinary edit. That edit reaches everyone else and the server's log; the next
+  snapshot then replaces the old entries. Some conversions need a particular key: only the owner
+  can sign the storage setting, for example. Until such a person opens the project, it keeps the
+  old form.
+- *On the server, readable by it* (its database, the TeX Live index). The server converts it when
+  it starts. Once every server has started on that version, the reading code can go.
+- *On a computer or in a browser* (a folder's `.texloom` records, browser storage). The app
+  converts it the next time it reads it.
+- *In a project list*. The list is encrypted too, so the server can't convert it. An app can,
+  the next time it saves the list.
+- *In people's hands* (links sent by email). These can't be converted. The owner can make new
+  links, or move the project to new keys.
+
+A project nobody opens is never converted, so code that reads data can't go just because time
+has passed. Removing it is a judgement: has the conversion been out long enough, and what happens
+to a project that is still in the old form? Prefer turning the old reading code into a harmless
+fallback (a default value, a field ignored) over removing it, so such a project still opens.
+The server could help with this judgement by noting the newest app version that has written to
+each stored project. It knows that version from the hello, without seeing anything inside. That
+isn't built yet.
+
+Renaming stored names is a data change of the same kind. An example is the `github` and
+`githubLease` project settings, which now cover every git host. The apps read both names, write
+only the new one, and carry a `compat(data …)` marker on the old name until it can go.
+
 ## Known limitations / open questions
 
 - Deleting a project for everyone stops it on its server only. Anyone with a copy can still read

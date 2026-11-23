@@ -406,6 +406,7 @@ class Relay(Endpoints):
                 await self.broadcast(project, {"t": "left", "from": conn.id})
         return ws
 
+    # compat(app 0.4.30): apps too old to send their version are held, not just refused: remove _hold, HOLD_UNVERSIONED and its use in handle
     async def _hold(self, project: str, ws, conn: Conn) -> None:
         """Keep a refused app that's too old to say its version (before 0.4.30) connected, hearing
         nothing, for a while. It doesn't understand the refusal, and after a connection that opened it
@@ -446,6 +447,7 @@ class Relay(Endpoints):
             size = await self.store.since_size(project, start)
             # An app that takes pages ("pages" in its hello) gets a long log a page at a time, so a
             # catch-up needs a page's memory whatever the log's size; others get it whole.
+            # compat(app 0.4.33): apps that don't take pages get a long log whole: page every catch-up instead
             paged = msg.get("pages") == 1 and size > PAGE
             # (a page is one entry at least, and a snapshot can be bigger than a page)
             cost = (max(PAGE, MAX_SNAPSHOT) if paged else size) * CATCHUP_OVERHEAD if size >= MiB else 0

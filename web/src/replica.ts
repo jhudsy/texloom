@@ -162,6 +162,7 @@ export class Replica {
    *  connected. Only servers that know the request (their status has ownerUsed) are asked. */
   askUsage(): boolean {
     const ws = this.ws
+    // compat(server 0.4.41): servers that don't know the usage request: always ask
     if (!ws || ws.readyState !== WebSocket.OPEN || !this.storeInfo || !('ownerUsed' in this.storeInfo)) return false
     ws.send(JSON.stringify({ t: 'usage' }))
     return true
@@ -222,6 +223,7 @@ export class Replica {
   get storage(): StorageMode {
     const v = this.meta.get('storage')
     if (v && typeof v === 'object' && (v.m === 'relay' || v.m === 'server') && this.keys.ownerSigned(`storage:${v.m}:${v.at}`, v.s)) return v.m
+    // compat(data 0.4.35): the plain, unsigned storage value (v == 'relay'); converted on read: its owner signs it
     return this.heardMode ?? (v === 'relay' ? 'relay' : 'server')
   }
   private heardMode: StorageMode | null = null // what the server last said it does with this project (kept)
@@ -369,6 +371,7 @@ export class Replica {
     if (this.keys.owner && pendingMode) await this.sendMode(pendingMode) // changed while offline
     // A project from before 0.4.35 has a plain, unsigned value: its owner signs what the server does.
     const v = this.meta.get('storage')
+    // compat(data 0.4.35): converted on read: the owner signs an unsigned storage value
     if (this.keys.owner && !pendingMode && v !== undefined && typeof v !== 'object') this.signStorage(this.serverMode)
     await this.uploadPending()
     await this.flushOutbox()

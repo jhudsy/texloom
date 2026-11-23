@@ -62,6 +62,7 @@ function signedName(r: Replica, prefix: string, msg: Uint8Array, s: unknown): st
   }
   if (!who || !('pub' in who)) return null
   const m = r.members.get(who.pub)
+  // compat(data 0.4.35): personal links that carry their name (the fallback when `members` has none); not converted: links are in people's hands
   const name = m && r.keys.grantValid(who.pub, String(m.name ?? ''), m.g) ? String(m.name) : who.name
   return name ? name.slice(0, 64) : null
 }

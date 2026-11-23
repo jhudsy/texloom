@@ -473,6 +473,7 @@ class FolderSync:
         seen.append(h)
         del seen[:-30]  # not a text
 
+    # compat(data 0.4.21): a folder's records with no line-ending note: read from disk; converted as each file next syncs
     def _windows(self, rel: str) -> bool:
         """Whether the file ends lines with \r\n: as remembered, or (noted before 0.4.21) as it is on disk."""
         k = self.known.get(rel, {})
@@ -537,6 +538,7 @@ class FolderSync:
 
     async def ingest_all(self) -> None:
         if not self._lf_done:
+            # compat(data 0.4.21): a "\r" left in projects by apps before 0.4.21; converted on read: a writer opening the project takes it out
             self._lf_done = True  # "\r" a copy of the app from before 0.4.21 put into the project
             self.keep_lf()
         await self.ingest(set(self.disk_files()) | set(self.known))

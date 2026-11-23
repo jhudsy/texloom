@@ -156,6 +156,7 @@ class TexLive:
         self.meta = json.loads((self.root / "repo.json").read_text())
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(pkgs)")}
         with self.db:
+            # compat(data 0.4.33): a TeX Live index without its size columns (the server's own file); converted on read, when the server starts
             if "bytes" not in cols:  # an index from before the cache was counted on disk
                 self.db.execute("ALTER TABLE pkgs ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0")
             if "used" not in cols:

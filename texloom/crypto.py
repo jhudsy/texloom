@@ -67,6 +67,7 @@ def signed_name(project: str, msg: bytes, sig_b64: object, members) -> str | Non
     pub = signer(project, msg, sig)
     if pub is None or pub == "owner":
         return None
+    # compat(data 0.4.35): personal links that carry their name (the fallback when `members` has none); not converted: links are in people's hands
     name = sig[98:98 + sig[97]].decode()
     m = members.get(pub) if members is not None else None
     if isinstance(m, dict) and isinstance(m.get("g"), str):

@@ -13,6 +13,7 @@ const LF = Symbol('texloom-lf') // the strips' own changes
 
 /** Keep "\r" out of the project's text: take out any already there, any a collaborator's older app
  *  brings in, and any pasted. Each "\r" is deleted by itself, so nothing else (cursors, comments) moves. */
+// compat(data 0.4.21): a "\r" left in projects by apps before 0.4.21; converted on read: a writer opening the project takes it out (pasted ones still need this)
 export function keepLF(r: Replica) {
   if (!r.keys.writable) return
   const strip = (texts: Iterable<Y.Text>) => {

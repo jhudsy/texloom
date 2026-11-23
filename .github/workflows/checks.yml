@@ -25,6 +25,7 @@ jobs:
       - name: No error swallowed without a trace (issue #24)
         run: uv run python scripts/check_quiet.py
       - run: uv run python scripts/check_i18n.py
+      - run: uv run python scripts/check_compat.py
       - run: uv run python scripts/check_listsync.py
       - run: uv run python scripts/check_xr.py
       - run: uv run python scripts/check_packing.py
