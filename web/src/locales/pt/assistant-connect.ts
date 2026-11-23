@@ -1,8 +1,8 @@
 import type { Catalog } from '../../i18n'
 
 const pt: Catalog = {
-  'Connect an AI tool via MCP…': 'Conectar uma ferramenta de IA via MCP…',
-  'Connect an AI tool via MCP': 'Conectar uma ferramenta de IA via MCP',
+  'Work on this project from Claude Code or another AI tool…': 'Trabalhar neste projeto a partir do Claude Code ou de outra ferramenta de IA…',
+  'Work on this project from Claude Code or another AI tool': 'Trabalhar neste projeto a partir do Claude Code ou de outra ferramenta de IA',
   'Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.': 'Ferramentas compatíveis com MCP, como Claude Code, Claude Desktop ou Cursor, podem trabalhar neste projeto como um colaborador. Elas rodam no seu computador com a sua própria conta, então nenhuma chave de API é necessária aqui.',
   'How to install uv': 'Como instalar o uv',
   'Choose what the tool may do': 'Escolha o que a ferramenta pode fazer',
@@ -20,7 +20,7 @@ const pt: Catalog = {
   'What your tool runs': 'O que sua ferramenta executa',
   'The TeXLoom app, in Applications: nothing more to install': 'O aplicativo TeXLoom, em Aplicativos: nada mais para instalar',
   'The TeXLoom command-line helper, installed once': 'O auxiliar de linha de comando do TeXLoom, instalado uma vez',
-  'If the TeXLoom desktop app is on this computer, nothing more needs installing: open this project in the app and choose Connect an AI tool via MCP… there, for lines that run the app itself. Otherwise, install the TeXLoom command-line helper once:': 'Se o aplicativo TeXLoom para computador estiver neste computador, não é preciso instalar mais nada: abra este projeto no aplicativo e escolha Conectar uma ferramenta de IA via MCP… lá, para obter linhas que executam o próprio aplicativo. Caso contrário, instale uma vez o auxiliar de linha de comando do TeXLoom:',
+  'If the TeXLoom desktop app is on this computer, nothing more needs installing: open this project in the app and choose Work on this project from Claude Code or another AI tool… there, for lines that run the app itself. Otherwise, install the TeXLoom command-line helper once:': 'Se o aplicativo TeXLoom para computador estiver neste computador, não é preciso instalar mais nada: abra este projeto no aplicativo e escolha Trabalhar neste projeto a partir do Claude Code ou de outra ferramenta de IA… lá, para obter linhas que executam o próprio aplicativo. Caso contrário, instale uma vez o auxiliar de linha de comando do TeXLoom:',
 }
 
 export default pt

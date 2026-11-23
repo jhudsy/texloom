@@ -434,7 +434,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     render()
   }
 
-  const connectButton = () => h('button', { class: 'small connect-tool', onclick: () => connectToolDialog(host.writable, host.link) }, t('Connect an AI tool via MCP…'))
+  const connectButton = () => h('button', { class: 'small connect-tool', onclick: () => connectToolDialog(host.writable, host.link) }, t('Work on this project from Claude Code or another AI tool…'))
   /** The other way to work with AI, which people took for part of this panel. */
   const otherWay = () => h('div', { class: 'ai-note ai-other' },
     h('b', {}, t('Or use an AI tool on your computer')), ' ',

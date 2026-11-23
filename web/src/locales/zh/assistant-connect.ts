@@ -1,8 +1,8 @@
 import type { Catalog } from '../../i18n'
 
 const zh: Catalog = {
-  'Connect an AI tool via MCP…': '通过 MCP 连接 AI 工具…',
-  'Connect an AI tool via MCP': '通过 MCP 连接 AI 工具',
+  'Work on this project from Claude Code or another AI tool…': '从 Claude Code 或其他 AI 工具处理此项目…',
+  'Work on this project from Claude Code or another AI tool': '从 Claude Code 或其他 AI 工具处理此项目',
   'Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.': '支持 MCP 的工具（如 Claude Code、Claude Desktop 或 Cursor）可以像协作者一样处理此项目。它们在您的电脑上使用您自己的账户运行，因此这里无需 API 密钥。',
   'How to install uv': '如何安装 uv',
   'Choose what the tool may do': '选择该工具可以执行的操作',
@@ -20,7 +20,7 @@ const zh: Catalog = {
   'What your tool runs': '你的工具运行什么',
   'The TeXLoom app, in Applications: nothing more to install': '“应用程序”中的 TeXLoom 应用：无需再安装',
   'The TeXLoom command-line helper, installed once': 'TeXLoom 命令行助手（安装一次即可）',
-  'If the TeXLoom desktop app is on this computer, nothing more needs installing: open this project in the app and choose Connect an AI tool via MCP… there, for lines that run the app itself. Otherwise, install the TeXLoom command-line helper once:': '如果这台电脑上装有 TeXLoom 桌面应用，就无需再安装：在应用中打开此项目，并在那里选择“通过 MCP 连接 AI 工具…”，即可得到直接运行该应用的命令。否则，请安装一次 TeXLoom 命令行助手：',
+  'If the TeXLoom desktop app is on this computer, nothing more needs installing: open this project in the app and choose Work on this project from Claude Code or another AI tool… there, for lines that run the app itself. Otherwise, install the TeXLoom command-line helper once:': '如果这台电脑上装有 TeXLoom 桌面应用，就无需再安装：在应用中打开此项目，并在那里选择“从 Claude Code 或其他 AI 工具处理此项目…”，即可得到直接运行该应用的命令。否则，请安装一次 TeXLoom 命令行助手：',
 }
 
 export default zh

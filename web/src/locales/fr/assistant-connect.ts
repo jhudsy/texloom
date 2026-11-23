@@ -1,8 +1,8 @@
 import type { Catalog } from '../../i18n'
 
 const fr: Catalog = {
-  'Connect an AI tool via MCP…': 'Connecter un outil d’IA via MCP…',
-  'Connect an AI tool via MCP': 'Connecter un outil d’IA via MCP',
+  'Work on this project from Claude Code or another AI tool…': 'Travailler sur ce projet depuis Claude Code ou un autre outil d’IA…',
+  'Work on this project from Claude Code or another AI tool': 'Travailler sur ce projet depuis Claude Code ou un autre outil d’IA',
   'Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.': 'Les outils compatibles MCP, comme Claude Code, Claude Desktop ou Cursor, peuvent travailler sur ce projet comme un collaborateur. Ils s’exécutent sur votre ordinateur avec votre propre compte, donc aucune clé API n’est nécessaire ici.',
   'How to install uv': 'Comment installer uv',
   'Choose what the tool may do': 'Choisissez ce que l’outil peut faire',
@@ -20,7 +20,7 @@ const fr: Catalog = {
   'What your tool runs': 'Ce que lance votre outil',
   'The TeXLoom app, in Applications: nothing more to install': 'L’application TeXLoom, dans Applications : rien de plus à installer',
   'The TeXLoom command-line helper, installed once': 'L’outil en ligne de commande TeXLoom, installé une fois',
-  'If the TeXLoom desktop app is on this computer, nothing more needs installing: open this project in the app and choose Connect an AI tool via MCP… there, for lines that run the app itself. Otherwise, install the TeXLoom command-line helper once:': 'Si l’application de bureau TeXLoom est sur cet ordinateur, il n’y a rien de plus à installer : ouvrez ce projet dans l’application et choisissez Connecter un outil d’IA via MCP… pour obtenir des lignes qui lancent l’application elle-même. Sinon, installez une fois l’outil en ligne de commande TeXLoom :',
+  'If the TeXLoom desktop app is on this computer, nothing more needs installing: open this project in the app and choose Work on this project from Claude Code or another AI tool… there, for lines that run the app itself. Otherwise, install the TeXLoom command-line helper once:': 'Si l’application de bureau TeXLoom est sur cet ordinateur, il n’y a rien de plus à installer : ouvrez ce projet dans l’application et choisissez Travailler sur ce projet depuis Claude Code ou un autre outil d’IA… pour obtenir des lignes qui lancent l’application elle-même. Sinon, installez une fois l’outil en ligne de commande TeXLoom :',
 }
 
 export default fr

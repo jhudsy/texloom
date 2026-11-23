@@ -413,7 +413,7 @@ Choosing a folder in the list shows whether it is up to date, offline or sending
 for owners **edit links for others**: one per person or group, to copy or email; revoking one
 is in the web app's Share dialog). **More** (also the **Project** menu and the right-click menu)
 has **Tags…**, **Make a copy…** (a new project, in a new folder, from this one's files),
-**Word count…**, **Connect an AI tool via MCP…** (how to connect a tool you already use through
+**Word count…**, **Work on this project from Claude Code or another AI tool…** (how to connect a tool you already use through
 [MCP](#agents-mcp)) and **Leave…**, which stops syncing a folder (its files stay).
 - **Compiling:** compile with your own TeX when files change. Once that's on, **Running programs
   when compiling** is *Never* (default), *TeX Live's safe list*, or *Anything the document asks,
@@ -706,7 +706,7 @@ claude mcp add texloom -- texloom mcp '<edit link>'         # or straight from a
 
 With the downloadable app there's nothing more to install: the binary inside it runs the server
 too (`/Applications/TeXLoom.app/Contents/MacOS/TeXLoom mcp …` on a Mac, `TeXLoom.exe mcp …` in the
-app's folder on Windows). **Connect an AI tool via MCP…** in the app gives the lines with its path.
+app's folder on Windows). **Work on this project from Claude Code or another AI tool…** in the app gives the lines with its path.
 App builds check that the built app answers MCP (`scripts/check_bundled_mcp.py`).
 
 The agent appears to everyone as **Claude (agent)** (change with `--name`), with its own
@@ -781,7 +781,7 @@ model is loaded), Ollama or OpenRouter; you can also enter it under ⚙ **Contex
 loaded with a small context: 16,000 tokens or more leaves room to work, since the assistant's own instructions take
 a few thousand. A model that thinks before answering can take a few minutes over a summary.
 
-**Connect an AI tool via MCP…** in the tab shows how to connect a tool you already use through
+**Work on this project from Claude Code or another AI tool…** in the tab shows how to connect a tool you already use through
 [MCP](#agents-mcp) instead, such as Claude Code. It runs under your own account with that tool, so it
 needs no API key here. It's separate from the tab: you talk to the tool in its own window, and its work
 shows up in the project under its name.
