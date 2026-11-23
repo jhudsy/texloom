@@ -5,11 +5,30 @@
   "version": "0.1.0",
   "publisher": "texloom",
   "license": "AGPL-3.0-or-later",
-  "repository": { "type": "git", "url": "https://github.com/jhudsy/texloom.git", "directory": "editors/vscode" },
-  "engines": { "vscode": "^1.82.0" },
-  "categories": ["Other"],
-  "keywords": ["latex", "tex", "comments", "review", "collaboration"],
-  "activationEvents": ["onLanguage:latex", "onLanguage:bibtex", "onLanguage:tex", "workspaceContains:**/*.tex"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jhudsy/texloom.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "latex",
+    "tex",
+    "comments",
+    "review",
+    "collaboration"
+  ],
+  "activationEvents": [
+    "onLanguage:latex",
+    "onLanguage:bibtex",
+    "onLanguage:tex",
+    "workspaceContains:**/*.tex"
+  ],
   "main": "./extension.js",
   "contributes": {
     "configuration": {
@@ -22,7 +41,11 @@
         },
         "texloom.comments": {
           "type": "string",
-          "enum": ["threads", "problems", "both"],
+          "enum": [
+            "threads",
+            "problems",
+            "both"
+          ],
           "default": "threads",
           "enumDescriptions": [
             "Comment threads beside the text, as in a pull request review, with reply and resolve.",
@@ -34,22 +57,58 @@
       }
     },
     "commands": [
-      { "command": "texloom.resolveThread", "title": "Resolve", "category": "TeXLoom", "icon": "$(check)" },
-      { "command": "texloom.replyThread", "title": "Reply", "category": "TeXLoom" },
-      { "command": "texloom.showReview", "title": "Open the Review tab in the browser", "category": "TeXLoom", "icon": "$(link-external)" },
-      { "command": "texloom.refresh", "title": "Refresh comments", "category": "TeXLoom" }
+      {
+        "command": "texloom.resolveThread",
+        "title": "Resolve",
+        "category": "TeXLoom",
+        "icon": "$(check)"
+      },
+      {
+        "command": "texloom.replyThread",
+        "title": "Reply",
+        "category": "TeXLoom"
+      },
+      {
+        "command": "texloom.showReview",
+        "title": "Open the Review tab in the browser",
+        "category": "TeXLoom",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "texloom.refresh",
+        "title": "Refresh comments",
+        "category": "TeXLoom"
+      }
     ],
     "menus": {
       "commandPalette": [
-        { "command": "texloom.resolveThread", "when": "false" },
-        { "command": "texloom.replyThread", "when": "false" }
+        {
+          "command": "texloom.resolveThread",
+          "when": "false"
+        },
+        {
+          "command": "texloom.replyThread",
+          "when": "false"
+        }
       ],
       "comments/commentThread/title": [
-        { "command": "texloom.resolveThread", "group": "navigation@1", "when": "commentController == texloom && commentThread == texloom-open" },
-        { "command": "texloom.showReview", "group": "navigation@2", "when": "commentController == texloom" }
+        {
+          "command": "texloom.resolveThread",
+          "group": "navigation@1",
+          "when": "commentController == texloom && commentThread == texloom-open"
+        },
+        {
+          "command": "texloom.showReview",
+          "group": "navigation@2",
+          "when": "commentController == texloom"
+        }
       ],
       "comments/commentThread/context": [
-        { "command": "texloom.replyThread", "group": "inline", "when": "commentController == texloom && commentThread == texloom-open" }
+        {
+          "command": "texloom.replyThread",
+          "group": "inline",
+          "when": "commentController == texloom && commentThread == texloom-open"
+        }
       ]
     }
   },
@@ -61,5 +120,6 @@
   },
   "devDependencies": {
     "@vscode/vsce": "3.2.1"
-  }
+  },
+  "icon": "icon.png"
 }
