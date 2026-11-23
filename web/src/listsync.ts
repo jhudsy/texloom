@@ -289,16 +289,21 @@ export function syncNow(): Promise<void> {
         console.warn('list settings:', e)
       }
       const doc = await exchange(await ListKey.of(secret), projects.asList())
-      different = projects.applyList(doc) || different
+      // merged with the list as it is now, not as it was sent: what changed here meanwhile (a project
+      // opened in this tab while the server answered, say) would otherwise be put back as it was
+      const now = mergeLists(projects.asList(), doc)
+      const behind = canon(now) !== canon(doc) // the server hasn't that yet: another exchange follows
+      different = projects.applyList(now) || different
       const hadError = tagsError
       try {
         different = await exchangeTags(secret, doc) || different
         tagsError = null
       } catch (e) { tagsError = e instanceof ListError ? e.message : 'network' }
       await copyWays(secret).catch((e) => console.warn('list ways in:', e))
-      lastSynced = localState()
+      lastSynced = behind ? '' : localState()
       lastError = null
       if (different || tagsError !== hadError) changed()
+      if (behind) schedule()
     } catch (e) {
       lastError = e instanceof ListError ? e.message : 'network'
       throw e

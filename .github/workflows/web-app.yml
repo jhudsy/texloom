@@ -65,3 +65,6 @@ jobs:
       - name: The Review tab
         if: (success() || failure()) && steps.chromium.outcome == 'success'  # even if the one above failed
         run: uv run --extra server --with playwright python scripts/check_web_review.py
+      - name: The project list keeps when a project was opened
+        if: (success() || failure()) && steps.chromium.outcome == 'success'
+        run: uv run --extra server --with playwright python scripts/check_web_listsync.py

@@ -88,7 +88,7 @@ class Session:
         p = self.browser.new_page(viewport={"width": 1400, "height": 950}, **kw)
         p.on("pageerror", lambda e: print("  page error:", e))
         items = {"texloom.testHooks": "1", **(storage or {})}
-        p.add_init_script(f"for (const [k, v] of Object.entries({json.dumps(items)})) localStorage.setItem(k, v)")
+        p.add_init_script(f"try {{ for (const [k, v] of Object.entries({json.dumps(items)})) localStorage.setItem(k, v) }} catch {{}}")  # (none on about:blank)
         return p
 
     def project(self, files: dict[str, str] | None = None, storage: dict[str, str] | None = None, name: str = "Tester"):
