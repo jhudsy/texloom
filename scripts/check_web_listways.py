@@ -21,9 +21,11 @@ os.environ["TEXLOOM_HOME"] = tempfile.mkdtemp(prefix="texloom-listways-")  # bef
 from texloom import listsync  # noqa: E402
 from texloom.crypto import b64e  # noqa: E402
 
-DESK = ("ada-desk", "correct horse desk one")
-WEB = ("ada-web", "correct horse web two")
-THIRD = ("ada-third", "correct horse third three")
+# usernames of their own each run, so it can be run again against a server that keeps them (staging)
+RUN = os.urandom(4).hex()
+DESK = (f"ada-desk-{RUN}", "correct horse desk one")
+WEB = (f"ada-web-{RUN}", "correct horse web two")
+THIRD = (f"ada-third-{RUN}", "correct horse third three")
 
 
 def password_dialog(p, username: str, password: str, again: bool) -> None:
