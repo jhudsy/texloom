@@ -3,9 +3,9 @@
 #
 #   deploy/install.sh root@server.example.org texloom.example.org
 #
-# Re-run it to update. Used for https://texloom.jhudsy.org (Ubuntu 24.04, alongside other nginx
-# sites). It only adds things: a `texloom` system user, the app in /var/www/texloom (set
-# TEXLOOM_DIR for elsewhere), its files and SQLite database in /var/lib/texloom, settings
+# Re-run it to update. Tested on Ubuntu 24.04 and Debian 13, alongside other nginx sites. It
+# only adds things: a `texloom` system user, the app in /var/www/texloom (set
+# TEXLOOM_DIR for elsewhere), its files and (unless PostgreSQL) SQLite database in /var/lib/texloom, settings
 # in /etc/texloom (texloom.toml, written once: edit it there), a systemd service on 127.0.0.1:8787
 # and an nginx site for the domain, plus a Let's Encrypt certificate via certbot. Other sites are
 # left alone. It keeps no backups: see INSTALL.md. Extra ssh options can be passed in SSH_OPTS;

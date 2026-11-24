@@ -70,6 +70,17 @@ relay keeps in memory moves into shared state ([#12](https://github.com/jhudsy/t
 
 ## Availability
 
+### Today: a cold standby from the backups
+
+The simplest standby needs nothing beyond the backups INSTALL.md describes: a second machine
+restores the latest one every night (the database, the settings and codes, and the stored files
+or a copy of the bucket), checks it, and stays stopped. If the main server is lost, it starts
+with that copy and the names move to it. Changes made since the backup aren't lost: the apps hold
+them, notice that the server's log isn't the one they last saw (they send the last change they
+have in their hello, and the server says when it doesn't match), and send everything again. So a
+restore costs a catch-up, not data (`scripts/check_restore.py`). The nightly restore is also the
+proof that the backups work.
+
 ### Two machines are enough
 
 Nothing needs a vote, because the database is the one place changes are numbered and the relays
