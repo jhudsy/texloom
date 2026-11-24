@@ -8,6 +8,7 @@ export const PROTOCOL = '2025-06-18'
 const CLIENT = { name: 'texloom-assistant', version: '1' }
 const MAX_TOOLS = 128 // per server: more would crowd out the conversation
 const MAX_RESULT = 100_000 // characters of one result handed to the model
+const MAX_STREAM = 20_000_000 // characters of one answer read from a server's event stream (a server that never stops)
 
 export interface McpTool { name: string; description: string; inputSchema: Record<string, unknown> }
 export interface McpServerInfo { name: string; version?: string; instructions?: string }
@@ -116,6 +117,7 @@ async function fromStream(r: Response, id: number): Promise<any> {
     for (;;) {
       const { value, done } = await reader.read()
       if (value) buf += dec.decode(value, { stream: true })
+      if (buf.length + data.reduce((n, d) => n + d.length, 0) > MAX_STREAM) throw new Error('the server’s answer is too long')
       let nl: number
       while ((nl = buf.search(/\r?\n/)) >= 0) {
         const line = buf.slice(0, nl)

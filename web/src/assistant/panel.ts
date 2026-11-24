@@ -599,9 +599,9 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       replica: r, writable: host.writable,
       review: (ch) => review(ch, turnEl),
       compile: host.compile, lastLog: host.lastLog, agentName: `Assistant (for ${host.userName()})`.slice(0, 64),
-      // a tool from elsewhere asks first, as edits do (and always on a read-only project, which has no switch)
-      allow: (summary, detail) => (host.writable && !aiPrefs.reviewEdits ? Promise.resolve(true)
-        : review({ path: '', before: null, after: '', summary, note: detail }, turnEl, true)),
+      // a tool from elsewhere always asks first, whatever the edits switch says: only marking its
+      // server trusted skips the question (text in the project could ask the assistant to call it)
+      allow: (summary, detail) => review({ path: '', before: null, after: '', summary, note: detail }, turnEl, true),
       signal: abort.signal,
     }
     try {
@@ -849,7 +849,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       list,
       form,
       h('button', { class: 'small', onclick: () => { form.hidden = false; url.focus() } }, t('Add a tool server…')),
-      h('p', { class: 'risk small' }, t('Their tools act outside this project, and what they return is text from elsewhere, which could include instructions aimed at the assistant. Unless a server is trusted, each call asks first while Ask before applying edits is on.')))
+      h('p', { class: 'risk small' }, t('Their tools act outside this project, and what they return is text from elsewhere, which could include instructions aimed at the assistant. Unless a server is trusted, each call asks first.')))
   }
 
   return panel

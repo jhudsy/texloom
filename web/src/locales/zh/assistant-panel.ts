@@ -131,7 +131,7 @@ const zh: Catalog = {
   'Tools for the Assistant': '助手的工具',
   'Tools from other servers, for the assistant to use beside its own: a literature search, a reference manager, your lab’s own tools. They’re MCP servers on the web, reached straight from this browser; only those that allow requests from this page work. Kept only in this browser, with their tokens, and they apply from your next message.': '来自其他服务器的工具，供助手在自身工具之外使用：文献检索、参考文献管理器、你所在实验室的工具。它们是网上的 MCP 服务器，由此浏览器直接访问；只有允许来自此页面请求的服务器才能使用。它们连同令牌只保存在此浏览器中，从你的下一条消息起生效。',
   'Add a tool server…': '添加工具服务器…',
-  'Their tools act outside this project, and what they return is text from elsewhere, which could include instructions aimed at the assistant. Unless a server is trusted, each call asks first while Ask before applying edits is on.': '它们的工具在此项目之外运行，返回的是来自别处的文本，其中可能包含针对助手的指令。除非服务器受信任，否则在开启“应用修改前先询问”时，每次调用都会先询问。',
+  'Their tools act outside this project, and what they return is text from elsewhere, which could include instructions aimed at the assistant. Unless a server is trusted, each call asks first.': '它们的工具在此项目之外运行，返回的是来自别处的文本，其中可能包含针对助手的指令。除非服务器受信任，否则每次调用都会先询问。',
 }
 
 export default zh

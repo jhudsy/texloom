@@ -51,7 +51,7 @@ let endpoint: Promise<string | null> | null = null
 export function texliveEndpoint(): Promise<string | null> {
   return (endpoint ??= serverInfo().then((j) => {
     if (!j) return getString(ENDPOINT_KEY) // offline: as last heard
-    const e = typeof j.texlive?.endpoint === 'string' && j.texlive.endpoint.startsWith('/') ? new URL(j.texlive.endpoint, location.origin).href : null
+    const e = typeof j.texlive?.endpoint === 'string' && j.texlive.endpoint.startsWith('/') && !j.texlive.endpoint.startsWith('//') ? new URL(j.texlive.endpoint, location.origin).href : null
     setString(ENDPOINT_KEY, e)
     return e
   }))
