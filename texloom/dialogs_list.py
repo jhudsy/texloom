@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import threading
+import logging
 import time
 from urllib.parse import urlparse
 
@@ -11,11 +11,20 @@ from PySide6.QtCore import Qt
 
 from . import listsync
 from .i18n import _, ngettext
-from .ui import AMBER, chevron, grey_note, known_server, red
+from .ui import AMBER, chevron, heading, in_background, known_server, note, red
+
+log = logging.getLogger("texloom")
 
 
 def NO_RECOVERY() -> str:  # a constant, translated when shown
     return _("There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it.")
+
+
+def keep_it_safe() -> QtWidgets.QLabel:
+    """The warning that a lost list can't be recovered, with more in its tooltip."""
+    label = note(_("Nobody can recover a lost list, not even the server’s owner: keep the sync link safe."), AMBER)
+    label.setToolTip(NO_RECOVERY())
+    return label
 
 
 def just_asked() -> bool:
@@ -45,12 +54,9 @@ class PasswordDialog(QtWidgets.QDialog):
         self.setWindowTitle(_("Set a password") if setting else _("Unlock with a password"))
         self.setMinimumWidth(440)
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(grey_note(_("Your username and password stay on this device. Only a value worked out from them reaches the server, so it never learns either one.")))
+        lay.addWidget(note(_("Your username and password stay on this device. Only a value worked out from them reaches the server, so it never learns either one.")))
         if setting:
-            warn = QtWidgets.QLabel(_("A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else."))
-            warn.setWordWrap(True)
-            warn.setStyleSheet(f"color: {AMBER}")
-            lay.addWidget(warn)
+            lay.addWidget(note(_("A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else."), AMBER))
         form = QtWidgets.QFormLayout()
         self.username = QtWidgets.QLineEdit()
         self.password = QtWidgets.QLineEdit()
@@ -100,11 +106,8 @@ class ProjectListDialog(QtWidgets.QDialog):
 
     current: ProjectListDialog | None = None  # the one open now: a list coming back from the browser goes there
 
-    work_done = QtCore.Signal(object, object, object)  # what to do next, its result, or the error
-
     def __init__(self, window, link: str = "", from_web: bool = False) -> None:
         super().__init__(window)
-        self.work_done.connect(self.after_work)
         self.window_ = window
         self.setWindowTitle(_("Project list"))
         self.setMinimumWidth(600)
@@ -113,9 +116,7 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.finished.connect(lambda _r: ProjectListDialog.current is self and setattr(ProjectListDialog, "current", None))
         if from_web and link and link == listsync.saved_link():
             from_web = False  # the list this computer already uses: nothing to decide
-        self.web_warn = QtWidgets.QLabel(self.web_warning(link) if from_web else "")
-        self.web_warn.setWordWrap(True)
-        self.web_warn.setStyleSheet(f"color: {AMBER}")
+        self.web_warn = note(self.web_warning(link) if from_web else "", AMBER)
         self.web_warn.setVisible(from_web)
         lay.addWidget(self.web_warn)
         intro = QtWidgets.QLabel(_("Your project list follows you to your other computers and browsers. It is kept on the "
@@ -129,8 +130,8 @@ class ProjectListDialog(QtWidgets.QDialog):
         setup = QtWidgets.QWidget()
         s = QtWidgets.QVBoxLayout(setup)
         s.setContentsMargins(0, 8, 0, 0)
-        s.addWidget(self.heading(_("Already syncing on another device?")))
-        s.addWidget(grey_note(_("Open the same list here with:")))
+        s.addWidget(heading(_("Already syncing on another device?")))
+        s.addWidget(note(_("Open the same list here with:")))
         row = QtWidgets.QHBoxLayout()
         passkey = QtWidgets.QPushButton(_("Passkey…"))
         passkey.setToolTip(_("Opens the server's page in your browser, which sends the list back to this app."))
@@ -151,8 +152,8 @@ class ProjectListDialog(QtWidgets.QDialog):
         row.addWidget(use)
         s.addLayout(row)
         s.addSpacing(12)
-        s.addWidget(self.heading(_("First time? Start syncing")))
-        s.addWidget(grey_note(_("Choose how you’ll open the list elsewhere. You also get a sync link, which always works.")))
+        s.addWidget(heading(_("First time? Start syncing")))
+        s.addWidget(note(_("Choose how you’ll open the list elsewhere. You also get a sync link, which always works.")))
         row = QtWidgets.QHBoxLayout()
         with_pw = QtWidgets.QPushButton(_("With a password…"))
         with_pw.setToolTip(_("A username and password of your choice. Nobody can reset it if you forget it."))
@@ -173,11 +174,7 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.code.setPlaceholderText(_("Creation code (if the server needs one)"))
         row.addWidget(self.code, 1)
         s.addLayout(row)
-        no_recovery = QtWidgets.QLabel(_("Nobody can recover a lost list, not even the server’s owner: keep the sync link safe."))
-        no_recovery.setWordWrap(True)
-        no_recovery.setStyleSheet(f"color: {AMBER}")
-        no_recovery.setToolTip(NO_RECOVERY())
-        s.addWidget(no_recovery)
+        s.addWidget(keep_it_safe())
         s.addStretch(1)
         self.pages.addWidget(setup)
 
@@ -196,8 +193,8 @@ class ProjectListDialog(QtWidgets.QDialog):
         u.addLayout(row)
 
         u.addSpacing(6)
-        u.addWidget(self.heading(_("Your sync link")))
-        u.addWidget(grey_note(_("It opens this list on any computer or browser. Save it in a password manager.")))
+        u.addWidget(heading(_("Your sync link")))
+        u.addWidget(note(_("It opens this list on any computer or browser. Save it in a password manager.")))
         row = QtWidgets.QHBoxLayout()
         self.copy_btn = QtWidgets.QPushButton(_("Copy sync link"))
         self.copy_btn.setToolTip(_("Copy the link, to paste into another browser or a password manager"))
@@ -205,14 +202,10 @@ class ProjectListDialog(QtWidgets.QDialog):
         row.addWidget(self.copy_btn)
         row.addStretch(1)
         u.addLayout(row)
-        keep = QtWidgets.QLabel(_("Nobody can recover a lost list, not even the server’s owner: keep the sync link safe."))
-        keep.setWordWrap(True)
-        keep.setStyleSheet(f"color: {AMBER}")
-        keep.setToolTip(NO_RECOVERY())
-        u.addWidget(keep)
+        u.addWidget(keep_it_safe())
 
         u.addSpacing(6)
-        u.addWidget(self.heading(_("Other ways to open it")))
+        u.addWidget(heading(_("Other ways to open it")))
         self.ways = QtWidgets.QVBoxLayout()
         self.ways.setSpacing(2)
         u.addLayout(self.ways)
@@ -241,13 +234,13 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.more = QtWidgets.QWidget()
         m = QtWidgets.QVBoxLayout(self.more)
         m.setContentsMargins(0, 0, 0, 0)
-        m.addWidget(self.heading(_("Copies on other servers")))
-        m.addWidget(grey_note(_("Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.")))
+        m.addWidget(heading(_("Copies on other servers")))
+        m.addWidget(note(_("Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.")))
         self.copies = QtWidgets.QListWidget()
         self.copies.setMaximumHeight(90)
         self.copies.itemChanged.connect(self.copy_changed)
         m.addWidget(self.copies)
-        m.addWidget(self.heading(_("Stop or start over")))
+        m.addWidget(heading(_("Stop or start over")))
         row = QtWidgets.QHBoxLayout()
         off = QtWidgets.QPushButton(_("Stop using it here…"))
         off.setToolTip(_("This computer keeps its folders but stops syncing the list. Other devices carry on."))
@@ -278,13 +271,6 @@ class ProjectListDialog(QtWidgets.QDialog):
         if in_use:
             self.refresh_list()
 
-    @staticmethod
-    def heading(text: str) -> QtWidgets.QLabel:
-        label = QtWidgets.QLabel(text)
-        f = label.font()
-        f.setBold(True)
-        label.setFont(f)
-        return label
 
     def _server(self) -> str:
         try:
@@ -293,35 +279,23 @@ class ProjectListDialog(QtWidgets.QDialog):
             return known_server()
 
     def in_background(self, work, then, quiet: bool = False) -> None:
-        """Network and password hashing are slow: keep the window responsive. `quiet`: leave the
-        status line alone (what's under way is only filling in the window)."""
-        if quiet:
-            def done(result, then=then):
-                then(result)
-            done.quiet = True  # (after_work leaves the status line alone)
-            then = done
-        else:
+        """Network and password hashing are slow: keep the window responsive. `then(result)` once
+        done; an error is shown in the status line instead. `quiet`: leave the status line alone
+        (what's under way is only filling in the window), and call `then(None)` on an error."""
+        if not quiet:
             self.status.setText(_("Working…"))
 
-        def run() -> None:
-            try:
-                result, error = work(), None
-            except Exception as e:  # noqa: BLE001 - shown to the user
-                result, error = None, e
-            try:
-                self.work_done.emit(then, result, error if not quiet else None)
-            except RuntimeError:  # the dialog was closed meanwhile
-                pass
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def after_work(self, then, result, error) -> None:
-        if error is None:
-            if not getattr(then, "quiet", False):
+        def done(result, error) -> None:
+            if error is not None and quiet:
+                log.debug("project list: %s", error)
+            elif error is not None:
+                self.status.setText(listsync.explain(error.code) if isinstance(error, listsync.ListError) else str(error))
+                return
+            elif not quiet:
                 self.status.setText("")
             then(result)
-        else:
-            self.status.setText(listsync.explain(error.code) if isinstance(error, listsync.ListError) else str(error))
+
+        in_background(work, done)
 
     def refresh_list(self) -> None:
         code = self.code.text().strip() or None
@@ -348,7 +322,7 @@ class ProjectListDialog(QtWidgets.QDialog):
             if item.widget():
                 item.widget().deleteLater()
         if not slots:
-            self.ways.addWidget(grey_note(_("None yet: only the sync link opens it.")))
+            self.ways.addWidget(note(_("None yet: only the sync link opens it.")))
             return
         for sid, slot in sorted(slots.items(), key=lambda x: x[1].get("at", 0)):
             row = QtWidgets.QWidget()

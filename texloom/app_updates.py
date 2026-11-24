@@ -6,13 +6,12 @@ import json
 import logging
 import re
 import sys
-import threading
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from . import __version__
 from .i18n import _
-from .ui import ICON, MAC
+from .ui import ICON, MAC, in_background
 
 log = logging.getLogger("texloom")
 
@@ -45,14 +44,8 @@ class UpdatesPart:
     def check_updates(self, asked: bool = False) -> None:
         """Ask GitHub for the newest release (in the background). A newer one shows "Update
         available" in the toolbar and tray; `asked` (Help ▸ Check for updates…) also says when
-        this is the newest, or that GitHub couldn't be reached."""
-        def work() -> None:
-            try:
-                found, err = latest_release(), None
-            except Exception as e:  # noqa: BLE001 - offline, rate-limited: try again tomorrow
-                found, err = None, e
-            self.engine.bridge.invoke(lambda: self.updates_found(found, err, asked))
-        threading.Thread(target=work, daemon=True).start()
+        this is the newest, or that GitHub couldn't be reached (offline, rate-limited: tried again tomorrow)."""
+        in_background(latest_release, lambda found, err: self.updates_found(found, err, asked))
 
     def updates_found(self, found: tuple[str, str] | None, err, asked: bool) -> None:
         newer = bool(found and found[0] and version_tuple(found[0]) > version_tuple(__version__))

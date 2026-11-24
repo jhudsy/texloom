@@ -5,7 +5,6 @@ from __future__ import annotations
 import functools
 import html
 import logging
-import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -13,10 +12,10 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from . import listsync, tags
-from .cli import load
+from .config import load
 from .dialogs_tags import ManageTagsDialog, TagsDialog
 from .i18n import _, app_pref, ngettext, set_app_pref
-from .ui import GREY, ICON, TAGS_ROLE, chevron, dot, grey_note, project_name, tag_hex
+from .ui import GREY, ICON, TAGS_ROLE, chevron, dot, heading, in_background, note, project_name, tag_hex
 
 log = logging.getLogger("texloom")
 
@@ -118,10 +117,7 @@ class ProjectListPart:
         self.welcome_list = QtWidgets.QWidget()
         wl = QtWidgets.QVBoxLayout(self.welcome_list)
         wl.setContentsMargins(0, 0, 0, 16)
-        ask = QtWidgets.QLabel(_("Already use TeXLoom in your browser?"))
-        f = ask.font()
-        f.setBold(True)
-        ask.setFont(f)
+        ask = heading(_("Already use TeXLoom in your browser?"))
         ask.setAlignment(Qt.AlignCenter)
         wl.addWidget(ask)
         b = QtWidgets.QPushButton(_("Open your project list…"))
@@ -129,12 +125,11 @@ class ProjectListPart:
         b.setMinimumHeight(36)
         b.clicked.connect(lambda: self.project_list())
         wl.addWidget(b, 0, Qt.AlignHCenter)
-        brings = grey_note(_("Your projects, your name and your creation codes come with it."))
+        brings = note(_("Your projects, your name and your creation codes come with it."))
         brings.setAlignment(Qt.AlignCenter)
         wl.addWidget(brings)
         lay.addWidget(self.welcome_list)
-        self.welcome_new = QtWidgets.QLabel(_("New to TeXLoom?"))
-        self.welcome_new.setFont(f)
+        self.welcome_new = heading(_("New to TeXLoom?"))
         self.welcome_new.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.welcome_new)
         row = QtWidgets.QHBoxLayout()
@@ -411,19 +406,23 @@ class ProjectListPart:
         self.scanning = True
         fs = self.folders()
 
-        def work() -> None:
+        def work() -> dict[Path, tuple[int, int]]:
             found = {}
-            try:
-                for d in fs:
-                    try:
-                        found[d] = listsync.folder_dates(d)
-                    except OSError:  # a folder that has gone
-                        found[d] = (0, 0)
-                self.dates = found
-            finally:
-                self.scanning = False
+            for d in fs:
+                try:
+                    found[d] = listsync.folder_dates(d)
+                except OSError:  # a folder that has gone
+                    found[d] = (0, 0)
+            return found
 
-        threading.Thread(target=work, daemon=True).start()
+        def done(found, error) -> None:
+            self.scanning = False
+            if error is not None:
+                log.warning("folder dates not read: %s", error)
+                return
+            self.dates = found
+
+        in_background(work, done)
 
     def selected(self) -> list[Path]:
         """What an action applies to: the selected folders, else the current one."""

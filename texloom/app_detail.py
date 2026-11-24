@@ -14,12 +14,14 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from . import listsync
-from .cli import DEFAULT_CONFIG, code_ok, load_config, update_config
+from .cli import code_ok
+from .comments import OVERVIEW, counts
+from .config import DEFAULT_CONFIG, browser_link, load_config, update_config
 from .dialogs import CopyFolderDialog, ProgramsDialog
 from .dialogs_share import ask_code
 from .i18n import _, ngettext
-from .paths import state_dir
-from .ui import GREY, ICON, browser_link, describe, grey_note, move_refusal_text, open_path, project_name, red, short_path, usage_text
+from .paths import state_dir, write_json
+from .ui import GREY, ICON, describe, heading, move_refusal_text, note, open_path, project_name, red, short_path, usage_text
 from .wordcount import find_texcount, texcount_report
 
 log = logging.getLogger("texloom")
@@ -51,8 +53,7 @@ class ProjectDetailPart:
                                               _("Couldn't reach the server: {err}", err=err))
                 return
             update_config(d, create_code=code)
-            if code != listsync.code_for(server):
-                listsync.remember_code(server, code)
+            listsync.keep_code(server, code)
 
             def switch() -> None:  # on the sync thread: the setting goes to everyone, then sync starts again with the code
                 r.set_storage("server")
@@ -89,19 +90,12 @@ class ProjectDetailPart:
             self.engine.submit(r.ask_usage(), lambda _res, _err: None)
         self.engine.submit(r.move_to_code(code), done)
 
-    def my_name_in(self, d: Path) -> str:
-        try:
-            cfg = {**DEFAULT_CONFIG, **load_config(d)}
-        except (OSError, ValueError):
-            cfg = DEFAULT_CONFIG
-        return str(cfg.get("name") or listsync.my_name()[0] or "")
 
     def check_comments(self) -> None:
-        from .comments import counts
         from .replica import Replica
         for d, st in list(self.engine.daemon.states.items()):
             if isinstance(st.replica, Replica):
-                self.engine.submit(counts(st.replica, self.my_name_in(d)), functools.partial(self.got_comments, d))
+                self.engine.submit(counts(st.replica, listsync.name_in(d)), functools.partial(self.got_comments, d))
 
     def got_comments(self, d: Path, res, err) -> None:
         if err or res is None:
@@ -119,7 +113,7 @@ class ProjectDetailPart:
         new = [k for k in mine if seen is not None and k not in seen]
         if set(mine) != (seen or set()):
             try:
-                seen_file.write_text(json.dumps(sorted(mine)))
+                write_json(seen_file, sorted(mine))
             except OSError as e:
                 log.debug("mentions seen not saved: %s", e)
         if new and self.tray is not None:
@@ -139,7 +133,7 @@ class ProjectDetailPart:
         if mine:
             parts.append("<b>" + html.escape(ngettext(mine, "{n} mentions you", "{n} mention you", n=mine)) + "</b>")
         links = [f"<a href='review'>{html.escape(_('Review in browser'))}</a>"]
-        if (d / ".texloom" / "comments.md").is_file():
+        if (d / ".texloom" / OVERVIEW).is_file():
             links.append(f"<a href='overview'>{html.escape(_('Overview file'))}</a>")
         self.comments_lbl.setText(" · ".join(parts) + " — " + " · ".join(links))
         self.comments_lbl.setToolTip(_("The overview file lists the open comments with their file and line, for reading in your own editor; "
@@ -151,7 +145,7 @@ class ProjectDetailPart:
         if d is None:
             return
         if href == "overview":
-            open_path(d / ".texloom" / "comments.md")
+            open_path(d / ".texloom" / OVERVIEW)
         else:
             self.open_review(d, mentions=bool(self.comment_counts.get(d, (0, 0))[1]))
 
@@ -210,13 +204,6 @@ class ProjectDetailPart:
             if Path(self.list.item(i).data(Qt.UserRole)) == d.resolve():
                 self.list.setCurrentRow(i)
 
-    @staticmethod
-    def section(text: str) -> QtWidgets.QLabel:
-        label = QtWidgets.QLabel(text)
-        f = label.font()
-        f.setBold(True)
-        label.setFont(f)
-        return label
 
     def build_detail(self) -> QtWidgets.QWidget:
         w = QtWidgets.QWidget()
@@ -232,9 +219,7 @@ class ProjectDetailPart:
         self.path_lbl.linkActivated.connect(lambda _href: self.open_folder())
         self.status_lbl = QtWidgets.QLabel()
         self.status_lbl.setWordWrap(True)
-        self.usage_lbl = QtWidgets.QLabel()  # how much the server keeps (ui.usage_text)
-        self.usage_lbl.setWordWrap(True)
-        self.usage_lbl.setStyleSheet(f"color: {GREY}")
+        self.usage_lbl = note("")  # how much the server keeps (ui.usage_text)
         self.usage_asked: dict[Path, float] = {}  # when fresh figures were last asked for, per folder
         self.comments_lbl = QtWidgets.QLabel()  # open comments, and the ones that mention you
         self.comments_lbl.setWordWrap(True)
@@ -259,7 +244,7 @@ class ProjectDetailPart:
         self.options = QtWidgets.QWidget()  # one folder's settings: hidden while several are selected
         o = QtWidgets.QVBoxLayout(self.options)
         o.setContentsMargins(0, 0, 0, 0)
-        o.addWidget(self.section(_("Compiling")))
+        o.addWidget(heading(_("Compiling")))
         self.c_compile = QtWidgets.QCheckBox(_("Compile with my own TeX (latexmk) when files change"))
         self.c_compile.clicked.connect(lambda on: self.set_option("compile", on))
         o.addWidget(self.c_compile)
@@ -290,11 +275,11 @@ class ProjectDetailPart:
         c.addLayout(srow)
         o.addWidget(self.compile_more)
         o.addSpacing(8)
-        o.addWidget(self.section(_("Git")))
+        o.addWidget(heading(_("Git")))
         self.c_git = QtWidgets.QCheckBox(_("Keep this folder’s git repository in step (commit, pull, push)"))
         self.c_git.clicked.connect(lambda on: self.set_option("git", on))
         o.addWidget(self.c_git)
-        self.git_note = grey_note(_("This folder isn’t a git repository. Run “git init” in it first to use this."))
+        self.git_note = note(_("This folder isn’t a git repository. Run “git init” in it first to use this."))
         o.addWidget(self.git_note)
         lay.addWidget(self.options)
         lay.addSpacing(10)
@@ -303,7 +288,7 @@ class ProjectDetailPart:
         self.act_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.act_btn.setAutoRaise(True)
         self.act_btn.setCursor(Qt.PointingHandCursor)
-        self.act_btn.setFont(self.section("").font())
+        self.act_btn.setFont(heading("").font())
         self.act_btn.setStyleSheet("QToolButton { border: none; padding: 0; background: transparent; }")
         self.act_btn.clicked.connect(self.a_activity.toggle)
         lay.addWidget(self.act_btn)
@@ -328,7 +313,7 @@ class ProjectDetailPart:
         f.setPointSize(f.pointSize() + 6)
         f.setBold(True)
         self.away_title.setFont(f)
-        self.away_where = grey_note("")
+        self.away_where = note("")
         self.away_tags = QtWidgets.QLabel()
         self.away_tags.setTextFormat(Qt.PlainText)
         for x in (self.away_title, self.away_where, self.away_tags):
@@ -401,7 +386,7 @@ class ProjectDetailPart:
             self.usage_asked[d] = time.time()
             self.engine.submit(r.ask_usage(), lambda _res, _err: None)
         try:
-            cfg = {**DEFAULT_CONFIG, **load_config(d)}
+            cfg = load_config(d)
         except (OSError, ValueError):
             cfg = DEFAULT_CONFIG
         compiles = bool(cfg.get("compile"))
