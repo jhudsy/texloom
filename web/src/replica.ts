@@ -18,6 +18,7 @@ import { quiet } from './quiet'
 import { randomHex } from './bytes'
 import { local } from './store'
 import { textStore } from './accounts'
+import { connect, req } from './idb'
 
 const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
@@ -50,23 +51,10 @@ const COLOR = /^#[0-9a-fA-F]{3,8}$/
 
 // ---- tiny IndexedDB key-value helper (one DB per project) -----------------
 type Store = 'kv' | 'outbox' | 'blobs' | 'pending'
-function openDb(name: string): Promise<IDBDatabase> {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open(name, 1)
-    r.onupgradeneeded = () => {
-      for (const s of ['kv', 'outbox', 'blobs', 'pending']) r.result.createObjectStore(s)
-    }
-    r.onsuccess = () => res(r.result)
-    r.onerror = () => rej(r.error)
-  })
-}
-function tx<T>(db: IDBDatabase, store: Store, mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  return new Promise((res, rej) => {
-    const req = fn(db.transaction(store, mode).objectStore(store))
-    req.onsuccess = () => res(req.result)
-    req.onerror = () => rej(req.error)
-  })
-}
+// (a connection of its own, closed with the replica: another copy of the project may be open too)
+const openDb = (name: string) => connect(name, 1, (db) => { for (const s of ['kv', 'outbox', 'blobs', 'pending']) db.createObjectStore(s) })
+const tx = <T>(db: IDBDatabase, store: Store, mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> =>
+  req(fn(db.transaction(store, mode).objectStore(store)))
 const idbGet = <T>(db: IDBDatabase, s: Store, k: string) => tx<T>(db, s, 'readonly', (o) => o.get(k))
 const idbPut = (db: IDBDatabase, s: Store, k: string, v: unknown) => tx(db, s, 'readwrite', (o) => o.put(v, k))
 const idbDel = (db: IDBDatabase, s: Store, k: string) => tx(db, s, 'readwrite', (o) => o.delete(k))

@@ -8,6 +8,7 @@ import { addedProgramLines, latexOutput, type ProgramLine } from './texscan'
 import { tn, t, locale } from './i18n'
 import { quiet } from './quiet'
 import { digest, hex } from './bytes'
+import { openDb, req } from './idb'
 
 const DB = 'texloom-folders'
 const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycache__', '.idea', '.vscode'])
@@ -38,21 +39,11 @@ type Dir = FileSystemDirectoryHandle
 
 export const folderSyncSupported = () => 'showDirectoryPicker' in window
 
-function db(): Promise<IDBDatabase> {
-  return new Promise((res, rej) => {
-    const q = indexedDB.open(DB, 1)
-    q.onupgradeneeded = () => q.result.createObjectStore('kv')
-    q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error)
-  })
-}
+/** What's kept in this browser under `key` (value undefined: read it; null: forget it). */
 async function kv<T>(key: string, value?: T | null): Promise<T | undefined> {
-  const d = await db()
-  return new Promise((res, rej) => {
-    const tx = d.transaction('kv', value === undefined ? 'readonly' : 'readwrite')
-    const st = tx.objectStore('kv')
-    const q = value === undefined ? st.get(key) : value === null ? st.delete(key) : st.put(value, key)
-    q.onsuccess = () => res(value === undefined ? q.result : undefined); q.onerror = () => rej(q.error)
-  })
+  const st = (await openDb(DB, 1, (d) => d.createObjectStore('kv'))).transaction('kv', value === undefined ? 'readonly' : 'readwrite').objectStore('kv')
+  const got = await req((value === undefined ? st.get(key) : value === null ? st.delete(key) : st.put(value, key)) as IDBRequest)
+  return value === undefined ? got as T | undefined : undefined
 }
 
 async function sha(data: Uint8Array): Promise<string> {
