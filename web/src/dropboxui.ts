@@ -1,14 +1,12 @@
 // The Dropbox screens: connecting an account (start page and project Settings), and linking the
 // project to a Dropbox folder in project Settings, with what's happening. The work is in dropbox.ts.
 import type { Replica } from './replica'
-import { dialog, h } from './dom'
+import { dialog, errorText, h, shortTime } from './dom'
 import type { Status } from './integrationcard'
 import { t, tn } from './i18n'
 import { appHolds, approve, approvedPath, dropboxAccount, dropboxAppKey, folderPath, linkFolder, linkOf, pull, push, signIn, signInProblem, startDropbox, topFolders, unlink } from './dropbox'
 import { quiet } from './quiet'
 
-const ago = (at: number) => new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 let engine: ReturnType<typeof startDropbox> | null = null
 const listeners = new Set<() => void>()
@@ -57,7 +55,7 @@ export function dropboxAccountBox(changed: () => void = () => {}): HTMLElement {
       msg.textContent = ''
       go.setAttribute('disabled', '')
       try { await signIn() } // (goes to Dropbox, and comes back here)
-      catch (e) { msg.textContent = say(e); go.removeAttribute('disabled') }
+      catch (e) { msg.textContent = errorText(e); go.removeAttribute('disabled') }
     } }, t('Connect Dropbox…'))
     box.replaceChildren(
       h('p', { class: 'muted small' }, t('Keep a project in step with a folder in your Dropbox, or one shared with you there. Connecting takes you to Dropbox to allow TeXLoom, then back here.')),
@@ -104,12 +102,12 @@ export function dropboxSection(r: Replica, me: () => string, writable: boolean):
         const b = e.currentTarget as HTMLButtonElement
         if (!confirm(t('Bring in the Dropbox folder’s changes, keeping the project’s version where the two clash? The project’s version then goes to Dropbox.'))) return
         b.disabled = true; note(t('Syncing…'))
-        try { await pull(r, a, me(), true); await push(r, a, me()); note(t('Done.')) } catch (err) { note(say(err), true) } finally { b.disabled = false; render() }
+        try { await pull(r, a, me(), true); await push(r, a, me()); note(t('Done.')) } catch (err) { note(errorText(err), true) } finally { b.disabled = false; render() }
       } }, t('Keep the project’s version'))) : null) : null
     box.replaceChildren(...[
       where,
       h('p', { class: 'muted small' }, role),
-      h('p', { class: 'muted small' }, t('Last synced {{when}} by {{name}}.', { when: ago(l.at), name: l.by || '?' })),
+      h('p', { class: 'muted small' }, t('Last synced {{when}} by {{name}}.', { when: shortTime(l.at), name: l.by || '?' })),
       blocked,
       st?.error ? h('p', { class: 'small err' }, st.error) : null,
       msg,
@@ -117,7 +115,7 @@ export function dropboxSection(r: Replica, me: () => string, writable: boolean):
         a && !path ? h('button', { class: 'small primary', onclick: () => approveDialog(r, render) }, t('Approve and sync…')) : null,
         a && path && st?.role !== 'standby' && st?.role !== 'app' ? h('button', { class: 'small', disabled: st?.busy, onclick: async () => {
           note(t('Syncing…'))
-          try { await engine?.now(); note(engine?.state.error ?? (engine?.state.role === 'syncing' && !linkOf(r)?.blocked ? t('Done.') : '')) } catch (err) { note(say(err), true) }
+          try { await engine?.now(); note(engine?.state.error ?? (engine?.state.role === 'syncing' && !linkOf(r)?.blocked ? t('Done.') : '')) } catch (err) { note(errorText(err), true) }
           render()
         } }, t('Sync now')) : null,
         h('button', { class: 'small', onclick: () => {
@@ -173,7 +171,7 @@ function linkDialog(r: Replica, me: () => string, done: () => void) {
       tell(got ? tn(got, 'Linked; {{n}} file came in from Dropbox.', 'Linked; {{n}} files came in from Dropbox.') : t('Linked.'))
       dlg.close(); done()
       engine?.now()
-    } catch (e) { tell(say(e), true) } finally { go.removeAttribute('disabled') }
+    } catch (e) { tell(errorText(e), true) } finally { go.removeAttribute('disabled') }
   }
 }
 
@@ -192,7 +190,7 @@ function approveDialog(r: Replica, done: () => void) {
       if ((await folderIdOf(a, path, false)) !== l.folder) throw new Error(t('{{path}} in your Dropbox isn’t the folder this project is linked to.', { path }))
       approve(r, l, path)
       dlg.close(); done(); engine?.now()
-    } catch (e) { msg.className = 'small err'; msg.textContent = say(e) } finally { go.removeAttribute('disabled') }
+    } catch (e) { msg.className = 'small err'; msg.textContent = errorText(e) } finally { go.removeAttribute('disabled') }
   } }, t('Approve and sync'))
   const dlg = dialog('settings zlinkdlg',
     h('h3', {}, t('Sync the Dropbox folder “{{name}}”', { name: l.name })),

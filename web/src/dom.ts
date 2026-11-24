@@ -2,6 +2,7 @@
 // elements, never parsed as HTML, so user-controlled strings can't inject markup.
 import { t } from './i18n'
 import { getString, setString } from './store'
+import { quiet } from './quiet'
 
 type Kid = Node | string | null | undefined | false
 export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs?: Record<string, any>, ...kids: Kid[]): HTMLElementTagNameMap[K]
@@ -92,3 +93,26 @@ export function verticalResizer(handle: HTMLElement, target: HTMLElement, key: s
     set(target.getBoundingClientRect().height + d * (e.shiftKey ? 60 : 20))
   })
 }
+
+/** A button that copies `text` (or what `text()` gives when clicked), then says so. */
+export function copyButton(text: string | (() => string), label: string, attrs: Record<string, any> = {}): HTMLButtonElement {
+  const b = h('button', { ...attrs, onclick: () => {
+    navigator.clipboard.writeText(typeof text === 'function' ? text() : text)
+      .then(() => { b.textContent = t('Copied') }, (e) => quiet('the clipboard refused (no permission)', e))
+  } }, label)
+  return b
+}
+
+/** An error, in words: its message (or itself, if it isn't an Error). */
+export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+/** A moment, as "24 Nov, 14:05" (when a link last synced). */
+export const shortTime = (at: number): string => new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+/** `fn`, run once calls have stopped for `ms` (with the last call's arguments); `cancel()` drops a run still to come. */
+export function debounce<A extends unknown[]>(fn: (...a: A) => void, ms: number): ((...a: A) => void) & { cancel(): void } {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Object.assign((...a: A) => { clearTimeout(timer); timer = setTimeout(() => fn(...a), ms) }, { cancel: () => clearTimeout(timer) })
+}
+
+export const sleep = (ms: number): Promise<void> => new Promise((ok) => setTimeout(ok, ms))

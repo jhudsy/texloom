@@ -1,5 +1,5 @@
 // Shows the Markdown, image or PDF file chosen in the file list, in place of the compiled PDF.
-import { h } from './dom'
+import { debounce, h } from './dom'
 import { t } from './i18n'
 import { renderMarkdown } from './markdown'
 import { loadKatex, render as renderMath } from './mathpreview'
@@ -61,10 +61,9 @@ export class FilePreview {
   private follow(path: string, redraw: () => void, wait: number) {
     const text = this.r.files.get(path)
     if (!text) return
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const later = () => { clearTimeout(timer); timer = setTimeout(() => this.drawWhenSeen(redraw), wait) }
+    const later = debounce(() => this.drawWhenSeen(redraw), wait)
     text.observe(later)
-    this.stop = () => { clearTimeout(timer); text.unobserve(later) }
+    this.stop = () => { later.cancel(); text.unobserve(later) }
   }
 
   private load(path: string) {

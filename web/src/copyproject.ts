@@ -2,7 +2,7 @@
 // that owes nothing to the original. No history, comments, collaborators or links come along.
 import * as Y from 'yjs'
 import { Keys } from './crypto'
-import { dialog, h } from './dom'
+import { dialog, h, sleep } from './dom'
 import { t, tn } from './i18n'
 import { cleanPath } from './projectfiles'
 import { projects } from './projects'
@@ -13,7 +13,6 @@ import { quiet } from './quiet'
 import { setString } from './store'
 
 const SETTINGS = ['main', 'bib', 'engine', 'lang'] // what else in the shared document a copy keeps
-const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
 const hasFiles = (r: Replica) => r.files.size > 0 || r.bin.size > 0
 
 /** Fill the empty `to` from `from`. Returns the files that couldn't be copied. */

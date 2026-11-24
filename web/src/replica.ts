@@ -19,6 +19,7 @@ import { randomHex } from './bytes'
 import { local } from './store'
 import { textStore } from './accounts'
 import { connect, req } from './idb'
+import { debounce, sleep } from './dom'
 
 const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
@@ -60,7 +61,6 @@ const idbPut = (db: IDBDatabase, s: Store, k: string, v: unknown) => tx(db, s, '
 const idbDel = (db: IDBDatabase, s: Store, k: string) => tx(db, s, 'readwrite', (o) => o.delete(k))
 const idbKeys = (db: IDBDatabase, s: Store) => tx<IDBValidKey[]>(db, s, 'readonly', (o) => o.getAllKeys())
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** Delete this browser's copy of a project (document, outbox, cached files).
  *  Other people's copies, folder copies and the server's copy are not affected. */
@@ -257,8 +257,7 @@ export class Replica {
       const changed = added.concat(updated, removed)
       this.sendAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed))
     })
-    let pruneTimer: ReturnType<typeof setTimeout> | undefined
-    this.out.observe(() => { clearTimeout(pruneTimer); pruneTimer = setTimeout(() => this.pruneOutputs().catch((e) => quiet('old outputs are pruned at the next change', e)), 3000) })
+    this.out.observe(debounce(() => { this.pruneOutputs().catch((e) => quiet('old outputs are pruned at the next change', e)) }, 3000))
     if (this.syncMode === 'live') this.connect()
     else { this.status = 'paused'; this.onStatus() }
   }

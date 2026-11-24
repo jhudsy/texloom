@@ -5,7 +5,7 @@
 import * as Y from 'yjs'
 import type { Replica } from './replica'
 import type { ProjectIndex } from './latex'
-import { dialog, h } from './dom'
+import { dialog, errorText, h } from './dom'
 import { cleanPath, mainFile } from './projectfiles'
 import { stripComments } from './texscan'
 import { t } from './i18n'
@@ -306,7 +306,7 @@ export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: st
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run() } })
   render()
   input.focus()
-  const problem = (e: unknown, where: string) => String(e instanceof Error ? e.message : e)
+  const problem = (e: unknown, where: string) => errorText(e)
     .replace(/^(TypeError: )?(Failed to fetch|Load failed|NetworkError.*)$/, t('Couldn’t reach {{site}} (offline?).', { site: where }))
 
   /** A DOI or arXiv id is added at once; anything else is searched for. */

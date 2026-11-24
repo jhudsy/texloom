@@ -32,6 +32,7 @@ import { b64e } from './crypto'
 import { devOverride, serverInfo } from './servers'
 import { getString, session } from './store'
 import { approval as approvalOf, applySteps, bytesOf, clashing, hashOf, MAX, projectFiles, putFile, storeBinaries, storedIds, tabId, type Mine, type Step } from './remotesync'
+import { errorText, sleep } from './dom'
 
 // (quiet: each send is a new version of the changed files in Dropbox, as each save is in its own app)
 const PULL_EVERY = 60_000, QUIET = 10_000, TICK = 5000 // ms
@@ -510,7 +511,7 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
       }
       set({ error: null })
     } catch (e) {
-      set({ error: e instanceof Error ? e.message : String(e) })
+      set({ error: errorText(e) })
     } finally {
       set({ busy: false })
       if (debugging() && (force || came.length || went.length)) console.debug(`[dropbox] ${force ? 'sync now' : 'round'}: ${Math.round(performance.now() - began)} ms, `
@@ -531,12 +532,12 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
     while (!stopped) {
       const a = dropboxAccount.get(), l = linkOf(r), root = l && approvedPath(r, l)
       const cursor = a && root ? listings.get(`${a.id} ${root.toLowerCase()}`)?.cursor : undefined
-      if (state.role !== 'syncing' || !cursor) { await new Promise((ok) => setTimeout(ok, TICK)); continue }
+      if (state.role !== 'syncing' || !cursor) { await sleep(TICK); continue }
       try {
         const { changes, backoff } = await changesAfter(cursor, 120)
         if (changes && !stopped) { nextPull = 0; await round().catch((e) => console.error('Dropbox sync:', e)) }
-        if (backoff) await new Promise((ok) => setTimeout(ok, backoff * 1000))
-      } catch { await new Promise((ok) => setTimeout(ok, 30_000)) } // offline, or Dropbox busy: the minute's round goes on
+        if (backoff) await sleep(backoff * 1000)
+      } catch { await sleep(30_000) } // offline, or Dropbox busy: the minute's round goes on
     }
   })()
   round().catch((e) => console.error('Dropbox sync:', e))

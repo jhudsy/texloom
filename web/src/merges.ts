@@ -19,6 +19,7 @@ import { addItem, allItems, mergeText, rangeOf } from './review'
 import { quiet } from './quiet'
 import { b64, unb64 } from './bytes'
 import { readJson, writeJson } from './store'
+import { debounce } from './dom'
 
 export const MIN_APART = 30_000 // ms: edits apart for less than this aren't flagged
 const SETTLE = 1500 // ms after the last change from others before notes are added
@@ -67,15 +68,11 @@ export function watchMerges(r: Replica, myName: () => string) {
   try {
     for (const [file, ps] of Object.entries(readJson<Stored>(key, {}))) places.set(file, ps.map(([s, e, at]) => ({ s: dec(s), e: dec(e), at })))
   } catch (e) { quiet('none kept', e) }
-  let saveTimer: ReturnType<typeof setTimeout> | undefined
-  const save = () => {
-    clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => {
-      const out: Stored = {}
-      for (const [file, ps] of places) out[file] = ps.map((p) => [enc(p.s), enc(p.e), p.at])
-      writeJson(key, places.size ? out : null) // (storage full or blocked: kept in memory only)
-    }, 1000)
-  }
+  const save = debounce(() => {
+    const out: Stored = {}
+    for (const [file, ps] of places) out[file] = ps.map((p) => [enc(p.s), enc(p.e), p.at])
+    writeJson(key, places.size ? out : null) // (storage full or blocked: kept in memory only)
+  }, 1000)
   const resolve = (yt: Y.Text, p: Place): [number, number] | null => {
     const a = Y.createAbsolutePositionFromRelativePosition(p.s, r.doc), b = Y.createAbsolutePositionFromRelativePosition(p.e, r.doc)
     if (!a || !b || a.type !== yt || b.type !== yt) return null

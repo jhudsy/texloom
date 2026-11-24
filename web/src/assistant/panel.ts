@@ -3,7 +3,7 @@ import { connectToolDialog } from './connect'
 import { chats, type ChatMeta, type Entry } from './chats'
 import * as Y from 'yjs'
 import type { Replica } from '../replica'
-import { dialog, h } from '../dom'
+import { copyButton, dialog, h } from '../dom'
 import { aiPrefs, listModels, PRESETS, type ProviderConfig } from './providers'
 import { createSession, explainError, tokensIn, type LlmSession, type TurnEvents, type TurnResult } from './llm'
 import { ASSISTANT, jsonSchema, runTool, toolsFor, type Change, type ToolCtx, type ToolDef } from './tools'
@@ -539,7 +539,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     for (const d of tools) if (d.server) byServer.set(d.server, [...(byServer.get(d.server) ?? []), d])
     const fromServers = [...byServer].map(([server, ds]) => h('li', {}, tn(ds.length, '{{server}}: {{n}} tool, about {{tokens}} tokens', '{{server}}: {{n}} tools, about {{tokens}} tokens',
       { server, tokens: tokensIn(JSON.stringify(ds.map((d) => ({ name: d.name, description: d.description, parameters: jsonSchema(d) }))).length).toLocaleString(locale) })))
-    const copy = (text: string) => h('button', { class: 'small', onclick: (e: any) => navigator.clipboard.writeText(text).then(() => { e.target.textContent = t('Copied') }, () => {}) }, t('Copy'))
+    const copy = (text: string) => copyButton(text, t('Copy'), { class: 'small' })
     const dlg = dialog('settings sent',
       h('h3', {}, t('What the assistant is sent')),
       h('p', { class: 'muted' }, t('Every request sends these instructions and the tool descriptions, then the whole conversation so far. Each of your messages starts with the context block below.')),

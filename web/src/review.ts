@@ -7,7 +7,7 @@ import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import type { Replica } from './replica'
 import { b64d, b64e, signer } from './crypto'
-import { h } from './dom'
+import { debounce, h } from './dom'
 import { t, tn, locale } from './i18n'
 import { applyChange, placeOf } from './suggestcore'
 import { byReading, readingOrder } from './navigate'
@@ -319,15 +319,14 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
     view.dispatch({ effects: setDecos.of(Decoration.set(ranges, true)) })
   }
   const plugin = ViewPlugin.define((view) => {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const schedule = () => { clearTimeout(timer); timer = setTimeout(() => compute(view), 120) }
+    const schedule = debounce(() => compute(view), 120)
     r.review.observeDeep(schedule)
     pendingWatchers.add(schedule)
     const unwatch = editorMarkup.watch(schedule)
     schedule()
     return {
       update(u: ViewUpdate) { if (u.docChanged) schedule() },
-      destroy() { clearTimeout(timer); r.review.unobserveDeep(schedule); pendingWatchers.delete(schedule); unwatch() },
+      destroy() { schedule.cancel(); r.review.unobserveDeep(schedule); pendingWatchers.delete(schedule); unwatch() },
     }
   })
   return [

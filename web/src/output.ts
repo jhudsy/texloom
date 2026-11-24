@@ -2,7 +2,7 @@
 // underneath (resizable, toggled with "Log").
 import type { Replica } from './replica'
 import type { Device } from './settings'
-import { h, saveFile, verticalResizer } from './dom'
+import { h, saveFile, sleep, verticalResizer } from './dom'
 import { icon } from './icons'
 import { PdfView, type CommentTarget, type PdfSelection } from './pdfview'
 import { anchorInSource, findAnywhere } from './pdfanchor'
@@ -314,7 +314,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     setRunning(() => { stopped = true }, t('Stop waiting'), t('Stop waiting for your texloom helper. It finishes any compile it has started.'))
     try {
       for (let i = 0; i < 240; i++) {
-        await new Promise((res) => setTimeout(res, 250))
+        await sleep(250)
         if (stopped) return { ok: false, log: 'Stopped waiting for the texloom helper.' }
         if (r.out.get('latest')?.at !== before) break
         if (failed) { const f: { by: string; why: string } = failed; return fail((t) => t('{{name}} couldn’t compile: {{why}}', { name: f.by, why: f.why })) }

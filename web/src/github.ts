@@ -30,6 +30,7 @@ import { shaCache as gitShaCache, type ShaCache } from './gitshacache'
 import { digest, hex } from './bytes'
 import { concat } from './crypto'
 import { approval as approvalOf, applySteps, bytesOf, clashing, hashOf, MAX, projectFiles, putFile, storeBinaries, storedIds, tabId, type Mine, type Step } from './remotesync'
+import { errorText } from './dom'
 
 export const RENEW = 30_000, EXPIRE = 100_000 // ms
 const PULL_EVERY = 60_000, QUIET = 120_000, TICK = 5000 // ms
@@ -355,7 +356,7 @@ export function startGitHub(r: Replica, me: () => string, onChange: () => void) 
       }
       set({ error: null })
     } catch (e) {
-      set({ error: e instanceof Error ? e.message : String(e) })
+      set({ error: errorText(e) })
     } finally { set({ busy: false }) }
   }
   const timer = setInterval(() => { round().catch((e) => console.error('git sync:', e)) }, TICK)

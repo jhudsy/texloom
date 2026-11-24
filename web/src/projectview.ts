@@ -10,7 +10,7 @@ import { prefs, setupDialog, settingsDialog, type Device, type SettingsTab } fro
 import { createAssistantPanel, type AssistantStatus } from './assistant/panel'
 import { setupLayout } from './layout'
 import { riskBanner } from './storagenotice'
-import { $, h, saveFile } from './dom'
+import { $, debounce, errorText, h, saveFile, sleep } from './dom'
 import { icon } from './icons'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
@@ -64,7 +64,7 @@ export async function openProject(keys: Keys, server: string) {
   const writable = keys.writable && !r.deletedAt // a project its owner deleted for everyone stays as it was
   let removing = false // set while deleting, so the page doesn't re-save it to "recent"
   if (!device.setup) {
-    if (r.syncMode === 'live') await new Promise((res) => setTimeout(res, 800)) // fetch the name first
+    if (r.syncMode === 'live') await sleep(800) // fetch the name first
     device = await setupDialog(r, keys.link(server, writable), openedByApp, appCompiles)
     r.setSyncMode(device.sync)
   }
@@ -125,7 +125,7 @@ export async function openProject(keys: Keys, server: string) {
     preview: (p) => { preview.show(p); showInPanel(true); layout.reveal('right'); showTab('pdf') },
     compile: (p) => { showInPanel(false); layout.reveal('right'); showTab('pdf'); output.compile(true, false, p) },
     zotero: (p) => (writable && zoteroLinks(r)[p] && zoteroAccount.get()
-      ? () => { zoteroRefresh(r, p, me.name).catch((e) => alert(e instanceof Error ? e.message : String(e))) } : null),
+      ? () => { zoteroRefresh(r, p, me.name).catch((e) => alert(errorText(e))) } : null),
     insert: () => {
       const v = editor.view()
       if (!v || !isTexFile(editor.current())) return null
@@ -639,8 +639,7 @@ export async function openProject(keys: Keys, server: string) {
   if (checking()) {
     (window as any).__texloom = { r, view: () => editor.view(), open: (p: string) => { layout.showEditor(); tree.open(p) } }
     // every shared text stays well formed once changes settle (invariants.ts)
-    let t: ReturnType<typeof setTimeout> | undefined
-    r.files.observeDeep(() => { clearTimeout(t); t = setTimeout(() => r.files.forEach((yt, p) => wellFormed(`the shared ${p}`, yt.toString())), 200) })
+    r.files.observeDeep(debounce(() => r.files.forEach((yt, p) => wellFormed(`the shared ${p}`, yt.toString())), 200))
   }
   runGitHub(r, () => me.name) // keep it in step with a GitHub repository, if it's linked to one
   runDropbox(r, () => me.name) // and with a Dropbox folder
