@@ -23,17 +23,13 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-import subprocess
 import sys
-import tempfile
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import testdb  # noqa: E402
-from check_synconly import PY, ROOT, SERVER, Computer, Failed, free_port, invariants, lf, wait  # noqa: E402
+from checklib import Computer, Failed, invariants, lf, server, wait  # noqa: E402
 
 os.environ.update({"TEXLOOM_TURN_ANNOUNCE": "2", "TEXLOOM_TURN_EXPIRE": "8"})  # (the computers inherit it)
 MAIN = "\\documentclass{article}\n\\begin{document}\nThe first paragraph.\n\nThe middle paragraph.\n\nThe last paragraph.\n\\end{document}\n"
@@ -128,18 +124,15 @@ def once_everywhere(cs, rel: str, *bits: str) -> bool:
 
 
 def check(step) -> None:
-    tmp = Path(os.environ.get("CHECK_DIR") or tempfile.mkdtemp(prefix="texloom-shared-"))  # (CI: the runner's own temp folder)
-    tmp.mkdir(parents=True, exist_ok=True)
-    port = free_port()
-    url = f"http://127.0.0.1:{port}"
-    database = testdb.start(tmp / "db")
-    server = subprocess.Popen(PY + [SERVER, "--port", str(port), "--database", database, "--data", str(tmp / "relay")],
-                              cwd=ROOT, stdout=open(tmp / "server.log", "w"), stderr=subprocess.STDOUT)  # noqa: SIM115
+    # (CI: CHECK_DIR, the runner's own temp folder, kept as an artifact if this fails)
+    with server("shared", tmp=os.environ.get("CHECK_DIR")) as srv:
+        shared(srv.url, srv.tmp, step)
+
+
+def shared(url: str, tmp: Path, step) -> None:
     a, b, c = Computer("A", "unix", tmp), Computer("B", "unix", tmp), Computer("C", "unix", tmp)
     service = FileSyncService(a.dir, b.dir)
-    ok = False
     try:
-        wait("the server starts", lambda: urllib.request.urlopen(url + "/api/info", timeout=2).status == 200, 30)
         a.dir.mkdir()
         b.dir.mkdir()
         a.save("main.tex", MAIN)
@@ -219,18 +212,10 @@ def check(step) -> None:
             raise Failed("with A back, an edit arrived more than once:\n" + lf(c.read("main.tex")))
         invariants(a, b, c)
         step("a conflicted copy made by the service isn't shared; A comes back without bringing anything in twice")
-        ok = True
     finally:
         service.stop.set()
         for x in (a, b, c):
             x.stop()
-        server.terminate()
-        server.wait(10)
-        testdb.stop(tmp / "db")
-        if ok:
-            shutil.rmtree(tmp, ignore_errors=True)
-        else:
-            print(f"folders and logs: {tmp}")
 
 
 if __name__ == "__main__":

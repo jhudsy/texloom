@@ -960,8 +960,7 @@ uv run --extra server python scripts/check_store.py               # the server's
 uv run --extra server python scripts/check_files.py               # the server's file store: a folder, and Garage (S3) if installed
 uv run --extra server python scripts/check_move_code.py           # moving a project to another creation code, against a real server
 uv run --extra server python scripts/check_restore.py            # a server restored from a backup: an app that had seen later changes misses none
-uv run --extra server python scripts/check_comments.py            # a folder's comments overview, and texloom comments list/reply/resolve
-uv run --extra server python scripts/check_lsp.py                 # texloom lsp, against a real server and a stdio client: diagnostics, hover, actions, reply, resolve
+uv run --extra server python scripts/check_comments.py            # a folder's comments overview, texloom comments list/reply/resolve, and texloom lsp with a stdio client
 uv run --extra server python scripts/check_config.py              # texloom.example.toml lists every server setting, and parses
 (cd web && npm run check-folder-model)                           # the same for the browser's folder sync, on a fake clock and folder
 ```
