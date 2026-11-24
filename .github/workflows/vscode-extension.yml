@@ -2,16 +2,25 @@
 # when a tag like vscode-v0.1.0 is pushed; the tag must match the version in its package.json.
 # Needs the repository secrets VSCE_PAT (a Marketplace token, scope Marketplace → Manage, for all
 # accessible organizations) and OVSX_PAT (an Open VSX token). The .vsix is attached to the run.
+# Run by hand (Actions → VS Code extension → Run workflow) it only builds, unless "publish" is ticked;
+# a version a store already has is skipped there, so publishing again finishes what failed.
 name: VS Code extension
 
 on:
   push:
     tags: ['vscode-v*']
-  workflow_dispatch:  # builds the .vsix without publishing
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the version in package.json (otherwise only build)
+        type: boolean
+        default: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      PUBLISH: ${{ startsWith(github.ref, 'refs/tags/') || inputs.publish }}
     defaults:
       run:
         working-directory: editors/vscode
@@ -32,16 +41,16 @@ jobs:
           name: texloom-vsix
           path: editors/vscode/texloom.vsix
       - name: Visual Studio Marketplace
-        if: startsWith(github.ref, 'refs/tags/')
-        run: npx vsce publish --packagePath texloom.vsix
+        if: env.PUBLISH == 'true'
+        run: npx vsce publish --packagePath texloom.vsix --skip-duplicate
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - name: Open VSX
-        if: startsWith(github.ref, 'refs/tags/')
+        if: env.PUBLISH == 'true'
         run: |
           publisher=$(node -p 'require("./package.json").publisher')
           # Once only; after that it says the namespace exists, and publishing says if anything's wrong.
           npx --yes ovsx@0.10.1 create-namespace "$publisher" || true
-          npx --yes ovsx@0.10.1 publish texloom.vsix
+          npx --yes ovsx@0.10.1 publish texloom.vsix --skip-duplicate
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
