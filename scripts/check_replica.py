@@ -123,7 +123,6 @@ def sent_files(r: Replica, socks: list[FakeWS]) -> dict:
 
 
 def state(r: Replica, socks: list[FakeWS], http: FakeHttp, got: dict) -> dict:
-    ws = socks[-1]
     pending = r.dir / "blobs-pending"
     return {
         "files": {k: str(v) for k, v in r.files.items()},
