@@ -210,7 +210,10 @@ class CodeBook:
         return self.default
 
     def label(self, owner: str) -> str:
-        return self.codes.get(owner, (0, owner))[1] or owner
+        """How the logs name a code: its label, else only its start (logs mustn't hold whole codes)."""
+        if owner == "default":
+            return owner
+        return self.codes.get(owner, (0, ""))[1] or f"code {owner[:4]}…"
 
     @staticmethod
     def display(code: str) -> str:

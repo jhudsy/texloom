@@ -50,6 +50,8 @@ jobs:
         run: uv run --extra server python scripts/check_files.py folder
       - name: A server restored from a backup, and an app that saw later changes (a real server)
         run: uv run --extra server python scripts/check_restore.py
+      - name: What an outsider could do to the server (revocations off the budget, TeX Live paths; security review)
+        run: uv run --extra server python scripts/check_server_abuse.py
       - name: Moving a project to another creation code (a real server)
         run: uv run --extra server python scripts/check_move_code.py
       - name: Comments for a synced folder (the overview, texloom comments, texloom lsp; a real server)

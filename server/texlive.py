@@ -89,6 +89,13 @@ FORMATS: dict[int, tuple[tuple[str, ...], tuple[str, ...]]] = {
 }
 
 
+def safe_path(p: str) -> bool:
+    """Whether a path from the package index stays under texmf/: relative, with no "..", "." or
+    empty parts and no backslashes (the index comes from a mirror, which mustn't name other files)."""
+    parts = p.split("/")
+    return bool(p) and "\\" not in p and "\0" not in p and all(x not in ("", ".", "..") for x in parts)
+
+
 def parse_tlpdb(text: str):
     """Yield (package, sha512, size, [run file paths relative to texmf-dist]) per package."""
     for rec in text.split("\n\n"):
@@ -103,10 +110,9 @@ def parse_tlpdb(text: str):
             if line.startswith(" "):
                 if in_run:
                     p = line.strip().split(" ", 1)[0]
-                    if p.startswith("RELOC/"):
-                        run.append(p[6:])
-                    elif p.startswith("texmf-dist/"):
-                        run.append(p[11:])
+                    p = p[6:] if p.startswith("RELOC/") else p[11:] if p.startswith("texmf-dist/") else None
+                    if p and safe_path(p):
+                        run.append(p)
                 continue
             in_run = line.startswith("runfiles")
             if line.startswith("containerchecksum "):
@@ -352,7 +358,8 @@ class TexLive:
                 raise RuntimeError("the TeX Live cache is full")
             old, n = row
             for (path,) in self.db.execute("SELECT path FROM files WHERE pkg=?", (old,)).fetchall():
-                (self.files / path).unlink(missing_ok=True)  # (one being served stays readable until closed)
+                if safe_path(path):
+                    (self.files / path).unlink(missing_ok=True)  # (one being served stays readable until closed)
             with self.db:
                 self.db.execute("UPDATE pkgs SET installed=0, bytes=0 WHERE name=?", (old,))
             self.used -= n
@@ -409,7 +416,7 @@ class TexLive:
     def _wanted(m: tarfile.TarInfo, allowed: set[str]) -> str | None:
         """The path under texmf/ of a container member to install, or None."""
         name = m.name[11:] if m.name.startswith("texmf-dist/") else m.name
-        if not m.isfile() or name not in allowed or name.startswith("/") or ".." in name.split("/"):
+        if not m.isfile() or name not in allowed or not safe_path(name):
             return None
         return name
 
@@ -434,12 +441,14 @@ class TexLive:
     # --- HTTP ------------------------------------------------------------------------
     async def handle(self, request: web.Request) -> web.StreamResponse:
         year, fmt, name = request.match_info["year"], request.match_info["fmt"], request.match_info["name"]
-        if year != str(YEAR) or not fmt.isdigit() or not NAME_RE.match(name) or name.startswith("."):
+        if year != str(YEAR) or not fmt.isdigit() or len(fmt) > 3 or not NAME_RE.match(name) or name.startswith("."):
             return self._miss()
         hit = self.find(int(fmt), name)
         if hit is None:
             return self._miss()
         path, pkg = hit
+        if not safe_path(path):
+            return self._miss()
         f = self.files / path
         if not f.is_file():
             job = self.jobs.get(pkg)

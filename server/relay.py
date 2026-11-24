@@ -635,7 +635,11 @@ class Relay:
         if pub is None or signer(project, revoke_msg(pub), sig) != "owner":
             await ws.send_json({"t": "err", "m": "rejected revocation"})
             return
-        if not await self._may_add(project) or not await self.store.revoke(project, pub, sig):
+        # each new row costs: from the code's project if it has one, else from the server-wide budget
+        # for rows that store nothing (a storage mode set once mustn't make the next thousand free)
+        new = pub not in await self.store.revoked(project)
+        if new and self.store.owner(project) is None and not self.store.meta_budget() \
+                or not await self.store.revoke(project, pub, sig):
             await ws.send_json({"t": "err", "m": "rejected revocation: too many"})
             return
         log.info("project %s…: revoked a personal link", project[:8])
