@@ -157,7 +157,7 @@ class MergeWatch:
             if isinstance(t, Text) and isinstance(entry, dict) and entry.get("h") == hashlib.sha256(str(t).encode()).hexdigest():
                 self.places[path] = [p for p in entry.get("p", []) if isinstance(p, list) and len(p) == 3]
 
-    def _save(self) -> None:
+    def save(self) -> None:
         self.dirty = False
         try:
             if not self.places:
@@ -285,4 +285,4 @@ class MergeWatch:
                     self.places.clear()
                     self.dirty = True
             if self.dirty:
-                self._save()
+                self.save()

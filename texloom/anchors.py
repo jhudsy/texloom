@@ -25,7 +25,7 @@ from .textpos import U16
 log = logging.getLogger("texloom")
 
 
-def _varuint(n: int) -> bytes:
+def varuint(n: int) -> bytes:
     out = bytearray()
     while True:
         b = n & 0x7F
@@ -59,7 +59,7 @@ def _read_varuint(b: bytes, i: int) -> tuple[int, int]:
 
 
 def item_anchor(client: int, clock: int, assoc: int) -> bytes:
-    return b"\x00" + _varuint(client) + _varuint(clock) + _varint(assoc)
+    return b"\x00" + varuint(client) + varuint(clock) + _varint(assoc)
 
 
 def anchor_id(raw: bytes) -> tuple[int, int] | None:

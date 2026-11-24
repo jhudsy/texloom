@@ -19,8 +19,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
-import json
-import time
 import logging
 import os
 import sys
@@ -30,72 +28,13 @@ from . import __version__
 from .crypto import Keys
 from .folder import FolderSync
 from . import registry, tls
+# the folder's settings, from config.py (still imported from here by scripts)
+from .config import DEFAULT_CONFIG, adopt, browser_link, config_path, load, load_config, save, side_replica, update_config  # noqa: F401
 from .daemon import CURRENT, FolderProblem, FolderTag, lock_folder
-from .paths import STATE, state_dir, write_json
+from .paths import state_dir
 from .replica import Replica
 
 log = logging.getLogger("texloom")
-
-
-def config_path(d: Path) -> Path:
-    return state_dir(d) / "config.json"
-
-
-def load(d: Path) -> tuple[Keys, str]:
-    return Keys.from_link(load_config(d)["link"])
-
-
-def load_config(d: Path) -> dict:
-    return json.loads(config_path(d).read_text())
-
-
-def browser_link(d: Path, extra: str = "") -> str:
-    """A folder's project link for opening in the browser, marked as opened by this app, so the web
-    app doesn't ask where the files should live: they're in this folder already. `extra`: more of the
-    query, such as "tab=review" (web/src/main.ts reads it)."""
-    cfg = load_config(d)
-    page, _hash, keys = cfg["link"].partition("#")
-    mark = "from=app" + ("&compile=1" if cfg.get("compile") else "") + (f"&{extra}" if extra else "")  # the web app then compiles here by default
-    return f"{page}{'&' if '?' in page else '?'}{mark}#{keys}"
-
-
-DEFAULT_CONFIG = {
-    # Local, per-folder settings (never shared with collaborators).
-    "compile": False,          # run latexmk after changes (same as --compile)
-    "engine": None,            # override the project's engine on this machine
-    "latexmk_args": [],        # extra arguments, e.g. ["-pdfxe"]
-    "git": False,              # true, or {"interval": 60, "quiet": 120, "push": true}: see `run --git`
-    "shell_escape": False,     # false, "restricted" (TeX Live's safe programs only) or true (minted etc.;
-                               # lines that run programs must be approved with `texloom allow`)
-    "confine": True,           # compiles may read only the project, TeX's files and fonts (false: anything
-                               # you can read, for projects whose collaborators you trust)
-    "label": "",               # how your compiles are labelled for others
-    "create_code": "",         # creation code, if the server requires one for new projects
-}
-
-
-def save(d: Path, link: str, create_code: str = "") -> None:
-    state_dir(d).mkdir(parents=True, exist_ok=True)
-    os.chmod(d / STATE, 0o700)
-    write_json(config_path(d), {"link": link, **DEFAULT_CONFIG, "create_code": create_code}, private=True, indent=2)  # holds the project keys
-    (d / STATE / ".gitignore").write_text("*\n")
-
-
-def adopt(d: Path) -> bool:
-    """A folder another computer syncs, shared with this one through Dropbox or the like (so its
-    `.texloom` has that computer's records, not this one's): set it up here with the same project
-    link. It starts out known to be shared (sharedfolder.py), so this computer stands by until it has
-    the project and has heard from the others. False if no other computer's records are there."""
-    for other in sorted((d / STATE / "computers").glob("*/config.json")):
-        try:
-            cfg = json.loads(other.read_text())
-            Keys.from_link(cfg["link"])
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
-        save(d, cfg["link"], str(cfg.get("create_code") or ""))
-        (state_dir(d) / "shared.json").write_text(json.dumps({"at": time.time()}))
-        return True
-    return False
 
 
 def print_links(keys: Keys, server: str) -> None:
@@ -120,7 +59,7 @@ async def run(d: Path, compile_: bool, once: bool = False, shell_escape: bool | 
 
 
 async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, git: bool) -> None:
-    cfg = {**DEFAULT_CONFIG, **load_config(d)}
+    cfg = load_config(d)
     keys, server = load(d)
     code = cfg["create_code"]  # never the environment's: a project's link decides which server hears it
     replica = Replica(state_dir(d), keys, server, code or None)
@@ -130,8 +69,8 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
             "confine": cfg["confine"] is not False,
             "label": cfg["label"] or f"latexmk on {platform.node().split('.')[0]}"}
     fs = FolderSync(d, replica, compile_ or cfg["compile"], opts)
-    from .listsync import my_name
-    name = cfg.get("name") or my_name()[0] or f"folder copy on {platform.node().split('.')[0]}"
+    from .listsync import name_in
+    name = name_in(d) or f"folder copy on {platform.node().split('.')[0]}"
     from .merges import MergeWatch
     merges = MergeWatch(replica, lambda: name, state_dir(d))  # before ingesting: edits made while stopped count as apart
     if (state := CURRENT.get()) is not None:  # running under the app or `texloom start`
@@ -154,9 +93,7 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
 
     async def after_connect() -> None:  # retry anything that couldn't be fetched offline
         await replica.synced.wait()
-        cid = str(replica.doc.client_id)
-        if replica.can_write and replica.clients.get(cid) != name:  # for "who wrote this"
-            replica.local_change(lambda: replica.clients.__setitem__(cid, name))
+        replica.name_client(name)
         if not bridge:
             from .gitsync import clone_of_link
             if await clone_of_link(d, replica.meta.get("github")):
@@ -199,7 +136,7 @@ async def _run(d: Path, compile_: bool, once: bool, shell_escape: bool | str, gi
         await asyncio.gather(conn, fs.watch(), merges.run(), turns.run(), keep_overview(), *([bridge.loop()] if bridge else []))
     finally:
         later.cancel()
-        merges._save()
+        merges.save()
         replica.save()
 
 
@@ -215,15 +152,14 @@ def comments_command(a: argparse.Namespace) -> None:
     last sync); `reply` and `resolve` connect with a copy of their own, as `texloom mcp` does, so
     they work while the app or `texloom run` is syncing the folder."""
     from .comments import read, reply, resolve
-    from .listsync import my_name
+    from .listsync import name_in
     act = a.args[0] if a.args[0] in ("reply", "resolve") else "list"
     rest = a.args[1:] if act != "list" else a.args
     if not rest or (act == "reply" and len(rest) < 3) or (act == "resolve" and len(rest) != 2):
         sys.exit("usage: texloom comments DIR | texloom comments reply DIR ID TEXT | texloom comments resolve DIR ID")
     d = Path(rest[0])
     keys, server = load(d)
-    cfg = {**DEFAULT_CONFIG, **load_config(d)}
-    name = cfg.get("name") or my_name()[0] or getpass.getuser()
+    name = name_in(d) or getpass.getuser()
     if act == "list":
         r = Replica(state_dir(d), keys, server)
         items = [c for c in read(r, a.all) if not a.mine or c.mentions(name)]
@@ -242,8 +178,7 @@ def comments_command(a: argparse.Namespace) -> None:
         sys.exit("this folder has a read-only link: it can't reply or resolve")
 
     async def change() -> None:
-        state = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "texloom" / "comments" / keys.project
-        r = Replica(state, keys, server, cfg["create_code"] or None)
+        r = side_replica("comments", keys, server, load_config(d)["create_code"] or None)
         conn = asyncio.create_task(r.run())
         try:
             await asyncio.wait_for(r.synced.wait(), 60)
@@ -362,12 +297,6 @@ async def peek(link: str, timeout: float = 15) -> dict:
                 "files": len(r.files) + len(r.bin), "member": keys.member[2] if keys.member else None}
 
 
-def update_config(d: Path, **changes) -> None:
-    """Change settings in a folder's .texloom/config.json (kept readable by you only)."""
-    cfg = {**load_config(d), **changes}
-    write_json(config_path(d), cfg, private=True, indent=2)
-
-
 def list_folders() -> None:
     have = registry.folders()
     if not have:
@@ -375,7 +304,7 @@ def list_folders() -> None:
         return
     for d in have:
         try:
-            cfg = {**DEFAULT_CONFIG, **load_config(d)}
+            cfg = load_config(d)
             keys, server = Keys.from_link(cfg["link"])
             name = str(Replica(state_dir(d), keys, server).meta.get("name") or "") or d.name
             extras = [x for x, on in (("compile", cfg["compile"]), ("git", cfg.get("git"))) if on]
@@ -603,7 +532,7 @@ def main() -> None:
         else:
             d = Path(a.target)
             keys, server = load(d)
-            code = load_config(d).get("create_code", "")
+            code = load_config(d)["create_code"]
         try:
             asyncio.run(serve(keys, server, a.name[:64], code or None, a.suggest_only))
         except KeyboardInterrupt:

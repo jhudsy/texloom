@@ -903,6 +903,7 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 | `texloom/folderrules.py` | the folder sync's rules: which files are the project's, text, merging, line endings, renames (as `web/src/foldersync.ts`) |
 | `texloom/gitsync.py` | `--git`: a synced folder's git repository kept in step, taking turns with browsers |
 | `texloom/cli.py` | command line |
+| `texloom/config.py` | a synced folder's own settings and project link, and the folders on this computer's list |
 | `texloom/mcp.py` | MCP server (stdio JSON-RPC): tools, presence, comments and suggestions |
 | `texloom/app.py`, `app_list.py`, `app_detail.py`, `app_updates.py` | the desktop app's window: menus and actions; the list of projects; the chosen project; updates |
 | `texloom/dialogs.py`, `dialogs_share.py`, `dialogs_list.py`, `dialogs_tags.py`, `dialogs_tools.py` | its dialogs: settings and copying; sharing and joining; the project list; tags; AI tools and editors |

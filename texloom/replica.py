@@ -133,6 +133,12 @@ class Replica:
         """An edit link, for a project its owner hasn't deleted for everyone."""
         return self.keys.writable and self.deleted_at is None
 
+    def name_client(self, name: str) -> None:
+        """Put `name` to what this copy writes, for "who wrote this" (with a link that can write)."""
+        cid = str(self.doc.client_id)
+        if self.can_write and self.clients.get(cid) != name:
+            self.local_change(lambda: self.clients.__setitem__(cid, name))
+
     @property
     def storage(self) -> str:
         """Where the project lives, as its owner set it: meta "storage" is {m, at, s}, signed by the
