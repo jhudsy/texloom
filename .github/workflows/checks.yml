@@ -57,21 +57,7 @@ jobs:
         run: |
           npm ci
           npx tsc --noEmit -p .
-          npm run check-i18n
-          npm run check-listsync
-          npm run check-versions
-          npm run check-suggest
-          npm run check-pdfanchor
-          npm run check-xr
-          npm run check-packing
-          npm run check-replica
-          npm run check-folder-rules
-          npm run check-chars
-          npm run check-props
-          npm run check-folder-model
-          npm run check-submission
-          npm run check-mcpclient
-          npm run check-gitshacache
+          npm run checks  # every scripts/check-*.mjs
       - name: Property checks of the desktop's text handling, and the same rules as the web app
         run: uv run --with hypothesis python scripts/check_props.py
       - name: Model-based check of the desktop's folder sync (two computers and a collaborator, random steps)

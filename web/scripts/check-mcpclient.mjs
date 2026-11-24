@@ -2,14 +2,9 @@
 // speaks Streamable HTTP: replies as JSON and as event streams, a session id, a token, tools listed
 // over two pages, a tool that fails, and the names the model sees.
 import http from 'node:http'
-import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
+import { load, tally } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-mcpclient')
-await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/assistant/mcpclient.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'mcpclient.mjs' } } } })
-const { McpClient, McpError, prefixFor, qualified, resultText } = await import(pathToFileURL(path.join(out, 'mcpclient.mjs')).href)
+const [{ McpClient, McpError, prefixFor, qualified, resultText }] = await load('src/assistant/mcpclient.ts')
 
 const TOKEN = 'secret-token'
 const SESSION = 'session-1234'
@@ -55,8 +50,7 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r))
 const url = `http://127.0.0.1:${server.address().port}/mcp`
 
-const results = []
-const check = (what, ok, detail = '') => results.push([what, !!ok, detail])
+const { check, report } = tally()
 const throwsKind = async (f) => { try { await f(); return null } catch (e) { return e instanceof McpError ? e.kind : `other: ${e}` } }
 
 try {
@@ -98,10 +92,4 @@ try {
   server.close()
 }
 
-let failed = 0
-for (const [what, ok, detail] of results) {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}${ok || !detail ? '' : `: ${detail}`}`)
-  if (!ok) failed++
-}
-console.log(`${results.length - failed}/${results.length} passed`)
-process.exit(failed ? 1 : 0)
+report()

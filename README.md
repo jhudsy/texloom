@@ -941,12 +941,11 @@ cd web && npm run check-listsync
 npm run check-versions  # saved versions: every one opens exactly, and storing them stays small
 npm run check-suggest   # suggest mode: random typing and collaborators' edits keep the view and suggestions in step
 npm run check-pdfanchor # comments from the PDF: selected text is found in its LaTeX source
-npm run check-chars     # edits never cut an emoji (or any character outside the BMP) in two
 npm run check-packing   # compressed snapshots: both apps read the same cases (scripts/packing-vectors.json; also scripts/check_packing.py)
 npm run check-submission  # the arXiv / journal .zip: files followed, comments removed, files merged
 npm run check-mcpclient    # the Assistant's MCP client, against a stand-in server: JSON and event-stream replies, sessions, tokens, errors, tool names
 npm run check-gitshacache  # the git id cache keeps only the project's current files, and survives blocked storage
-npm run check-props     # random texts and edits (Windows line endings, emoji): the editor and the shared text stay identical, merges and line endings behave
+npm run check-props     # random texts and edits (Windows line endings, emoji): the editor and the shared text stay identical, no emoji is cut in two, merges and line endings behave
 cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for the desktop, and its merge agrees with the web app's
 uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
 uv run python scripts/check_compat.py                              # code kept for older apps, servers and data: listed, markers well formed (DESIGN.md)

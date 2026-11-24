@@ -3,14 +3,10 @@
 // that isn't one (cut short, corrupted, something after it) is left as it is.
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
 import * as Y from 'yjs'
+import { load, report, web } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-packing')
-await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/packing.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'packing.mjs' } } } })
-const { pack, unpack } = await import(pathToFileURL(path.join(out, 'packing.mjs')).href)
+const [{ pack, unpack }] = await load('src/packing.ts')
 const v = JSON.parse(fs.readFileSync(path.join(web, '../scripts/packing-vectors.json'), 'utf8'))
 const hex = (u) => Buffer.from(u).toString('hex')
 const bytes = (h) => new Uint8Array(Buffer.from(h, 'hex'))
@@ -28,5 +24,4 @@ for (const n of [0, 1, 1000, 3_000_000]) {
   for (let i = 0; i < n / 2; i++) u[i] = (i * 2654435761) >>> 24
   if (hex(await unpack(await pack(u))) !== hex(u)) bad.push(`pack then unpack changes ${n} bytes`)
 }
-console.log(bad.join('\n') || `packing: all ${v.cases.length} cases and the round trips agree`)
-process.exit(bad.length ? 1 : 0)
+report('packing', bad, `packing: all ${v.cases.length} cases and the round trips agree`)

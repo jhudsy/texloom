@@ -6,7 +6,9 @@
 //    text settings (src/editortext.ts) with y-codemirror's own copying both ways mirrored step for
 //    step (node_modules/y-codemirror.next/src/y-sync.js). Without lineSeparator this fails at once
 //    on "\r\n": the bug behind scrambled text before 0.4.21.
-// 2. Edits through the editor never leave half a character (src/wholechars.ts).
+// 2. Edits through the editor never leave half a character (src/wholechars.ts); plus cases by hand,
+//    for it and for setText (src/diff.ts) changing one emoji for another. Half a character becomes
+//    "�" in Yjs and can't exist in the desktop app's copy at all.
 // 3. applyText and setText turn a shared text into exactly the target, as another copy sees it too.
 // 4. merge3's laws: nothing changed on one side gives the other; both the same gives that; when
 //    merge3Strict finds no clash it agrees with merge3.
@@ -18,28 +20,14 @@
 //
 // With --same <cases.json> <answers.json>, writes the web app's results for cases scripts/check_props.py made, to
 // check the two implementations of the "same rules" agree.
-import path from 'node:path'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
 import * as Y from 'yjs'
 import fc from 'fast-check'
 import { EditorState } from '@codemirror/state'
+import { browser, load, report } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-props')
-const load = async (entry) => {
-  const name = path.basename(entry, '.ts') + '.mjs'
-  await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: entry, outDir: out, emptyOutDir: false, minify: false, rollupOptions: { output: { entryFileNames: name } } } })
-  return import(pathToFileURL(path.join(out, name)).href)
-}
-const { editorText } = await load('src/editortext.ts')
-const { applyText, setText, merge3, merge3Strict } = await load('src/diff.ts')
-const { lf, keepLF } = await load('src/lineends.ts')
-globalThis.localStorage ??= { getItem: () => null, setItem: () => {}, removeItem: () => {} }
-const { mathSpans } = await load('src/mathpreview.ts')
-globalThis.location = { origin: 'https://app.texloom.org', protocol: 'https:' }
-const { normalServer, fragmentOfLink, fragmentFor, awayServer } = await load('src/servers.ts')
+browser({ location: { origin: 'https://app.texloom.org', protocol: 'https:' } })
+const [{ editorText }, { applyText, setText, merge3, merge3Strict }, { lf, keepLF }, { mathSpans }, { normalServer, fragmentOfLink, fragmentFor, awayServer }] = await load('src/editortext.ts', 'src/diff.ts', 'src/lineends.ts', 'src/mathpreview.ts', 'src/servers.ts')
 
 if (process.argv[2] === '--same') { // cases from scripts/check_props.py: the web app's answers
   const cases = JSON.parse(readFileSync(process.argv[3], 'utf8'))
@@ -172,6 +160,24 @@ const serverCases = [ // [what, got, want]: projects on other servers (src/serve
   ['keys and server round-trip', new URLSearchParams(fragmentFor('p=A&k=B', 'https://other.org')).get('s'), 'https://other.org'],
 ]
 for (const [what, got, want] of serverCases) if (got !== want) { console.error(`props: servers, ${what}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); process.exit(1) }
+// whole characters, by hand: the editor's filter on half of 😀, and setText changing one emoji for another
+const emoji = EditorState.create({ doc: 'a😀b', extensions: editorText })
+const typed = (spec) => emoji.update(spec).state.doc.toString()
+const charCases = [ // [what, got, want]
+  ['deleting the second half of 😀 deletes it', typed({ changes: { from: 2, to: 3 } }), 'ab'],
+  ['deleting the first half of 😀 deletes it', typed({ changes: { from: 1, to: 2 } }), 'ab'],
+  ['changing only the second half gives 😁', typed({ changes: { from: 2, to: 3, insert: '\ude01' } }), 'a😁b'],
+  ['typing between the halves keeps 😀 whole', LONE.test(typed({ changes: { from: 2, insert: 'X' } })), false],
+  ['other edits untouched', typed({ changes: { from: 0, to: 1, insert: 'Z' } }), 'Z😀b'],
+]
+for (const [a, b] of [['face 😀 here', 'face 😁 here'], ['😀', '😁'], ['x😀😀y', 'x😀😁y'], ['ab', 'a😀b'], ['😀b', 'b']]) {
+  const d1 = new Y.Doc(), d2 = new Y.Doc(), t1 = d1.getText('t')
+  t1.insert(0, a); Y.applyUpdate(d2, Y.encodeStateAsUpdate(d1))
+  const sv = Y.encodeStateVector(d2)
+  setText(t1, b); Y.applyUpdate(d2, Y.encodeStateAsUpdate(d1, sv))
+  charCases.push([`setText ${a} → ${b}, here`, t1.toString(), b], [`setText ${a} → ${b}, on another copy`, d2.getText('t').toString(), b])
+}
+for (const [what, got, want] of charCases) if (got !== want) { console.error(`props: whole characters, ${what}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); process.exit(1) }
 for (const [text, want] of examples) {
   const got = mathSpans(text).map((m) => text.slice(m.from, m.to))
   if (JSON.stringify(got) !== JSON.stringify(want)) { console.error(`props: maths in ${JSON.stringify(text)}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); process.exit(1) }
@@ -181,5 +187,4 @@ const bad = []
 for (const [name, prop] of checks) {
   try { fc.assert(prop) } catch (e) { bad.push(`${name}\n    ${String(e.message).split('\n').slice(0, 6).join('\n    ')}`) }
 }
-if (bad.length) { console.error(`props: FAILED (seed ${seed})\n  ` + bad.join('\n  ')); process.exit(1) }
-console.log(`props: all ${checks.length} properties hold (${fc.readConfigureGlobal().numRuns} cases each, seed ${seed})`)
+report(`props (seed ${seed})`, bad, `props: all ${checks.length} properties hold (${fc.readConfigureGlobal().numRuns} cases each, seed ${seed})`)

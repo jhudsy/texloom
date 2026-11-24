@@ -2,13 +2,9 @@
 // the Python against: which documents a compile builds first for \externaldocument.
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
+import { load, report, web } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-xr')
-await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/xr.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'xr.mjs' } } } })
-const { compileOrder, externalDocuments } = await import(pathToFileURL(path.join(out, 'xr.mjs')).href)
+const [{ compileOrder, externalDocuments }] = await load('src/xr.ts')
 const cases = JSON.parse(fs.readFileSync(path.join(web, '../scripts/xr-vectors.json'), 'utf8'))
 const bad = []
 for (const c of cases) {
@@ -20,5 +16,4 @@ for (const c of cases) {
     if (got !== JSON.stringify(want)) bad.push(`${c.what}: ${doc} reads ${got}, want ${JSON.stringify(want)}`)
   }
 }
-console.log(bad.join('\n') || 'xr: all cases agree')
-process.exit(bad.length ? 1 : 0)
+report('xr', bad, 'xr: all cases agree')

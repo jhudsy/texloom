@@ -1,14 +1,9 @@
 // Checks web/src/versions.ts: every saved version must open to exactly what the project
 // held when it was saved, however it was stored, and storing them must stay small.
-import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
 import * as Y from 'yjs'
+import { load, report } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-versions')
-await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/versions.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'versions.mjs' } } } })
-const { saveVersion, docAt, nextLink, versionLabel, nameVersion, thinned } = await import(pathToFileURL(path.join(out, 'versions.mjs')).href)
+const [{ saveVersion, docAt, nextLink, versionLabel, nameVersion, thinned }] = await load('src/versions.ts')
 
 const bad = []
 const check = (what, ok) => { if (!ok) bad.push(what) }
@@ -158,5 +153,4 @@ for (const [label, total, every] of [['paper', 150000, 1500], ['thesis', 1000000
   if (label === 'thesis') check('thesis: well under the 12 MB limit', mb(n.r) < 4)
 }
 
-if (bad.length) { console.error(`FAILED (${bad.length}):\n  ` + bad.slice(0, 20).join('\n  ')); process.exit(1) }
-console.log('versions: all checks passed')
+report(`versions (${bad.length} failed, the first 20 here)`, bad.slice(0, 20), 'versions: all checks passed')

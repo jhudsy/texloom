@@ -1,13 +1,8 @@
 // Checks web/src/submission.ts, the arXiv / journal .zip: which files go in, comment stripping,
 // merging into one .tex, and the main file's folder becoming the top level.
-import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
+import { load, report } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-submission')
-await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/submission.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'submission.mjs' } } } })
-const { submission, needsBbl, stripTexComments } = await import(pathToFileURL(path.join(out, 'submission.mjs')).href)
+const [{ submission, needsBbl, stripTexComments }] = await load('src/submission.ts')
 
 const bad = []
 const eq = (what, got, want) => { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(`${what}:\n  got  ${JSON.stringify(got)}\n  want ${JSON.stringify(want)}`) }
@@ -81,5 +76,4 @@ eq('blank lines stay (paragraphs)', strip('a\n\n% c\n\nb'), 'a\n\n\nb')
   eq('a subfile’s body is merged', sub.files.get('main.tex'), '\nS\n')
 }
 
-console.log(bad.join('\n') || 'submission: all cases agree')
-process.exit(bad.length ? 1 : 0)
+report('submission', bad, 'submission: all cases agree')
