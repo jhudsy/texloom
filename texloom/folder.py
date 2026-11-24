@@ -608,7 +608,7 @@ class FolderSync:
         the sync knows it. A folder renamed, moved or deleted is reported as the folder alone (on
         macOS), not as each file in it; without this, its files stayed in the project at their old
         paths until the next look at the whole folder, and a write to disk in between put them back
-        there (scripts/check_folder_renames.py)."""
+        there (scripts/check_folder_regressions.py)."""
         out = set(paths)
         for rel in paths:
             full = self.root / rel
