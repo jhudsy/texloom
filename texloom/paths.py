@@ -6,6 +6,7 @@ chosen main file come from collaborators.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -16,6 +17,20 @@ from pathlib import Path
 STATE = ".texloom"
 # In STATE, kept for the folder as a whole: the rest is each computer's own (state_dir)
 SHARED_STATE = {"computers", "folder-id", "lock", ".gitignore"}
+
+
+def write_json(path: Path, data, private: bool = False, **dump) -> None:
+    """Write a JSON file so that a crash leaves the old one or the new one, never half of one: a
+    temporary file beside it, then a rename. `private`: readable by you only (it holds keys or
+    links). `dump`: json.dump's options (indent, ensure_ascii)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600 if private else 0o644)
+    if private and os.name != "nt":
+        os.fchmod(fd, 0o600)  # (a temporary file left by a crash keeps its mode otherwise)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f, **dump)
+    os.replace(tmp, path)
 
 
 def state_dir(folder: Path) -> Path:

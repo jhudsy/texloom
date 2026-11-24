@@ -6,6 +6,7 @@ import * as Y from 'yjs'
 import { z } from 'zod'
 import type { Replica } from '../replica'
 import { cleanPath } from '../projectfiles'
+import { setText } from '../diff'
 import { addItem, itemOf, listItems, rangeOf, reply, setResolved } from '../review'
 import { t } from '../i18n'
 import { mentionsMe } from '../mention'
@@ -63,19 +64,6 @@ function occurrences(hay: string, needle: string): number[] {
   const out: number[] = []
   for (let i = hay.indexOf(needle); i >= 0 && needle; i = hay.indexOf(needle, i + needle.length)) out.push(i)
   return out
-}
-
-/** Replace `old` with `next` in a Y.Text using one small edit (common prefix/suffix trimmed). */
-function replaceText(yt: Y.Text, next: string) {
-  const old = yt.toString()
-  if (old === next) return
-  let p = 0
-  const n = Math.min(old.length, next.length)
-  while (p < n && old[p] === next[p]) p++
-  let s = 0
-  while (s < n - p && old[old.length - 1 - s] === next[next.length - 1 - s]) s++
-  if (old.length - s - p > 0) yt.delete(p, old.length - s - p)
-  if (next.length - s - p > 0) yt.insert(p, next.slice(p, next.length - s))
 }
 
 /** Pull the useful part out of a LaTeX log: errors with line numbers, then warnings. */
@@ -223,7 +211,7 @@ export const TOOLS: ToolDef[] = [
         return 'The user rejected this change.'
       r.doc.transact(() => {
         const yt = r.files.get(p)
-        if (yt) replaceText(yt, content)
+        if (yt) setText(yt, content)
         else r.files.set(p, new Y.Text(content))
       }, ASSISTANT)
       return before === null ? `Created ${p}.` : `Rewrote ${p}.`

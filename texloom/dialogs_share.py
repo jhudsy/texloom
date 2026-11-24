@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import html
 import json
-import os
 import platform
 import re
 import time
@@ -20,7 +19,7 @@ from .cli import clone_project, load_config, new_project, peek, server_info, upd
 from .crypto import Keys
 from .daemon import FolderProblem
 from .i18n import _, ngettext
-from .paths import state_dir
+from .paths import state_dir, write_json
 from .ui import AMBER, GREY, Dialog, Engine, default_parent, folder_of, known_server, open_path, red, slug
 
 
@@ -48,9 +47,7 @@ async def create_personal(engine: Engine, d: Path, name: str) -> str:
     r.local_change(lambda: r.members.__setitem__(pub, {"name": granted, "at": at, "by": me, "g": grant}))
     link = personal.link(r.server)
     issued = {**load_issued(d), pub: {"name": granted, "at": at, "link": link}}
-    fd = os.open(issued_file(d), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # these links are keys
-    with os.fdopen(fd, "w") as f:
-        json.dump(issued, f, indent=2)
+    write_json(issued_file(d), issued, private=True, indent=2)  # these links are keys
     return link
 
 

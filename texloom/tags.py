@@ -18,6 +18,7 @@ from typing import Callable
 from . import registry
 from .crypto import b64e
 from .listsync import _canon, empty_tags, fold_tag, merge_tags, tag_colour, tidy_tags
+from .paths import write_json
 
 MAX_NAME = 60
 _lock = threading.RLock()  # the window changes tags while a background thread syncs them
@@ -63,13 +64,7 @@ def _shared() -> dict:
 def _write(data: dict) -> None:
     global _cache
     _cache = None
-    f = _file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_suffix(".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # says which projects you have
-    with os.fdopen(fd, "w", encoding="utf-8") as out:
-        json.dump(data, out, ensure_ascii=False)
-    tmp.replace(f)
+    write_json(_file(), data, private=True, ensure_ascii=False)  # says which projects you have
 
 
 def _stamp(prev: int = 0) -> int:

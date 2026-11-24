@@ -30,6 +30,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from . import registry, tls
 from .crypto import b64d, b64e, seal, unseal
 from .i18n import _
+from .paths import write_json
 
 log = logging.getLogger(__name__)
 
@@ -660,11 +661,7 @@ def save_link(link: str | None) -> None:
 
 
 def _write_saved(state: dict) -> None:
-    p = _saved()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # it opens every project on the list
-    with os.fdopen(fd, "w") as f:
-        json.dump(state, f)
+    write_json(_saved(), state, private=True)  # it opens every project on the list
 
 
 def _name_file() -> Path:
@@ -684,11 +681,7 @@ def my_name() -> tuple[str, int]:
 
 
 def remember_name(name: str, at: int | None = None) -> None:
-    p = _name_file()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump({"v": name.strip()[:64], "at": int(time.time() * 1000) if at is None else at}, f)
+    write_json(_name_file(), {"v": name.strip()[:64], "at": int(time.time() * 1000) if at is None else at}, private=True)
 
 
 def _origin(s: str) -> str | None:
@@ -718,9 +711,7 @@ def last_server() -> str | None:
 
 def remember_server(server: str) -> None:
     if o := _origin(server):
-        p = _last_server_file()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"server": o}))
+        write_json(_last_server_file(), {"server": o})
 
 
 def known_servers() -> list[str]:
@@ -763,11 +754,7 @@ def remember_code(server: str, code: str, at: int | None = None) -> None:
     """Keep the creation code used on `server`, with when it was entered; with a project list, the
     latest one entered anywhere follows the list."""
     codes = {**_saved_codes(), server.rstrip("/"): {"v": code, "at": int(time.time() * 1000) if at is None else at}}
-    p = _codes_file()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(codes, f, indent=2)
+    write_json(_codes_file(), codes, private=True, indent=2)
 
 
 def code_for(server: str) -> str:

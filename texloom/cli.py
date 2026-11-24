@@ -31,7 +31,7 @@ from .crypto import Keys
 from .folder import FolderSync
 from . import registry, tls
 from .daemon import CURRENT, FolderProblem, FolderTag, lock_folder
-from .paths import STATE, state_dir
+from .paths import STATE, state_dir, write_json
 from .replica import Replica
 
 log = logging.getLogger("texloom")
@@ -77,9 +77,7 @@ DEFAULT_CONFIG = {
 def save(d: Path, link: str, create_code: str = "") -> None:
     state_dir(d).mkdir(parents=True, exist_ok=True)
     os.chmod(d / STATE, 0o700)
-    fd = os.open(config_path(d), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # holds the project keys
-    with os.fdopen(fd, "w") as f:
-        json.dump({"link": link, **DEFAULT_CONFIG, "create_code": create_code}, f, indent=2)
+    write_json(config_path(d), {"link": link, **DEFAULT_CONFIG, "create_code": create_code}, private=True, indent=2)  # holds the project keys
     (d / STATE / ".gitignore").write_text("*\n")
 
 
@@ -367,9 +365,7 @@ async def peek(link: str, timeout: float = 15) -> dict:
 def update_config(d: Path, **changes) -> None:
     """Change settings in a folder's .texloom/config.json (kept readable by you only)."""
     cfg = {**load_config(d), **changes}
-    fd = os.open(config_path(d), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(cfg, f, indent=2)
+    write_json(config_path(d), cfg, private=True, indent=2)
 
 
 def list_folders() -> None:

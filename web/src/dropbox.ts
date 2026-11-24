@@ -27,6 +27,7 @@ import { t } from './i18n'
 import { accountStore } from './accounts'
 import { EXPIRE, RENEW, type Lease } from './github'
 import { quiet, STORAGE } from './quiet'
+import { shaCache, type ShaCache } from './gitshacache'
 
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 // (quiet: each send is a new version of the changed files in Dropbox, as each save is in its own app)
@@ -311,17 +312,13 @@ function projectFiles(r: Replica): Map<string, Mine> {
   return out
 }
 const bytesOf = async (r: Replica, m: Mine) => ('text' in m ? new TextEncoder().encode(m.text) : await r.getBlob(m.h))
-/** Content hashes of stored files, by TeXLoom id (both name the content, so this never goes stale). */
-function hashCache(r: Replica) {
-  const key = `texloom.dropboxHash.${r.keys.project}`
-  let m: Record<string, string> = {}
-  try { m = JSON.parse(localStorage.getItem(key) || '{}') } catch (e) { quiet(STORAGE, e) }
-  return {
-    get: (h: string) => m[h],
-    set: (h: string, v: string) => { m[h] = v; try { localStorage.setItem(key, JSON.stringify(m)) } catch (e) { quiet(STORAGE, e) } },
-  }
+/** Content hashes of stored files, by TeXLoom id (gitshacache.ts): only the files the project has now. */
+function hashCache(r: Replica): ShaCache {
+  const now: string[] = []
+  for (const b of r.bin.values()) if (b && typeof b.h === 'string') now.push(b.h)
+  return shaCache(r.keys.project, now, `texloom.dropboxHash.${r.keys.project}`)
 }
-async function hashOfMine(r: Replica, m: Mine, cache: ReturnType<typeof hashCache>): Promise<string> {
+async function hashOfMine(r: Replica, m: Mine, cache: ShaCache): Promise<string> {
   if ('text' in m) return contentHash(new TextEncoder().encode(m.text))
   const known = cache.get(m.h)
   if (known) return known

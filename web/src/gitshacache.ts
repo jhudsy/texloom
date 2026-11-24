@@ -1,5 +1,5 @@
-// Git's ids for a project's stored (binary) files, by TeXLoom's id, kept in browser storage so that
-// syncing with a repository (github.ts) doesn't download and hash every image each minute. Both ids
+// Git's ids (github.ts), or Dropbox's content hashes (dropbox.ts), of a project's stored (binary) files,
+// by TeXLoom's id, kept in browser storage so that syncing doesn't download and hash every image each minute. Both ids
 // name the content, so an entry never goes stale; but it would outlive its file, and a project whose
 // images change often would fill the browser's storage with ids of old versions (issue 29). So each
 // time a sync opens it, it keeps only the files the project has now: those are all a sync looks up.
@@ -13,9 +13,9 @@ export interface ShaCache {
 
 export const cacheKey = (project: string) => `texloom.gitsha.${project}`
 
-/** The cache for `project`, trimmed to `current`: the TeXLoom ids of the files it has now. */
-export function shaCache(project: string, current: Iterable<string>): ShaCache {
-  const key = cacheKey(project)
+/** The cache for `project`, trimmed to `current`: the TeXLoom ids of the files it has now. `key`: where
+ *  it's kept (Dropbox's hashes are kept apart from git's). */
+export function shaCache(project: string, current: Iterable<string>, key = cacheKey(project)): ShaCache {
   let m: Record<string, string> = {}
   try {
     const v = JSON.parse(localStorage.getItem(key) || '{}')

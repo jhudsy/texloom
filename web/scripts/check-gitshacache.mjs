@@ -1,4 +1,4 @@
-// Checks the git id cache (src/gitshacache.ts, issue 29): it keeps only the files the project has
+// Checks the cache of git ids and Dropbox hashes (src/gitshacache.ts, issue 29): it keeps only the files the project has
 // now, so it doesn't grow with every version of every image ever synced, and survives bad storage.
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -47,6 +47,10 @@ store.set(cacheKey('p5'), JSON.stringify(['x']))
 check('contents of the wrong shape start afresh', shaCache('p5', ['0']).get('0') === undefined)
 store.set(cacheKey('p6'), JSON.stringify({ x: 5, y: 'sha-y' }))
 check('an entry that isn’t an id is dropped', shaCache('p6', ['x', 'y']).get('x') === undefined && stored('p6').y === 'sha-y')
+shaCache('p8', ['a']).set('a', 'sha-a')
+shaCache('p8', ['a'], 'texloom.dropboxHash.p8').set('a', 'dropbox-a')
+shaCache('p8', [], 'texloom.dropboxHash.p8')
+check('Dropbox’s hashes are kept apart, and trimmed the same way', stored('p8').a === 'sha-a' && !store.has('texloom.dropboxHash.p8'))
 broken = true
 const b = shaCache('p7', ['z'])
 b.set('z', 'sha-z')
