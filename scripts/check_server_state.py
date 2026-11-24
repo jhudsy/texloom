@@ -55,7 +55,7 @@ STATE = {
     "TexLive.*": "per-server",  # a cache of public TeX Live files
     # per project
     "Store.usage": "project", "Store.owners": "project", "Store.seen": "project", "Store.pending": "project",
-    "Store._facts": "project", "Store._revoked": "project",
+    "Store._facts": "project", "Store._revoked": "project", "Recent.*": "project",
     "Store._locks": "project",  # one project's steps in order: needs all its writes on one relay
     # across projects: into the database for several relays
     "Store.total": "shared", "Store.owner_bytes": "shared", "Store.list_bytes": "shared",
