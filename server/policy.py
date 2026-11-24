@@ -1,7 +1,8 @@
 """The relay's storage rules: sizes and limits, creation codes and their allowances (CodeBook),
-and what may be stored, by whom (StoragePolicy, part of Relay). They decide on top of the Store
-(store.py), which only keeps things; the WebSocket protocol (relay.py) and the HTTP endpoints
-(endpoints.py) ask them. See the server's help (cli.py) for how allowances are set."""
+and who may use the server and what it stores for them (Policy). They decide on top of the Store
+(store.py), which only keeps things; the WebSocket protocol (relay.py), the HTTP endpoints
+(endpoints.py) and the command line ask them. See the server's help (cli.py) for how allowances
+are set."""
 
 from __future__ import annotations
 
@@ -13,15 +14,17 @@ import math
 import os
 import re
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from aiohttp import web
+from texloom import __version__
 
-    from .lists import Lists
-    from .relay import Conn
+from .lists import Lists
+from .wire import APPS, version_tuple
+
+if TYPE_CHECKING:
     from .store import Store
 
 log = logging.getLogger("texloom.relay")
@@ -281,15 +284,30 @@ class CodeBook:
         raise KeyError(f"no such code: {code}")
 
 
-class StoragePolicy:
-    """Who may use a server and what it stores for them (part of Relay)."""
+class Policy:
+    """Who may use a server and what it stores for them, on top of the Store: asked by the
+    WebSocket protocol (relay.py), the HTTP endpoints (endpoints.py), the background upkeep
+    (app.py) and the command line's purges (cli.py)."""
 
-    store: Store
-    codes: CodeBook
-    limits: Limits
-    private: bool
-    lists: Lists | None
-    rooms: dict[str, set[web.WebSocketResponse]]
+    def __init__(self, store: Store | None, codes: CodeBook | None = None, limits: Limits | None = None,
+                 private: bool = False, lists: bool = True, min_version: str = "",
+                 busy: Callable[[str], bool] = lambda project: False):
+        self.codes = codes or CodeBook(None)
+        self.limits = limits or Limits()
+        self.private = private  # only projects created with a valid creation code may use this server
+        # the oldest app version allowed (--min-version): older ones, or apps too old to say, are
+        # asked to update, so that support for older data and protocols can be dropped
+        self.min_version = version_tuple(min_version) if min_version else None
+        self.busy = busy  # busy(project): someone has it open, so it isn't evicted or purged now
+        self.want_lists = lists
+        self.store: Store = store  # type: ignore[assignment]  # (attach, when the server starts)
+        self.lists: Lists | None = None
+        if store is not None:
+            self.attach(store)
+
+    def attach(self, store: Store) -> None:
+        self.store = store
+        self.lists = Lists(store.db, store.lists_grew) if self.want_lists else None
 
     # --- private servers -----------------------------------------------------------
     async def denied(self, project: str, code: object, claim: bool = True) -> str | None:
@@ -314,6 +332,29 @@ class StoragePolicy:
             await self.store.register(project, valid, self.codes.label(valid))
         return None
 
+    def anyone_creates(self) -> bool:
+        """Anyone may create projects that are stored here, without a code."""
+        return not self.private and self.codes.open_creation
+
+    # --- app versions ------------------------------------------------------------------
+    async def note_client(self, app: object, version: object) -> None:
+        """Count an app connecting, by kind and version (shown on the admin page)."""
+        a = app if app in APPS else "unknown"
+        # versions up to this server's own, as they are; anything else (made up, or unknown) as one
+        # row, so that connections can't add rows without end
+        v = version if (t := version_tuple(version)) and t <= (version_tuple(__version__) or ()) else "other"
+        await self.store.note_client(a, v)
+
+    def too_old(self, version: object) -> bool:
+        """Below --min-version (an app that doesn't say is older than this check)."""
+        if not self.min_version:
+            return False
+        v = version_tuple(version)
+        return v is None or v < self.min_version
+
+    def update_needed(self) -> dict:
+        m = ".".join(map(str, self.min_version or ()))
+        return {"code": "update-needed", "min": m, "m": f"this server needs TeXLoom {m} or later"}
 
     # --- storage policy ------------------------------------------------------------
     async def may_store(self, project: str, nbytes: int, code: str | None) -> str | None:
@@ -338,7 +379,7 @@ class StoragePolicy:
         return None
 
     async def move(self, project: str, code: str) -> dict | None:
-        """Move a stored project to another creation code (its owner asked; see `move` in handle).
+        """Move a stored project to another creation code (its owner asked; see `move` in relay.py).
         None if done, else the refusal to send: the code isn't valid (or has lapsed), or hasn't room."""
         owner = self.store.owner(project)
         if owner is None:
@@ -361,20 +402,17 @@ class StoragePolicy:
         log.info("project %s… moved to another creation code (%s)", project[:8], self.codes.label(new))
         return None
 
-    async def purge(self, owner: str) -> tuple[int, int, int]:
+    async def purge(self, owner: str, pause: float = 0) -> tuple[int, int, int]:
         """Drop the stored copies of every project created with `owner` (a creation code), as
-        idle eviction does. Writers' re-uploads are refused while the code is expired or
-        removed, so the projects carry on relay-only, on people's devices. Projects someone
-        has open are skipped (and picked up next time). Returns (purged, bytes freed, skipped)."""
-        return await self._purging(owner)
-
-    async def _purging(self, owner: str, pause: float = 0) -> tuple[int, int, int]:
-        """Purge a code's projects one at a time, pausing after each. Returns (purged, freed, skipped)."""
+        idle eviction does, one at a time, pausing `pause` seconds after each. Writers' re-uploads
+        are refused while the code is expired or removed, so the projects carry on relay-only, on
+        people's devices. Projects someone has open are skipped (and picked up next time).
+        Returns (purged, bytes freed, skipped)."""
         if self.lists:
             await self.lists.purge_owner(owner)
         purged = freed = skipped = 0
         for p in self.store.stored_by(owner):
-            if self.rooms.get(p):
+            if self.busy(p):
                 skipped += 1
                 continue
             freed += await self.store.evict(p)
@@ -390,26 +428,33 @@ class StoragePolicy:
             days = self.codes.lapsed_since(c)
             if days is None or days <= after_days or not (self.store.stored_by(c) or (self.lists and await self.lists.count(c))):
                 continue
-            n, freed, skipped = await self._purging(c, PURGE_PAUSE)
+            n, freed, skipped = await self.purge(c, PURGE_PAUSE)
             log.info("purged %d project(s) of code %s… (%s), expired %d day(s) ago%s", n, c[:4],
                      fmt_size(freed), days, f"; {skipped} open, left for later" if skipped else "")
 
-    def _open(self) -> bool:
-        return not self.private and self.codes.open_creation
+    async def evict_idle(self, days: float) -> None:
+        """Drop the stored copies of projects nobody has opened for `days` (their writers upload
+        them again), letting live editing through between projects."""
+        for p in self.store.idle(days):
+            if self.busy(p):
+                continue  # someone is connected right now
+            freed = await self.store.evict(p)
+            log.info("evicted idle project %s… (%s, unopened for %g days)", p[:8], fmt_size(freed), days)
+            await asyncio.sleep(PURGE_PAUSE)
 
-    def store_status(self, project: str, conn: Conn) -> dict:
-        """What the server keeps of a project, and its limits. `ownerUsed` (all that the project's
-        creation code stores, its other projects and project lists included) goes only to a
-        connection that holds that code: to anyone else it would tell how much the owner keeps
-        elsewhere."""
+    def store_status(self, project: str, code: str | None) -> dict:
+        """What the server keeps of a project, and its limits, for a connection holding creation
+        code `code`. `ownerUsed` (all that the project's creation code stores, its other projects
+        and project lists included) goes only to a connection that holds that code: to anyone
+        else it would tell how much the owner keeps elsewhere."""
         owner = self.store.owner(project)
-        allowance = self.codes.allowance(owner or conn.code or "default")
+        allowance = self.codes.allowance(owner or code or "default")
         return {
             "registered": owner is not None,
-            "creation": "open" if self._open() else "code",
-            "canCreate": self._open() or bool(conn.code),
+            "creation": "open" if self.anyone_creates() else "code",
+            "canCreate": self.anyone_creates() or bool(code),
             "used": self.store.usage.get(project, 0),
             "projectMax": self.limits.project_max if allowance != UNLIMITED else None,
             "allowance": None if allowance == UNLIMITED else allowance,
-            "ownerUsed": self.store.owner_usage(owner) if owner is not None and conn.code == owner else None,
+            "ownerUsed": self.store.owner_usage(owner) if owner is not None and code == owner else None,
         }

@@ -888,6 +888,7 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 
 | path | what |
 |---|---|
+| `server/app.py` | the relay's web application: its addresses, settings, database start and background upkeep (eviction, purges) |
 | `server/relay.py` | relay (aiohttp): the WebSocket protocol (connections, catch-up, updates, storage modes), memory limits |
 | `server/policy.py` | storage rules: creation codes and allowances, limits, what may be stored and by whom |
 | `server/endpoints.py` | the relay's HTTP endpoints: stored files, `/api/info`, project lists, code checks; response headers |

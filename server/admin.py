@@ -66,11 +66,11 @@ class Admin:
             await asyncio.sleep(1)  # slow down guessing
             return web.Response(status=401, text="admin token required",
                                 headers={"WWW-Authenticate": 'Basic realm="TeXLoom admin"'})
-        r, st = self.relay, self.relay.store
+        r, st = self.relay.policy, self.relay.store
         r.codes.load()
         e = html.escape
         modes, rows, apps, snaps = await st.admin_rows()
-        online = {p: len(ws) for p, ws in r.rooms.items() if ws}
+        online = {p: len(ws) for p, ws in self.relay.rooms.items() if ws}
         label = {c: lab for c, (_, lab) in r.codes.codes.items()}
         label["default"] = "default (no code)"
 

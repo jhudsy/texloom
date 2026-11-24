@@ -6,7 +6,7 @@ decision, not an accident. See "Keeping several servers possible" in SCALING.md.
 It reads server/*.py and fails on:
 - an attribute set on `self` in a server class (or a mutable value at module level, other than a
   constant in capitals) not listed in STATE below, or listed but gone;
-- a route added in make_app (server/relay.py) not listed in ROUTES, or listed but gone; and a
+- a route added in make_app (server/app.py) not listed in ROUTES, or listed but gone; and a
   route listed as "project" without {project} in its path.
 
 The kinds of state:
@@ -37,10 +37,8 @@ KINDS = {"setting", "connection", "per-server", "project", "shared", "maintenanc
 # "Class.attribute" (or "Class.*" for every attribute of a class, "module:NAME" for module level)
 STATE = {
     # settings and handles
-    "Relay.min_version": "setting", "Relay.codes_url": "setting", "Relay.dropbox_app_key": "setting",
-    "Relay.private": "setting", "Relay.want_lists": "setting", "Relay.limits": "setting",
-    "Relay.codes": "setting",  # the codes file: every relay needs the same one
-    "Relay.store": "setting", "Relay.lists": "setting", "Relay.texlive": "setting",
+    "Relay.policy": "setting", "Endpoints.*": "setting",
+    "Policy.*": "setting",  # the limits, the codes file (every relay needs the same one), handles to the store
     "Store.db": "setting", "Store.files": "setting", "Store.dir": "setting",
     "Lists.*": "setting", "Admin.*": "setting", "CodeBook.*": "setting",
     "Database.*": "setting", "PostgreSQL.*": "setting", "SQLite.*": "setting", "_PgCalls.*": "setting",
@@ -48,6 +46,7 @@ STATE = {
     # connections on this relay
     "Relay.rooms": "connection", "Relay.conns": "connection", "Relay._next_id": "connection",
     "Conn.*": "connection", "Metered.*": "connection",
+    "Policy.busy": "connection",  # whether a project is open: asks this relay's connections only
     # each relay's own
     "Relay.memory": "per-server", "Relay.held": "per-server", "Relay.stopping": "per-server", "Budget.*": "per-server",
     "Store.meta_tokens": "per-server", "Store.meta_at": "per-server",  # the budget for rows that store nothing
@@ -100,7 +99,7 @@ def found_state() -> set[str]:
 
 
 def found_routes() -> set[str]:
-    tree = ast.parse((SERVER / "relay.py").read_text())
+    tree = ast.parse((SERVER / "app.py").read_text())
     out = set()
     for n in ast.walk(tree):
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr.startswith("add_") \

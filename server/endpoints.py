@@ -1,5 +1,6 @@
-"""The relay's HTTP endpoints (part of Relay): stored files, the server's info, encrypted project
-lists and checking a creation code; and the headers every response gets."""
+"""The relay's HTTP endpoints: stored files, the server's info, encrypted project lists and
+checking a creation code; and the headers every response gets. The storage rules they follow are
+in policy.py (Policy)."""
 
 from __future__ import annotations
 
@@ -11,16 +12,16 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
-from texloom import __version__
 from texloom.crypto import signer
 
 from .files import FilesError
-from .lists import MAX_LIST, RETIRED
-from .policy import UNLIMITED, KiB, MiB, StoragePolicy
-from .wire import APPS, BLOB_RE, PROJECT_RE, b64d, verify, version_tuple
+from .lists import MAX_LIST, RETIRED, Lists
+from .policy import UNLIMITED, KiB, MiB, Policy
+from .wire import BLOB_RE, PROJECT_RE, b64d, verify
 
 if TYPE_CHECKING:
     from .relay import Budget
+    from .store import Store
     from .texlive import TexLive
 
 log = logging.getLogger("texloom.relay")
@@ -45,14 +46,20 @@ def x_sig(request: web.Request) -> bytes:
         raise web.HTTPForbidden(text="bad signature") from None
 
 
-class Endpoints(StoragePolicy):
-    """HTTP requests (part of Relay)."""
+class Endpoints:
+    """HTTP requests."""
 
-    texlive: TexLive | None
-    codes_url: str
-    dropbox_app_key: str
-    min_version: tuple[int, ...] | None
-    memory: Budget
+    def __init__(self, policy: Policy, memory: Budget, texlive: TexLive | None = None, codes_url: str = "",
+                 dropbox_app_key: str = ""):
+        self.policy = policy
+        self.memory = memory  # shared with the WebSocket protocol (see MEMORY)
+        self.texlive = texlive  # TeX Live files on demand, when served (for /api/info)
+        self.codes_url = codes_url  # where people learn how to get a creation code (/api/info)
+        self.dropbox_app_key = dropbox_app_key  # the server's Dropbox app, for the web app's Dropbox integration
+
+    @property
+    def store(self) -> Store:
+        return self.policy.store
 
     async def put_blob(self, request: web.Request) -> web.Response:
         project, bid = blob_ids(request)
@@ -61,7 +68,7 @@ class Endpoints(StoragePolicy):
         if await self.store.deleted(project):
             return web.json_response({"code": "deleted"}, status=410)
         # before reading a large body; the project is bound to the code only once the upload is signed
-        why = await self.denied(project, request.headers.get("X-Create-Code"), claim=False)
+        why = await self.policy.denied(project, request.headers.get("X-Create-Code"), claim=False)
         if why:
             return web.json_response({"code": why}, status=403)
         sig = x_sig(request)
@@ -78,7 +85,7 @@ class Endpoints(StoragePolicy):
                         size += len(piece)
                         if size > MAX_BLOB:
                             raise web.HTTPRequestEntityTooLarge(max_size=MAX_BLOB, actual_size=size)
-                        if size > MiB and self.store.free_disk() < self.limits.min_free:
+                        if size > MiB and self.store.free_disk() < self.policy.limits.min_free:
                             return web.json_response({"code": "server-full"}, status=507)
                         spool.write(piece)
             except TimeoutError:
@@ -106,7 +113,7 @@ class Endpoints(StoragePolicy):
             return web.Response(status=403, text="bad signature")
         if await self.store.deleted(project):  # deleted while it was uploading
             return web.json_response({"code": "deleted"}, status=410)
-        if await self.denied(project, request.headers.get("X-Create-Code")):  # a genuine upload: now it may claim
+        if await self.policy.denied(project, request.headers.get("X-Create-Code")):  # a genuine upload: now it may claim
             return web.json_response({"code": "needs-code"}, status=403)
         if await self.store.relay_only(project):
             return web.Response(status=409, text="project is relay-only: blobs are exchanged peer to peer")
@@ -116,7 +123,7 @@ class Endpoints(StoragePolicy):
                 if kind == "file":
                     await self.store.mark_file(project, bid)
                 return web.Response(status=200)
-            refused = await self.may_store(project, len(data), self.codes.check(request.headers.get("X-Create-Code")))
+            refused = await self.policy.may_store(project, len(data), self.policy.codes.check(request.headers.get("X-Create-Code")))
             if refused:
                 status = {"needs-code": 403, "code-expired": 403, "quota-full": 507, "project-full": 413, "server-full": 507}[refused]
                 return web.json_response({"code": refused}, status=status)
@@ -148,7 +155,7 @@ class Endpoints(StoragePolicy):
         project, bid = blob_ids(request)
         if await self.store.deleted(project):
             raise web.HTTPGone()
-        if await self.denied(project, None):
+        if await self.policy.denied(project, None):
             raise web.HTTPForbidden()
         size = await self.store.blob_size(project, bid)
         if size is None:
@@ -159,56 +166,38 @@ class Endpoints(StoragePolicy):
             "Content-Disposition": "attachment",  # ciphertext; never something to render
         })
 
-    # --- app versions ------------------------------------------------------------------
-    async def note_client(self, app: object, version: object) -> None:
-        """Count an app connecting, by kind and version (shown on the admin page)."""
-        a = app if app in APPS else "unknown"
-        # versions up to this server's own, as they are; anything else (made up, or unknown) as one
-        # row, so that connections can't add rows without end
-        v = version if (t := version_tuple(version)) and t <= (version_tuple(__version__) or ()) else "other"
-        await self.store.note_client(a, v)
-
-    def too_old(self, version: object) -> bool:
-        """Below --min-version (an app that doesn't say is older than this check)."""
-        if not self.min_version:
-            return False
-        v = version_tuple(version)
-        return v is None or v < self.min_version
-
-    def update_needed(self) -> dict:
-        m = ".".join(map(str, self.min_version or ()))
-        return {"code": "update-needed", "min": m, "m": f"this server needs TeXLoom {m} or later"}
-
     async def info(self, _request: web.Request) -> web.Response:
-        self.codes.load()
-        d = self.codes.default
+        p = self.policy
+        p.codes.load()
+        d = p.codes.default
         return web.json_response({
-            "private": self.private,
-            "creation": "open" if self._open() else "code",
+            "private": p.private,
+            "creation": "open" if p.anyone_creates() else "code",
             "defaultAllowance": None if d == UNLIMITED else d,
-            "projectMaxBytes": self.limits.project_max,
-            "projectLists": self.lists is not None,
+            "projectMaxBytes": p.limits.project_max,
+            "projectLists": p.lists is not None,
             "texlive": self.texlive.info() if self.texlive else None,
             **({"codesUrl": self.codes_url} if self.codes_url else {}),
             **({"dropboxAppKey": self.dropbox_app_key} if self.dropbox_app_key else {}),
-            **({"minVersion": ".".join(map(str, self.min_version))} if self.min_version else {}),
+            **({"minVersion": ".".join(map(str, p.min_version))} if p.min_version else {}),
         })
 
     # --- encrypted project lists (see lists.py) -----------------------------------------
-    def _list_request(self, request: web.Request) -> str:
-        if not self.lists:
+    def _list_request(self, request: web.Request) -> tuple[str, Lists]:
+        """The list a request names, and the lists (404 if this server keeps none)."""
+        p = self.policy
+        if not p.lists:
             raise web.HTTPNotFound()
-        if self.min_version and self.too_old(request.headers.get("X-TeXLoom", "").partition("/")[2]):  # app/version
-            raise web.HTTPUpgradeRequired(text=json.dumps(self.update_needed()), content_type="application/json")
+        if p.min_version and p.too_old(request.headers.get("X-TeXLoom", "").partition("/")[2]):  # app/version
+            raise web.HTTPUpgradeRequired(text=json.dumps(p.update_needed()), content_type="application/json")
         lid = request.match_info["id"]
         if not PROJECT_RE.match(lid):
             raise web.HTTPBadRequest()
-        return lid
+        return lid, p.lists
 
     async def get_list(self, request: web.Request) -> web.Response:
-        lid = self._list_request(request)
-        assert self.lists
-        row = await self.lists.get(lid)
+        lid, lists = self._list_request(request)
+        row = await lists.get(lid)
         if row is None:
             raise web.HTTPNotFound()
         if row[0] == RETIRED:
@@ -222,8 +211,7 @@ class Endpoints(StoragePolicy):
         return len(sig) == 64 and signer(lid, msg, sig) == "owner"
 
     async def put_list(self, request: web.Request) -> web.Response:
-        lid = self._list_request(request)
-        assert self.lists
+        lid, lists = self._list_request(request)
         if (request.content_length or 0) > MAX_LIST:
             raise web.HTTPRequestEntityTooLarge(max_size=MAX_LIST, actual_size=request.content_length or 0)
         try:
@@ -233,33 +221,33 @@ class Endpoints(StoragePolicy):
         data = await request.read()
         if len(data) > MAX_LIST or not self._list_signed(lid, f"list:{lid}:{seq}:".encode() + data, request):
             raise web.HTTPForbidden(text="bad signature")
-        row = await self.lists.meta(lid)
+        row = await lists.meta(lid)
         if row and row[0] == RETIRED:
             return web.json_response({"code": "list-retired"}, status=410)
         current = row[0] if row else 0
         if seq != current + 1:  # someone else updated it: the client merges and tries again
             return web.json_response({"seq": current}, status=409)
-        owner = row[1] if row else (self.codes.check(request.headers.get("X-Create-Code")) or "default")
-        if self.codes.allowance(owner) <= 0 or (self.private and owner == "default"):
-            return web.json_response({"code": "code-expired" if self.codes.lapsed(owner) else "needs-code"}, status=403)
+        codes, limits = self.policy.codes, self.policy.limits
+        owner = row[1] if row else (codes.check(request.headers.get("X-Create-Code")) or "default")
+        if codes.allowance(owner) <= 0 or (self.policy.private and owner == "default"):
+            return web.json_response({"code": "code-expired" if codes.lapsed(owner) else "needs-code"}, status=403)
         more = len(data) - (row[2] if row else 0)  # what this version adds
-        allowance = self.codes.allowance(owner)
+        allowance = codes.allowance(owner)
         if allowance != UNLIMITED and more > 0 and self.store.owner_usage(owner) + more > allowance:
             return web.json_response({"code": "list-full"}, status=507)  # (the apps know this one)
-        if (self.store.free_disk() - len(data) < self.limits.min_free or self.store.total + more > self.limits.max_bytes
-                or (not row and not await self.lists.room_for(owner))):
+        if (self.store.free_disk() - len(data) < limits.min_free or self.store.total + more > limits.max_bytes
+                or (not row and not await lists.room_for(owner))):
             return web.json_response({"code": "list-full"}, status=507)
-        if not await self.lists.put(lid, seq, data, owner):  # another update got there first (another server, say)
-            now = await self.lists.meta(lid)
+        if not await lists.put(lid, seq, data, owner):  # another update got there first (another server, say)
+            now = await lists.meta(lid)
             return web.json_response({"seq": now[0] if now else 0}, status=409)
         return web.json_response({"seq": seq})
 
     async def delete_list(self, request: web.Request) -> web.Response:
-        lid = self._list_request(request)
-        assert self.lists
+        lid, lists = self._list_request(request)
         if not self._list_signed(lid, f"listdel:{lid}".encode(), request):
             raise web.HTTPForbidden(text="bad signature")
-        await self.lists.retire(lid)
+        await lists.retire(lid)
         return web.Response(status=204)
 
     async def check_code(self, request: web.Request) -> web.Response:
@@ -268,10 +256,10 @@ class Endpoints(StoragePolicy):
             code = str(body.get("code", ""))[:64] if isinstance(body, dict) else ""
         except ValueError:
             raise web.HTTPBadRequest()
-        c = self.codes.check(code)
+        c = self.policy.codes.check(code)
         if not c:
             return web.json_response({"ok": False})
-        allowance = self.codes.allowance(c)
+        allowance = self.policy.codes.allowance(c)
         return web.json_response({"ok": True, "allowance": None if allowance == UNLIMITED else allowance,
                                   "used": self.store.owner_usage(c)})
 
