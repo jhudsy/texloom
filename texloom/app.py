@@ -32,7 +32,7 @@ from . import __version__, autostart, listsync, registry, tags
 from .app_detail import ProjectDetailPart
 from .app_links import SCHEME, instance_socket, parse_url, register_url_scheme
 from .app_list import ProjectListPart
-from .app_updates import SOURCE_URL, UpdatesPart
+from .app_updates import CHANGELOG_URL, SOURCE_URL, UpdatesPart
 from .daemon import CURRENT, FOLDER, FolderTag
 from .dialogs import SettingsDialog
 from .dialogs_list import ProjectListDialog, just_asked
@@ -45,7 +45,7 @@ from .ui import ICON, MAC, RED, TAGS_ROLE, Engine, browser_link, chevron, defaul
 
 log = logging.getLogger("texloom")
 COMMENTS_EVERY = 15  # seconds between looks at the comments (counts and mention notices)
-HELP_URL = "https://github.com/jhudsy/texloom#readme"
+HELP_URL = "https://texloom.org/help.html"
 
 
 class Activity(logging.Handler):
@@ -159,6 +159,8 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.a_activity.setChecked(bool(app_pref("show_activity", False)))
         self.a_activity.toggled.connect(self.show_activity)
         self.a_help = a(_("TeXLoom help"), lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(HELP_URL)), keys=K.HelpContents)
+        self.a_news = a(_("What’s new in TeXLoom"), lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(CHANGELOG_URL)))
+        self.a_report = a(_("Report a problem…"), lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(f"{SOURCE_URL}/issues/new")))
         self.a_about = a(_("About TeXLoom"), self.about, role=QtGui.QAction.AboutRole)
         self.a_updates = a(_("Check for updates…"), lambda: self.check_updates(asked=True), role=QtGui.QAction.ApplicationSpecificRole)
         self.a_update = a(_("Update available"), self.offer_update, "SoftwareUpdateAvailable")
@@ -216,10 +218,9 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
             m = mb.addMenu(_("Window"))
             m.addAction(self.action(_("Minimise"), self.showMinimized, keys="Ctrl+M"))
             m.addAction(self.action("TeXLoom", self.show_window))
-        m = mb.addMenu(_("Help"))
-        m.addAction(self.a_help)
-        m.addAction(self.a_updates)
-        m.addAction(self.a_about)
+        m = mb.addMenu(_("Help"))  # (on a Mac, About and Check for updates move to the TeXLoom menu)
+        for act in (self.a_help, self.a_news, self.a_report, None, self.a_updates, self.a_about):
+            m.addSeparator() if act is None else m.addAction(act)
 
     def about(self) -> None:
         box = QtWidgets.QMessageBox(self)
@@ -337,6 +338,9 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.refresh_away()
         away = self.has_away and self.away_head.isChecked()
         self.pages.setCurrentIndex(1 if every or self.has_away else 0)
+        has_list = bool(listsync.saved_link())  # (the welcome: with a list, opening it is done)
+        self.welcome_list.setVisible(not has_list)
+        self.welcome_new.setVisible(not has_list)
         self.list.setVisible(bool(every))  # (only projects to join: they have the whole side)
         self.right.setVisible(bool(fs) or away)
         self.statusBar().setVisible(bool(every))

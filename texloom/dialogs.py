@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from urllib.parse import urlparse
 
 from PySide6 import QtGui, QtWidgets
 
@@ -17,7 +18,7 @@ from .i18n import _, app_pref, lang_pref, set_app_pref, set_lang_pref
 from .locales import NAMES
 from .paths import state_dir
 from .dialogs_share import CodeSource, NameBox
-from .ui import AMBER, MAC, Dialog, Engine, grey_note, program_what, project_name, red, slug
+from .ui import AMBER, GREY, MAC, Dialog, Engine, grey_note, known_server, program_what, project_name, red, slug
 
 
 async def program_lines(engine: Engine, d: Path) -> tuple[list, set[str]]:
@@ -195,6 +196,21 @@ class SettingsDialog(QtWidgets.QDialog):
         self.me.editingFinished.connect(self.name_changed)
         lay.addRow(_("Your name"), self.me)
         lay.addRow("", grey_note(_("Shown to collaborators next to what you write, in every project. With a project list, it follows you to your other computers and browsers.")))
+        # the creation code for new projects, one per server (as New project from a folder offers it)
+        row = QtWidgets.QHBoxLayout()
+        self.code = QtWidgets.QLineEdit()
+        self.code.setPlaceholderText(_("only if the server asks for one"))
+        self.code.editingFinished.connect(self.code_changed)
+        self.code_server = QtWidgets.QComboBox()
+        self.code_server.currentIndexChanged.connect(lambda _i: self.show_code())
+        row.addWidget(self.code, 1)
+        row.addWidget(self.code_server)
+        lay.addRow(_("Creation code"), row)
+        self.code_note = grey_note("")
+        lay.addRow("", self.code_note)
+        self.code_source = CodeSource(window.engine)
+        self.code_source.setStyleSheet(f"color: {GREY}")  # a note, as the one above (its link still works)
+        lay.addRow("", self.code_source)
         self.login = QtWidgets.QCheckBox(_("Start TeXLoom when I log in, so folders keep syncing"))
         self.login.setChecked(autostart.status() != "off")
         self.login.toggled.connect(self.set_autostart)
@@ -244,7 +260,39 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def showEvent(self, e) -> None:
         self.list_state.setText(_("In use on this computer") if listsync.saved_link() else _("Not set up"))
+        self.fill_servers()
         super().showEvent(e)
+
+    def fill_servers(self) -> None:
+        """The servers this computer knows, the one a new project goes to by default first; a code
+        may have arrived meanwhile from the project list."""
+        start = known_server().rstrip("/")
+        servers = [start, *[x for x in listsync.known_servers() if x != start]]
+        keep = self.code_server.currentData() if self.code_server.count() else start
+        self.code_server.blockSignals(True)
+        self.code_server.clear()
+        for s in servers:
+            self.code_server.addItem(urlparse(s).netloc, s)
+        self.code_server.setCurrentIndex(max(0, self.code_server.findData(keep)))
+        self.code_server.blockSignals(False)
+        self.code_server.setVisible(len(servers) > 1)
+        self.show_code()
+
+    def show_code(self) -> None:
+        server = self.code_server.currentData() or known_server()
+        self.code.setText(listsync.code_for(server))
+        self.code_note.setText(_("Lets you keep new projects on {server}. Joining a project doesn’t need one. With a project list, "
+                                 "it follows you to your other computers and browsers.", server=urlparse(server).netloc))
+        self.code_source.show_for(server)
+
+    def code_changed(self) -> None:
+        server, code = self.code_server.currentData() or known_server(), self.code.text().strip()
+        if code == listsync.code_for(server):
+            return
+        listsync.remember_code(server, code)
+        self.msg.setText(_("Creation code saved."))
+        if listsync.saved_link():
+            self.window_.keep_list_updated(force=True)  # so your other devices get it soon
 
     def name_changed(self) -> None:
         if self.me.save() and listsync.saved_link():

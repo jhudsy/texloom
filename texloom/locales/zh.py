@@ -441,4 +441,11 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Choose how you’ll open the list elsewhere. You also get a sync link, which always works.': '选择你在其他地方打开列表的方式。你还会得到一个始终有效的同步链接。',
     'Syncing. Now copy the sync link and keep it safe: it’s your way back in if you forget this password.': '已开始同步。现在请复制同步链接并妥善保管：如果忘记此密码，可以用它重新进入。',
     'Syncing. Now copy the sync link and keep it safe.': '已开始同步。现在请复制同步链接并妥善保管。',
+    'What’s new in TeXLoom': 'TeXLoom 新功能',
+    'Report a problem…': '报告问题…',
+    'Already use TeXLoom in your browser?': '已经在浏览器中使用 TeXLoom？',
+    'Your projects, your name and your creation codes come with it.': '您的项目、名字和创建码都会一起带过来。',
+    'New to TeXLoom?': '初次使用 TeXLoom？',
+    'Lets you keep new projects on {server}. Joining a project doesn’t need one. With a project list, it follows you to your other computers and browsers.': '用它可以把新项目保存在 {server} 上。加入项目不需要创建码。使用项目列表时，它会跟随您到其他电脑和浏览器。',
+    'Creation code saved.': '创建码已保存。',
 }

@@ -16,7 +16,7 @@ from . import listsync, tags
 from .cli import load
 from .dialogs_tags import ManageTagsDialog, TagsDialog
 from .i18n import _, app_pref, ngettext, set_app_pref
-from .ui import GREY, ICON, TAGS_ROLE, chevron, dot, project_name, tag_hex
+from .ui import GREY, ICON, TAGS_ROLE, chevron, dot, grey_note, project_name, tag_hex
 
 log = logging.getLogger("texloom")
 
@@ -114,20 +114,41 @@ class ProjectListPart:
         text.setMinimumHeight(text.heightForWidth(500))  # a wrapped label doesn't otherwise get its full height here
         lay.addWidget(text, 0, Qt.AlignHCenter)
         lay.addSpacing(16)
+        # someone who already uses TeXLoom in a browser: the list brings their projects, name and codes
+        self.welcome_list = QtWidgets.QWidget()
+        wl = QtWidgets.QVBoxLayout(self.welcome_list)
+        wl.setContentsMargins(0, 0, 0, 16)
+        ask = QtWidgets.QLabel(_("Already use TeXLoom in your browser?"))
+        f = ask.font()
+        f.setBold(True)
+        ask.setFont(f)
+        ask.setAlignment(Qt.AlignCenter)
+        wl.addWidget(ask)
+        b = QtWidgets.QPushButton(_("Open your project list…"))
+        b.setDefault(True)
+        b.setMinimumHeight(36)
+        b.clicked.connect(lambda: self.project_list())
+        wl.addWidget(b, 0, Qt.AlignHCenter)
+        brings = grey_note(_("Your projects, your name and your creation codes come with it."))
+        brings.setAlignment(Qt.AlignCenter)
+        wl.addWidget(brings)
+        lay.addWidget(self.welcome_list)
+        self.welcome_new = QtWidgets.QLabel(_("New to TeXLoom?"))
+        self.welcome_new.setFont(f)
+        self.welcome_new.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.welcome_new)
         row = QtWidgets.QHBoxLayout()
         row.addStretch(1)
-        for act, default in ((self.a_new, True), (self.a_join, False)):
+        for act in (self.a_new, self.a_join):
             b = QtWidgets.QPushButton(act.icon(), act.text())
-            b.setDefault(default)
             b.setMinimumHeight(36)
             b.clicked.connect(act.trigger)
             row.addWidget(b)
         row.addStretch(1)
         lay.addLayout(row)
-        more = QtWidgets.QLabel(f"<a href='add'>{html.escape(_('Add a TeXLoom folder from this computer…'))}</a>"
-                                f" · <a href='list'>{html.escape(_('Open your project list…'))}</a>")
+        more = QtWidgets.QLabel(f"<a href='add'>{html.escape(_('Add a TeXLoom folder from this computer…'))}</a>")
         more.setAlignment(Qt.AlignCenter)
-        more.linkActivated.connect(lambda what: self.add_existing() if what == "add" else self.project_list())
+        more.linkActivated.connect(lambda _what: self.add_existing())
         lay.addSpacing(8)
         lay.addWidget(more)
         lay.addStretch(2)

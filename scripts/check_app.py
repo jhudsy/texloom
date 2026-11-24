@@ -127,6 +127,41 @@ def windows(win: appmod.Window) -> None:
     check(not win.isVisible(), "the main window closes (hides: the app keeps syncing)")
 
 
+def first_run(win: appmod.Window) -> None:
+    """The welcome while there are no folders, a creation code entered in Settings, and the Help menu."""
+    from texloom import listsync
+    from texloom.ui import DEFAULT_SERVER
+    print("first run:")
+    win.refresh()
+    check(win.pages.currentIndex() == 0, "with no folders, the window shows the welcome")
+    check(not win.welcome_list.isHidden(), "the welcome offers to open your project list")
+    listsync.save_link(listsync.ListKey.generate().link(DEFAULT_SERVER))
+    win.refresh()
+    check(win.welcome_list.isHidden() and win.welcome_new.isHidden(), "with a list in use, the welcome doesn't offer it again")
+    listsync.save_link(None)
+    win.refresh()
+
+    s = SettingsDialog(win)
+    s.fill_servers()
+    host = DEFAULT_SERVER.split("//")[1]
+    check(s.code_server.currentData() == DEFAULT_SERVER, "Settings shows the creation code for the default server")
+    check(host in s.code_note.text(), "and says which server it is for")
+    s.code.setText("  test-code-123 ")
+    s.code.editingFinished.emit()
+    check(listsync.code_for(DEFAULT_SERVER) == "test-code-123", "a code entered in Settings is kept for that server")
+    s2 = SettingsDialog(win)
+    s2.fill_servers()
+    check(s2.code.text() == "test-code-123", "and shown the next time Settings opens")
+    s.deleteLater()
+    s2.deleteLater()
+
+    help_menu = next(a.menu() for a in win.menuBar().actions() if a.menu() and a.text() == "Help")
+    names = [a.text() for a in help_menu.actions()]
+    check(all(n in names for n in ("TeXLoom help", "What’s new in TeXLoom", "Report a problem…")),
+          "the Help menu has help, what's new and reporting a problem")
+    check(appmod.HELP_URL.startswith("https://"), "TeXLoom help opens a web page")
+
+
 def away(win: appmod.Window) -> None:
     """The projects on your list that aren't on this computer, in the main window, to join."""
     from texloom import listsync
@@ -380,6 +415,7 @@ def main() -> int:
     engine = Engine()  # not started: nothing here syncs or goes online
     win = appmod.Window(engine, appmod.Activity())
     windows(win)
+    first_run(win)
     away(win)
     list_window()
     if NATIVE:

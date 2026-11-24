@@ -401,8 +401,9 @@ browser stops if it finds the app or `texloom run` keeping the same folder.
 [releases page](https://github.com/jhudsy/texloom/releases/latest), or install it with
 `uv tool install 'texloom[app] @ git+https://github.com/jhudsy/texloom'` and run
 `texloom app`. It keeps all your project folders in sync from the menu bar or tray. The first
-time, it shows two choices; afterwards they are under **Add project** in the toolbar (and the
-**File** menu):
+time, it offers to open your project list if you already use one in a browser (your projects, name
+and creation codes come with it), and two other choices, which are afterwards under **Add project**
+in the toolbar (and the **File** menu):
 - **New project from a folder…** turns a folder you already have into a project: its files are
   uploaded, encrypted, to `app.texloom.org` (or the server you type) and the folder stays in step.
 - **Join a project with a link…** takes a link (from the Share dialog or an email), shows the
@@ -438,9 +439,12 @@ has **Tags…**, **Make a copy…** (a new project, in a new folder, from this o
   Select several (Shift or ⌘/Ctrl-click) to change their **Tags…** or **Leave…** them together.
   Tags are the same ones as in the web app, through your project list.
 - **Settings** (TeXLoom ▸ Settings… or ⌘, on a Mac; the toolbar elsewhere): start at login, so
-  folders keep syncing; the language, used from the next start (`TEXLOOM_LANG=fr` or `en`
+  folders keep syncing; your creation code for new projects, per server (it follows your project
+  list); the language, used from the next start (`TEXLOOM_LANG=fr` or `en`
   overrides it); the project list; and checking for a new version once a day (also **Help ▸
   Check for updates…**), which shows **Update to …** in the toolbar and offers the download.
+- **Help** opens [the app's help page](https://texloom.org/help.html), the changelog, and a new
+  GitHub issue to report a problem.
 - **Quit TeXLoom** (menu, ⌘Q / Ctrl+Q, tray) asks first, since folders then stop syncing, and
   offers to keep running in the background instead (Settings can stop it asking).
 - Closing the window keeps TeXLoom syncing in the menu bar or tray. On a Mac it then leaves the

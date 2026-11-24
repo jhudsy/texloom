@@ -441,4 +441,11 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Choose how you’ll open the list elsewhere. You also get a sync link, which always works.': 'Escolha como você vai abrir a lista em outros lugares. Você também recebe um link de sincronização, que sempre funciona.',
     'Syncing. Now copy the sync link and keep it safe: it’s your way back in if you forget this password.': 'Sincronizando. Agora copie o link de sincronização e guarde-o bem: é a sua forma de voltar se esquecer esta senha.',
     'Syncing. Now copy the sync link and keep it safe.': 'Sincronizando. Agora copie o link de sincronização e guarde-o bem.',
+    'What’s new in TeXLoom': 'Novidades do TeXLoom',
+    'Report a problem…': 'Relatar um problema…',
+    'Already use TeXLoom in your browser?': 'Já usa o TeXLoom no navegador?',
+    'Your projects, your name and your creation codes come with it.': 'Seus projetos, seu nome e seus códigos de criação vêm junto.',
+    'New to TeXLoom?': 'Novo no TeXLoom?',
+    'Lets you keep new projects on {server}. Joining a project doesn’t need one. With a project list, it follows you to your other computers and browsers.': 'Permite guardar novos projetos em {server}. Para entrar em um projeto não é preciso. Com uma lista de projetos, ele acompanha você em seus outros computadores e navegadores.',
+    'Creation code saved.': 'Código de criação salvo.',
 }
