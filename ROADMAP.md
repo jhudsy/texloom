@@ -4,6 +4,13 @@ What's planned or considered, roughly in the order it would be done. Each item i
 which has the details and is where it's discussed; this file is the overview. Known limitations
 that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitations--open-questions).
 
+## Now
+
+- **[The desktop app's project list](https://github.com/jhudsy/texloom/issues/37)**: everything the
+  web app's project list can do (set a password, see and remove ways in, replace the link, delete
+  the list), the window only about the sync, the projects you could join shown in the main window,
+  and setup as a short guided flow. About 3½–4 days.
+
 ## Next: the server, towards redundancy and scale
 
 How the pieces fit, and why (a bucket for files, one primary database, a lease as the tie-breaker),
