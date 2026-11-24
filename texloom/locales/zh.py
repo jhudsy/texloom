@@ -136,6 +136,8 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Unlock with a password…': '使用密码解锁…',
     'This list was replaced or deleted. Use its new sync link.': '此列表已被替换或删除。请使用新的同步链接。',
     'That username and password don\'t open a list on this server.': '该用户名和密码无法打开此服务器上的列表。',
+    'That username and password are already in use. Choose another password.': '该用户名和密码已被使用。请选择其他密码。',
+    'The list keeps changing: try again.': '列表一直在变化：请重试。',
     'Username or email:': '用户名或邮箱：',
     'Password:': '密码：',
     'Working…': '处理中…',

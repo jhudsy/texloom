@@ -988,6 +988,7 @@ starts its own throwaway server; `scripts/webcheck.py` is what they share, for w
 uv run --extra server --with playwright python scripts/check_web_git.py     # keeping a project in step with GitHub, GitLab and Gitea (stand-ins: scripts/fakeforge.py)
 uv run --extra server --with playwright python scripts/check_web_review.py  # the Review tab: comments in reading order, several drafts at once, acting on several
 uv run --extra server --with playwright python scripts/check_web_listsync.py  # the project list: a project opened while the list syncs keeps the time it was opened
+uv run --extra server --with playwright python scripts/check_web_listways.py  # the project list's passwords, replacing and deleting it, across the desktop app and the web app
 uv run --extra server --with playwright python scripts/check_web_dropbox.py # keeping a project in step with a Dropbox folder (stand-in: scripts/fakedropbox.py)
 ```
 

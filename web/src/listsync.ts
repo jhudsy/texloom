@@ -9,7 +9,7 @@
 // records those entries' signing keys, so that they can be removed.
 import { ed25519 } from '@noble/curves/ed25519.js'
 import { b64d, b64e } from './crypto'
-import { canon, emptyList, emptySettings, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeSettings, mergeTags, passwordSecret, signPut, tidyTags, type ListDoc, type SettingsDoc, type TagDoc } from './listcore'
+import { canon, emptyList, emptySettings, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeRegistry, mergeSettings, mergeTags, noSlots, passwordSecret, signPut, tidyTags, type ListDoc, type Registry, type SettingsDoc, type Slot, type TagDoc } from './listcore'
 import { projects } from './projects'
 import { creationCode } from './replica'
 import { myName, NAME_CHANGED } from './myname'
@@ -386,21 +386,7 @@ export async function createPasskey(): Promise<Uint8Array | null> {
 }
 
 // ---- other ways in, and removing them -------------------------------------------------------
-export interface Slot { kind: 'passkey' | 'password'; at: number; seed: string }
-/** The ways in, and those removed (id -> when), so that a copy that missed a removal can't bring one back. */
-type Registry = { v: 1; slots: Record<string, Slot>; gone?: Record<string, number> }
-const noSlots = (): Registry => ({ v: 1, slots: {} })
-function mergeRegistry(a: Registry, b: Registry): Registry {
-  const gone: Record<string, number> = { ...(a.gone ?? {}) }
-  for (const [id, at] of Object.entries(b.gone ?? {})) gone[id] = Math.max(gone[id] ?? 0, at)
-  const slots: Record<string, Slot> = {}
-  for (const [id, slot] of [...Object.entries(a.slots ?? {}), ...Object.entries(b.slots ?? {})]) {
-    if ((gone[id] ?? 0) >= slot.at) continue
-    if (!slots[id] || slot.at > slots[id].at) slots[id] = slot
-  }
-  return { v: 1, slots, ...(Object.keys(gone).length ? { gone } : {}) }
-}
-
+export type { Slot }
 const registryKey = async (secret: Uint8Array) => ListKey.of(await hmac(secret, 'texloom list slots'))
 
 /** The ways in, as all the copies know them (and the removed ones). */

@@ -810,5 +810,149 @@
    },
    "merged": "{\"s\":{\"code\":{\"at\":9,\"v\":\"\"}},\"v\":1}"
   }
+ ],
+ "registry_merges": [
+  {
+   "what": "ways in from either copy are kept",
+   "a": {
+    "v": 1,
+    "slots": {
+     "a": {
+      "kind": "passkey",
+      "at": 5,
+      "seed": "c2VlZA"
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "slots": {
+     "b": {
+      "kind": "password",
+      "at": 6,
+      "seed": "c2VlZA"
+     }
+    }
+   },
+   "merged": "{\"slots\":{\"a\":{\"at\":5,\"kind\":\"passkey\",\"seed\":\"c2VlZA\"},\"b\":{\"at\":6,\"kind\":\"password\",\"seed\":\"c2VlZA\"}},\"v\":1}"
+  },
+  {
+   "what": "a removal beats an older copy",
+   "a": {
+    "v": 1,
+    "slots": {
+     "a": {
+      "kind": "password",
+      "at": 5,
+      "seed": "c2VlZA"
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "slots": {},
+    "gone": {
+     "a": 6
+    }
+   },
+   "merged": "{\"gone\":{\"a\":6},\"slots\":{},\"v\":1}"
+  },
+  {
+   "what": "a removal at the same moment wins",
+   "a": {
+    "v": 1,
+    "slots": {
+     "a": {
+      "kind": "password",
+      "at": 6,
+      "seed": "c2VlZA"
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "slots": {},
+    "gone": {
+     "a": 6
+    }
+   },
+   "merged": "{\"gone\":{\"a\":6},\"slots\":{},\"v\":1}"
+  },
+  {
+   "what": "a way in added again after its removal is back",
+   "a": {
+    "v": 1,
+    "slots": {
+     "a": {
+      "kind": "passkey",
+      "at": 9,
+      "seed": "c2VlZA"
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "slots": {},
+    "gone": {
+     "a": 6
+    }
+   },
+   "merged": "{\"gone\":{\"a\":6},\"slots\":{\"a\":{\"at\":9,\"kind\":\"passkey\",\"seed\":\"c2VlZA\"}},\"v\":1}"
+  },
+  {
+   "what": "the latest removal is kept",
+   "a": {
+    "v": 1,
+    "slots": {},
+    "gone": {
+     "a": 3,
+     "b": 9
+    }
+   },
+   "b": {
+    "v": 1,
+    "slots": {},
+    "gone": {
+     "a": 7
+    }
+   },
+   "merged": "{\"gone\":{\"a\":7,\"b\":9},\"slots\":{},\"v\":1}"
+  },
+  {
+   "what": "the later record of one way in wins",
+   "a": {
+    "v": 1,
+    "slots": {
+     "a": {
+      "kind": "password",
+      "at": 5,
+      "seed": "b2xk"
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "slots": {
+     "a": {
+      "kind": "password",
+      "at": 8,
+      "seed": "bmV3"
+     }
+    }
+   },
+   "merged": "{\"slots\":{\"a\":{\"at\":8,\"kind\":\"password\",\"seed\":\"bmV3\"}},\"v\":1}"
+  },
+  {
+   "what": "nothing to merge",
+   "a": {
+    "v": 1,
+    "slots": {}
+   },
+   "b": {
+    "v": 1,
+    "slots": {}
+   },
+   "merged": "{\"slots\":{},\"v\":1}"
+  }
  ]
 }

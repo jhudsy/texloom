@@ -34,7 +34,7 @@ from .i18n import _
 log = logging.getLogger(__name__)
 
 SIGN_LABEL, CRYPT_LABEL, TAGS_LABEL = b"texloom list sign", b"texloom list encrypt", b"texloom list tags"
-SETTINGS_LABEL = b"texloom list settings"
+SETTINGS_LABEL, SLOTS_LABEL = b"texloom list settings", b"texloom list slots"
 TIMEOUT = 15
 YEAR_MS = 365 * 86400_000
 # Must match web/src/listsync.ts. A password only ever opens a small entry holding the list's secret.
@@ -50,6 +50,8 @@ def explain(code: str) -> str:
         "list-retired": _("This list was replaced or deleted. Use its new sync link."),
         "update-needed": _("This server needs a newer TeXLoom: update the app."),
         "wrong-password": _("That username and password don't open a list on this server."),
+        "password-taken": _("That username and password are already in use. Choose another password."),
+        "busy": _("The list keeps changing: try again."),
     }.get(code, code)
 
 
@@ -59,7 +61,7 @@ def derive(secret: bytes, label: bytes) -> bytes:
 
 
 class ListError(Exception):
-    """code: needs-code, code-expired, list-full, list-retired, wrong-password, or a short description."""
+    """code: needs-code, code-expired, list-full, list-retired, password-taken, wrong-password, busy, or a short description."""
 
     def __init__(self, code: str):
         super().__init__(code)
@@ -107,8 +109,18 @@ class ListKey:
     def decrypt(self, data: bytes) -> bytes:
         return unseal(self._crypt_key, data)
 
+    @property
+    def signing_seed(self) -> str:
+        """Its signing key's seed, as the record of ways in keeps it (web: ListKey.signingSeed)."""
+        return b64e(derive(self.secret, SIGN_LABEL))
+
     def sign_put(self, seq: int, data: bytes) -> str:
-        return b64e(self._signer.sign(f"list:{self.id}:{seq}:".encode() + data))
+        return sign_put(self.signing_seed, self.id, seq, data)
+
+
+def sign_put(seed: str, entry_id: str, seq: int, data: bytes) -> str:
+    """The signature on writing entry `entry_id` as `seq` (stored data `data`), with its signing seed."""
+    return b64e(Ed25519PrivateKey.from_private_bytes(b64d(seed)).sign(f"list:{entry_id}:{seq}:".encode() + data))
 
 
 def _canon(doc: dict) -> str:
@@ -261,27 +273,41 @@ def _request(method: str, url: str, data: bytes | None = None, headers: dict | N
         raise ListError(f"can't reach the server: {e}") from None
 
 
-def pull(key: ListKey, server: str) -> tuple[int, dict | None]:
-    """(sequence number, the list), or (0, None) if the server has none."""
-    status, body, headers = _request("GET", f"{server}/api/list/{key.id}")
+def _get_raw(server: str, entry_id: str) -> tuple[int, bytes] | None | str:
+    """An entry as stored (encrypted): (sequence number, data), None if missing, "retired" if retired."""
+    status, body, headers = _request("GET", f"{server}/api/list/{entry_id}")
     if status == 404:
-        return 0, None
+        return None
     if status == 410:
-        raise ListError("list-retired")
+        return "retired"
     if status == 426:
         raise ListError("update-needed")
     if status != 200:
         raise ListError(f"server said {status}")
-    return int(headers.get("X-Seq", 0)), json.loads(key.decrypt(body))
+    return int(headers.get("X-Seq", 0)), body
+
+
+def pull(key: ListKey, server: str) -> tuple[int, dict | None]:
+    """(sequence number, the list), or (0, None) if the server has none."""
+    got = _get_raw(server, key.id)
+    if got == "retired":
+        raise ListError("list-retired")
+    if got is None:
+        return 0, None
+    return got[0], json.loads(key.decrypt(got[1]))
 
 
 def _push(key: ListKey, server: str, seq: int, doc: dict, code: str | None) -> bool:
     """False if someone else got there first."""
-    data = key.encrypt(_canon(doc).encode())
-    headers = {"X-Seq": str(seq), "X-Sig": key.sign_put(seq, data), "Content-Type": "application/octet-stream"}
+    return _put_raw(server, key.id, seq, key.encrypt(_canon(doc).encode()), key.signing_seed, code)
+
+
+def _put_raw(server: str, entry_id: str, seq: int, data: bytes, seed: str, code: str | None) -> bool:
+    """Write an entry as stored, signed with the seed of its signing key. False if someone else got there first."""
+    headers = {"X-Seq": str(seq), "X-Sig": sign_put(seed, entry_id, seq, data), "Content-Type": "application/octet-stream"}
     if code:
         headers["X-Create-Code"] = code
-    status, body, _headers = _request("PUT", f"{server}/api/list/{key.id}", data, headers)
+    status, body, _headers = _request("PUT", f"{server}/api/list/{entry_id}", data, headers)
     if status == 409:
         return False
     if status != 200:
@@ -360,7 +386,7 @@ def _update_on(entry: ListKey, server: str, change, blank: dict | None, code: st
             return merged
         if _push(entry, server, seq + 1, merged, code):
             return merged
-    raise ListError("the list keeps changing: try again")
+    raise ListError("busy")
 
 
 def _replicate(entry: ListKey, home: str, merge_in, mine: dict, blank_for, code: str | None) -> dict:
@@ -418,6 +444,174 @@ def sync_settings(key: ListKey, server: str, local: dict, code: str | None = Non
                       lambda _s: empty_settings(), code)
 
 
+# --- other ways in: passkeys and passwords ----------------------------------------------------
+# Each way in is a secret (a passkey's, or a password's) that opens a small entry holding the list's
+# secret ({"v": 1, "wrap": …}). A further entry, opened by the list's secret, records each way in's
+# id, kind, when it was added and its signing seed, so that it can be removed; and the removed ones,
+# so that a copy that missed a removal can't bring one back. Same as web/src/listsync.ts.
+PASSKEY, PASSWORD = "passkey", "password"
+MIN_PASSWORD = 12  # as the web app
+
+
+def no_slots() -> dict:
+    return {"v": 1, "slots": {}}
+
+
+def merge_registry(a: dict, b: dict) -> dict:
+    """The ways in either copy knows, less those removed since they were added (web: mergeRegistry)."""
+    gone = dict(a.get("gone") or {})
+    for sid, at in (b.get("gone") or {}).items():
+        gone[sid] = max(gone.get(sid, 0), at)
+    slots: dict = {}
+    for sid, slot in [*(a.get("slots") or {}).items(), *(b.get("slots") or {}).items()]:
+        if gone.get(sid, 0) >= slot["at"]:
+            continue
+        if sid not in slots or slot["at"] > slots[sid]["at"]:
+            slots[sid] = slot
+    return {"v": 1, "slots": slots, **({"gone": gone} if gone else {})}
+
+
+def _registry_key(key: ListKey) -> ListKey:
+    return ListKey(derive(key.secret, SLOTS_LABEL))
+
+
+def _registry(key: ListKey, home: str, change: dict | None = None) -> dict:
+    """The record of ways in, as every copy knows it (with `change` merged in and written)."""
+    return _replicate(_registry_key(key), home, lambda had, known: merge_registry(had or no_slots(), known),
+                      change or no_slots(), lambda _s: no_slots() if change is None else None, _code_on(home, home))
+
+
+def read_slots(key: ListKey, home: str) -> dict[str, dict]:
+    """The ways in (id -> {"kind", "at", "seed"})."""
+    return _registry(key, home)["slots"]
+
+
+def _code_on(server: str, home: str) -> str | None:
+    return code_for(server) or (_known_code(home) if server == home.rstrip("/") else None) or None
+
+
+def add_password(key: ListKey, home: str, username: str, password: str) -> str:
+    """Make a username and password a way in, on every copy (one unreachable now gets it at a later
+    sync: copy_ways); returns its id. Refused if that pair already opens something."""
+    way = ListKey(password_secret(username, password))
+    made, failure = 0, None
+    for server in copy_servers(home):
+        def wrap(had: dict | None) -> dict:
+            if had is not None:
+                raise ListError("password-taken")
+            return {"v": 1, "wrap": b64e(key.secret)}
+        try:
+            _update_on(way, server, wrap, None, _code_on(server, home))
+            made += 1
+        except ListError as e:
+            if e.code in ("password-taken", "list-retired"):  # (retired: used before, then changed)
+                raise ListError("password-taken") from None
+            failure = e
+    if not made:
+        raise failure or ListError("server")
+    _registry(key, home, {"v": 1, "slots": {way.id: {"kind": PASSWORD, "at": int(time.time() * 1000), "seed": way.signing_seed}}})
+    return way.id
+
+
+def set_password(key: ListKey, home: str, username: str, password: str) -> None:
+    """Set the list's one password, replacing any earlier one."""
+    fresh = add_password(key, home, username, password)
+    for sid, slot in read_slots(key, home).items():
+        if slot.get("kind") == PASSWORD and sid != fresh:
+            remove_slot(key, home, sid, slot)
+
+
+def remove_slot(key: ListKey, home: str, sid: str, slot: dict) -> None:
+    """Stop a way in opening the list, on every copy reachable now."""
+    for server in copy_servers(home):
+        try:
+            _retire(server, sid, slot["seed"])
+        except ListError:
+            pass  # one offline: its stale entry's seed went with the record (copy_ways)
+    _registry(key, home, {"v": 1, "slots": {}, "gone": {sid: int(time.time() * 1000)}})
+
+
+def _retire(server: str, entry_id: str, seed: str) -> None:
+    """Delete an entry on one server, keeping its id out of use, given the seed of its signing key."""
+    sig = b64e(Ed25519PrivateKey.from_private_bytes(b64d(seed)).sign(f"listdel:{entry_id}".encode()))
+    status, _body, _headers = _request("DELETE", f"{server}/api/list/{entry_id}", None, {"X-Sig": sig})
+    if status not in (200, 204, 404, 410):
+        raise ListError(f"server said {status}")
+
+
+def copy_ways(key: ListKey, home: str) -> None:
+    """Passwords on every copy: each entry copied as it is, encrypted, signed with the seed the
+    record keeps (a passkey only works on the server it was made on, so it stays there)."""
+    servers = copy_servers(home)
+    for sid, slot in read_slots(key, home).items():
+        if slot.get("kind") != PASSWORD:
+            continue
+        blob, lacking = None, []
+        for s in servers:
+            try:
+                got = _get_raw(s, sid)
+            except ListError:
+                continue  # unreachable: neither having nor lacking it
+            if got is None:
+                lacking.append(s)
+            elif got != "retired":
+                blob = blob or got
+        for s in lacking if blob else []:
+            try:
+                _put_raw(s, sid, 1, blob[1], slot["seed"], _code_on(s, home))
+            except ListError as e:
+                copy_problems[s] = e.code
+
+
+def _retire_list(key: ListKey, home: str) -> None:
+    """Retire a list and every way into it on every copy, keeping their ids out of use. A copy that
+    can't be reached now keeps them, but a device still using the list finds it retired on the
+    others, and a list retired on any copy is retired."""
+    slots = read_slots(key, home)
+    entries = [_registry_key(key), ListKey(derive(key.secret, TAGS_LABEL)), ListKey(derive(key.secret, SETTINGS_LABEL)), key]
+    done = 0
+    for server in copy_servers(home):
+        try:
+            for sid, slot in slots.items():
+                _retire(server, sid, slot["seed"])
+            for e in entries:
+                _retire(server, e.id, e.signing_seed)
+            done += 1
+        except ListError:
+            continue
+    if not done:
+        raise ListError("server")
+
+
+def replace_list() -> str:
+    """Move this computer's list to a new secret, for when the link has got out; returns the new
+    link. Everything that opened the old one stops working, passkeys and passwords too (whoever
+    has the old link could read them). The same servers keep it."""
+    found = sync_this_computer()
+    if found is None:
+        raise ListError("no list")
+    home, doc = found
+    old = ListKey.from_link(saved_link() or "")[0]
+    kept = copies(home)
+    fresh, code = ListKey.generate(), _code_on(home, home)
+    sync(fresh, home, doc, code)  # on every copy
+    _retire_list(old, home)
+    link = fresh.link(home)
+    _write_saved({"link": link, "copies": kept})
+    sync_this_computer(code)  # its tags and settings
+    return link
+
+
+def delete_list() -> None:
+    """Delete this computer's list, and every way into it, from every copy; this computer stops using it."""
+    link = saved_link()
+    if not link:
+        return
+    key, home = ListKey.from_link(link)
+    _retire_list(key, home)
+    save_link(None)
+
+
 def password_secret(username: str, password: str) -> bytes:
     """The secret a username and password stand for. Slow on purpose, and done on this computer:
     neither is ever sent anywhere."""
@@ -427,17 +621,21 @@ def password_secret(username: str, password: str) -> bytes:
 
 
 def unlock_with_password(server: str, username: str, password: str) -> ListKey:
-    """The list a username and password open."""
+    """The list a username and password open: tried on `server`, then on the others this computer knows."""
     unlocking = ListKey(password_secret(username, password))
-    try:
-        _seq, entry = pull(unlocking, server)
-    except ListError as e:
-        if e.code != "list-retired":  # a password that was changed or removed
-            raise
-        entry = None
-    if entry is None:
-        raise ListError("wrong-password")
-    return ListKey(b64d(entry["wrap"]))
+    first = server.rstrip("/")
+    for s in [first, *(x for x in known_servers() if x != first)]:
+        try:
+            _seq, entry = pull(unlocking, s)
+        except ListError as e:
+            if e.code == "list-retired":  # a password that was changed or removed
+                continue
+            if s == first:
+                raise
+            continue
+        if entry is not None:
+            return ListKey(b64d(entry["wrap"]))
+    raise ListError("wrong-password")
 
 
 # --- this computer -----------------------------------------------------------------------------
@@ -629,6 +827,10 @@ def sync_this_computer(code: str | None = None) -> tuple[str, dict] | None:
     _sync_my_settings(key, server, code)  # first: they say where the copies are
     doc = sync(key, server, local_folders(server), code)
     _sync_my_tags(key, server, doc, code)
+    try:
+        copy_ways(key, server)
+    except ListError as e:
+        log.debug("list ways in: %s", e.code)
     return server, doc
 
 

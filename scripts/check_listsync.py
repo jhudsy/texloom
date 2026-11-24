@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from texloom.listsync import ListKey, _canon, b64d, b64e, merge, merge_settings, merge_tags, password_secret, tag_colour, tidy_tags  # noqa: E402
+from texloom.listsync import ListKey, _canon, b64d, b64e, merge, merge_registry, merge_settings, merge_tags, password_secret, tag_colour, tidy_tags  # noqa: E402
 
 VECTORS = Path(__file__).with_name("listsync-vectors.json")
 E = lambda f, n, at, w, **more: {"f": f, "n": n, "at": at, "w": w, **more}  # noqa: E731
@@ -59,6 +59,17 @@ SETTING_MERGES = [
     ("settings from either side are kept", SET(code={"v": "AAAA", "at": 5}), SET(other={"v": "x", "at": 1})),
     ("a cleared code is a setting too", SET(code={"v": "", "at": 9}), SET(code={"v": "AAAA", "at": 5})),
 ]
+REG = lambda slots=None, gone=None: {"v": 1, "slots": slots or {}, **({"gone": gone} if gone else {})}  # noqa: E731
+SLOT = lambda kind, at, seed="c2VlZA": {"kind": kind, "at": at, "seed": seed}  # noqa: E731
+REGISTRY_MERGES = [
+    ("ways in from either copy are kept", REG({"a": SLOT("passkey", 5)}), REG({"b": SLOT("password", 6)})),
+    ("a removal beats an older copy", REG({"a": SLOT("password", 5)}), REG(gone={"a": 6})),
+    ("a removal at the same moment wins", REG({"a": SLOT("password", 6)}), REG(gone={"a": 6})),
+    ("a way in added again after its removal is back", REG({"a": SLOT("passkey", 9)}), REG(gone={"a": 6})),
+    ("the latest removal is kept", REG(gone={"a": 3, "b": 9}), REG(gone={"a": 7})),
+    ("the later record of one way in wins", REG({"a": SLOT("password", 5, "b2xk")}), REG({"a": SLOT("password", 8, "bmV3")})),
+    ("nothing to merge", REG(), REG()),
+]
 PASSWORDS = [("ada@example.org", "correct horse battery"), ("  Ada@Example.ORG ", "correct horse battery"), ("josé", "pässwörd ﬁne long"), ("ｗｉｄｅ", "Ａ full-width pass")]
 SECRETS = [bytes(range(32)), bytes([0xff] * 32)]
 
@@ -76,6 +87,7 @@ def build() -> dict:
         "passwords": [{"username": u, "password": p, "secret": b64e(password_secret(u, p))} for u, p in PASSWORDS],
         "merges": [{"what": what, "a": a, "b": b, "merged": _canon(merge(a, b))} for what, a, b in MERGES],
         "tag_merges": [{"what": what, "a": a, "b": b, "merged": _canon(merge_tags(a, b))} for what, a, b in TAG_MERGES],
+        "registry_merges": [{"what": what, "a": a, "b": b, "merged": _canon(merge_registry(a, b))} for what, a, b in REGISTRY_MERGES],
         "setting_merges": [{"what": what, "a": a, "b": b, "merged": _canon(merge_settings(a, b))} for what, a, b in SETTING_MERGES],
         "tag_colours": [{"id": tid, "chosen": chosen, "colour": tag_colour(tid, chosen)} for tid, chosen in TAG_COLOURS],
         "tag_tidies": [{"what": what, "doc": doc, "listed": listed, "now": now, "tidied": _canon(tidy_tags(doc, set(listed), now))}
@@ -106,6 +118,9 @@ def main() -> int:
     for m in v["tag_merges"]:
         check(m["what"], _canon(merge_tags(m["a"], m["b"])), m["merged"])
         check(m["what"] + " (other way round)", _canon(merge_tags(m["b"], m["a"])), m["merged"])
+    for m in v["registry_merges"]:
+        check(m["what"], _canon(merge_registry(m["a"], m["b"])), m["merged"])
+        check(m["what"] + " (other way round)", _canon(merge_registry(m["b"], m["a"])), m["merged"])
     for m in v["setting_merges"]:
         check(m["what"], _canon(merge_settings(m["a"], m["b"])), m["merged"])
         check(m["what"] + " (other way round)", _canon(merge_settings(m["b"], m["a"])), m["merged"])
@@ -113,7 +128,7 @@ def main() -> int:
         check(f"colour of {m['id']}", tag_colour(m["id"], m["chosen"]), m["colour"])
     for m in v["tag_tidies"]:
         check(m["what"], _canon(tidy_tags(m["doc"], set(m["listed"]), m["now"])), m["tidied"])
-    print(*bad, sep="\n") if bad else print(f"listsync: {len(v['keys'])} keys, {len(v['passwords'])} passwords, {len(v['merges'])} merges, "
+    print(*bad, sep="\n") if bad else print(f"listsync: {len(v['keys'])} keys, {len(v['passwords'])} passwords, {len(v['merges'])} merges, {len(v['registry_merges'])} ways-in merges, "
                                              f"{len(v['tag_merges'])} tag merges, {len(v['setting_merges'])} setting merges, {len(v['tag_tidies'])} tidies match")
     return 1 if bad else 0
 

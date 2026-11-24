@@ -165,3 +165,19 @@ export const passwordSecret = (username: string, password: string) => scryptAsyn
   enc.encode(`texloom list password v1:${username.trim().toLowerCase().normalize('NFKC')}`),
   { N: 2 ** 17, r: 8, p: 1, dkLen: 32, maxmem: 256 * 1024 * 1024 + 1024 },
 )
+
+// ---- the ways in (passkeys and passwords) -----------------------------------------------
+export interface Slot { kind: 'passkey' | 'password'; at: number; seed: string }
+/** The ways in, and those removed (id -> when), so that a copy that missed a removal can't bring one back. */
+export type Registry = { v: 1; slots: Record<string, Slot>; gone?: Record<string, number> }
+export const noSlots = (): Registry => ({ v: 1, slots: {} })
+export function mergeRegistry(a: Registry, b: Registry): Registry {
+  const gone: Record<string, number> = { ...(a.gone ?? {}) }
+  for (const [id, at] of Object.entries(b.gone ?? {})) gone[id] = Math.max(gone[id] ?? 0, at)
+  const slots: Record<string, Slot> = {}
+  for (const [id, slot] of [...Object.entries(a.slots ?? {}), ...Object.entries(b.slots ?? {})]) {
+    if ((gone[id] ?? 0) >= slot.at) continue
+    if (!slots[id] || slot.at > slots[id].at) slots[id] = slot
+  }
+  return { v: 1, slots, ...(Object.keys(gone).length ? { gone } : {}) }
+}

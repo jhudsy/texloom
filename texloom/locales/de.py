@@ -136,6 +136,8 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Unlock with a password…': 'Mit einem Passwort entsperren …',
     'This list was replaced or deleted. Use its new sync link.': 'Diese Liste wurde ersetzt oder gelöscht. Verwenden Sie ihren neuen Synchronisationslink.',
     'That username and password don\'t open a list on this server.': 'Dieser Benutzername und dieses Passwort öffnen keine Liste auf diesem Server.',
+    'That username and password are already in use. Choose another password.': 'Dieser Benutzername und dieses Passwort werden bereits verwendet. Wählen Sie ein anderes Passwort.',
+    'The list keeps changing: try again.': 'Die Liste ändert sich ständig: Versuchen Sie es erneut.',
     'Username or email:': 'Benutzername oder E-Mail:',
     'Password:': 'Passwort:',
     'Working…': 'Wird bearbeitet …',

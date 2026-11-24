@@ -12,6 +12,7 @@ on:
       - 'server/**'
       - 'scripts/webcheck.py'
       - 'scripts/check_web_*.py'
+      - 'texloom/listsync.py'
       - 'scripts/fakeforge.py'
       - 'scripts/fakedropbox.py'
       - 'scripts/pg.py'
@@ -23,6 +24,7 @@ on:
       - 'server/**'
       - 'scripts/webcheck.py'
       - 'scripts/check_web_*.py'
+      - 'texloom/listsync.py'
       - 'scripts/fakeforge.py'
       - 'scripts/fakedropbox.py'
       - 'scripts/pg.py'
@@ -72,3 +74,6 @@ jobs:
       - name: The project list keeps when a project was opened
         if: (success() || failure()) && steps.chromium.outcome == 'success'
         run: uv run --extra server --with playwright python scripts/check_web_listsync.py
+      - name: The project list's ways in, desktop and web
+        if: (success() || failure()) && steps.chromium.outcome == 'success'
+        run: uv run --extra server --with playwright python scripts/check_web_listways.py
