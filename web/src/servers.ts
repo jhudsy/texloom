@@ -1,4 +1,5 @@
 import { quiet } from './quiet'
+import { getString } from './store'
 // Projects can live on other TeXLoom servers than this one. This web app (and your project list,
 // settings and creation code) belong to the server it's loaded from, the "home" server; a project
 // from elsewhere syncs with its own server, straight from this page. Only encrypted data goes
@@ -10,6 +11,37 @@ import { quiet } from './quiet'
 
 export const home = (): string => location.origin
 
+/** Whether a host name (URL.hostname) is this computer: localhost, 127.x.x.x or [::1]. */
+export const isLoopback = (host: string): boolean => /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(host)
+
+/** A setting for testing on this computer (a stand-in for GitHub's or Dropbox's API, test hooks),
+ *  kept in localStorage under `key`: only when this app is served from this computer, else null. */
+export const devOverride = (key: string): string | null => (isLoopback(location.hostname) ? getString(key) : null)
+
+/** What a server says about itself (GET /api/info, server/endpoints.py). */
+export interface ServerInfo {
+  creation: 'open' | 'code'
+  projectMaxBytes: number
+  projectLists?: boolean
+  private?: boolean
+  codesUrl?: string
+  dropboxAppKey?: string
+  texlive?: { endpoint?: unknown } | null
+}
+const infos = new Map<string, Promise<ServerInfo | null>>()
+/** What a server says about itself (this app's own by default), or null if it can't be had (asked
+ *  again next time: an answer is kept for the page's life). */
+export function serverInfo(server: string = home()): Promise<ServerInfo | null> {
+  let got = infos.get(server)
+  if (!got) {
+    got = fetch(`${server}/api/info`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null))
+      .catch((e) => { quiet('the server didn’t say what it offers (offline?)', e); return null })
+    infos.set(server, got)
+    void got.then((v) => { if (!v) infos.delete(server) })
+  }
+  return got
+}
+
 /** A server address as an origin ("https://host[:port]"), or null if it can't be one: https only,
  *  except http on this computer (local servers, for testing) or when this app itself is on http. */
 export function normalServer(s: string | null | undefined): string | null {
@@ -17,8 +49,7 @@ export function normalServer(s: string | null | undefined): string | null {
   let u: URL
   try { u = new URL(s) } catch { return null }
   if (u.username || u.password) return null
-  const local = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)
-  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && (local || location.protocol === 'http:'))) return null
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && (isLoopback(u.hostname) || location.protocol === 'http:'))) return null
   return u.origin
 }
 

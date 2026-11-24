@@ -13,6 +13,7 @@ import { githubSection, gitStatus } from './githubui'
 import { dropboxSection, dropboxStatus } from './dropboxui'
 import { integrationCard } from './integrationcard'
 import { quiet, STORAGE } from './quiet'
+import { serverInfo } from './servers'
 import { usageBox } from './usage'
 import { moveCodeDialog } from './movecode'
 import { confirmStopStoring } from './storagenotice'
@@ -20,7 +21,7 @@ import { confirmStopStoring } from './storagenotice'
 /** "Codes come from whoever runs this server", with the server's own page about them once known. */
 function codeSourceSlot(): HTMLElement {
   const slot = h('span', {})
-  import('./storagenotice').then(async ({ codeSource, serverInfo }) => slot.replaceChildren(codeSource(await serverInfo())))
+  import('./storagenotice').then(async ({ codeSource }) => slot.replaceChildren(codeSource(await serverInfo())))
   return slot
 }
 

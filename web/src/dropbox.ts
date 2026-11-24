@@ -30,6 +30,7 @@ import { quiet, STORAGE } from './quiet'
 import { shaCache, type ShaCache } from './gitshacache'
 import { digest, hex, randomHex } from './bytes'
 import { b64e } from './crypto'
+import { devOverride, serverInfo } from './servers'
 
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 // (quiet: each send is a new version of the changed files in Dropbox, as each save is in its own app)
@@ -61,12 +62,11 @@ const MOVED = 409
 
 // ---- talking to Dropbox ----------------------------------------------------------------
 
-const local = () => /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
 /** Dropbox's addresses, or stand-ins when testing on this computer (texloom.dropboxApi in localStorage). */
 function ep(): { api: string; content: string; www: string; notify: string } {
   try {
-    const o = JSON.parse(localStorage.getItem('texloom.dropboxApi') || 'null')
-    if (o && local()) return { notify: o.api, ...o }
+    const o = JSON.parse(devOverride('texloom.dropboxApi') || 'null')
+    if (o) return { notify: o.api, ...o }
   } catch (e) { quiet('no stand-in for Dropbox (testing only)', e) }
   return { api: 'https://api.dropboxapi.com', content: 'https://content.dropboxapi.com', www: 'https://www.dropbox.com', notify: 'https://notify.dropboxapi.com' }
 }
@@ -88,8 +88,9 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Prom
 let keyAsked: Promise<string> | null = null
 /** This server's Dropbox app (its `dropbox_app_key` setting), or '' if it has none. */
 export function dropboxAppKey(): Promise<string> {
-  try { const k = localStorage.getItem('texloom.dropboxKey'); if (k && local()) return Promise.resolve(k) } catch (e) { quiet(STORAGE, e) }
-  keyAsked ??= fetch('/api/info', { cache: 'no-store' }).then((r) => r.json()).then((j) => String(j?.dropboxAppKey ?? ''), () => '')
+  const k = devOverride('texloom.dropboxKey')
+  if (k) return Promise.resolve(k)
+  keyAsked ??= serverInfo().then((j) => String(j?.dropboxAppKey ?? ''))
   return keyAsked
 }
 

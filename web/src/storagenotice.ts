@@ -3,17 +3,13 @@
 import { creationCode, type Replica } from './replica'
 import { dialog, h } from './dom'
 import { t, tn } from './i18n'
-import { normalServer, serverName } from './servers'
+import { normalServer, serverInfo, serverName } from './servers'
 import { quiet, STORAGE } from './quiet'
 import { bytes } from './usage'
 
 const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent)
 export const SAFARI_NOTE = isSafari ? ' ' + t('Safari may also delete a site’s data after about 7 days without a visit.') : ''
 
-/** What a server says about itself (this app's own by default). */
-export async function serverInfo(server = location.origin): Promise<{ creation: 'open' | 'code'; projectMaxBytes: number; projectLists?: boolean; private?: boolean; codesUrl?: string } | null> {
-  try { const r = await fetch(`${server}/api/info`); return r.ok ? await r.json() : null } catch { return null }
-}
 const checkCode = (server: string, code: string) => fetch(`${server}/api/code`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })
   .then((x) => x.json()).catch(() => null)
 /** "on other.org", for a server that isn't this app's own. */

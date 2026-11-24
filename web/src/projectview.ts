@@ -646,15 +646,12 @@ export async function openProject(keys: Keys, server: string) {
   keepLF(r) // line breaks are \n only (files saved on Windows have \r\n): see lineends.ts
   // End-to-end checks (scripts/check_synconly.py) type into the editor for real and read the shared
   // text back: only on this computer's own addresses, and only when a check turns it on.
-  try {
-    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && localStorage.getItem('texloom.testHooks') === '1') {
-      (window as any).__texloom = { r, view: () => editor.view(), open: (p: string) => { layout.showEditor(); tree.open(p) } }
-    }
-    if (checking()) { // every shared text stays well formed once changes settle (invariants.ts)
-      let t: ReturnType<typeof setTimeout> | undefined
-      r.files.observeDeep(() => { clearTimeout(t); t = setTimeout(() => r.files.forEach((yt, p) => wellFormed(`the shared ${p}`, yt.toString())), 200) })
-    }
-  } catch (e) { quiet('storage blocked: no hooks', e) }
+  if (checking()) {
+    (window as any).__texloom = { r, view: () => editor.view(), open: (p: string) => { layout.showEditor(); tree.open(p) } }
+    // every shared text stays well formed once changes settle (invariants.ts)
+    let t: ReturnType<typeof setTimeout> | undefined
+    r.files.observeDeep(() => { clearTimeout(t); t = setTimeout(() => r.files.forEach((yt, p) => wellFormed(`the shared ${p}`, yt.toString())), 200) })
+  }
   runGitHub(r, () => me.name) // keep it in step with a GitHub repository, if it's linked to one
   runDropbox(r, () => me.name) // and with a Dropbox folder
   r.meta.observe(renderMoved); renderMoved()

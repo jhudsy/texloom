@@ -2,11 +2,12 @@
 // end-to-end check turns them on (scripts/check_synconly.py sets texloom.testHooks). A broken one is
 // recorded on window.__texloomBroken and logged; the check fails on any. They cost a full copy of
 // the text per check, which is why they don't run for real users.
+import { devOverride } from './servers'
 
 let on: boolean | null = null
 export function checking(): boolean {
   if (on === null) {
-    try { on = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && localStorage.getItem('texloom.testHooks') === '1' } catch { on = false }
+    on = devOverride('texloom.testHooks') === '1'
   }
   return on
 }

@@ -6,6 +6,7 @@ import { t } from '../i18n'
 import { quiet, STORAGE } from '../quiet'
 import { McpClient, McpError, prefixFor, qualified, type McpTool } from './mcpclient'
 import { ToolError, type ToolDef } from './tools'
+import { isLoopback } from '../servers'
 
 export interface ToolServer {
   id: string
@@ -39,7 +40,7 @@ export function checkUrl(url: string): string | null {
   let u: URL
   try { u = new URL(url) } catch { return t('That isn’t a web address.') }
   if (u.protocol === 'https:') return null
-  if (u.protocol === 'http:' && /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(u.hostname)) return null
+  if (u.protocol === 'http:' && isLoopback(u.hostname)) return null
   return t('Use an https:// address (http:// only for this computer).')
 }
 
