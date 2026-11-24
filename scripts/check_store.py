@@ -9,7 +9,9 @@ trash, app versions, the admin page's rows, and project lists. Each answer is ch
 answers from the two databases must be identical. Then, on reopening, the totals read back must
 match; a copy from one database to the other (texloom-server --copy-database-from) must hold
 every row; and SQLite's own rules hold: one server per file, and a transaction's calls go
-through it.
+through it. Before any of that, in the code: store.TABLES names every table the schema creates (or
+the copy would leave one behind), and the SQL in store.py and lists.py uses nothing only one of
+the databases knows (see db.py).
 
 PostgreSQL needs its programs (scripts/pg.py); without them only SQLite is checked, unless
 --postgresql says it must be.
@@ -19,9 +21,11 @@ PostgreSQL needs its programs (scripts/pg.py); without them only SQLite is check
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
+import re
 import sys
 import tempfile
 import time
@@ -196,6 +200,45 @@ async def steps(url: str, tmp: Path) -> list:
     return out
 
 
+# SQL that only one of the databases runs (see db.py), and where it goes wrong
+ONE_DATABASE_ONLY = {
+    r"\bDISTINCT\s+ON\b": "DISTINCT ON is PostgreSQL's",
+    r"::\s*[a-z]": "::casts are PostgreSQL's (CAST(x AS type) works in both)",
+    r"\bINSERT\s+OR\b": "INSERT OR … is SQLite's (ON CONFLICT works in both)",
+    r"\bINSERT\b(?:(?!\bWHERE\b).)*?\bSELECT\b(?:(?!\bWHERE\b).)*?\bON\s+CONFLICT\b":
+        "an INSERT … SELECT with ON CONFLICT needs a WHERE (SQLite's parser does)",
+}
+SQL_RE = re.compile(r"\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER)\b")
+
+
+def sql_texts(path: Path) -> list[tuple[int, str]]:
+    """The SQL in a module: its string literals that look like SQL (f-strings with {…} for what's
+    put in), with their line numbers."""
+    out, parts = [], set()
+    for n in ast.walk(ast.parse(path.read_text())):
+        if isinstance(n, ast.JoinedStr):
+            text = "".join(v.value if isinstance(v, ast.Constant) else "{…}" for v in n.values)
+            parts.update(id(v) for v in n.values)  # (each is read as part of the whole)
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in parts:
+            text = n.value
+        else:
+            continue
+        if SQL_RE.search(text):
+            out.append((n.lineno, text))
+    return out
+
+
+def code_rules() -> None:
+    created = set(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", SCHEMA))
+    ok(created == set(TABLES), "store.TABLES names every table the schema creates, so a copy takes them all"
+       + (f" (missing: {sorted(created - set(TABLES))}, extra: {sorted(set(TABLES) - created)})" if created != set(TABLES) else ""))
+    found = []
+    for name in ("store.py", "lists.py"):
+        for line, text in sql_texts(ROOT / "server" / name):
+            found += [f"server/{name}:{line}: {why}" for rule, why in ONE_DATABASE_ONLY.items() if re.search(rule, text, re.I | re.S)]
+    ok(not found, "the shared SQL uses nothing only SQLite or only PostgreSQL knows" + "".join(f"\n      {f}" for f in found))
+
+
 async def table_rows(url: str) -> dict[str, list]:
     db = await connect(url, SCHEMA, SCHEMA_POSTGRESQL)
     try:
@@ -253,6 +296,8 @@ def main() -> None:
         if need_pg:
             raise
         have_pg = False
+    print("code:")
+    code_rules()
     with tempfile.TemporaryDirectory(prefix="texloom-store-") as d:
         tmp = Path(d)
         answers = {}
