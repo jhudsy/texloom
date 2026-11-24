@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+from .paths import CachedFile, write_json
+
 
 def config_dir() -> Path:
     """Per-user configuration directory for texloom."""
@@ -47,32 +49,24 @@ def _file() -> Path:
     return config_dir() / "folders.json"
 
 
-# the last read of the list, as the app reads it every second: (path, date, size, inode), folders
-_cache: tuple[tuple, list[Path]] | None = None
+def _read(f: Path) -> list[Path]:
+    data = json.loads(f.read_text())
+    return [Path(p) for p in data.get("folders", []) if isinstance(p, str)] if isinstance(data, dict) else []
+
+
+_cache = CachedFile(_read)  # the app reads the list every second
 
 
 def folders() -> list[Path]:
-    global _cache
-    f = _file()
     try:
-        st = f.stat()
-        key = (f, st.st_mtime_ns, st.st_size, st.st_ino)  # each write replaces the file: a new inode
-        if _cache is None or _cache[0] != key:
-            data = json.loads(f.read_text())
-            _cache = (key, [Path(p) for p in data.get("folders", []) if isinstance(p, str)] if isinstance(data, dict) else [])
+        return list(_cache.get(_file(), []))
     except (OSError, ValueError):
         return []
-    return list(_cache[1])
 
 
 def _write(paths: list[Path]) -> None:
-    global _cache
-    _cache = None
-    f = _file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"folders": [str(p) for p in paths]}, indent=2))
-    tmp.replace(f)
+    _cache.forget()
+    write_json(_file(), {"folders": [str(p) for p in paths]}, indent=2)
 
 
 def add(d: Path) -> bool:
