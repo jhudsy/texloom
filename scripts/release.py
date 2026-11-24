@@ -196,6 +196,7 @@ def main() -> int:
         print("==> The website's changelog")
         changelog.write_text(with_stub(changelog.read_text("utf-8"), new, current, dt.date.today(), desktop_commits(current)), "utf-8")
         print(f"    a stub for {new} is in {changelog}: write its wording (the TODOs), then commit and publish")
+        print(f"    and check {changelog.with_name('help.html')} still describes the app as it now is")
         return 0
     except Refused as e:
         print(f"release: refused: {e}", file=sys.stderr)

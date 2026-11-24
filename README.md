@@ -1041,7 +1041,9 @@ and `uv.lock`, commits "Release X.Y.Z", tags `vX.Y.Z` and pushes both; the tag s
 builds (`app.yml`), which make the GitHub release. Last, it writes a stub for the release into
 the website's changelog (`../texloom-web/changelog.html`, or `--web`): the entry in the list, the
 "Latest" badge moved to it, and the desktop app's commits since the last release as a comment.
-The wording is yours; commit and publish the website separately. `--no-push` stops short of
+The wording is yours; commit and publish the website separately. The app's Help menu opens the
+website's help page (`../texloom-web/help.html`, [texloom.org/help.html](https://texloom.org/help.html)): a change to
+something it describes updates it in the same go, and each release is a moment to check it for anything out of date. `--no-push` stops short of
 pushing. `scripts/check_version.py`, in CI, checks the three version strings agree.
 
 ### Translations
