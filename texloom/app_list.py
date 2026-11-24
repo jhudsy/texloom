@@ -7,6 +7,7 @@ import html
 import logging
 import threading
 from pathlib import Path
+from urllib.parse import urlparse
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
@@ -14,8 +15,8 @@ from PySide6.QtCore import Qt
 from . import listsync, tags
 from .cli import load
 from .dialogs_tags import ManageTagsDialog, TagsDialog
-from .i18n import _, ngettext, set_app_pref
-from .ui import ICON, TAGS_ROLE, dot, project_name, tag_hex
+from .i18n import _, app_pref, ngettext, set_app_pref
+from .ui import GREY, ICON, TAGS_ROLE, chevron, dot, project_name, tag_hex
 
 log = logging.getLogger("texloom")
 
@@ -166,9 +167,126 @@ class ProjectListPart:
         self.list.itemDoubleClicked.connect(lambda _it: self.open_folder())
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self.list_menu)
-        lay.addWidget(self.list, 1)
+        lay.addWidget(self.list, 3)
+        # the projects on your list that aren't on this computer, to join (from the last list sync)
+        self.list_data: tuple[str, dict] | None = None  # (server, the list): set beside the window by keep_list_updated
+        self.away_cache: tuple | None = None  # (what it was worked out from, the entries)
+        self.away_rows: tuple | None = None  # what the rows last showed
+        self.away_head = QtWidgets.QToolButton()
+        self.away_head.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.away_head.setAutoRaise(True)
+        self.away_head.setCheckable(True)
+        self.away_head.setChecked(bool(app_pref("away_open", True)))
+        self.away_head.setStyleSheet("QToolButton { border: none; padding: 2px 0; } QToolButton:checked { background: transparent; }")
+        self.away_head.setToolTip(_("Projects on your project list that aren’t on this computer. Join one to keep it in a folder here."))
+        self.away_head.toggled.connect(self.open_away)
+        lay.addWidget(self.away_head)
+        self.away = QtWidgets.QListWidget()
+        self.away.setItemDelegate(ProjectRows(self.away))
+        self.away.setMinimumWidth(220)
+        self.away.itemSelectionChanged.connect(self.away_selected)
+        self.away.itemDoubleClicked.connect(lambda _it: self.join_away())
+        lay.addWidget(self.away, 2)
+        self.list.itemSelectionChanged.connect(lambda: self.list.selectedItems() and self.away.clearSelection())
+        self.away_head.setVisible(False)
+        self.away.setVisible(False)
         self.show_filter()
         return w
+
+    # -- the projects on your list that aren't here
+    def away_entries(self) -> list[tuple[str, dict, str]]:
+        """(project, its list entry, its server) for each project on the list with no folder here.
+        Worked out again only when the list or the folders change."""
+        data = self.list_data
+        if not data:
+            return []
+        server, doc = data
+        key = (id(doc), tuple(map(str, self.folders())))
+        if not self.away_cache or self.away_cache[0] != key:
+            try:
+                away = listsync.not_here(doc, server)
+            except (OSError, ValueError, KeyError):
+                away = []
+            out = []
+            for project, entry in away:
+                # compat(data 0.4.29): list entries without their server (s); not converted: read as the server that keeps the list
+                there = entry.get("s") if isinstance(entry.get("s"), str) and entry["s"].startswith(("https://", "http://")) else server
+                out.append((project, entry, there.rstrip("/")))
+            self.away_cache = (key, out)
+        return self.away_cache[1]
+
+    def refresh_away(self) -> None:
+        """The rows for the projects you could join, matching the search and tag filter."""
+        every = self.away_entries() if app_pref("show_away", True) else []
+        self.has_away = bool(every)  # (the widgets' own visibility depends on the page being shown)
+        self.away_head.setVisible(bool(every))
+        of = tags.reader()
+        words = tags.fold_search(self.find.text()).split()
+        rows = []
+        for project, entry, there in every:
+            own = tuple(of(project))
+            if self.tag_filter - {t.id for t in own}:
+                continue
+            title = entry.get("nick") or entry.get("n") or _("Untitled project")
+            if all(w in tags.fold_search(" ".join([title, *(t.name for t in own)])) for w in words):
+                rows.append((project, title, urlparse(there).netloc, f"{there}/#{entry['f']}", own))
+        self.away_head.setText(_("On your list, not here ({n})", n=len(every)))
+        self.away_head.setIcon(chevron(self.away_head, down=self.away_head.isChecked()))
+        self.away.setVisible(bool(every) and self.away_head.isChecked())
+        shown = tuple((r[0], r[1], r[2], tuple(t.name for t in r[4]), tuple(t.colour for t in r[4])) for r in rows)
+        if shown == self.away_rows:
+            return
+        self.away_rows = shown
+        keep = self.away_current()
+        self.away.blockSignals(True)
+        self.away.clear()
+        grey = QtGui.QBrush(QtGui.QColor(GREY))
+        for project, title, where, link, own in rows:
+            it = QtWidgets.QListWidgetItem(f"{title}\n{where}" + (f"\n{', '.join(t.name for t in own)}" if own else ""))
+            it.setData(Qt.UserRole, link)
+            it.setData(Qt.UserRole + 2, project)
+            it.setData(TAGS_ROLE, own)
+            it.setForeground(grey)
+            it.setToolTip(_("Not on this computer. Double-click to join it."))
+            self.away.addItem(it)
+            if keep and keep[0] == project:
+                it.setSelected(True)
+                self.away.setCurrentItem(it)
+        self.away.blockSignals(False)
+        if keep and not self.away.selectedItems():
+            self.away_selected()
+
+    def open_away(self, on: bool) -> None:
+        set_app_pref("away_open", on)
+        self.refresh_away()
+
+    def away_current(self) -> tuple[str, str, str, str, tuple] | None:
+        """The selected project you could join: (project, title, server, link, tags)."""
+        it = next(iter(self.away.selectedItems()), None)
+        if it is None:
+            return None
+        project = it.data(Qt.UserRole + 2)
+        lines = it.text().split("\n")
+        return project, lines[0], lines[1] if len(lines) > 1 else "", it.data(Qt.UserRole), tuple(it.data(TAGS_ROLE) or ())
+
+    def away_selected(self) -> None:
+        if self.away.selectedItems():
+            self.list.blockSignals(True)
+            self.list.clearSelection()
+            self.list.setCurrentRow(-1)
+            self.list.blockSignals(False)
+        self.show_detail()
+
+    def join_away(self) -> None:
+        picked = self.away_current()
+        if picked:
+            self.join(picked[3])
+
+    def set_show_away(self, on: bool) -> None:
+        set_app_pref("show_away", on)
+        if not on:
+            self.away.clearSelection()
+        self.refresh()
 
     @property
     def sorting(self) -> str:
@@ -194,6 +312,12 @@ class ProjectListPart:
         self.fill_sort_menu(m)
         m.addSection(_("Filter by tag"))
         self.fill_filter_menu(m, clear=False)
+        if self.list_data:
+            m.addSeparator()
+            act = m.addAction(_("Show projects on your list that aren’t here"))
+            act.setCheckable(True)
+            act.setChecked(bool(app_pref("show_away", True)))
+            act.toggled.connect(self.set_show_away)
 
     def fill_filter_menu(self, m: QtWidgets.QMenu, clear: bool = True) -> None:
         if clear:

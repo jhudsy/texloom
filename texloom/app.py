@@ -84,7 +84,10 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         split = QtWidgets.QSplitter()
         split.setChildrenCollapsible(False)
         split.addWidget(self.build_list())
-        split.addWidget(self.build_detail())
+        self.right = QtWidgets.QStackedWidget()  # a folder's details, or a project on the list that isn't here
+        self.right.addWidget(self.build_detail())
+        self.right.addWidget(self.build_away_detail())
+        split.addWidget(self.right)
         split.setStretchFactor(1, 1)
         split.setSizes([260, 640])
         self.pages.addWidget(split)
@@ -111,6 +114,7 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.comments_timer.timeout.connect(self.check_comments)
         self.comments_timer.start(COMMENTS_EVERY * 1000)
         QtCore.QTimer.singleShot(5_000, self.check_comments)
+        QtCore.QTimer.singleShot(2_000, self.keep_list_updated)  # the projects on the list that aren't here
         self.refresh()
         self.list.setFocus()  # not the search field, which would open with a focus ring and a blinking cursor
 
@@ -330,8 +334,11 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
             it.setData(TAGS_ROLE, own)
             it.setIcon(dot(colour))
             it.setToolTip(str(d))
-        self.pages.setCurrentIndex(1 if every else 0)
-        self.detail.setVisible(bool(fs))
+        self.refresh_away()
+        away = self.has_away and self.away_head.isChecked()
+        self.pages.setCurrentIndex(1 if every or self.has_away else 0)
+        self.list.setVisible(bool(every))  # (only projects to join: they have the whole side)
+        self.right.setVisible(bool(fs) or away)
         self.statusBar().setVisible(bool(every))
         if every:
             self.statusBar().showMessage(
@@ -354,7 +361,10 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
     def keep_list_updated(self, force: bool = False) -> None:
         """Keep the project list in step: when this computer's folders or tags change, when the window
         comes to the front, and every half hour."""
-        if self.list_busy or not listsync.saved_link():
+        if not listsync.saved_link():
+            self.list_data = None
+            return
+        if self.list_busy:
             return
         folders = {str(d) for d in registry.folders()}
         if folders == self.list_folders and not force and not self.tags_dirty and time.time() - self.list_at < 1800:
@@ -363,7 +373,11 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
 
         def work() -> None:
             try:
-                listsync.sync_this_computer()
+                self.list_data = listsync.sync_this_computer()  # (read by refresh, on the window's thread)
+            except listsync.ListError as e:
+                if e.code == "list-retired":
+                    self.list_data = None
+                log.debug("project list: %s", e)
             except Exception as e:  # noqa: BLE001 - offline, say: the next try will do
                 log.debug("project list: %s", e)
             finally:
@@ -375,6 +389,8 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
     def project_list(self, link: str = "", from_web: bool = False) -> None:
         self.show_window()
         ProjectListDialog(self, link, from_web).exec()
+        self.list_data = None if not listsync.saved_link() else self.list_data
+        self.keep_list_updated(force=True)
         self.refresh()
 
     def add_existing(self) -> None:

@@ -221,8 +221,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
         'Liste de projets…',
     'A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.':
         'Une page web a demandé à TeXLoom d’utiliser cette liste de projets. Vos dossiers y seraient ajoutés, et toute personne ayant ce lien pourrait les ouvrir. Ne l’utilisez que si ce lien est le vôtre.',
-    "Projects on the list that aren't on this computer:":
-        'Projets de la liste absents de cet ordinateur\xa0:',
     'This computer has no project list yet.':
         'Cet ordinateur n’a pas encore de liste de projets.',
     'Untitled project':
@@ -512,4 +510,10 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Your list is synced, encrypted.': 'Votre liste est synchronisée, chiffrée.',
     'Last synced {n} minutes ago.': ('Synchronisée il y a {n} minute.', 'Synchronisée il y a {n} minutes.'),
     'Your {n} projects are synced, encrypted.': ('Votre projet est synchronisé, chiffré.', 'Vos {n} projets sont synchronisés, chiffrés.'),
+    'This project is on your project list but not on this computer. Join it to keep it in a folder here, or open it in your browser.': 'Ce projet est sur votre liste de projets mais pas sur cet ordinateur. Rejoignez-le pour le garder ici dans un dossier, ou ouvrez-le dans votre navigateur.',
+    'On {server}': 'Sur {server}',
+    'Projects on your project list that aren’t on this computer. Join one to keep it in a folder here.': 'Les projets de votre liste qui ne sont pas sur cet ordinateur. Rejoignez-en un pour le garder ici dans un dossier.',
+    'On your list, not here ({n})': 'Sur votre liste, pas ici ({n})',
+    'Not on this computer. Double-click to join it.': 'Pas sur cet ordinateur. Double-cliquez pour le rejoindre.',
+    'Show projects on your list that aren’t here': 'Afficher les projets de votre liste qui ne sont pas ici',
 }

@@ -8,8 +8,8 @@ undocumented AppKit and Qt behaviour are still in place.
 
 Offscreen (Qt's "offscreen" platform), it opens the main window, then each dialog the way the
 window's own menus do (Join, Sync between your computers, New project from a folder, Settings,
-Manage tags), checks which window it opened over, and closes it. Join opened from the project-list
-dialog must open over that dialog: a sheet opened under it was once left blocked behind it.
+Manage tags), checks which window it opened over, and closes it. Then the projects on your list
+that aren't on this computer, in the main window, and the project list's own window.
 
 With --native on a Mac (the real menu bar; CI's macOS runners have one), also:
 - the menu-bar icon: macOS still has NSStatusBarButton with rightMouseDown:, the app's
@@ -122,25 +122,59 @@ def windows(win: appmod.Window) -> None:
     else:
         opens_over(win.settings_window, SettingsDialog, win, "Settings")
 
-    # Join from inside the project-list dialog (its "Join…"): over that dialog, not under it
-    inner: list[QtWidgets.QDialog] = []
-
-    def in_list(lst: QtWidgets.QDialog) -> None:
-        def got(j: QtWidgets.QDialog) -> None:
-            inner.append(j)
-            check(j.parentWidget() is lst, "Join opened from the project-list dialog opens over it")
-            j.reject()
-        when_modal(JoinDialog, got)
-        win.join()  # runs modally until got() closes it
-        lst.reject()
-    when_modal(ProjectListDialog, in_list)
-    win.project_list()
-    settle()
-    check(bool(inner), "Join opens from the project-list dialog")
-
     win.hide()
     settle()
     check(not win.isVisible(), "the main window closes (hides: the app keeps syncing)")
+
+
+def away(win: appmod.Window) -> None:
+    """The projects on your list that aren't on this computer, in the main window, to join."""
+    from texloom import listsync
+    print("projects to join:")
+    win.show_window()
+    doc = {"v": 1, "gone": {}, "projects": {
+        "p1": {"f": "p=p1&k=a", "n": "Thesis", "at": 2, "w": True},
+        "p2": {"f": "p=p2&k=b", "n": "Grant proposal", "at": 1, "w": True, "s": "https://other.example"}}}
+    sync, listsync.sync_this_computer = listsync.sync_this_computer, lambda code=None: ("https://example.org", doc)
+    listsync.save_link(listsync.ListKey.generate().link("https://example.org"))
+    win.list_data = ("https://example.org", doc)
+    win.refresh()
+    settle()
+    check(win.pages.currentIndex() == 1, "with projects on the list, the window shows them even with no folders here")
+    check(win.away.isVisible() and win.away.count() == 2, "both projects are listed to join")
+    check("(2)" in win.away_head.text(), "under a heading that counts them")
+    win.away.item(1).setSelected(True)
+    settle()
+    check(win.right.currentIndex() == 1 and win.away_title.text() == "Grant proposal", "selecting one shows it, with Join")
+    check("other.example" in win.away_where.text(), "and which server it's on")
+    got: list[str] = []
+
+    def joining(j: QtWidgets.QDialog) -> None:
+        got.append(j.link.text())
+        check(j.parentWidget() is win, "Join opens over the main window")
+        j.reject()
+    when_modal(JoinDialog, joining)
+    win.join_away()
+    settle()
+    check(got == ["https://other.example/#p=p2&k=b"], "with the project's link, on its own server")
+    win.find.setText("thes")
+    win.refresh()
+    check(win.away.count() == 1 and win.away.item(0).text().startswith("Thesis"), "the search covers them")
+    win.find.setText("")
+    win.away_head.setChecked(False)
+    win.refresh()
+    check(not win.away.isVisible() and win.away_head.isVisible(), "the heading folds them away")
+    win.away_head.setChecked(True)
+    win.set_show_away(False)
+    check(not win.away_head.isVisible() and win.pages.currentIndex() == 0, "and View can hide them")
+    win.set_show_away(True)
+    listsync.save_link(None)
+    listsync.sync_this_computer = sync
+    win.keep_list_updated(force=True)
+    win.refresh()
+    check(not win.away_head.isVisible(), "without a list there's nothing to join")
+    win.hide()
+    settle()
 
 
 def list_window() -> None:
@@ -314,6 +348,7 @@ def main() -> int:
     engine = Engine()  # not started: nothing here syncs or goes online
     win = appmod.Window(engine, appmod.Activity())
     windows(win)
+    away(win)
     list_window()
     if NATIVE:
         menu_bar(win)

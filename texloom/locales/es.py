@@ -141,7 +141,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Working…': 'Procesando…',
     'Project list…': 'Lista de proyectos…',
     'A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.': 'Una página web ha pedido a TeXLoom que use esta lista de proyectos. Tus carpetas se añadirían a ella, y cualquiera que tenga este enlace podría abrirlas. Úsalo solo si el enlace es tuyo.',
-    'Projects on the list that aren\'t on this computer:': 'Proyectos de la lista que no están en este ordenador:',
     'This computer has no project list yet.': 'Este ordenador aún no tiene una lista de proyectos.',
     'Untitled project': 'Proyecto sin título',
     'That isn\'t a sync link.': 'Eso no es un enlace de sincronización.',
@@ -424,4 +423,10 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Your list is synced, encrypted.': 'Tu lista está sincronizada y cifrada.',
     'Last synced {n} minutes ago.': ('Sincronizada hace {n} minuto.', 'Sincronizada hace {n} minutos.'),
     'Your {n} projects are synced, encrypted.': ('Tu proyecto está sincronizado y cifrado.', 'Tus {n} proyectos están sincronizados y cifrados.'),
+    'This project is on your project list but not on this computer. Join it to keep it in a folder here, or open it in your browser.': 'Este proyecto está en tu lista de proyectos, pero no en este ordenador. Únete para tenerlo aquí en una carpeta, o ábrelo en tu navegador.',
+    'On {server}': 'En {server}',
+    'Projects on your project list that aren’t on this computer. Join one to keep it in a folder here.': 'Proyectos de tu lista que no están en este ordenador. Únete a uno para tenerlo aquí en una carpeta.',
+    'On your list, not here ({n})': 'En tu lista, no aquí ({n})',
+    'Not on this computer. Double-click to join it.': 'No está en este ordenador. Haz doble clic para unirte.',
+    'Show projects on your list that aren’t here': 'Mostrar los proyectos de tu lista que no están aquí',
 }

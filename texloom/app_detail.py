@@ -317,7 +317,50 @@ class ProjectDetailPart:
         self.show_activity(self.a_activity.isChecked())
         return w
 
+    def build_away_detail(self) -> QtWidgets.QWidget:
+        """A project on your list that isn't on this computer: what it is, and Join."""
+        w = QtWidgets.QWidget()
+        lay = QtWidgets.QVBoxLayout(w)
+        lay.setContentsMargins(16, 8, 12, 8)
+        self.away_title = QtWidgets.QLabel()
+        self.away_title.setTextFormat(Qt.PlainText)  # chosen by collaborators
+        f = self.away_title.font()
+        f.setPointSize(f.pointSize() + 6)
+        f.setBold(True)
+        self.away_title.setFont(f)
+        self.away_where = grey_note("")
+        self.away_tags = QtWidgets.QLabel()
+        self.away_tags.setTextFormat(Qt.PlainText)
+        for x in (self.away_title, self.away_where, self.away_tags):
+            lay.addWidget(x)
+        lay.addWidget(QtWidgets.QLabel(_("This project is on your project list but not on this computer. Join it to keep it in a folder here, or open it in your browser.")))
+        lay.itemAt(lay.count() - 1).widget().setWordWrap(True)
+        lay.addSpacing(4)
+        row = QtWidgets.QHBoxLayout()
+        join = QtWidgets.QPushButton(_("Join…"))
+        join.setDefault(True)
+        join.clicked.connect(self.join_away)
+        web = QtWidgets.QPushButton(_("Open in browser"))
+        web.clicked.connect(lambda: (p := self.away_current()) and QtGui.QDesktopServices.openUrl(QtCore.QUrl(p[3])))
+        row.addWidget(join)
+        row.addWidget(web)
+        row.addStretch(1)
+        lay.addLayout(row)
+        lay.addStretch(1)
+        return w
+
     def show_detail(self) -> None:
+        away = self.away_current()
+        self.right.setCurrentIndex(1 if away else 0)
+        if away:
+            for act in (self.a_open, self.a_web, self.a_share, self.a_copy, self.a_count, self.a_scratch, self.a_mcp, self.a_tags, self.a_leave):
+                act.setEnabled(False)
+            _project, title, where, _link, own = away
+            self.away_title.setText(title)
+            self.away_where.setText(_("On {server}", server=where))
+            self.away_tags.setText(", ".join(t.name for t in own))
+            self.away_tags.setVisible(bool(own))
+            return
         picked = self.selected()
         one, several = len(picked) == 1, len(picked) > 1
         for act in (self.a_open, self.a_web, self.a_share, self.a_copy, self.a_count, self.a_scratch, self.a_mcp):

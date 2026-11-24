@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
-from . import listsync, tags
+from . import listsync
 from .i18n import _, ngettext
 from .ui import AMBER, chevron, grey_note, known_server, red
 
@@ -157,8 +157,7 @@ class ProjectListDialog(QtWidgets.QDialog):
         s.addStretch(1)
         self.pages.addWidget(setup)
 
-        # in use: the list's sync settings (and, until they move to the main window, the projects
-        # on it that aren't here yet)
+        # in use: the list's sync settings (the projects on it that aren't here are in the main window)
         inuse = QtWidgets.QWidget()
         u = QtWidgets.QVBoxLayout(inuse)
         u.setContentsMargins(0, 8, 0, 0)
@@ -170,23 +169,6 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.sync_btn.clicked.connect(self.refresh_list)
         row.addWidget(self.count, 1)
         row.addWidget(self.sync_btn)
-        u.addLayout(row)
-
-        u.addWidget(QtWidgets.QLabel(_("Projects on the list that aren't on this computer:")))
-        self.find = QtWidgets.QLineEdit()
-        self.find.setPlaceholderText(_("Search by name or tag…"))
-        self.find.setClearButtonEnabled(True)
-        self.find.textChanged.connect(lambda _text: self.apply_find())
-        u.addWidget(self.find)
-        self.items = QtWidgets.QListWidget()
-        self.items.setMaximumHeight(130)
-        self.items.itemDoubleClicked.connect(lambda _item: self.join())
-        u.addWidget(self.items)
-        row = QtWidgets.QHBoxLayout()
-        join = QtWidgets.QPushButton(_("Join…"))
-        join.clicked.connect(self.join)
-        row.addWidget(join)
-        row.addStretch(1)
         u.addLayout(row)
 
         u.addSpacing(6)
@@ -310,38 +292,22 @@ class ProjectListDialog(QtWidgets.QDialog):
             self.status.setText(listsync.explain(error.code) if isinstance(error, listsync.ListError) else str(error))
 
     def refresh_list(self) -> None:
-        self.items.clear()
         code = self.code.text().strip() or None
-
-        def work():
-            found = listsync.sync_this_computer(code)
-            return found and (*found, listsync.not_here(found[1], found[0]))
-
-        self.in_background(work, self.show_list)
+        self.in_background(lambda: listsync.sync_this_computer(code), self.show_list)
 
     def show_list(self, found) -> None:
         if found is None:
             self.count.setText(_("This computer has no project list yet."))
             return
-        server, doc, away = found
+        server, doc = found
+        if hasattr(self.window_, "list_data"):
+            self.window_.list_data = found  # the main window shows the projects on it that aren't here
         self.show_copies(server)
         n = len(doc["projects"])
         self.count.setText("✓ " + (ngettext(n, "Your {n} project is synced, encrypted.", "Your {n} projects are synced, encrypted.", n=n) if n
                                    else _("Your list is synced, encrypted.")) + " " + synced_ago(listsync.last_synced))
         key = listsync.ListKey.from_link(listsync.saved_link() or "")[0]
         self.in_background(lambda: listsync.read_slots(key, server), self.show_ways)
-        of = tags.reader()
-        for project, entry in away:
-            names = [t.name for t in of(project)]
-            title = entry.get("nick") or entry.get("n") or _("Untitled project")
-            elsewhere = entry.get("s") if isinstance(entry.get("s"), str) and entry["s"].rstrip("/") != server.rstrip("/") else None  # on another server
-            where = f"  ·  {urlparse(elsewhere).netloc}" if elsewhere else ""
-            item = QtWidgets.QListWidgetItem(title + where + (f"  ·  {', '.join(names)}" if names else ""))
-            # compat(data 0.4.29): list entries without their server (s); not converted: read as the server that keeps the list
-            there = entry.get("s") if isinstance(entry.get("s"), str) and entry["s"].startswith(("https://", "http://")) else server
-            item.setData(Qt.UserRole, f"{there.rstrip('/')}/#{entry['f']}")  # on its own server
-            self.items.addItem(item)
-        self.apply_find()
 
     def show_ways(self, slots: dict) -> None:
         """The passkeys and password that open the list, each with Remove."""
@@ -440,12 +406,6 @@ class ProjectListDialog(QtWidgets.QDialog):
         listsync.set_copy(self.home, server, keep)
         self.refresh_list()  # the next sync writes it there (or stops)
 
-    def apply_find(self) -> None:
-        words = tags.fold_search(self.find.text()).split()
-        for i in range(self.items.count()):
-            item = self.items.item(i)
-            item.setHidden(not all(w in tags.fold_search(item.text()) for w in words))
-
     def adopt(self, link: str) -> None:
         self.link.setText(link)
         listsync.save_link(link)
@@ -482,12 +442,5 @@ class ProjectListDialog(QtWidgets.QDialog):
 
     def stopped(self, text: str) -> None:
         self.link.clear()
-        self.items.clear()
         self.pages.setCurrentIndex(0)
         self.status.setText(text)
-
-    def join(self) -> None:
-        item = self.items.currentItem()
-        if item:
-            self.window_.join(item.data(Qt.UserRole))
-            self.refresh_list()

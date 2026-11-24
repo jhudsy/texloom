@@ -141,7 +141,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Working…': '处理中…',
     'Project list…': '项目列表…',
     'A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.': '某个网页请求 TeXLoom 使用此项目列表。你的文件夹将被添加到列表中，任何持有此链接的人都能打开它们。请仅在链接属于你时使用。',
-    'Projects on the list that aren\'t on this computer:': '列表中不在这台电脑上的项目：',
     'This computer has no project list yet.': '这台电脑还没有项目列表。',
     'Untitled project': '未命名项目',
     'That isn\'t a sync link.': '这不是同步链接。',
@@ -424,4 +423,10 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Your list is synced, encrypted.': '你的列表已加密同步。',
     'Last synced {n} minutes ago.': {'other': '{n} 分钟前已同步。'},
     'Your {n} projects are synced, encrypted.': {'other': '你的 {n} 个项目已加密同步。'},
+    'This project is on your project list but not on this computer. Join it to keep it in a folder here, or open it in your browser.': '此项目在你的项目列表中，但不在这台电脑上。加入它即可在此处的文件夹中保存，或在浏览器中打开它。',
+    'On {server}': '位于 {server}',
+    'Projects on your project list that aren’t on this computer. Join one to keep it in a folder here.': '你的项目列表中不在这台电脑上的项目。加入其中一个即可在此处的文件夹中保存。',
+    'On your list, not here ({n})': '在列表中，不在此处（{n}）',
+    'Not on this computer. Double-click to join it.': '不在这台电脑上。双击即可加入。',
+    'Show projects on your list that aren’t here': '显示列表中不在此处的项目',
 }

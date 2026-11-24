@@ -141,7 +141,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Working…': 'Wird bearbeitet …',
     'Project list…': 'Projektliste …',
     'A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.': 'Eine Webseite hat TeXLoom gebeten, diese Projektliste zu verwenden. Ihre Ordner würden hinzugefügt, und alle, die diesen Link haben, könnten sie öffnen. Verwenden Sie ihn nur, wenn es Ihr Link ist.',
-    'Projects on the list that aren\'t on this computer:': 'Projekte der Liste, die nicht auf diesem Computer sind:',
     'This computer has no project list yet.': 'Dieser Computer hat noch keine Projektliste.',
     'Untitled project': 'Unbenanntes Projekt',
     'That isn\'t a sync link.': 'Das ist kein Synchronisationslink.',
@@ -424,4 +423,10 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Your list is synced, encrypted.': 'Ihre Liste wird verschlüsselt synchronisiert.',
     'Last synced {n} minutes ago.': ('Vor {n} Minute synchronisiert.', 'Vor {n} Minuten synchronisiert.'),
     'Your {n} projects are synced, encrypted.': ('Ihr {n} Projekt wird verschlüsselt synchronisiert.', 'Ihre {n} Projekte werden verschlüsselt synchronisiert.'),
+    'This project is on your project list but not on this computer. Join it to keep it in a folder here, or open it in your browser.': 'Dieses Projekt steht auf Ihrer Projektliste, ist aber nicht auf diesem Computer. Treten Sie ihm bei, um es hier in einem Ordner zu haben, oder öffnen Sie es in Ihrem Browser.',
+    'On {server}': 'Auf {server}',
+    'Projects on your project list that aren’t on this computer. Join one to keep it in a folder here.': 'Projekte auf Ihrer Projektliste, die nicht auf diesem Computer sind. Treten Sie einem bei, um es hier in einem Ordner zu haben.',
+    'On your list, not here ({n})': 'Auf Ihrer Liste, nicht hier ({n})',
+    'Not on this computer. Double-click to join it.': 'Nicht auf diesem Computer. Doppelklicken, um beizutreten.',
+    'Show projects on your list that aren’t here': 'Projekte auf Ihrer Liste zeigen, die nicht hier sind',
 }

@@ -141,7 +141,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Working…': 'Processando…',
     'Project list…': 'Lista de projetos…',
     'A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.': 'Uma página da web pediu ao TeXLoom para usar esta lista de projetos. Suas pastas seriam adicionadas a ela, e qualquer pessoa com este link poderia abri-las. Use somente se o link for seu.',
-    'Projects on the list that aren\'t on this computer:': 'Projetos da lista que não estão neste computador:',
     'This computer has no project list yet.': 'Este computador ainda não tem uma lista de projetos.',
     'Untitled project': 'Projeto sem título',
     'That isn\'t a sync link.': 'Isso não é um link de sincronização.',
@@ -424,4 +423,10 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Your list is synced, encrypted.': 'Sua lista está sincronizada e criptografada.',
     'Last synced {n} minutes ago.': ('Sincronizada há {n} minuto.', 'Sincronizada há {n} minutos.'),
     'Your {n} projects are synced, encrypted.': ('Seu projeto está sincronizado e criptografado.', 'Seus {n} projetos estão sincronizados e criptografados.'),
+    'This project is on your project list but not on this computer. Join it to keep it in a folder here, or open it in your browser.': 'Este projeto está na sua lista de projetos, mas não neste computador. Entre nele para mantê-lo aqui numa pasta, ou abra-o no navegador.',
+    'On {server}': 'Em {server}',
+    'Projects on your project list that aren’t on this computer. Join one to keep it in a folder here.': 'Projetos da sua lista que não estão neste computador. Entre em um para mantê-lo aqui numa pasta.',
+    'On your list, not here ({n})': 'Na sua lista, não aqui ({n})',
+    'Not on this computer. Double-click to join it.': 'Não está neste computador. Clique duas vezes para entrar.',
+    'Show projects on your list that aren’t here': 'Mostrar os projetos da sua lista que não estão aqui',
 }
