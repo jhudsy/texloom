@@ -139,7 +139,6 @@ def refused_then_saved() -> None:
     """A collaborator's edit can't be written (refused), and the file is then saved here: both edits
     stay. Noting the text as written before the write took place made the save undo it."""
     import asyncio
-    import pathlib
     import shutil
 
     from texloom import folder
@@ -161,20 +160,21 @@ def refused_then_saved() -> None:
             other.apply_update(r.doc.get_update())
             ot = other.get("files", type=Map)["main.tex"]
             ot.insert(len("One.\n\nTwo."), " Collaborator's edit.")
-            real = pathlib.Path.replace
+            from texloom import paths
+            real = paths.os.replace
 
-            def refuse(self, target):
-                if ".texloom-tmp" in self.name:
+            def refuse(src, dst):
+                if ".texloom-tmp" in str(src):
                     raise PermissionError(32, "in use (check)")
-                return real(self, target)
-            pathlib.Path.replace = refuse  # type: ignore[method-assign]
+                return real(src, dst)
+            paths.os.replace = refuse  # (replace_file's rename into place)
             try:
                 with r.doc.transaction(origin="remote"):
                     r.doc.apply_update(other.get_update(r.doc.get_state()))
                 async with r.lock:
                     await fs.write_out()
             finally:
-                pathlib.Path.replace = real  # type: ignore[method-assign]
+                paths.os.replace = real
                 if fs._retry_task:
                     fs._retry_task.cancel()
             await asyncio.sleep(0.05)
