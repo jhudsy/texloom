@@ -3,8 +3,8 @@
 web/scripts/check-listsync.mjs checks web/src/listcore.ts against. If the two clients ever
 disagreed, lists would simply fail to open from the other one.
 
-    python scripts/check_listsync.py            check
-    python scripts/check_listsync.py --write    regenerate the file (only when the format changes on purpose)
+    uv run python scripts/check_listsync.py            check
+    uv run python scripts/check_listsync.py --write    regenerate the file (only when the format changes on purpose)
 """
 import json
 import sys

@@ -2,7 +2,7 @@
 """Check texloom/xr.py against scripts/xr-vectors.json, the cases that web/scripts/check-xr.mjs
 checks web/src/xr.ts against: which documents a compile builds first for \\externaldocument.
 
-    python scripts/check_xr.py
+    uv run python scripts/check_xr.py
 """
 import json
 import sys

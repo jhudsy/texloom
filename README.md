@@ -932,35 +932,59 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 
 ### Checks
 
-The project list has to match exactly between the Python and web clients. Both are checked
-against the same data, `scripts/listsync-vectors.json`:
+Several things are written twice, once in each app, and must agree exactly. Each pair is checked
+against the same cases in `scripts/` (`*-vectors.json`, `folder-rules.json`):
 
 ```bash
-python scripts/check_listsync.py
-cd web && npm run check-listsync
-npm run check-versions  # saved versions: every one opens exactly, and storing them stays small
-npm run check-suggest   # suggest mode: random typing and collaborators' edits keep the view and suggestions in step
-npm run check-pdfanchor # comments from the PDF: selected text is found in its LaTeX source
-npm run check-packing   # compressed snapshots: both apps read the same cases (scripts/packing-vectors.json; also scripts/check_packing.py)
-npm run check-submission  # the arXiv / journal .zip: files followed, comments removed, files merged
+uv run python scripts/check_listsync.py         # the project list (listsync-vectors.json)
+uv run python scripts/check_xr.py               # which documents a compile builds first for \externaldocument (xr-vectors.json)
+uv run python scripts/check_packing.py          # compressed snapshots: both apps read the same cases (packing-vectors.json)
+uv run python scripts/check_replica.py          # what a replica does with the server's messages (replica-vectors.json, from make_replica_vectors.py)
+uv run python scripts/check_folder_rules.py     # the folder syncs' rules: which files sync, text or not, merging, settling, line endings, renames (folder-rules.json)
+uv run python scripts/make_folder_rules.py --check   # folder-rules.json is what make_folder_rules.py writes
+cd web
+npm run check-listsync && npm run check-xr && npm run check-packing && npm run check-replica && npm run check-folder-rules   # the web app's side of each
+```
+
+The web app's own checks, in `web/` (`npm run checks` runs every `scripts/check-*.mjs`, the ones
+above too, a few at once, as CI does):
+
+```bash
+npm run checks
+npm run check-i18n         # every text has its translations, plural forms and placeholders
+npm run check-versions     # saved versions: every one opens exactly, and storing them stays small
+npm run check-suggest      # suggest mode: random typing and collaborators' edits keep the view and suggestions in step
+npm run check-pdfanchor    # comments from the PDF: selected text is found in its LaTeX source
+npm run check-submission   # the arXiv / journal .zip: files followed, comments removed, files merged
 npm run check-mcpclient    # the Assistant's MCP client, against a stand-in server: JSON and event-stream replies, sessions, tokens, errors, tool names
 npm run check-gitshacache  # the git id cache keeps only the project's current files, and survives blocked storage
-npm run check-props     # random texts and edits (Windows line endings, emoji): the editor and the shared text stay identical, no emoji is cut in two, merges and line endings behave
-cd .. && uv run --with hypothesis python scripts/check_props.py   # the same for the desktop, and its merge agrees with the web app's
-uv run --with mypy python scripts/check_textpos.py               # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
+npm run check-props        # random texts and edits (Windows line endings, emoji): the editor and the shared text stay identical, no emoji is cut in two, merges and line endings behave
+npm run check-folder-model # the browser's folder sync through random steps, on a fake clock and folder
+```
+
+The desktop app and the server, from the top folder:
+
+```bash
+uv run --with hypothesis python scripts/check_props.py             # the property checks for the desktop, and its merge agrees with the web app's (needs npm ci in web/)
+uv run --with mypy python scripts/check_textpos.py                 # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
 uv run python scripts/check_compat.py                              # code kept for older apps, servers and data: listed, markers well formed (DESIGN.md)
 uv run python scripts/check_server_state.py                        # what each server keeps in memory, and its addresses, each listed for several servers (SCALING.md)
-uv run --with hypothesis python scripts/check_folder_model.py     # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
-uv run python scripts/check_folder_regressions.py                 # folder sync's old bugs: a deleted file brought back, a half-saved file shared, a renamed folder's files left behind
-uv run --extra server python scripts/check_shared_folder.py       # two computers on one folder shared through a stand-in Dropbox: they take turns, nothing arrives twice
-uv run --extra server python scripts/check_store.py               # the server's database: SQLite and PostgreSQL give the same answers, and copy into each other
-uv run --extra server python scripts/check_files.py               # the server's file store: a folder, and Garage (S3) if installed
-uv run --extra server python scripts/check_move_code.py           # moving a project to another creation code, against a real server
-uv run --extra server python scripts/check_restore.py            # a server restored from a backup: an app that had seen later changes misses none
-uv run --extra server python scripts/check_comments.py            # a folder's comments overview, texloom comments list/reply/resolve, and texloom lsp with a stdio client
-uv run --extra server python scripts/check_config.py              # texloom.example.toml lists every server setting, and parses
-(cd web && npm run check-folder-model)                           # the same for the browser's folder sync, on a fake clock and folder
+uv run --with hypothesis python scripts/check_folder_model.py      # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
+uv run python scripts/check_folder_regressions.py                  # folder sync's old bugs: a deleted file brought back, a half-saved file shared, a renamed folder's files left behind
+uv run --extra server python scripts/check_shared_folder.py        # two computers on one folder shared through a stand-in Dropbox: they take turns, nothing arrives twice
+uv run --extra server python scripts/check_store.py                # the server's database: SQLite and PostgreSQL give the same answers, and copy into each other
+uv run --extra server python scripts/check_files.py                # the server's file store: a folder, and Garage (S3) if installed
+uv run --extra server python scripts/check_move_code.py            # moving a project to another creation code, against a real server
+uv run --extra server python scripts/check_restore.py              # a server restored from a backup: an app that had seen later changes misses none
+uv run --extra server python scripts/check_comments.py             # a folder's comments overview, texloom comments list/reply/resolve, and texloom lsp with a stdio client
+uv run --extra server python scripts/check_config.py               # texloom.example.toml lists every server setting, and parses
+uv run python scripts/conncheck.py https://app.texloom.org          # connect to a server the way the desktop app does, saying what happened at each step
 ```
+
+`conncheck.py` is for someone who can't connect; CI runs it on Windows, macOS and Linux on demand
+(Actions → Connection check). The checks against a real server share `scripts/checklib.py`: each
+starts its own throwaway server and removes its folder afterwards, unless something failed or
+`KEEP=1` is set.
 
 The server's checks each start a throwaway database of their own (`scripts/testdb.py`): an SQLite
 file, or with `TEXLOOM_CHECK_DATABASE=postgresql` a PostgreSQL (`scripts/pg.py`, which needs
@@ -1060,7 +1084,7 @@ To add a language (`it`, say):
 2. Desktop app: copy `texloom/locales/fr.py` to `it.py`, translate it, and add it to
    `CATALOGS` in `texloom/locales/__init__.py`. If its plurals aren't "one for 1, other
    otherwise", add the rule to `PLURAL_RULES` in `texloom/i18n.py`.
-3. Check: `npm run check-i18n` in `web/` and `python scripts/check_i18n.py`. Both list
+3. Check: `npm run check-i18n` in `web/` and `uv run python scripts/check_i18n.py`. Both list
    missing or unused text, wrong plural forms and `{{placeholder}}` mismatches for every
    language (name languages to check only those; `--allow-missing` for one in progress).
 
