@@ -219,6 +219,8 @@ map \$request_method \$texloom_put_key { PUT \$binary_remote_addr; default ""; }
 limit_req_zone \$texloom_put_key zone=texloom_upload:10m rate=10r/s;
 limit_conn_zone \$binary_remote_addr zone=texloom_ws:10m;
 limit_conn_zone \$binary_remote_addr zone=texloom_blob:10m;
+# pages are always rechecked: an old copy would ask for build files a deploy has replaced (a blank page)
+map \$sent_http_content_type \$texloom_html_expires { ~^text/html epoch; default off; }
 
 server {
     listen 80;
@@ -226,6 +228,7 @@ server {
     server_name $DOMAIN;
 
     root $APP_DIR/web/dist;
+    expires \$texloom_html_expires;
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
 
@@ -389,6 +392,15 @@ if old_csp in site:
     site = site.replace(old_csp, "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*;")
     open(path, "w").write(site)
     print("    nginx: page policy allows other servers' websockets")
+if "$texloom_html_expires" not in site:  # pages always rechecked (else a stale page loads replaced build files)
+    root = f"    root {app_dir}/web/dist;\n"
+    if root in site:
+        at = site.index("\nserver {")
+        site = (site[:at] + "\n# pages are always rechecked: an old copy would ask for build files a deploy has replaced\n"
+                "map $sent_http_content_type $texloom_html_expires { ~^text/html epoch; default off; }" + site[at:])
+        site = site.replace(root, root + "    expires $texloom_html_expires;\n")
+        open(path, "w").write(site)
+        print("    nginx: pages are always rechecked")
 anchor = "    location /api/ {"
 missing = "".join(b for k, b in blocks.items() if k not in site)
 if missing and anchor in site:
