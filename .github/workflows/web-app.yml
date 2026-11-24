@@ -18,6 +18,8 @@ on:
       - 'scripts/pg.py'
       - 'scripts/testdb.py'
       - '.github/workflows/web-app.yml'
+      - '.github/actions/web/**'
+      - '.github/actions/chromium/**'
   pull_request:
     paths:
       - 'web/**'
@@ -30,6 +32,8 @@ on:
       - 'scripts/pg.py'
       - 'scripts/testdb.py'
       - '.github/workflows/web-app.yml'
+      - '.github/actions/web/**'
+      - '.github/actions/chromium/**'
   schedule:
     - cron: '47 3 * * *'  # nightly
   workflow_dispatch:
@@ -42,27 +46,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Build the web app (the server serves it)
-        working-directory: web
-        run: |
-          npm ci
-          npm run build
+      - uses: ./.github/actions/web  # npm ci, and web/dist built: the server serves it
       - name: PostgreSQL's programs (scripts/pg.py runs a throwaway one)
         run: ls /usr/lib/postgresql/*/bin/initdb >/dev/null 2>&1 || sudo apt-get install -y postgresql
       - name: Chromium
         id: chromium
-        # Ubuntu's package mirrors are sometimes unreachable for a while: try again before failing
-        run: |
-          for i in 1 2 3; do
-            uv run --with playwright python -m playwright install --with-deps chromium && exit 0
-            echo "Chromium install failed (attempt $i); trying again in a minute"; sleep 60
-          done
-          exit 1
+        uses: ./.github/actions/chromium
       - name: Keeping a project in step with a git repository (GitHub, GitLab, Gitea)
         run: uv run --extra server --with playwright python scripts/check_web_git.py
       - name: Keeping a project in step with a Dropbox folder

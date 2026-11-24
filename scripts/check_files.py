@@ -23,11 +23,9 @@ The database is a throwaway one (scripts/testdb.py: SQLite, or PostgreSQL).
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import secrets
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -35,21 +33,12 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from checklib import check, free_port, summary  # noqa: E402
+import testdb  # noqa: E402
 
-import testdb
-
-from server.files import FolderFiles, S3Files, open_files
-from server.store import Store
-
-failures: list[str] = []
-
-
-def ok(cond: bool, what: str) -> None:
-    print(("  ✓ " if cond else "  ✗ ") + what)
-    if not cond:
-        failures.append(what)
+from server.files import FolderFiles, S3Files, open_files  # noqa: E402
+from server.store import Store  # noqa: E402
 
 
 def project() -> str:
@@ -84,16 +73,16 @@ async def cases(make_files, tmp: Path, db: str) -> None:
     p, a, b = project(), bid(), bid()
     data = secrets.token_bytes(700_000)
     stored = await store.put_blob(p, a, data, "file")
-    ok(stored and await store.blob_size(p, a) == len(data) and store.usage[p] == len(data), "a file is stored and counted")
-    ok(await read(store, p, a) == data, "it reads back whole (in pieces)")
-    ok(not await store.put_blob(p, a, data, "file") and store.usage[p] == len(data), "the same content again is stored once")
+    check("a file is stored and counted", stored and await store.blob_size(p, a) == len(data) and store.usage[p] == len(data))
+    check("it reads back whole (in pieces)", await read(store, p, a) == data)
+    check("the same content again is stored once", not await store.put_blob(p, a, data, "file") and store.usage[p] == len(data))
     await store.put_blob(p, b, b"pdf" * 1000, "output")
-    ok(not await store.delete_blob(p, a, any_kind=False), "a project file can't be erased as output")
-    ok(await store.delete_blob(p, b, any_kind=False) and await store.blob_size(p, b) is None, "output is erased by any writer")
-    ok(store.usage[p] == len(data), "and stops counting at once")
-    ok(await store.delete_blob(p, a, any_kind=True) and store.usage[p] == 0, "the owner erases a project file")
+    check("a project file can't be erased as output", not await store.delete_blob(p, a, any_kind=False))
+    check("output is erased by any writer", await store.delete_blob(p, b, any_kind=False) and await store.blob_size(p, b) is None)
+    check("and stops counting at once", store.usage[p] == len(data))
+    check("the owner erases a project file", await store.delete_blob(p, a, any_kind=True) and store.usage[p] == 0)
     await store._reaper
-    ok(await gone(files, f"{p}/{a}") and await gone(files, f"{p}/{b}"), "their content is erased from the store")
+    check("their content is erased from the store", await gone(files, f"{p}/{a}") and await gone(files, f"{p}/{b}"))
 
     # an upload counts while under way; two of the same at once are stored once
     q, c = project(), bid()
@@ -101,22 +90,22 @@ async def cases(make_files, tmp: Path, db: str) -> None:
     t1 = asyncio.ensure_future(store.put_blob(q, c, big))
     t2 = asyncio.ensure_future(store.put_blob(q, c, big))
     await asyncio.sleep(0)
-    ok(store.usage[q] == 2 * len(big), "uploads count from the moment they're accepted")
+    check("uploads count from the moment they're accepted", store.usage[q] == 2 * len(big))
     r = await asyncio.gather(t1, t2)
-    ok(sorted(r) == [False, True] and store.usage[q] == len(big), "two uploads of the same content: stored once, counted once")
+    check("two uploads of the same content: stored once, counted once", sorted(r) == [False, True] and store.usage[q] == len(big))
 
     # a dropped project: erased in the background; a re-upload of content in the trash keeps it
     ids = [bid() for _ in range(5)]
     for i in ids:
         await store.put_blob(q, i, secrets.token_bytes(10_000))
     await store._drop_files(q)
-    ok(store.usage[q] == 0 and all([await store.blob_size(q, i) is None for i in ids + [c]]), "a dropped project's files stop counting at once")
+    check("a dropped project's files stop counting at once", store.usage[q] == 0 and all([await store.blob_size(q, i) is None for i in ids + [c]]))
     keep = ids[0]
     again = await store.put_blob(q, keep, b"new copy of the same content")
     await store._reaper
-    ok(again and await read(store, q, keep) == b"new copy of the same content", "content uploaded again while in the trash is kept")
-    ok(all([await gone(files, f"{q}/{i}") for i in ids[1:] + [c]]), "the rest is erased")
-    ok(await store.db.fetchval("SELECT COUNT(*) FROM trash") == 0, "and the trash is empty")
+    check("content uploaded again while in the trash is kept", again and await read(store, q, keep) == b"new copy of the same content")
+    check("the rest is erased", all([await gone(files, f"{q}/{i}") for i in ids[1:] + [c]]))
+    check("and the trash is empty", await store.db.fetchval("SELECT COUNT(*) FROM trash") == 0)
     await store.close()
 
     # a stop part way: what's left in the trash is erased on the next start
@@ -132,7 +121,7 @@ async def cases(make_files, tmp: Path, db: str) -> None:
     store = await Store.open(db, make_files(), tmp)
     await store.start()
     await store._reaper
-    ok(all([await gone(store.files, f"{r_}/{i}") for i in ids]), "after a restart, the trash is emptied")
+    check("after a restart, the trash is emptied", all([await gone(store.files, f"{r_}/{i}") for i in ids]))
 
     # a backup copy in a folder, and a restore from it after the store loses files
     b_, ids = project(), [bid() for _ in range(4)]
@@ -141,19 +130,19 @@ async def cases(make_files, tmp: Path, db: str) -> None:
         await store.put_blob(b_, i, d)
     copy = tmp / "backup-copy"
     copied, _ = await store.files_to_folder(copy)
-    ok(copied >= len(ids) and all((copy / b_ / i).read_bytes() == d for i, d in contents.items()),
-       "a backup copy in a folder holds every stored file")
+    check("a backup copy in a folder holds every stored file",
+          copied >= len(ids) and all((copy / b_ / i).read_bytes() == d for i, d in contents.items()))
     again, _ = await store.files_to_folder(copy)
-    ok(again == 0, "a second copy copies nothing new")
+    check("a second copy copies nothing new", again == 0)
     await store.delete_blob(b_, ids[0], any_kind=True)
     await store._reaper
     _, removed = await store.files_to_folder(copy)
-    ok(removed == 1 and not (copy / b_ / ids[0]).exists(), "a file erased since is removed from the copy")
+    check("a file erased since is removed from the copy", removed == 1 and not (copy / b_ / ids[0]).exists())
     for i in ids[1:3]:
         await store.files.delete(f"{b_}/{i}")  # the store loses two files
     put_back, missing = await store.files_from_folder(copy)
-    ok(put_back == 2 and missing == 0 and all([await read(store, b_, i) == contents[i] for i in ids[1:]]),
-       "a restore puts back what the store lost, and only that")
+    check("a restore puts back what the store lost, and only that",
+          put_back == 2 and missing == 0 and all([await read(store, b_, i) == contents[i] for i in ids[1:]]))
     await store.close()
 
 
@@ -171,15 +160,9 @@ async def folder_race(root: Path) -> None:
             await f.delete(k)
     try:
         await asyncio.gather(*(churn() for _ in range(8)))
-        ok(True, "writes racing erases in the same folder: none lost")
+        check("writes racing erases in the same folder: none lost", True)
     except OSError as e:
-        ok(False, f"writes racing erases in the same folder: {e!r}")
-
-
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        check(f"writes racing erases in the same folder: {e!r}", False)
 
 
 @contextmanager
@@ -230,9 +213,9 @@ async def wrong_secret(env: dict[str, str]) -> None:
     f = S3Files(env["TEXLOOM_S3_ENDPOINT"], "texloom", "", env["TEXLOOM_S3_REGION"], env["TEXLOOM_S3_KEY_ID"], "wrong")
     try:
         await f.check()
-        ok(False, "a wrong secret is refused at the start")
+        check("a wrong secret is refused at the start", False)
     except Exception as e:  # noqa: BLE001
-        ok("can't use the bucket" in str(e), "a wrong secret is refused at the start, saying why")
+        check("a wrong secret is refused at the start, saying why", "can't use the bucket" in str(e))
     finally:
         await f.close()
 
@@ -269,8 +252,7 @@ def main() -> None:
                     asyncio.run(cases(lambda prefix=prefix, s3=s3: open_files(prefix, Path(), s3), tmp, db))
             else:
                 sys.exit(f"unknown store {which!r}: folder, garage or s3://bucket/prefix")
-    print(json.dumps({"failures": failures}) if failures else "file store: all checks passed")
-    sys.exit(1 if failures else 0)
+    sys.exit(summary("file store"))
 
 
 if __name__ == "__main__":

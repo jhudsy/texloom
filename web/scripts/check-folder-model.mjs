@@ -19,23 +19,13 @@
 // a failing sequence replays exactly (CHECK_SEED=…), shrunk to the shortest one that shows it.
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
 import * as Y from 'yjs'
 import fc from 'fast-check'
 import { readFileSync } from 'node:fs'
+import { browser, load, web } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-folder-model')
-globalThis.localStorage ??= { getItem: () => null, setItem() {}, removeItem() {} }
-const load = async (entry) => {
-  const name = path.basename(entry, '.ts') + '.mjs'
-  await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: entry, outDir: out, emptyOutDir: false, minify: false, rollupOptions: { output: { entryFileNames: name } } } })
-  return import(pathToFileURL(path.join(out, name)).href)
-}
-const { startFolderSync, rememberFolder } = await load('src/foldersync.ts')
-const { applyText } = await load('src/diff.ts')
-const { keepLF } = await load('src/lineends.ts')
+browser()
+const [{ startFolderSync, rememberFolder }, { applyText }, { keepLF }] = await load('src/foldersync.ts', 'src/diff.ts', 'src/lineends.ts')
 
 // ---- the fake world: clock and timers, browser storage, folders --------------------------------
 const clock = { now: 1_700_000_000_000, timers: new Map(), next: 1 }

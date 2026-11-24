@@ -13,11 +13,13 @@ scripts/check_folder_rules.py and web/scripts/check-folder-rules.mjs.
 The expected values are written here from what each rule says, not taken from either app.
 
     uv run python scripts/make_folder_rules.py
+    uv run python scripts/make_folder_rules.py --check   # whether folder-rules.json is what this writes (CI)
 """
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -121,5 +123,12 @@ out = {
     "onDisk": [{"text": t, "windows": w, "want": d.hex()} for t, w, d in on_disk],
     "moves": [{"what": w, "gone": g, "new": n, "want": x} for w, g, n, x in moves],
 }
-(ROOT / "scripts/folder-rules.json").write_text(json.dumps(out, indent=1, ensure_ascii=False) + "\n")
-print(sum(len(v) for k, v in out.items() if isinstance(v, list)), "rules")
+made = json.dumps(out, indent=1, ensure_ascii=False) + "\n"
+target = ROOT / "scripts/folder-rules.json"
+if "--check" in sys.argv[1:]:
+    if target.read_text("utf-8") != made:
+        sys.exit("scripts/folder-rules.json isn't what scripts/make_folder_rules.py writes: run it, and commit the result")
+    print("folder-rules.json: up to date")
+else:
+    target.write_text(made, "utf-8")
+    print(sum(len(v) for k, v in out.items() if isinstance(v, list)), "rules")

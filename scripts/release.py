@@ -38,8 +38,7 @@ QUICK_CHECKS = [  # the quick desktop checks CI runs on every push (.github/work
     ["uv", "run", "python", "scripts/check_listsync.py"],
     ["uv", "run", "python", "scripts/check_xr.py"],
     ["uv", "run", "python", "scripts/check_packing.py"],
-    ["uv", "run", "python", "scripts/check_folder_deletions.py"],
-    ["uv", "run", "python", "scripts/check_folder_reads.py"],
+    ["uv", "run", "python", "scripts/check_folder_regressions.py"],
     ["uv", "run", "--with", "mypy", "python", "scripts/check_textpos.py"],
 ]
 DESKTOP_PATHS = ["texloom", "pyproject.toml"]  # what the changelog describes: the desktop app

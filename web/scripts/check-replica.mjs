@@ -11,24 +11,12 @@
 //     npm run check-replica [words in a case's name]
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
 import * as Y from 'yjs'
+import { browser, load, web } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-replica')
 const SERVER = 'http://test'
-Object.defineProperty(globalThis, 'localStorage', { value: { getItem: () => null, setItem() {}, removeItem() {} }, configurable: true }) // (not node's own, which warns)
-globalThis.location ??= { origin: SERVER, href: SERVER + '/', hash: '' }
-globalThis.WebSocket ??= { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 }
-const load = async (entry) => {
-  const name = path.basename(entry, '.ts') + '.mjs'
-  await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: entry, outDir: out, emptyOutDir: false, minify: false, rollupOptions: { output: { entryFileNames: name } } } })
-  return import(pathToFileURL(path.join(out, name)).href)
-}
-const { Replica } = await load('src/replica.ts')
-const { Keys, b64d } = await load('src/crypto.ts')
-const { unpack } = await load('src/packing.ts')
+browser({ location: { origin: SERVER, href: SERVER + '/', hash: '' }, WebSocket: { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 } })
+const [{ Replica }, { Keys, b64d }, { unpack }] = await load('src/replica.ts', 'src/crypto.ts', 'src/packing.ts')
 for (const k of ['log', 'info', 'warn', 'debug']) console[k] = () => {} // the cases are full of things a replica warns about
 const say = (s) => process.stdout.write(s + '\n')
 

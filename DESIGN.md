@@ -421,7 +421,7 @@ relay) as the fallback for symmetric NATs.
   Typing never does this, but position-based edits could (restoring from History, importing over a
   file: 😀 → 😁 or 𝒜 → 𝒞 share their first half). `setText` keeps common ends by whole character,
   and an editor filter (`wholechars.ts`) widens any other change that would cut one.
-  `npm run check-chars` checks both.
+  `npm run check-props` checks both.
 - Renames on disk: a rename reaches the sync as a deletion and an addition, perhaps in
   different batches. A file gone from disk whose last synced content (by hash) is now in a
   file the project doesn't have yet has moved there, and moves as renaming in the web app

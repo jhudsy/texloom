@@ -2,13 +2,9 @@
 // scripts/check_listsync.py checks the Python against.
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
+import { load, report, web } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-listsync')
-await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/listcore.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'listcore.mjs' } } } })
-const { ListKey, canon, emptyTags, mergeLists, mergeRegistry, mergeSettings, mergeTags, passwordSecret, signPut, tagColour, tidyTags } = await import(pathToFileURL(path.join(out, 'listcore.mjs')).href)
+const [{ ListKey, canon, emptyTags, mergeLists, mergeRegistry, mergeSettings, mergeTags, passwordSecret, signPut, tagColour, tidyTags }] = await load('src/listcore.ts')
 const v = JSON.parse(fs.readFileSync(path.join(web, '../scripts/listsync-vectors.json'), 'utf8'))
 const b64d = (s) => new Uint8Array(Buffer.from(s, 'base64url'))
 const b64e = (b) => Buffer.from(b).toString('base64url')
@@ -42,5 +38,4 @@ for (const m of v.tag_colours) check(`colour of ${m.id}`, tagColour(m.id, m.chos
 for (const m of v.tag_tidies) check(m.what, canon(tidyTags(m.doc, new Set(m.listed), m.now)), m.tidied)
 check('no tags to merge', canon(mergeTags(emptyTags(), emptyTags())), canon(emptyTags()))
 
-if (bad.length) { console.error(bad.join('\n')); process.exit(1) }
-console.log(`listsync: ${v.keys.length} keys, ${v.passwords.length} passwords, ${v.merges.length} merges, ${v.tag_merges.length} tag merges, ${v.setting_merges.length} setting merges, ${v.registry_merges.length} ways-in merges and ${v.tag_tidies.length} tidies match`)
+report('listsync', bad, `listsync: ${v.keys.length} keys, ${v.passwords.length} passwords, ${v.merges.length} merges, ${v.tag_merges.length} tag merges, ${v.setting_merges.length} setting merges, ${v.registry_merges.length} ways-in merges and ${v.tag_tidies.length} tidies match`)

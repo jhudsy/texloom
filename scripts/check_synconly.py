@@ -44,22 +44,13 @@ import argparse
 import asyncio
 import os
 import random
-import shutil
-import socket
-import subprocess
 import sys
-import tempfile
 import time
-import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-import testdb  # noqa: E402  (a throwaway database for the server)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from checklib import ROOT, Computer, Failed, invariants, lf, server, wait  # noqa: E402
 
-PY = [sys.executable, "-c"]
-CLI = "import sys; from texloom.cli import main; sys.argv[0] = 'texloom'; main()"
-SERVER = "import sys; from server.cli import main; sys.argv[0] = 'texloom-server'; main()"
 PAIRS = ["unix/unix", "windows/windows", "windows/unix", "unix/windows"]
 BROWSER_PAIRS = ["unix/browser", "windows/browser"]  # the desktop makes the project, the web app joins
 
@@ -73,106 +64,8 @@ KEEP_INTACT = ["\\begin{tabular}{l|rrrr|rrrr|}", "\\bottomrule", "\\toprule"]
 TEXT_FILES = ["main.tex", "chapter.tex", "refs.bib"]
 
 
-class Failed(Exception):
-    pass
-
-
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def wait(what: str, ok, secs: float = 60) -> None:
-    end = time.monotonic() + secs
-    while time.monotonic() < end:
-        try:
-            if ok():
-                return
-        except (OSError, ValueError, UnicodeDecodeError):
-            pass
-        time.sleep(0.25)
-    raise Failed(f"timed out after {secs:g}s: {what}")
-
-
-def lf(s: str) -> str:
-    return s.replace("\r\n", "\n")
-
-
-class Computer:
-    def __init__(self, name: str, system: str, tmp: Path):
-        self.name, self.system = f"{name} ({system})", system
-        self.home, self.dir = tmp / f"home-{name}", tmp / name
-        self.home.mkdir()
-        self.log = tmp / f"run-{name}.log"
-        self.proc: subprocess.Popen | None = None
-        self.saved: set[str] = set()  # text files this computer's editor saved (or made)
-
-    @property
-    def env(self) -> dict:
-        env = {**os.environ, "TEXLOOM_HOME": str(self.home), "PYTHONIOENCODING": "utf-8", "TEXLOOM_CHECKS": "1"}
-        if env.get("CHECK_REFUSE_WRITES"):
-            env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(ROOT / "scripts" / "refuse_writes"), env.get("PYTHONPATH")]))
-        return env
-
-    def texloom(self, *args: str, timeout: float = 180) -> str:
-        p = subprocess.run(PY + [CLI, *args], cwd=ROOT, env=self.env, capture_output=True, text=True, timeout=timeout, check=False)
-        if p.returncode:
-            raise Failed(f"{self.name}: texloom {args[0]} failed:\n{p.stdout}{p.stderr}")
-        return p.stdout + p.stderr
-
-    def start(self) -> None:
-        self.proc = subprocess.Popen(PY + [CLI, "run", str(self.dir)], cwd=ROOT, env=self.env,
-                                     stdout=open(self.log, "a"), stderr=subprocess.STDOUT)  # noqa: SIM115 - open while it runs
-        wait(f"{self.name} connects", lambda: "connected to" in self.log.read_text(errors="replace"), 30)
-
-    def stop(self) -> None:
-        if self.proc:
-            self.proc.terminate()
-            try:
-                self.proc.wait(10)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-            self.proc = None
-
-    def file(self, rel: str) -> Path:
-        return self.dir / rel
-
-    def broken(self) -> list[str]:
-        try:
-            return [line.split("INVARIANT BROKEN: ", 1)[1] for line in self.log.read_text(errors="replace").splitlines() if "INVARIANT BROKEN: " in line]
-        except OSError:
-            return []
-
-    def read(self, rel: str) -> str:
-        return self.file(rel).read_bytes().decode("utf-8")
-
-    def save(self, rel: str, content: str) -> None:
-        """Save a text file as this computer's editor would: \\r\\n line endings on "windows"."""
-        content = lf(content)
-        self.file(rel).write_bytes((content.replace("\n", "\r\n") if self.system == "windows" else content).encode("utf-8"))
-        self.saved.add(rel)
-
-    def edit(self, rel: str, old: str, new: str) -> None:
-        s = lf(self.read(rel))
-        if old not in s:
-            raise Failed(f"{self.name}: {rel}: {old!r} isn't there to change")
-        self.save(rel, s.replace(old, new, 1))
-
-    def has(self, rel: str, *bits: str) -> bool:
-        return self.file(rel).exists() and all(b in self.read(rel) for b in bits)
-
-
 def same(a: Computer, b: Computer, rel: str) -> bool:
     return a.file(rel).exists() and b.file(rel).exists() and lf(a.read(rel)) == lf(b.read(rel))
-
-
-def invariants(*cs) -> None:
-    """No computer has found one of its own invariants broken (texloom/invariants.py, web/src/invariants.ts)."""
-    for c in cs:
-        found = c.broken()
-        if found:
-            raise Failed(f"{c.name} found an invariant broken: {found[0]}" + (f" (and {len(found) - 1} more)" if len(found) > 1 else ""))
 
 
 def sound(*cs: Computer) -> None:
@@ -592,42 +485,24 @@ def main() -> None:
                     help=f"which to run: {', '.join(PAIRS + BROWSER_PAIRS)} (default: all; the browser ones need Playwright)")
     ap.add_argument("--keep", action="store_true", help="keep the folders, logs and database afterwards")
     args = ap.parse_args()
-    tmp = Path(os.environ.get("CHECK_DIR") or tempfile.mkdtemp(prefix="texloom-synconly-"))
-    tmp.mkdir(parents=True, exist_ok=True)
-    port = free_port()
-    url = f"http://127.0.0.1:{port}"
-    (tmp / "codes.txt").write_text("CHECK-ONLY-NOT-A-REAL-CODE 1G check\n")  # stores projects only with a code
-    database = testdb.start(tmp / "db")  # stopped at the end, below
-    server = subprocess.Popen(PY + [SERVER, "--port", str(port), "--database", database, "--data", str(tmp / "relay"),
-                                    "--codes-file", str(tmp / "codes.txt")],
-                              cwd=ROOT, stdout=open(tmp / "server.log", "w"), stderr=subprocess.STDOUT)  # noqa: SIM115 - open while it runs
     failed: list[str] = []
-    try:
-        wait("the server starts", lambda: urllib.request.urlopen(url + "/api/info", timeout=2).status == 200, 30)
+    # (CI: CHECK_DIR, the runner's own temp folder, kept as an artifact if this fails)
+    with server("synconly", tmp=os.environ.get("CHECK_DIR"), codes="CHECK-ONLY-NOT-A-REAL-CODE 1G check\n") as srv:  # stores projects only with a code
+        srv.keep = args.keep
         for name in args.pairs or PAIRS + BROWSER_PAIRS:
             print(f"{name}:", flush=True)
-            where = tmp / name.replace("/", "-")
+            where = srv.tmp / name.replace("/", "-")
             where.mkdir()
             try:
                 run = browser_pairing if name in BROWSER_PAIRS else pairing
                 if run is browser_pairing and not playwright_ready():
                     print("  – skipped: Playwright isn't installed (uv run --with playwright …; playwright install chromium)", flush=True)
                     continue
-                run(name, url, where, (database, tmp / "relay"), lambda msg: print(f"  ✓ {msg}", flush=True))
+                run(name, srv.url, where, (srv.database, srv.tmp / "relay"), lambda msg: print(f"  ✓ {msg}", flush=True))
             except Failed as e:
                 print(f"  ✗ {e}", flush=True)
                 failed.append(name)
-    except Failed as e:
-        print(f"✗ {e}", flush=True)
-        failed.append("setup")
-    finally:
-        server.terminate()
-        server.wait(10)
-        testdb.stop(tmp / "db")
-        if failed or args.keep:
-            print(f"folders, logs and the server's database: {tmp}")
-        else:
-            shutil.rmtree(tmp, ignore_errors=True)
+                srv.keep = True
     print(f"sync-only: FAILED ({', '.join(failed)})" if failed else "sync-only: all checks passed")
     sys.exit(1 if failed else 0)
 

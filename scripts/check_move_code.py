@@ -14,28 +14,20 @@ app's sync engine (texloom/replica.py) against it.
 """
 import asyncio
 import json
-import os
 import secrets
-import shutil
-import socket
-import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-sys.path.insert(0, str(ROOT))
-import testdb  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from checklib import background, check, server, summary, until  # noqa: E402
 
 from pycrdt import Text  # noqa: E402
 
 from texloom.crypto import Keys, b64e  # noqa: E402
 from texloom.replica import Replica  # noqa: E402
 
-SERVER = "import sys; from server.cli import main; sys.argv[0] = 'texloom-server'; main()"
 CODES = """\
 FIRS-TCOD-EAAA  70K   first
 SECO-NDCO-DEBB  1M    second
@@ -43,29 +35,6 @@ TINY-CODE-CCCC  20K   tiny
 GONE-CODE-DDDD  1M    until=2020-01-01  lapsed
 """
 FIRST, SECOND, TINY, LAPSED = "FIRS-TCOD-EAAA", "seco-ndco-debb", "TINY-CODE-CCCC", "GONE-CODE-DDDD"
-
-ok = True
-
-
-def check(what: str, cond: bool, detail: object = "") -> None:
-    global ok
-    ok &= bool(cond)
-    print(("✓ " if cond else "✗ ") + what + ("" if cond else f": {detail}"), flush=True)
-
-
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-async def until(cond, secs: float = 20) -> bool:
-    end = time.monotonic() + secs
-    while time.monotonic() < end:
-        if cond():
-            return True
-        await asyncio.sleep(0.1)
-    return False
 
 
 async def usage(r: Replica) -> dict:
@@ -82,97 +51,72 @@ def write(r: Replica, name: str, size: int) -> None:
 
 
 async def main() -> int:
-    tmp = Path(tempfile.mkdtemp(prefix="texloom-move-"))
-    port = free_port()
-    url = f"http://127.0.0.1:{port}"
-    (tmp / "codes.txt").write_text(CODES)
-    database = testdb.start(tmp / "db")
-    server = subprocess.Popen([sys.executable, "-c", SERVER, "--port", str(port), "--database", database,
-                               "--data", str(tmp / "relay"), "--codes-file", str(tmp / "codes.txt")],
-                              cwd=ROOT, stdout=open(tmp / "server.log", "w"), stderr=subprocess.STDOUT)  # noqa: SIM115
-    tasks: list[asyncio.Task] = []
-    try:
-        for _ in range(300):
-            try:
-                if urllib.request.urlopen(url + "/api/info", timeout=2).status == 200:
-                    break
-            except OSError:
-                await asyncio.sleep(0.1)
-        keys = Keys.generate()
-        owner = Replica(tmp / "owner", keys, url, FIRST)
-        editor_keys = keys.personal("Editor")[2]
-        editor = Replica(tmp / "editor", editor_keys, url)
-        tasks += [asyncio.create_task(owner.run()), asyncio.create_task(editor.run())]
-        await asyncio.wait_for(owner.synced.wait(), 20)
-        await asyncio.wait_for(editor.synced.wait(), 20)
+    with server("move", codes=CODES) as srv:
+        async with background() as tasks:
+            url, tmp = srv.url, srv.tmp
+            keys = Keys.generate()
+            owner = Replica(tmp / "owner", keys, url, FIRST)
+            editor_keys = keys.personal("Editor")[2]
+            editor = Replica(tmp / "editor", editor_keys, url)
+            tasks += [asyncio.create_task(owner.run()), asyncio.create_task(editor.run())]
+            await asyncio.wait_for(owner.synced.wait(), 20)
+            await asyncio.wait_for(editor.synced.wait(), 20)
 
-        write(owner, "main.tex", 60_000)  # about 46K stored
-        stored = await until(lambda: not owner.outbox, 20)
-        info = await usage(owner)
-        check("the project is stored under the first code", stored and info.get("registered") and info.get("used", 0) > 30_000, info)
-        check("its owner, holding that code, sees the code's usage", (info.get("ownerUsed") or 0) >= info.get("used", 1), info)
+            write(owner, "main.tex", 60_000)  # about 46K stored
+            stored = await until(lambda: not owner.outbox, 20)
+            info = await usage(owner)
+            check("the project is stored under the first code", stored and info.get("registered") and info.get("used", 0) > 30_000, info)
+            check("its owner, holding that code, sees the code's usage", (info.get("ownerUsed") or 0) >= info.get("used", 1), info)
 
-        # past the first code's 70K (hex text is stored at about three quarters its size): refused, kept in the outbox
-        write(owner, "big.tex", 80_000)
-        refused = await until(lambda: owner.store_refusal == "quota-full", 20)
-        check("a write past the first code's allowance is refused (quota-full)", refused, owner.store_refusal)
+            # past the first code's 70K (hex text is stored at about three quarters its size): refused, kept in the outbox
+            write(owner, "big.tex", 80_000)
+            refused = await until(lambda: owner.store_refusal == "quota-full", 20)
+            check("a write past the first code's allowance is refused (quota-full)", refused, owner.store_refusal)
 
-        # only the owner may move it
-        ts = int(time.time())
-        sent = {"t": "move", "c": SECOND, "ts": ts, "s": b64e(editor_keys.sign(f"move:{SECOND}:{ts}".encode()))}
-        assert editor.ws is not None
-        await editor.ws.send_json(sent)
-        await asyncio.sleep(1)
-        info_after = await usage(owner)
-        check("an editor's move is refused (only the owner's signature counts)", info_after.get("ownerUsed") is not None, info_after)
+            # only the owner may move it
+            ts = int(time.time())
+            sent = {"t": "move", "c": SECOND, "ts": ts, "s": b64e(editor_keys.sign(f"move:{SECOND}:{ts}".encode()))}
+            assert editor.ws is not None
+            await editor.ws.send_json(sent)
+            await asyncio.sleep(1)
+            info_after = await usage(owner)
+            check("an editor's move is refused (only the owner's signature counts)", info_after.get("ownerUsed") is not None, info_after)
 
-        for code, want, why in ((LAPSED, "move-bad-code", "a lapsed code"), ("NOPE-NOPE-NOPE", "move-bad-code", "a code that doesn't exist"),
-                                (TINY, "move-no-room", "a code without room for it")):
-            no = await owner.move_to_code(code)
-            check(f"moving to {why} is refused ({want})", no is not None and no.get("code") == want, no)
-        no = await owner.move_to_code(TINY)
-        check("a refusal for room says how much is needed and free", no is not None and no.get("need", 0) > no.get("free", -1) >= 0, no)
+            for code, want, why in ((LAPSED, "move-bad-code", "a lapsed code"), ("NOPE-NOPE-NOPE", "move-bad-code", "a code that doesn't exist"),
+                                    (TINY, "move-no-room", "a code without room for it")):
+                no = await owner.move_to_code(code)
+                check(f"moving to {why} is refused ({want})", no is not None and no.get("code") == want, no)
+            no = await owner.move_to_code(TINY)
+            check("a refusal for room says how much is needed and free", no is not None and no.get("need", 0) > no.get("free", -1) >= 0, no)
 
-        # the move itself: to the second code (given in lower case, as people may type it)
-        heard_before = editor.store_info
-        no = await owner.move_to_code(SECOND)
-        check("moving to a code with room succeeds", no is None, no)
-        check("the owner's copy now holds the new code", owner.create_code == SECOND, owner.create_code)
-        cleared = await until(lambda: owner.store_refusal is None and not owner.outbox, 20)
-        check("the refused write goes through under the new code", cleared, (owner.store_refusal, len(owner.outbox)))
-        info = await usage(owner)
-        check("the new code counts the project, and its holder sees it", (info.get("ownerUsed") or 0) >= info.get("used", 1) > 90_000, info)
-        check("the allowance shown is the new code's", info.get("allowance") == 1024 * 1024, info)
-        check("everyone connected is told (the editor's figures were refreshed)",
-              await until(lambda: editor.store_info is not heard_before and (editor.store_info or {}).get("allowance") == 1024 * 1024, 5), editor.store_info)
-        check("the editor isn't shown the code's usage (it doesn't hold it)", (editor.store_info or {}).get("ownerUsed") is None, editor.store_info)
+            # the move itself: to the second code (given in lower case, as people may type it)
+            heard_before = editor.store_info
+            no = await owner.move_to_code(SECOND)
+            check("moving to a code with room succeeds", no is None, no)
+            check("the owner's copy now holds the new code", owner.create_code == SECOND, owner.create_code)
+            cleared = await until(lambda: owner.store_refusal is None and not owner.outbox, 20)
+            check("the refused write goes through under the new code", cleared, (owner.store_refusal, len(owner.outbox)))
+            info = await usage(owner)
+            check("the new code counts the project, and its holder sees it", (info.get("ownerUsed") or 0) >= info.get("used", 1) > 90_000, info)
+            check("the allowance shown is the new code's", info.get("allowance") == 1024 * 1024, info)
+            check("everyone connected is told (the editor's figures were refreshed)",
+                  await until(lambda: editor.store_info is not heard_before and (editor.store_info or {}).get("allowance") == 1024 * 1024, 5), editor.store_info)
+            check("the editor isn't shown the code's usage (it doesn't hold it)", (editor.store_info or {}).get("ownerUsed") is None, editor.store_info)
 
-        # the first code no longer counts it: check it with the server's own code check
-        req = urllib.request.Request(url + "/api/code", data=json.dumps({"code": FIRST}).encode(),
-                                     headers={"Content-Type": "application/json"})
-        first = json.loads(urllib.request.urlopen(req, timeout=5).read())
-        check("the first code's usage drops to nothing", first.get("ok") and first.get("used") == 0, first)
+            # the first code no longer counts it: check it with the server's own code check
+            req = urllib.request.Request(url + "/api/code", data=json.dumps({"code": FIRST}).encode(),
+                                         headers={"Content-Type": "application/json"})
+            first = json.loads(urllib.request.urlopen(req, timeout=5).read())
+            check("the first code's usage drops to nothing", first.get("ok") and first.get("used") == 0, first)
 
-        no = await owner.move_to_code(SECOND)
-        check("moving to the code it already has is a no-op", no is None, no)
+            no = await owner.move_to_code(SECOND)
+            check("moving to the code it already has is a no-op", no is None, no)
 
-        # a connection may only offer so many wrong codes: two above, then these
-        tries = [await owner.move_to_code("NOPE-NOPE-NOPE") for _ in range(4)]
-        check("after a few tries a connection is told to reconnect (no guessing codes)",
-              tries[-1] is not None and tries[-1].get("code") == "move-busy", [t and t.get("code") for t in tries])
-    finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        server.terminate()
-        server.wait(10)
-        testdb.stop(tmp / "db")
-        if ok and not os.environ.get("KEEP"):
-            shutil.rmtree(tmp, ignore_errors=True)
-        else:
-            print(f"server log and database: {tmp}")
-    print("move to another code: " + ("all checks passed" if ok else "FAILED"))
-    return 0 if ok else 1
+            # a connection may only offer so many wrong codes: two above, then these
+            tries = [await owner.move_to_code("NOPE-NOPE-NOPE") for _ in range(4)]
+            check("after a few tries a connection is told to reconnect (no guessing codes)",
+                  tries[-1] is not None and tries[-1].get("code") == "move-busy", [t and t.get("code") for t in tries])
+    return summary("move to another code")
 
 
 if __name__ == "__main__":

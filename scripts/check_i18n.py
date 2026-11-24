@@ -4,9 +4,9 @@ Every string passed to _() or ngettext() in texloom/*.py needs an entry in each 
 counts need the forms that language uses (see PLURAL_RULES in texloom/i18n.py); `{name}`
 placeholders must match. French also gets a typography check (non-breaking spaces, « »).
 
-    python scripts/check_i18n.py                 every language
-    python scripts/check_i18n.py de pl           just these
-    python scripts/check_i18n.py --allow-missing report untranslated text without failing
+    uv run python scripts/check_i18n.py                 every language
+    uv run python scripts/check_i18n.py de pl           just these
+    uv run python scripts/check_i18n.py --allow-missing report untranslated text without failing
 """
 
 from __future__ import annotations

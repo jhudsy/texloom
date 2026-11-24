@@ -2,17 +2,10 @@
 // random edits: what the editor shows must always be the shared text with the suggestions
 // applied, saving and loading must give the same suggestions back, and accepting them all must
 // turn the shared text into what was typed.
-import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
 import * as Y from 'yjs'
+import { load, report } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-suggest')
-await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/suggestcore.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'suggestcore.mjs' } } } })
-const core = await import(pathToFileURL(path.join(out, 'suggestcore.mjs')).href)
-await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/worddiff.ts', outDir: out, emptyOutDir: false, minify: false, rollupOptions: { output: { entryFileNames: 'worddiff.mjs' } } } })
-const { wordDiff } = await import(pathToFileURL(path.join(out, 'worddiff.mjs')).href)
+const [core, { wordDiff }] = await load('src/suggestcore.ts', 'src/worddiff.ts')
 
 const bad = []
 const check = (what, ok) => { if (!ok && bad.length < 20) bad.push(what) }
@@ -203,5 +196,4 @@ for (let run = 0; run < 300; run++) {
   check(`loading joins them: ${JSON.stringify(loaded.hunks.map((h) => h.text))} gone ${loaded.gone.length}`, loaded.hunks.length === 1 && loaded.hunks[0].text === 'ALPHAGAMMA' && loaded.gone.length === 1)
 }
 
-if (bad.length) { console.error('suggest: FAILED\n' + bad.join('\n')); process.exit(1) }
-console.log('suggest: all checks passed')
+report('suggest', bad, 'suggest: all checks passed')

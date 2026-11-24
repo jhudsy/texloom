@@ -1,23 +1,17 @@
 // Checks the cache of git ids and Dropbox hashes (src/gitshacache.ts, issue 29): it keeps only the files the project has
 // now, so it doesn't grow with every version of every image ever synced, and survives bad storage.
-import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'vite'
+import { browser, load, tally } from './lib.mjs'
 
-const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.join(web, 'node_modules/.cache/check-gitshacache')
-await build({ configFile: false, root: web, logLevel: 'warn', build: { ssr: 'src/gitshacache.ts', outDir: out, emptyOutDir: true, minify: false, rollupOptions: { output: { entryFileNames: 'gitshacache.mjs' } } } })
-const { shaCache, cacheKey } = await import(pathToFileURL(path.join(out, 'gitshacache.mjs')).href)
+const [{ shaCache, cacheKey }] = await load('src/gitshacache.ts')
 
 const store = new Map()
 let writes = 0, broken = false
-globalThis.localStorage = {
+browser({ localStorage: {
   getItem: (k) => { if (broken) throw new Error('blocked'); return store.has(k) ? store.get(k) : null },
   setItem: (k, v) => { if (broken) throw new Error('blocked'); writes++; store.set(k, String(v)) },
   removeItem: (k) => { if (broken) throw new Error('blocked'); writes++; store.delete(k) },
-}
-const results = []
-const check = (what, ok, detail = '') => results.push([what, !!ok, detail])
+} })
+const { check, report } = tally()
 const stored = (p) => JSON.parse(store.get(cacheKey(p)) ?? '{}')
 
 // a project whose image changes every sync: without trimming, one entry per version
@@ -56,10 +50,4 @@ const b = shaCache('p7', ['z'])
 b.set('z', 'sha-z')
 check('blocked storage: it still works for this visit', b.get('z') === 'sha-z')
 
-let failed = 0
-for (const [what, ok, detail] of results) {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}${ok || detail === '' ? '' : `: ${detail}`}`)
-  if (!ok) failed++
-}
-console.log(`${results.length - failed}/${results.length} passed`)
-process.exit(failed ? 1 : 0)
+report()
