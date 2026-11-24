@@ -15,6 +15,7 @@ import { t } from './i18n'
 import { APP_VERSION } from './version'
 import type { Link } from './versions'
 import { quiet, STORAGE } from './quiet'
+import { randomHex } from './bytes'
 
 const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
@@ -711,7 +712,7 @@ export class Replica {
     // signed: changes, and compile requests (only writers may ask another computer to compile)
     const s = SIGNED_P2P.has(String(payload.k)) && this.keys.writable ? b64e(this.keys.sign('p2p:', data)) : undefined
     if (d.length <= P2P_PIECE) { await this.sendP2p(d, s, to); return }
-    const id = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('')
+    const id = randomHex(8)
     const n = Math.ceil(d.length / P2P_PIECE)
     for (let i = 0; i < n; i++) {
       const part: Record<string, unknown> = { k: 'part', id, i, n, c: d.slice(i * P2P_PIECE, (i + 1) * P2P_PIECE) }

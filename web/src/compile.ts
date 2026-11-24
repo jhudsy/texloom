@@ -6,6 +6,7 @@ import type { BusyTexRunner } from 'texlyre-busytex'
 import { stripComments } from './texscan'
 import { compileOrder, externalDocuments } from './xr'
 import { quiet, STORAGE } from './quiet'
+import { digest, hex } from './bytes'
 
 const BASE = '/core/busytex'
 let runner: Promise<BusyTexRunner> | null = null
@@ -189,7 +190,7 @@ async function auxKey(files: Map<string, string | Uint8Array>, main: string, doc
   const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
   let at = 0
   for (const p of parts) { all.set(p, at); at += p.length }
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', all))].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return hex(await digest('SHA-256', all))
 }
 
 export class CompileStopped extends Error {}

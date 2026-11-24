@@ -9,6 +9,7 @@
 // downloaded each minute to see what changed. The TeXLoom app's git bridge works with any host.
 import { t } from './i18n'
 import { quiet } from './quiet'
+import { b64, unb64 } from './bytes'
 
 export type Kind = 'github' | 'gitlab' | 'gitea'
 
@@ -76,8 +77,6 @@ export function repoPath(kind: Kind, host: string, s: string): string | null {
 }
 
 const enc = (s: string) => s.split('/').map(encodeURIComponent).join('/')
-const b64 = (d: Uint8Array) => { let s = ''; for (let i = 0; i < d.length; i += 0x8000) s += String.fromCharCode(...d.subarray(i, i + 0x8000)); return btoa(s) }
-const unb64 = (s: string) => Uint8Array.from(atob(s.replace(/\s/g, '')), (c) => c.charCodeAt(0))
 const FILE = (mode: string) => mode === '100644' || mode === '100755'
 
 export interface Forge {

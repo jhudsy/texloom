@@ -7,6 +7,7 @@ import { applyText, merge3 } from './diff'
 import { addedProgramLines, latexOutput, type ProgramLine } from './texscan'
 import { tn, t, locale } from './i18n'
 import { quiet } from './quiet'
+import { digest, hex } from './bytes'
 
 const DB = 'texloom-folders'
 const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycache__', '.idea', '.vscode'])
@@ -55,8 +56,7 @@ async function kv<T>(key: string, value?: T | null): Promise<T | undefined> {
 }
 
 async function sha(data: Uint8Array): Promise<string> {
-  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', data as BufferSource))
-  return Array.from(d.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
+  return hex((await digest('SHA-256', data)).subarray(0, 16))
 }
 
 /** Whether a file at this path in the folder is one of the project's files: not in a tools' folder

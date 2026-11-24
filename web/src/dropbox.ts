@@ -28,6 +28,8 @@ import { accountStore } from './accounts'
 import { EXPIRE, RENEW, type Lease } from './github'
 import { quiet, STORAGE } from './quiet'
 import { shaCache, type ShaCache } from './gitshacache'
+import { digest, hex, randomHex } from './bytes'
+import { b64e } from './crypto'
 
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 // (quiet: each send is a new version of the changed files in Dropbox, as each save is in its own app)
@@ -91,8 +93,6 @@ export function dropboxAppKey(): Promise<string> {
   return keyAsked
 }
 
-const b64url = (d: Uint8Array) => btoa(String.fromCharCode(...d)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-const hex = (d: ArrayBuffer) => [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('')
 /** JSON for an HTTP header: anything outside ASCII escaped, as Dropbox asks. */
 const headerJson = (v: unknown) => JSON.stringify(v).replace(/[\u007f-￿]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
 
@@ -104,9 +104,9 @@ const headerJson = (v: unknown) => JSON.stringify(v).replace(/[\u007f-￿]/g, (c
 export async function signIn(back = location.href): Promise<never> {
   const key = await dropboxAppKey()
   if (!key) throw new DropboxError(t('This server isn’t set up for Dropbox.'))
-  const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)))
-  const challenge = b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))))
-  const state = b64url(crypto.getRandomValues(new Uint8Array(16)))
+  const verifier = b64e(crypto.getRandomValues(new Uint8Array(48)))
+  const challenge = b64e(await digest('SHA-256', new TextEncoder().encode(verifier)))
+  const state = b64e(crypto.getRandomValues(new Uint8Array(16)))
   const redirect = `${location.origin}/dropbox-auth.html`
   try { sessionStorage.setItem('texloom.dropboxPending', JSON.stringify({ verifier, state, key, back, redirect, api: ep().api })) }
   catch { throw new DropboxError(t('This browser won’t keep the sign-in for a moment (private browsing?), so Dropbox can’t be connected here.')) }
@@ -194,10 +194,10 @@ async function upload(a: DropboxAccount, path: string, data: Uint8Array, rev: st
 /** Dropbox's content hash: SHA-256 of each 4 MiB block, then SHA-256 of those together. */
 export async function contentHash(d: Uint8Array): Promise<string> {
   const parts: Uint8Array[] = [] // (an empty file has no blocks)
-  for (let i = 0; i < d.length; i += BLOCK) parts.push(new Uint8Array(await crypto.subtle.digest('SHA-256', d.subarray(i, i + BLOCK) as BufferSource)))
+  for (let i = 0; i < d.length; i += BLOCK) parts.push(await digest('SHA-256', d.subarray(i, i + BLOCK)))
   const all = new Uint8Array(parts.length * 32)
   parts.forEach((p, i) => all.set(p, i * 32))
-  return hex(await crypto.subtle.digest('SHA-256', all as BufferSource))
+  return hex(await digest('SHA-256', all))
 }
 
 /** A folder path as Dropbox wants it: "/Papers/thesis", no slash at the end; null if it isn't one. */
@@ -270,7 +270,7 @@ export async function folderIdOf(a: DropboxAccount, root: string, make: boolean)
     if (/^[0-9a-f]{32}$/.test(id)) return id
   } catch (e) { if (!(e instanceof DropboxError && e.status === 409)) throw e }
   if (!make) return null
-  const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('')
+  const id = randomHex(16)
   try { await upload(a, at, new TextEncoder().encode(id), null) }
   catch (e) { if (e instanceof DropboxError && e.tag === 'moved') return folderIdOf(a, root, false); throw e } // made elsewhere just now
   return id

@@ -17,6 +17,7 @@ import * as Y from 'yjs'
 import type { Replica } from './replica'
 import { addItem, allItems, mergeText, rangeOf } from './review'
 import { quiet } from './quiet'
+import { b64, unb64 } from './bytes'
 
 export const MIN_APART = 30_000 // ms: edits apart for less than this aren't flagged
 const SETTLE = 1500 // ms after the last change from others before notes are added
@@ -27,8 +28,8 @@ const LONG = 3000 // characters: a "paragraph" longer than this is narrowed to t
 interface Place { s: Y.RelativePosition; e: Y.RelativePosition; at: number }
 type Stored = Record<string, [string, string, number][]>
 
-const enc = (p: Y.RelativePosition) => btoa(String.fromCharCode(...Y.encodeRelativePosition(p)))
-const dec = (s: string) => Y.decodeRelativePosition(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)))
+const enc = (p: Y.RelativePosition) => b64(Y.encodeRelativePosition(p))
+const dec = (s: string) => Y.decodeRelativePosition(unb64(s))
 
 /** The paragraph around [from, to) in `text`: between blank lines, or just the lines if it's very long. */
 export function paragraphAt(text: string, from: number, to: number): [number, number] {

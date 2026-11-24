@@ -29,6 +29,8 @@ import { accountStore } from './accounts'
 import { forge, GitError, hostOf, kindOf, MOVED, type Account, type Change, type Entry, type Forge, type Kind, type Tree } from './forges'
 import { quiet, STORAGE } from './quiet'
 import { shaCache as gitShaCache, type ShaCache } from './gitshacache'
+import { digest, hex } from './bytes'
+import { concat } from './crypto'
 
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 export const RENEW = 30_000, EXPIRE = 100_000 // ms
@@ -99,9 +101,7 @@ async function filesAt(f: Forge, l: Link, commit: string): Promise<Tree> {
 
 /** The id git gives this content: SHA-1 of "blob <size>\0<content>". */
 export async function gitSha(d: Uint8Array): Promise<string> {
-  const head = new TextEncoder().encode(`blob ${d.length}\0`)
-  const all = new Uint8Array(head.length + d.length); all.set(head); all.set(d, head.length)
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-1', all))].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return hex(await digest('SHA-1', concat(new TextEncoder().encode(`blob ${d.length}\0`), d)))
 }
 
 // ---- the project's side ----------------------------------------------------------------
