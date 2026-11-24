@@ -14,9 +14,9 @@ from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
-from . import listsync, registry
-from .cli import browser_link, load_config, run
-from .crypto import Keys
+from . import listsync
+from .cli import run
+from .config import linked_folders
 from .daemon import Daemon
 from .i18n import _, ngettext
 
@@ -63,13 +63,6 @@ def chevron(w: QtWidgets.QWidget, down: bool) -> QtGui.QIcon:
     p.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(x, y) for x, y in pts]))
     p.end()
     return QtGui.QIcon(pm)
-
-
-def grey_note(text: str) -> QtWidgets.QLabel:
-    label = QtWidgets.QLabel(text)
-    label.setWordWrap(True)
-    label.setStyleSheet(f"color: {GREY}")
-    return label
 
 
 # ---- the sync engine, on its own thread -------------------------------------------------
@@ -121,8 +114,49 @@ class Bridge(QtCore.QObject):
         self.call.emit(fn)
 
 
+_bridge: Bridge | None = None  # in_background's way back to the Qt thread
+
+
+def in_background(work, done) -> None:
+    """Run `work()` on a thread of its own (the network, password hashing: slow), so the window
+    stays responsive; then `done(result, error)` on the Qt thread. Called from the Qt thread. Needs
+    no window or Engine (the project list's dialog is also used without them)."""
+    global _bridge
+    if _bridge is None:
+        _bridge = Bridge()  # made here, on the Qt thread, so that it calls back there
+    bridge = _bridge
+
+    def run() -> None:
+        try:
+            result, error = work(), None
+        except Exception as e:  # noqa: BLE001 - handed to done(), which says what went wrong
+            result, error = None, e
+        bridge.invoke(lambda: done(result, error))
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 # ---- what a folder is doing ---------------------------------------------------------------
 GREEN, AMBER, RED, GREY = "#2e7d32", "#b26a00", "#b3261e", "#75736c"
+
+
+def note(text: str, colour: str | None = GREY) -> QtWidgets.QLabel:
+    """A label that wraps, in `colour` (None: the window's text colour)."""
+    label = QtWidgets.QLabel(text)
+    label.setWordWrap(True)
+    if colour:
+        label.setStyleSheet(f"color: {colour}")
+    return label
+
+
+def heading(text: str, wrap: bool = False) -> QtWidgets.QLabel:
+    """A label in bold, over a part of a window or dialog."""
+    label = QtWidgets.QLabel(text)
+    label.setWordWrap(wrap)
+    f = label.font()
+    f.setBold(True)
+    label.setFont(f)
+    return label
 
 
 def program_what(en: str) -> str:
@@ -167,7 +201,7 @@ def describe(d: Path, engine: Engine) -> tuple[str, str, str]:
         return _("Offline"), AMBER, _("Can't reach the server. Changes here are kept and sent when it's back.")
     if not r.synced.is_set():
         return _("Catching up…"), AMBER, ""
-    turns = getattr(st, "turns", None)
+    turns = st.turns
     if turns is not None and turns.shared and not turns.holding:
         who = turns.holder
         return _("Standing by"), GREEN, (
@@ -247,14 +281,7 @@ def default_parent() -> Path:
 
 def folder_of(project: str) -> Path | None:
     """The folder on this computer that already syncs this project, if any."""
-    for d in registry.folders():
-        try:
-            if Keys.from_link(load_config(d)["link"])[0].project == project:
-                return d
-        except Exception:  # noqa: BLE001 - a folder that has gone, or isn't set up
-            log.debug("folder %s skipped", d, exc_info=True)
-            continue
-    return None
+    return next((d for d, keys, _server in linked_folders() if keys.project == project), None)
 
 
 def known_server() -> str:
@@ -262,13 +289,14 @@ def known_server() -> str:
     computer's projects, else TeXLoom's own."""
     if last := listsync.last_server():
         return last
-    for d in registry.folders():
-        try:
-            return Keys.from_link(load_config(d)["link"])[1]
-        except Exception:  # noqa: BLE001 - a folder that has gone, or isn't set up
-            log.debug("folder %s skipped", d, exc_info=True)
-            continue
-    return DEFAULT_SERVER
+    return next((server for _d, _keys, server in linked_folders()), DEFAULT_SERVER)
+
+
+def server_choices(first: str = "") -> list[str]:
+    """The servers to offer for a new project: `first` (else the one it goes to by default), then
+    the others this computer knows."""
+    first = (first or known_server()).rstrip("/")
+    return [first, *[s for s in listsync.known_servers() if s != first]]
 
 
 KB, MB, GB = 1024, 1024 ** 2, 1024 ** 3

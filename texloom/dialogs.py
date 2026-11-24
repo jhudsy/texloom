@@ -11,14 +11,15 @@ from urllib.parse import urlparse
 from PySide6 import QtGui, QtWidgets
 
 from . import autostart, listsync
-from .cli import load, load_config, new_project
+from .cli import new_project
+from .config import load, load_config
 from .crypto import Keys
 from .folder import copy_project_files
 from .i18n import _, app_pref, lang_pref, set_app_pref, set_lang_pref
 from .locales import NAMES
 from .paths import state_dir
-from .dialogs_share import CodeSource, NameBox
-from .ui import AMBER, GREY, MAC, Dialog, Engine, grey_note, known_server, program_what, project_name, red, slug
+from .dialogs_share import CodeField, NameBox
+from .ui import AMBER, GREY, MAC, Dialog, Engine, known_server, note, program_what, project_name, red, server_choices, slug
 
 
 async def program_lines(engine: Engine, d: Path) -> tuple[list, set[str]]:
@@ -48,11 +49,8 @@ class ProgramsDialog(Dialog):
         self.view.setHeaderLabels(["", _("Where"), _("What"), _("Line")])
         self.view.setRootIsDecorated(False)
         lay.addWidget(self.view, 1)
-        warn = QtWidgets.QLabel(_("Anyone with an edit link can change these lines, and TeX macros can hide a command "
-                                  "from this list, so allow this only for projects whose editors you trust."))
-        warn.setWordWrap(True)
-        warn.setStyleSheet(f"color: {AMBER}")
-        lay.addWidget(warn)
+        lay.addWidget(note(_("Anyone with an edit link can change these lines, and TeX macros can hide a command "
+                             "from this list, so allow this only for projects whose editors you trust."), AMBER))
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
         self.ok = bb.addButton(_("Allow these lines"), QtWidgets.QDialogButtonBox.AcceptRole)
         self.ok.setEnabled(False)
@@ -95,11 +93,9 @@ class CopyFolderDialog(Dialog):
         self.setMinimumWidth(560)
         lay = QtWidgets.QFormLayout(self)
         lay.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)  # macOS keeps fields narrow otherwise
-        note = QtWidgets.QLabel(_("The copy is a new project of your own, with its own links, in a folder of its own. It starts "
-                                  "with the current files and settings, without the history, comments or collaborators, and "
-                                  "it counts towards your storage."))
-        note.setWordWrap(True)
-        lay.addRow(note)
+        lay.addRow(note(_("The copy is a new project of your own, with its own links, in a folder of its own. It starts "
+                          "with the current files and settings, without the history, comments or collaborators, and "
+                          "it counts towards your storage."), None))
         self.name = QtWidgets.QLineEdit(_("Copy of {name}", name=project_name(src, engine)))
         self.name.textEdited.connect(self.suggest_folder)
         lay.addRow(_("Project name"), self.name)
@@ -110,11 +106,11 @@ class CopyFolderDialog(Dialog):
         row.addWidget(self.folder, 1)
         row.addWidget(choose)
         lay.addRow(_("Folder"), row)
-        self.code = QtWidgets.QLineEdit(str(load_config(src).get("create_code") or ""))
-        self.code.setPlaceholderText(_("only if the server asks for one"))
+        self.code = CodeField(engine, code=str(load_config(src)["create_code"] or ""))
         lay.addRow(_("Creation code"), self.code)
         try:
-            lay.addRow("", CodeSource(engine, load(src)[1]))
+            self.code.source.show_for(load(src)[1])
+            lay.addRow("", self.code.source)
         except (OSError, ValueError, KeyError):  # a folder that has gone: the copy fails later, saying why
             pass
         self.msg = QtWidgets.QLabel("")
@@ -195,22 +191,20 @@ class SettingsDialog(QtWidgets.QDialog):
         self.me = NameBox()
         self.me.editingFinished.connect(self.name_changed)
         lay.addRow(_("Your name"), self.me)
-        lay.addRow("", grey_note(_("Shown to collaborators next to what you write, in every project. With a project list, it follows you to your other computers and browsers.")))
+        lay.addRow("", note(_("Shown to collaborators next to what you write, in every project. With a project list, it follows you to your other computers and browsers.")))
         # the creation code for new projects, one per server (as New project from a folder offers it)
         row = QtWidgets.QHBoxLayout()
-        self.code = QtWidgets.QLineEdit()
-        self.code.setPlaceholderText(_("only if the server asks for one"))
+        self.code = CodeField(window.engine)
         self.code.editingFinished.connect(self.code_changed)
         self.code_server = QtWidgets.QComboBox()
         self.code_server.currentIndexChanged.connect(lambda _i: self.show_code())
         row.addWidget(self.code, 1)
         row.addWidget(self.code_server)
         lay.addRow(_("Creation code"), row)
-        self.code_note = grey_note("")
+        self.code_note = note("")
         lay.addRow("", self.code_note)
-        self.code_source = CodeSource(window.engine)
-        self.code_source.setStyleSheet(f"color: {GREY}")  # a note, as the one above (its link still works)
-        lay.addRow("", self.code_source)
+        self.code.source.setStyleSheet(f"color: {GREY}")  # a note, as the one above (its link still works)
+        lay.addRow("", self.code.source)
         self.login = QtWidgets.QCheckBox(_("Start TeXLoom when I log in, so folders keep syncing"))
         self.login.setChecked(autostart.status() != "off")
         self.login.toggled.connect(self.set_autostart)
@@ -231,7 +225,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.allow_lsp.setChecked(bool(app_pref("allow_lsp", True)))
         self.allow_lsp.toggled.connect(lambda on: set_app_pref("allow_lsp", on))
         lay.addRow("", self.allow_lsp)
-        lay.addRow("", grey_note(_("These servers start only when an AI tool or an editor asks, and run only while that program is open. Turned off, they refuse to start on this computer.")))
+        lay.addRow("", note(_("These servers start only when an AI tool or an editor asks, and run only while that program is open. Turned off, they refuse to start on this computer.")))
         self.lang = QtWidgets.QComboBox()
         self.lang.addItem(_("Automatic (the system’s language)"), "auto")
         for code, name in NAMES.items():
@@ -239,7 +233,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.lang.setCurrentIndex(max(0, self.lang.findData(lang_pref())))
         self.lang.activated.connect(self.set_language)
         lay.addRow(_("Language"), self.lang)
-        lay.addRow("", grey_note(_("A new language is used the next time TeXLoom starts.")))
+        lay.addRow("", note(_("A new language is used the next time TeXLoom starts.")))
         row = QtWidgets.QHBoxLayout()
         self.list_state = QtWidgets.QLabel()
         open_list = QtWidgets.QPushButton(_("Project list…"))
@@ -248,8 +242,8 @@ class SettingsDialog(QtWidgets.QDialog):
         row.addWidget(self.list_state, 1)
         row.addWidget(open_list)
         lay.addRow(_("Project list"), row)
-        lay.addRow("", grey_note(_("Keeps the list of your projects in step across your computers and browsers.")))
-        self.msg = grey_note("")
+        lay.addRow("", note(_("Keeps the list of your projects in step across your computers and browsers.")))
+        self.msg = note("")
         lay.addRow(self.msg)
         if not MAC:
             bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
@@ -266,9 +260,8 @@ class SettingsDialog(QtWidgets.QDialog):
     def fill_servers(self) -> None:
         """The servers this computer knows, the one a new project goes to by default first; a code
         may have arrived meanwhile from the project list."""
-        start = known_server().rstrip("/")
-        servers = [start, *[x for x in listsync.known_servers() if x != start]]
-        keep = self.code_server.currentData() if self.code_server.count() else start
+        servers = server_choices()
+        keep = self.code_server.currentData() if self.code_server.count() else servers[0]
         self.code_server.blockSignals(True)
         self.code_server.clear()
         for s in servers:
@@ -283,13 +276,12 @@ class SettingsDialog(QtWidgets.QDialog):
         self.code.setText(listsync.code_for(server))
         self.code_note.setText(_("Lets you keep new projects on {server}. Joining a project doesn’t need one. With a project list, "
                                  "it follows you to your other computers and browsers.", server=urlparse(server).netloc))
-        self.code_source.show_for(server)
+        self.code.source.show_for(server)
 
     def code_changed(self) -> None:
         server, code = self.code_server.currentData() or known_server(), self.code.text().strip()
-        if code == listsync.code_for(server):
+        if not listsync.keep_code(server, code):
             return
-        listsync.remember_code(server, code)
         self.msg.setText(_("Creation code saved."))
         if listsync.saved_link():
             self.window_.keep_list_updated(force=True)  # so your other devices get it soon

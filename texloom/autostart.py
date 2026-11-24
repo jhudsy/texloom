@@ -105,31 +105,28 @@ def vbs(cmd: list[str], log: Path) -> str:
     return f'CreateObject("WScript.Shell").Run "cmd /c {inner} >> ""{log}"" 2>&1", 0, False\n'
 
 
-def enable(dry_run: bool = False, app: bool = False) -> str:
+def enable(app: bool = False) -> str:
     """Start `texloom start` (or, with app=True, the TeXLoom app in the tray) at login."""
     (cmd, keep), log = command(app), log_file()
     log.parent.mkdir(parents=True, exist_ok=True)
     if sys.platform == "darwin":
         p = _mac_plist()
-        if not dry_run:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(plist(cmd, log, keep))
-            subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}", str(p)], capture_output=True)
-            subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(p)], check=True, capture_output=True)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(plist(cmd, log, keep))
+        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}", str(p)], capture_output=True)
+        subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(p)], check=True, capture_output=True)
         return f"Starts at login (launchd agent {p}); running now. Log: {log}"
     if sys.platform == "win32":
         p = _win_script()
-        if not dry_run:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(vbs(cmd, log))
-            subprocess.Popen(["wscript", str(p)])
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(vbs(cmd, log))
+        subprocess.Popen(["wscript", str(p)])
         return f"Starts at login ({p}); running now. Log: {log}"
     p = _linux_unit()
-    if not dry_run:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(unit(cmd))
-        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-        subprocess.run(["systemctl", "--user", "enable", "--now", "texloom.service"], check=True)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(unit(cmd))
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+    subprocess.run(["systemctl", "--user", "enable", "--now", "texloom.service"], check=True)
     return f"Starts at login (systemd user service {p}); running now. Log: journalctl --user -u texloom"
 
 

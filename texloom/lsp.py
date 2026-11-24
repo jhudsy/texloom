@@ -31,9 +31,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
-from .cli import DEFAULT_CONFIG, browser_link, config_path, load, load_config
 from .comments import Comment, add, read, reply, resolve
-from .listsync import my_name
+from .config import browser_link, config_path, load, load_config, side_replica
+from .listsync import name_in
 from .replica import Replica
 from .textpos import length_u16
 
@@ -127,10 +127,8 @@ class Lsp:
         if self.replica or not self.folder:
             return
         keys, server = load(self.folder)
-        cfg = {**DEFAULT_CONFIG, **load_config(self.folder)}
-        self.name = cfg.get("name") or my_name()[0] or getpass.getuser()
-        state = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "texloom" / "lsp" / keys.project
-        self.replica = Replica(state, keys, server, cfg["create_code"] or None)
+        self.name = name_in(self.folder) or getpass.getuser()
+        self.replica = side_replica("lsp", keys, server, load_config(self.folder)["create_code"] or None)
         self.tasks += [asyncio.create_task(self.replica.run()), asyncio.create_task(self.watch())]
 
     async def watch(self) -> None:
@@ -158,9 +156,6 @@ class Lsp:
         except ValueError:
             return None
 
-    def uri_of(self, rel: str) -> str:
-        assert self.folder
-        return (self.folder / rel).resolve().as_uri()
 
     def buffer(self, uri: str, rel: str) -> str | None:
         """What the editor shows, else what the project has."""

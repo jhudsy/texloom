@@ -28,6 +28,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from . import registry, tls
+from .config import config_path, linked_folders, load_config
 from .crypto import b64d, b64e, seal, unseal
 from .i18n import _
 from .paths import write_json
@@ -396,11 +397,9 @@ def _replicate(entry: ListKey, home: str, merge_in, mine: dict, blank_for, code:
     others added more are written again. An unreachable copy is skipped (it catches up later), but
     one is needed; a copy that says the list was retired stops it. `code`: the link's own server's."""
     known, holds, failure = mine, {}, None
-    def code_there(s: str) -> str | None:
-        return (code if s == home.rstrip("/") else None) or code_for(s) or None
     for s in copy_servers(home):
         try:
-            known = _update_on(entry, s, lambda had, k=known: merge_in(had, k), blank_for(s), code_there(s))
+            known = _update_on(entry, s, lambda had, k=known: merge_in(had, k), blank_for(s), _code_on(s, home, code))
             holds[s] = _canon(known)
             copy_problems.pop(s, None)
         except ListError as e:
@@ -413,7 +412,7 @@ def _replicate(entry: ListKey, home: str, merge_in, mine: dict, blank_for, code:
     for s, held in holds.items():
         if held != _canon(known):
             try:
-                known = _update_on(entry, s, lambda had, k=known: merge_in(had, k), blank_for(s), code_there(s))
+                known = _update_on(entry, s, lambda had, k=known: merge_in(had, k), blank_for(s), _code_on(s, home, code))
             except ListError:
                 pass  # next sync
     return known
@@ -431,9 +430,8 @@ def sync_tags(key: ListKey, server: str, local: dict, listed: set[str], code: st
     don't know about tags can't lose them). A new entry needs a creation code; without one, none is
     made until there is something to put in it."""
     entry = ListKey(derive(key.secret, TAGS_LABEL))
-    def blank(s: str) -> dict | None:
-        return None if ((code if s == server.rstrip("/") else None) or code_for(s)) else empty_tags()
-    return _replicate(entry, server, lambda had, known: tidy_tags(merge_tags(had or empty_tags(), known), listed), local, blank, code)
+    return _replicate(entry, server, lambda had, known: tidy_tags(merge_tags(had or empty_tags(), known), listed), local,
+                      lambda s: None if _code_on(s, server, code) else empty_tags(), code)
 
 
 def sync_settings(key: ListKey, server: str, local: dict, code: str | None = None) -> dict:
@@ -487,8 +485,10 @@ def read_slots(key: ListKey, home: str) -> dict[str, dict]:
     return _registry(key, home)["slots"]
 
 
-def _code_on(server: str, home: str) -> str | None:
-    return code_for(server) or (_known_code(home) if server == home.rstrip("/") else None) or None
+def _code_on(server: str, home: str, code: str | None = None) -> str | None:
+    """The creation code to use on `server`, one of the copies of a list whose link points to
+    `home`: there, `code` if given; else the one this computer has for that server (code_for)."""
+    return (code if server == home.rstrip("/") else None) or code_for(server) or None
 
 
 def add_password(key: ListKey, home: str, username: str, password: str) -> str:
@@ -680,6 +680,16 @@ def my_name() -> tuple[str, int]:
     return "", 0
 
 
+def name_in(d: Path) -> str:
+    """The name you're shown as in a folder's project: the folder's own ("name" in its settings),
+    else the one for every project (my_name); "" if neither is set."""
+    try:
+        own = load_config(d).get("name")
+    except (OSError, ValueError):
+        own = None
+    return str(own or my_name()[0] or "")
+
+
 def remember_name(name: str, at: int | None = None) -> None:
     write_json(_name_file(), {"v": name.strip()[:64], "at": int(time.time() * 1000) if at is None else at}, private=True)
 
@@ -717,17 +727,13 @@ def remember_server(server: str) -> None:
 def known_servers() -> list[str]:
     """Servers this computer knows: the last used, its folders', the project list's, and those it
     has a creation code for. For choosing where a new project goes."""
-    from .cli import load
     out: list[str] = []
     def add(s: str | None) -> None:
         if s and (o := _origin(s)) and o not in out:
             out.append(o)
     add(last_server())
-    for d in registry.folders():
-        try:
-            add(load(d)[1])
-        except (OSError, ValueError, KeyError):
-            continue
+    for _d, _keys, server in linked_folders():
+        add(server)
     if link := saved_link():
         try:
             add(ListKey.from_link(link)[1])
@@ -757,6 +763,15 @@ def remember_code(server: str, code: str, at: int | None = None) -> None:
     write_json(_codes_file(), codes, private=True, indent=2)
 
 
+def keep_code(server: str, code: str) -> bool:
+    """Remember a creation code entered here (remember_code), unless it's the one already offered
+    for `server` (code_for). True if it was new."""
+    if code == code_for(server):
+        return False
+    remember_code(server, code)
+    return True
+
+
 def code_for(server: str) -> str:
     """The creation code to offer for a new project on `server`: the latest one entered here or on
     the project list, else one a folder here already uses."""
@@ -768,7 +783,6 @@ def code_for(server: str) -> str:
 
 def folder_dates(d: Path) -> tuple[int, int]:
     """(when this folder became a project here, when one of its files last changed), in ms."""
-    from .cli import config_path
     from .folder import project_files
     st = config_path(d).parent.stat()
     born = getattr(st, "st_birthtime", None) or (st.st_ctime if os.name == "nt" else config_path(d).stat().st_mtime)
@@ -784,11 +798,9 @@ def folder_dates(d: Path) -> tuple[int, int]:
 def local_folders(server: str) -> dict:
     """This computer's synced folders, as a list kept on `server`: a project on another server
     carries that server ("s"), as in the web app (web/src/servers.ts)."""
-    from .cli import config_path, load
     doc = empty()
-    for d in registry.folders():
+    for d, keys, there in linked_folders():
         try:
-            keys, there = load(d)
             at = int(config_path(d).stat().st_mtime * 1000)
             created, changed = folder_dates(d)
         except (OSError, ValueError, KeyError):
@@ -834,12 +846,13 @@ def tags_problem() -> str | None:
 
 def _known_code(server: str) -> str | None:
     """A creation code this computer already uses on `server`."""
-    from .cli import load, load_config
-    for d in registry.folders():
+    for d, _keys, there in linked_folders():
+        if there.rstrip("/") != server.rstrip("/"):
+            continue
         try:
-            if load(d)[1].rstrip("/") == server.rstrip("/") and load_config(d).get("create_code"):
-                return load_config(d)["create_code"]
-        except (OSError, ValueError, KeyError):
+            if code := load_config(d)["create_code"]:
+                return code
+        except (OSError, ValueError):  # gone meanwhile
             continue
     return None
 
@@ -847,14 +860,8 @@ def _known_code(server: str) -> str | None:
 def _sync_my_tags(key: ListKey, server: str, doc: dict, code: str | None) -> None:
     global _tags_error
     from . import tags
-    from .cli import load
     listed = set(doc["projects"])
-    here = set(listed)  # and any folder not on the list yet keeps its tags here
-    for d in registry.folders():
-        try:
-            here.add(load(d)[0].project)
-        except (OSError, ValueError, KeyError):
-            continue
+    here = listed | {keys.project for _d, keys, _s in linked_folders()}  # and any folder not on the list yet keeps its tags here
     try:
         tags.apply(sync_tags(key, server, tags.doc(), listed, code or _known_code(server)), here)
         _tags_error = None

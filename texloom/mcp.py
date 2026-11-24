@@ -17,7 +17,6 @@ import asyncio
 import io
 import json
 import logging
-import os
 import re
 import shutil
 import sys
@@ -29,9 +28,10 @@ from pathlib import Path
 from pycrdt import Array, Map, Text
 
 from . import __version__
-from .anchors import index_in
+from .anchors import index_in, varuint
 from .confine import outside_reads
 from .comments import add, mentions, sticky
+from .config import side_replica
 from .crypto import Keys, b64e, signed_name
 from .folder import apply_text, compile_externals, latexmk
 from .paths import STATE, latexmk_command, main_file, safe_rel, tex_names_refused
@@ -48,19 +48,10 @@ COLOR = "#d97757"
 
 
 # --- awareness (presence) -------------------------------------------------------------
-def _varuint(n: int) -> bytes:
-    out = bytearray()
-    while n >= 0x80:
-        out.append((n & 0x7F) | 0x80)
-        n >>= 7
-    out.append(n)
-    return bytes(out)
-
-
 def awareness_update(client: int, clock: int, state: dict | None) -> bytes:
     """A y-protocols awareness update for one client (state None = gone)."""
     s = json.dumps(state, separators=(",", ":")).encode()
-    return _varuint(1) + _varuint(client) + _varuint(clock) + _varuint(len(s)) + s
+    return varuint(1) + varuint(client) + varuint(clock) + varuint(len(s)) + s
 
 
 
@@ -575,17 +566,14 @@ class Server:
 
 
 async def serve(keys: Keys, server: str, name: str, code: str | None, suggest_only: bool = False) -> None:
-    state = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "texloom" / "mcp" / keys.project
-    replica = Replica(state, keys, server, code)
+    replica = side_replica("mcp", keys, server, code)
     project = Project(replica, name)
     conn = asyncio.create_task(replica.run())
     presence = asyncio.create_task(project.presence_loop())
 
-    async def register() -> None:
+    async def register() -> None:  # "who wrote this" shows the agent
         await replica.synced.wait()
-        cid = str(replica.doc.client_id)
-        if replica.can_write and replica.clients.get(cid) != name:  # "who wrote this" shows the agent
-            replica.local_change(lambda: replica.clients.__setitem__(cid, name))
+        replica.name_client(name)
     reg = asyncio.create_task(register())
     try:
         await Server(project, suggest_only).serve()

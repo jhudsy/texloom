@@ -33,6 +33,31 @@ def write_json(path: Path, data, private: bool = False, **dump) -> None:
     os.replace(tmp, path)
 
 
+class CachedFile:
+    """What a file holds, read again only when it changes, for files read many times a second (the
+    app reads the folder list and the tags every second): known by its date, size and inode (each
+    write replaces the file: a new inode)."""
+
+    def __init__(self, read) -> None:
+        self.read = read  # path -> what it holds; may raise, and then nothing is kept
+        self._last: tuple | None = None  # (path, date, size, inode), what it held: one value, for threads
+
+    def get(self, path: Path, missing):
+        """What the file holds, or `missing` if there is none."""
+        try:
+            st = path.stat()
+        except OSError:
+            return missing
+        key = (path, st.st_mtime_ns, st.st_size, st.st_ino)
+        if (last := self._last) is None or last[0] != key:
+            last = self._last = (key, self.read(path))
+        return last[1]
+
+    def forget(self) -> None:
+        """After writing the file: read it again next time."""
+        self._last = None
+
+
 def state_dir(folder: Path) -> Path:
     """This computer's records for a synced folder: its copy of the project, what it last synced,
     its settings and the project link. In the folder (so they move with it), but apart from other

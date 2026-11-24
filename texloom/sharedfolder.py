@@ -32,7 +32,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import STATE, state_dir
+from .paths import STATE, state_dir, write_json
 from .registry import computer_id
 
 log = logging.getLogger("texloom.shared")
@@ -106,7 +106,7 @@ class SharedFolder:
         if not self.shared or time.time() - self._flag_at() > 3600:
             self.shared = self.fs.shared = True
             try:
-                self._flag.write_text(json.dumps({"at": time.time()}))
+                write_json(self._flag, {"at": time.time()})
             except OSError:
                 pass
 

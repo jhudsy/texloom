@@ -21,7 +21,6 @@ import html
 import logging
 import os
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -33,6 +32,7 @@ from .app_detail import ProjectDetailPart
 from .app_links import SCHEME, instance_socket, parse_url, register_url_scheme
 from .app_list import ProjectListPart
 from .app_updates import CHANGELOG_URL, SOURCE_URL, UpdatesPart
+from .config import adopt, browser_link, config_path
 from .daemon import CURRENT, FOLDER, FolderTag
 from .dialogs import SettingsDialog
 from .dialogs_list import ProjectListDialog, just_asked
@@ -40,8 +40,8 @@ from .dialogs_share import JoinDialog, LinksDialog, ShareFolderDialog
 from .dialogs_tools import ConnectToolDialog, EditorDialog
 from .i18n import _, app_pref, ngettext, set_app_pref
 from .mac import DockFollowsWindows, menu_opens_where_clicked, nsapp
-from .paths import state_dir, use_tex_on_path
-from .ui import ICON, MAC, RED, TAGS_ROLE, Engine, browser_link, chevron, default_parent, describe, dot, open_path, project_name, theme_icon
+from .paths import use_tex_on_path
+from .ui import ICON, MAC, RED, TAGS_ROLE, Engine, chevron, default_parent, describe, dot, in_background, open_path, project_name, theme_icon
 
 log = logging.getLogger("texloom")
 COMMENTS_EVERY = 15  # seconds between looks at the comments (counts and mention notices)
@@ -268,19 +268,10 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         else:
             SettingsDialog(self).exec()
 
-    # -- the welcome page, while there are no folders
-
-    # -- the list of folders
-
     def connect_tool(self) -> None:
         ConnectToolDialog(self.selected()[0], self).exec()
 
-
-    # -- comments (texloom/comments.py)
-
-
     # -- detail pane
-
     def show_activity(self, on: bool) -> None:
         set_app_pref("show_activity", on)
         self.act_btn.setText(_("Activity"))
@@ -355,7 +346,6 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.a_pause.setIcon(theme_icon("MediaPlaybackStart" if paused else "MediaPlaybackPause"))
         self.show_detail()
 
-
     # -- actions
     def join(self, link: str = "", from_web: bool = False) -> None:
         self.show_window()
@@ -375,20 +365,17 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
             return
         self.tags_dirty = False
 
-        def work() -> None:
-            try:
-                self.list_data = listsync.sync_this_computer()  # (read by refresh, on the window's thread)
-            except listsync.ListError as e:
-                if e.code == "list-retired":
+        def done(found, error) -> None:
+            if error is None:
+                self.list_data = found
+            else:  # offline, say: the next try will do
+                log.debug("project list: %s", error)
+                if isinstance(error, listsync.ListError) and error.code == "list-retired":
                     self.list_data = None
-                log.debug("project list: %s", e)
-            except Exception as e:  # noqa: BLE001 - offline, say: the next try will do
-                log.debug("project list: %s", e)
-            finally:
-                self.list_folders, self.list_at, self.list_busy = folders, time.time(), False
+            self.list_folders, self.list_at, self.list_busy = folders, time.time(), False
 
         self.list_busy = True
-        threading.Thread(target=work, daemon=True).start()
+        in_background(listsync.sync_this_computer, done)
 
     def project_list(self, link: str = "", from_web: bool = False) -> None:
         self.show_window()
@@ -412,8 +399,7 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         if not d:
             return
         d = Path(d)
-        from .cli import adopt
-        if not (state_dir(d) / "config.json").is_file() and not adopt(d):
+        if not config_path(d).is_file() and not adopt(d):
             QtWidgets.QMessageBox.warning(self, _("Add folder"), _(
                 "{d} isn’t a TeXLoom folder yet. To turn it into a project, use Add project ▸ New project from a folder….", d=d))
             return
@@ -475,8 +461,6 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         dm.paused = not dm.paused
         self.engine.call(dm.poke)
         self.refresh()
-
-    # -- new versions
 
     def show_window(self) -> None:
         self.show()

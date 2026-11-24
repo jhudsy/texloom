@@ -18,7 +18,7 @@ from typing import Callable
 from . import registry
 from .crypto import b64e
 from .listsync import _canon, empty_tags, fold_tag, merge_tags, tag_colour, tidy_tags
-from .paths import write_json
+from .paths import CachedFile, write_json
 
 MAX_NAME = 60
 _lock = threading.RLock()  # the window changes tags while a background thread syncs them
@@ -43,27 +43,16 @@ def doc() -> dict:
     return {**empty_tags(), **data} if isinstance(data, dict) else empty_tags()
 
 
-# the last read of the file, for reading it many times a second: (path, date, size, inode), data
-_cache: tuple[tuple, dict] | None = None
+_cache = CachedFile(lambda _f: doc())  # for reading it many times a second
 
 
 def _shared() -> dict:
     """The stored tags, read again only when the file changes. Shared: not to be changed."""
-    global _cache
-    f = _file()
-    try:
-        st = f.stat()
-    except OSError:
-        return empty_tags()
-    key = (f, st.st_mtime_ns, st.st_size, st.st_ino)  # each write replaces the file: a new inode
-    if _cache is None or _cache[0] != key:
-        _cache = (key, doc())
-    return _cache[1]
+    return _cache.get(_file(), empty_tags())
 
 
 def _write(data: dict) -> None:
-    global _cache
-    _cache = None
+    _cache.forget()
     write_json(_file(), data, private=True, ensure_ascii=False)  # says which projects you have
 
 

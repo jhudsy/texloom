@@ -15,12 +15,13 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from . import listsync
-from .cli import clone_project, load_config, new_project, peek, server_info, update_config
+from .cli import clone_project, new_project, peek, server_info
+from .config import load, load_config, update_config
 from .crypto import Keys
 from .daemon import FolderProblem
 from .i18n import _, ngettext
 from .paths import state_dir, write_json
-from .ui import AMBER, GREY, Dialog, Engine, default_parent, folder_of, known_server, open_path, red, slug
+from .ui import AMBER, Dialog, Engine, default_parent, folder_of, note, open_path, red, server_choices, slug
 
 
 def issued_file(d: Path) -> Path:
@@ -66,10 +67,10 @@ class LinksDialog(Dialog):
         super().__init__(parent)
         self.setWindowTitle(_("Links"))
         self.setMinimumWidth(600)
-        keys, server = Keys.from_link(load_config(d)["link"])
+        keys, server = load(d)
         lay = QtWidgets.QVBoxLayout(self)
 
-        def row(label: str, text: str, note: str = "") -> None:
+        def row(label: str, text: str, about: str = "") -> None:
             lay.addWidget(QtWidgets.QLabel(f"<b>{label}</b>"))
             r = QtWidgets.QHBoxLayout()
             field = QtWidgets.QLineEdit(text)
@@ -80,22 +81,16 @@ class LinksDialog(Dialog):
             r.addWidget(field, 1)
             r.addWidget(copy)
             lay.addLayout(r)
-            if note:
-                n = QtWidgets.QLabel(note)
-                n.setWordWrap(True)
-                n.setStyleSheet(f"color: {GREY}")
-                lay.addWidget(n)
+            if about:
+                lay.addWidget(note(about))
 
         row(_("Read-only link"), keys.link(server, write=False), _("Anyone with it can read the project."))
         if keys.seed:
             row(_("Your owner link"), keys.link(server, write=True),
                 _("Full control, including making and revoking people’s links: keep it to yourself."))
             lay.addWidget(QtWidgets.QLabel(f"<b>{_('Edit links for others')}</b>"))
-            hint = QtWidgets.QLabel(_("Each person (or group) gets their own link, so you can later revoke one without "
-                                      "affecting the others (revoking is in the web app: Open in browser → Share)."))
-            hint.setWordWrap(True)
-            hint.setStyleSheet(f"color: {GREY}")
-            lay.addWidget(hint)
+            lay.addWidget(note(_("Each person (or group) gets their own link, so you can later revoke one without "
+                                 "affecting the others (revoking is in the web app: Open in browser → Share).")))
             make = QtWidgets.QHBoxLayout()
             who = QtWidgets.QLineEdit()
             who.setPlaceholderText(_("Name, e.g. Alice, or Lab group"))
@@ -155,10 +150,7 @@ class JoinDialog(Dialog):
         self.setMinimumWidth(560)
         lay = QtWidgets.QVBoxLayout(self)
         if from_web:
-            warn = QtWidgets.QLabel(_("A web page asked TeXLoom to add this project. Join only if you expected it."))
-            warn.setWordWrap(True)
-            warn.setStyleSheet(f"color: {AMBER}")
-            lay.addWidget(warn)
+            lay.addWidget(note(_("A web page asked TeXLoom to add this project. Join only if you expected it."), AMBER))
         lay.addWidget(QtWidgets.QLabel(_("Project link (from the Share dialog, or an email):")))
         row = QtWidgets.QHBoxLayout()
         self.link = QtWidgets.QLineEdit(link)
@@ -171,10 +163,8 @@ class JoinDialog(Dialog):
         self.what = QtWidgets.QLabel("")
         self.what.setWordWrap(True)
         lay.addWidget(self.what)
-        self.already = QtWidgets.QLabel("")
-        self.already.setWordWrap(True)
+        self.already = note("", AMBER)
         self.already.setTextFormat(Qt.PlainText)
-        self.already.setStyleSheet(f"color: {AMBER}")
         self.already.hide()
         lay.addWidget(self.already)
         self.existing: Path | None = None
@@ -192,12 +182,9 @@ class JoinDialog(Dialog):
         lay.addLayout(frow)
         self.compile = QtWidgets.QCheckBox(_("Compile with my own TeX (latexmk) when files change"))
         lay.addWidget(self.compile)
-        note = QtWidgets.QLabel(_("Collaborators’ files will be written to this folder. TeXLoom won’t write files that "
-                                  "LaTeX tools run as programs, but compile it with your own tools only if you trust "
-                                  "everyone who can edit the project."))
-        note.setWordWrap(True)
-        note.setStyleSheet(f"color: {GREY}")
-        lay.addWidget(note)
+        lay.addWidget(note(_("Collaborators’ files will be written to this folder. TeXLoom won’t write files that "
+                             "LaTeX tools run as programs, but compile it with your own tools only if you trust "
+                             "everyone who can edit the project.")))
         self.buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
         self.join = self.buttons.addButton(_("Join"), QtWidgets.QDialogButtonBox.AcceptRole)
         self.join.setEnabled(False)
@@ -335,6 +322,16 @@ class CodeSource(QtWidgets.QLabel):
                      f'<a href="{html.escape(url, quote=True)}">{html.escape(_("Where to get one"))}</a>')
 
 
+class CodeField(QtWidgets.QLineEdit):
+    """A creation code to type in, and `source`, where codes come from (CodeSource), for the dialog
+    to show near it."""
+
+    def __init__(self, engine: Engine, server: str = "", code: str = "", optional: bool = True) -> None:
+        super().__init__(code)
+        self.setPlaceholderText(_("only if the server asks for one") if optional else _("Creation code"))
+        self.source = CodeSource(engine, server)
+
+
 def ask_code(parent, engine: Engine, server: str, title: str, text: str, code: str = "") -> str | None:
     """Ask for a creation code, saying where codes come from. None if cancelled."""
     dlg = QtWidgets.QDialog(parent)
@@ -344,9 +341,8 @@ def ask_code(parent, engine: Engine, server: str, title: str, text: str, code: s
     intro = QtWidgets.QLabel(text)
     intro.setWordWrap(True)
     lay.addWidget(intro)
-    lay.addWidget(CodeSource(engine, server))
-    box = QtWidgets.QLineEdit(code)
-    box.setPlaceholderText(_("Creation code"))
+    box = CodeField(engine, server, code, optional=False)
+    lay.addWidget(box.source)
     lay.addWidget(box)
     bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
     bb.accepted.connect(dlg.accept)
@@ -370,11 +366,8 @@ class ShareFolderDialog(Dialog):
         lay = QtWidgets.QFormLayout(self)
         lay.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)  # macOS keeps fields narrow otherwise
         if from_web:
-            warn = QtWidgets.QLabel(_("A web page asked TeXLoom to make a new project from a folder. Go on only if you "
-                                      "expected it, and check the server it goes to."))
-            warn.setWordWrap(True)
-            warn.setStyleSheet(f"color: {AMBER}")
-            lay.addRow(warn)
+            lay.addRow(note(_("A web page asked TeXLoom to make a new project from a folder. Go on only if you "
+                              "expected it, and check the server it goes to."), AMBER))
         intro = QtWidgets.QLabel(_("The folder’s files are uploaded, encrypted, and the folder stays in step with the "
                                    "project from then on. You can invite people once it’s made."))
         intro.setWordWrap(True)
@@ -392,24 +385,20 @@ class ShareFolderDialog(Dialog):
         self.server = QtWidgets.QComboBox()
         self.server.setEditable(True)
         self.server.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
-        start = (server or known_server()).rstrip("/")
-        for s in [start, *[x for x in listsync.known_servers() if x != start]]:
-            self.server.addItem(s)
+        servers = server_choices(server)
+        self.server.addItems(servers)
         self.server.lineEdit().setPlaceholderText("https://your.server")
         lay.addRow(_("Server"), self.server)
-        self.code = QtWidgets.QLineEdit(code or listsync.code_for(start))  # yours there, or from your project list
-        self.code.setPlaceholderText(_("only if the server asks for one"))
+        self.code = CodeField(engine, servers[0], code or listsync.code_for(servers[0]))  # yours there, or from your project list
         self.given_code = bool(code)
         self.server.currentTextChanged.connect(self.server_changed)
         lay.addRow(_("Creation code"), self.code)
         hint = QtWidgets.QLabel(_("Without a code, a server that asks for one keeps no copy: the project syncs only between "
                                   "computers that are online at the same time. You can add a code later."))
         hint.setWordWrap(True)
-        hint.setProperty("class", "hint")
         hint.setEnabled(False)  # greyed, as a note
         lay.addRow("", hint)
-        self.code_source = CodeSource(engine, start)
-        lay.addRow("", self.code_source)
+        lay.addRow("", self.code.source)
         self.me = NameBox()
         self.accepted.connect(self.me.save)
         lay.addRow(_("Your name"), self.me)
@@ -427,7 +416,7 @@ class ShareFolderDialog(Dialog):
         s = text.strip().rstrip("/")
         if not self.given_code:
             self.code.setText(listsync.code_for(s))
-        self.code_source.show_for(s)
+        self.code.source.show_for(s)
 
     def choose(self) -> None:
         d = QtWidgets.QFileDialog.getExistingDirectory(self, _("Folder for the new project"), str(Path.home()))
@@ -455,8 +444,8 @@ class ShareFolderDialog(Dialog):
             self.msg.setText(red(_("Couldn’t create the project: {err}", err=err)))
             self.go.setEnabled(True)
             return
-        if code and code != listsync.code_for(server):  # a new code: keep it, and it follows your project list
-            listsync.remember_code(server, code)
+        if code:  # a new code is kept, and follows your project list
+            listsync.keep_code(server, code)
         if server != self.web_server:
             listsync.remember_server(server)  # the default next time
         self.made = d.resolve()

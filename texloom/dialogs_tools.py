@@ -11,8 +11,9 @@ from pathlib import Path
 from PySide6 import QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
-from .cli import load
+from .config import load
 from .i18n import _
+from .ui import heading, note
 
 
 class ConnectToolDialog(QtWidgets.QDialog):
@@ -31,33 +32,33 @@ class ConnectToolDialog(QtWidgets.QDialog):
         self.setWindowTitle(_("Use an AI agent on your computer"))
         self.setMinimumWidth(620)
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(self.note(_("Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here.")))
+        lay.addWidget(note(_("Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here."), None))
         self.install = None
         if self.command == "texloom":
-            lay.addWidget(self.heading(_("Install the TeXLoom command-line helper once")))
+            lay.addWidget(heading(_("Install the TeXLoom command-line helper once"), wrap=True))
             self.install = self.block(lay, 1, lambda: self.INSTALL)
-            how = self.note(f'<a href="https://docs.astral.sh/uv/getting-started/installation/">{_("How to install uv")}</a>')
+            how = note(f'<a href="https://docs.astral.sh/uv/getting-started/installation/">{_("How to install uv")}</a>', None)
             how.setOpenExternalLinks(True)
             lay.addWidget(how)
         else:
-            lay.addWidget(self.note(_("Your tool runs the TeXLoom app for this, so there’s nothing else to install. If you move the app, connect your tool again.")))
+            lay.addWidget(note(_("Your tool runs the TeXLoom app for this, so there’s nothing else to install. If you move the app, connect your tool again."), None))
         if self.keys.writable:
-            lay.addWidget(self.heading(_("Choose what the tool may do")))
+            lay.addWidget(heading(_("Choose what the tool may do"), wrap=True))
             for access, label in (("suggest", _("Suggest changes for people to accept")), ("edit", _("Edit files directly")), ("read", _("Read the project only"))):
                 radio = QtWidgets.QRadioButton(label)
                 radio.setProperty("access", access)
                 radio.setChecked(access == self.access)
                 radio.toggled.connect(functools.partial(self.choose, access))
                 lay.addWidget(radio)
-        lay.addWidget(self.heading(_("Add it to your tool")))
-        lay.addWidget(self.note(_("Claude Code: run this in a terminal")))
+        lay.addWidget(heading(_("Add it to your tool"), wrap=True))
+        lay.addWidget(note(_("Claude Code: run this in a terminal"), None))
         self.claude = self.block(lay, 3, lambda: "claude mcp add texloom -- " + " ".join(self.quoted(a) for a in (self.command, *self.args("Claude Code"))))
-        lay.addWidget(self.note(_("Other tools: add this to their MCP settings")))
+        lay.addWidget(note(_("Other tools: add this to their MCP settings"), None))
         self.other = self.block(lay, 9, lambda: json.dumps({"mcpServers": {"texloom": {"command": self.command, "args": self.args("AI agent")}}}, indent=2, ensure_ascii=False))
         if self.install:
-            lay.addWidget(self.note(_("If your tool can’t find the texloom command, give its full path instead.")))
-        lay.addWidget(self.note(_("Suggesting and editing use this folder’s path. Reading uses a read-only link, which your tool saves in its settings, so anyone who can read those settings can read the project.")))
-        lay.addWidget(self.note(_("The tool reads text other people wrote in this project, which could include instructions aimed at it. On shared projects, suggesting is the safer choice.")))
+            lay.addWidget(note(_("If your tool can’t find the texloom command, give its full path instead."), None))
+        lay.addWidget(note(_("Suggesting and editing use this folder’s path. Reading uses a read-only link, which your tool saves in its settings, so anyone who can read those settings can read the project."), None))
+        lay.addWidget(note(_("The tool reads text other people wrote in this project, which could include instructions aimed at it. On shared projects, suggesting is the safer choice."), None))
         row = QtWidgets.QHBoxLayout()
         row.addStretch(1)
         close = QtWidgets.QPushButton(_("Close"))
@@ -65,19 +66,6 @@ class ConnectToolDialog(QtWidgets.QDialog):
         row.addWidget(close)
         lay.addLayout(row)
         self.show_commands()
-
-    @staticmethod
-    def note(text: str) -> QtWidgets.QLabel:
-        label = QtWidgets.QLabel(text)
-        label.setWordWrap(True)
-        return label
-
-    def heading(self, text: str) -> QtWidgets.QLabel:
-        label = self.note(text)
-        font = label.font()
-        font.setBold(True)
-        label.setFont(font)
-        return label
 
     def block(self, lay: QtWidgets.QBoxLayout, lines: int, text) -> tuple:
         box = QtWidgets.QPlainTextEdit(readOnly=True)
@@ -129,8 +117,8 @@ class EditorDialog(ConnectToolDialog):
         self.setWindowTitle(_("Show comments in your editor"))
         self.setMinimumWidth(620)
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(self.note(_("Your editor can show a synced folder’s comments beside the text they are about, through TeXLoom’s language server. The editor starts it when it needs it, in the folder you open.")))
-        lay.addWidget(self.heading(_("Choose your editor")))
+        lay.addWidget(note(_("Your editor can show a synced folder’s comments beside the text they are about, through TeXLoom’s language server. The editor starts it when it needs it, in the folder you open."), None))
+        lay.addWidget(heading(_("Choose your editor"), wrap=True))
         self.notes = {
             "VS Code": _("Install the TeXLoom comments extension from the Extensions view (search for TeXLoom; in VSCodium and similar editors it comes from Open VSX). If it doesn’t find TeXLoom by itself, add this to your settings:"),
             "Neovim": _("Neovim 0.11 or later: add this to your init.lua"),
@@ -141,12 +129,12 @@ class EditorDialog(ConnectToolDialog):
         self.pick = QtWidgets.QComboBox()
         self.pick.addItems(list(self.notes))
         lay.addWidget(self.pick)
-        self.what = self.note("")
+        self.what = note("", None)
         lay.addWidget(self.what)
         self.snippet = self.block(lay, 9, self.text)
         if self.command == "texloom":
-            lay.addWidget(self.note(_("If your editor can’t find the texloom command, give its full path instead.")))
-        lay.addWidget(self.note(_("Comments that mention you stand out, and hovering shows the whole thread. Replying and starting a comment need an editor that can ask for text, as the VS Code extension does; elsewhere, reply with texloom comments reply, or use the web app. You can turn this off in Settings.")))
+            lay.addWidget(note(_("If your editor can’t find the texloom command, give its full path instead."), None))
+        lay.addWidget(note(_("Comments that mention you stand out, and hovering shows the whole thread. Replying and starting a comment need an editor that can ask for text, as the VS Code extension does; elsewhere, reply with texloom comments reply, or use the web app. You can turn this off in Settings."), None))
         row = QtWidgets.QHBoxLayout()
         row.addStretch(1)
         close = QtWidgets.QPushButton(_("Close"))
