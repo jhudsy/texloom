@@ -143,6 +143,75 @@ def windows(win: appmod.Window) -> None:
     check(not win.isVisible(), "the main window closes (hides: the app keeps syncing)")
 
 
+def list_window() -> None:
+    """The project list's window when a list is in use: its sync settings, with the network calls
+    stood in for (texloom/listsync.py's are checked against a server by check_web_listways.py)."""
+    import time
+
+    from texloom import dialogs_list, listsync
+    print("project list:")
+    calls: list[tuple] = []
+    slots = {"pk": {"kind": "passkey", "at": 1763900000000, "seed": "a"}, "pw": {"kind": "password", "at": 1763990000000, "seed": "b"}}
+    doc = {"projects": {"p1": {"f": "x", "n": "Thesis"}, "p2": {"f": "y", "n": "Notes"}}}
+    def synced(code=None):
+        listsync.last_synced = time.time()
+        return "https://example.org", doc
+    stand_ins = {
+        "sync_this_computer": synced,
+        "not_here": lambda doc, server: [],
+        "read_slots": lambda key, home: dict(slots),
+        "remove_slot": lambda key, home, sid, slot: calls.append(("remove", sid)),
+        "set_password": lambda key, home, u, pw: calls.append(("password", u)),
+        "delete_list": lambda: calls.append(("delete",)),
+    }
+    kept = {name: getattr(listsync, name) for name in stand_ins}
+    yes, ask = QtWidgets.QMessageBox.question, dialogs_list.PasswordDialog.ask
+    try:
+        for name, f in stand_ins.items():
+            setattr(listsync, name, f)
+        QtWidgets.QMessageBox.question = lambda *a, **k: QtWidgets.QMessageBox.Yes
+        dialogs_list.PasswordDialog.ask = classmethod(lambda cls, parent, setting: ("ada", "correct horse battery"))
+        listsync.save_link(listsync.ListKey.generate().link("https://example.org"))
+
+        def wait(cond, ms: int = 3000) -> bool:
+            for _ in range(ms // 20):
+                if cond():
+                    return True
+                settle(20)
+            return False
+        d = dialogs_list.ProjectListDialog(None)
+        d.show()
+        check(d.pages.currentIndex() == 1, "with a list, it opens on the list's settings")
+        check(wait(lambda: "2 projects" in d.count.text() and "synced" in d.count.text().lower()), "it says how many projects are synced, and when")
+        check(wait(lambda: sum(isinstance(d.ways.itemAt(i).widget(), QtWidgets.QWidget) for i in range(d.ways.count())) == 2),
+              "it lists the passkey and the password")
+        rows = [d.ways.itemAt(i).widget() for i in range(d.ways.count())]
+        rows[1].findChild(QtWidgets.QPushButton).click()
+        check(wait(lambda: ("remove", "pw") in calls), "Remove takes that way in off the list")
+        d.set_password()
+        check(wait(lambda: ("password", "ada") in calls), "Set a password sets it")
+        d.copy_btn.click()
+        check(QtWidgets.QApplication.clipboard().text() == listsync.saved_link(), "Copy sync link copies it")
+        check(wait(lambda: d.copy_btn.text() != dialogs_list._("Copied"), 4000), "and its button says so only for a moment")
+        check(not d.more.isVisibleTo(d), "More options starts folded")
+        d.more_btn.click()
+        check(d.more.isVisibleTo(d), "and opens")
+        d.delete()
+        check(wait(lambda: ("delete",) in calls and d.pages.currentIndex() == 0), "Delete this list deletes it, and the window goes back to setting one up")
+        listsync.save_link(listsync.ListKey.generate().link("https://example.org"))
+        d2 = dialogs_list.ProjectListDialog(None)
+        d2.show()
+        d2.off()
+        check(listsync.saved_link() is None and d2.pages.currentIndex() == 0, "Stop using it here stops, after asking")
+        d.close()
+        d2.close()
+    finally:
+        for name, f in kept.items():
+            setattr(listsync, name, f)
+        QtWidgets.QMessageBox.question, dialogs_list.PasswordDialog.ask = yes, ask
+        listsync.save_link(None)
+
+
 def objc():
     """The Objective-C runtime, typed for the few calls the Mac checks make."""
     import ctypes
@@ -245,6 +314,7 @@ def main() -> int:
     engine = Engine()  # not started: nothing here syncs or goes online
     win = appmod.Window(engine, appmod.Activity())
     windows(win)
+    list_window()
     if NATIVE:
         menu_bar(win)
     if failures:

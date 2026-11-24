@@ -831,10 +831,13 @@ def sync_this_computer(code: str | None = None) -> tuple[str, dict] | None:
         copy_ways(key, server)
     except ListError as e:
         log.debug("list ways in: %s", e.code)
+    global last_synced
+    last_synced = time.time()
     return server, doc
 
 
 _tags_error: str | None = None
+last_synced = 0.0  # when this computer's list was last synced (time.time())
 
 
 def tags_problem() -> str | None:

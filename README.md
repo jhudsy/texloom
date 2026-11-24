@@ -147,7 +147,9 @@ good. Your projects aren't deleted, but you'll need each project's own link to o
 is also the one way in that can be guessed, by someone with the server's data, so make it long.
 
 In the desktop app, use **File ▸ Project list…** (also in Settings), which also keeps the list up to date while the app
-runs; or, in the web app's list dialog, **Use in the TeXLoom app** sends the list to the app on this
+runs and does the same as the web app's dialog: copy the link, set a password, remove a passkey or
+password, replace the link or delete the list. A passkey is made by a browser, so **Add a passkey…**
+opens the list there (that browser then keeps it too). Or, in the web app's list dialog, **Use in the TeXLoom app** sends the list to the app on this
 computer, which asks before using it. For the helper, see `texloom projects` below (`use --password`
 unlocks with a password). Starting a list counts as creating something on the server, so servers
 that require a creation code ask for one. Servers can turn lists off with `--no-project-lists`.

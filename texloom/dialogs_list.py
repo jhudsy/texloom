@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from urllib.parse import urlparse
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -10,7 +11,79 @@ from PySide6.QtCore import Qt
 
 from . import listsync, tags
 from .i18n import _, ngettext
-from .ui import AMBER, grey_note, known_server, red
+from .ui import AMBER, chevron, grey_note, known_server, red
+
+
+def NO_RECOVERY() -> str:  # a constant, translated when shown
+    return _("There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it.")
+
+
+def synced_ago(at: float) -> str:
+    """When the list was last synced, in words."""
+    if not at:
+        return ""
+    mins = int((time.time() - at) // 60)
+    if mins < 1:
+        return _("Last synced just now.")
+    if mins < 60:
+        return ngettext(mins, "Last synced {n} minute ago.", "Last synced {n} minutes ago.", n=mins)
+    return _("Last synced at {time}.", time=time.strftime("%H:%M", time.localtime(at)))
+
+
+class PasswordDialog(QtWidgets.QDialog):
+    """A username and password: to unlock a list, or (`setting`) to set one, confirmed and checked
+    as the web app does."""
+
+    def __init__(self, parent, setting: bool) -> None:
+        super().__init__(parent)
+        self.setting = setting
+        self.setWindowTitle(_("Set a password") if setting else _("Unlock with a password"))
+        self.setMinimumWidth(440)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(grey_note(_("Your username and password stay on this device. Only a value worked out from them reaches the server, so it never learns either one.")))
+        if setting:
+            warn = QtWidgets.QLabel(_("A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else."))
+            warn.setWordWrap(True)
+            warn.setStyleSheet(f"color: {AMBER}")
+            lay.addWidget(warn)
+        form = QtWidgets.QFormLayout()
+        self.username = QtWidgets.QLineEdit()
+        self.password = QtWidgets.QLineEdit()
+        self.password.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.again = QtWidgets.QLineEdit()
+        self.again.setEchoMode(QtWidgets.QLineEdit.Password)
+        form.addRow(_("Username or email"), self.username)
+        form.addRow(_("Password"), self.password)
+        if setting:
+            form.addRow(_("Password again"), self.again)
+        lay.addLayout(form)
+        self.msg = QtWidgets.QLabel("")
+        lay.addWidget(self.msg)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.check)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+    def check(self) -> None:
+        user, pw = self.username.text(), self.password.text()
+        if not user.strip() or not pw:
+            return
+        if self.setting:
+            if len(pw) < listsync.MIN_PASSWORD:
+                self.msg.setText(red(_("Use at least {n} characters.", n=listsync.MIN_PASSWORD)))
+                return
+            if len(set(pw)) < 6:
+                self.msg.setText(red(_("That password is too easy to guess.")))
+                return
+            if pw != self.again.text():
+                self.msg.setText(red(_("The two passwords don’t match.")))
+                return
+        self.accept()
+
+    @classmethod
+    def ask(cls, parent, setting: bool) -> tuple[str, str] | None:
+        d = cls(parent, setting)
+        return (d.username.text(), d.password.text()) if d.exec() == QtWidgets.QDialog.Accepted else None
 
 
 class ProjectListDialog(QtWidgets.QDialog):
@@ -77,19 +150,28 @@ class ProjectListDialog(QtWidgets.QDialog):
         row.addWidget(self.code, 1)
         row.addWidget(new)
         s.addLayout(row)
-        no_recovery = QtWidgets.QLabel(_("There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it."))
+        no_recovery = QtWidgets.QLabel(NO_RECOVERY())
         no_recovery.setWordWrap(True)
         no_recovery.setStyleSheet(f"color: {AMBER}")
         s.addWidget(no_recovery)
         s.addStretch(1)
         self.pages.addWidget(setup)
 
-        # in use: the projects on it that aren't here yet
+        # in use: the list's sync settings (and, until they move to the main window, the projects
+        # on it that aren't here yet)
         inuse = QtWidgets.QWidget()
         u = QtWidgets.QVBoxLayout(inuse)
         u.setContentsMargins(0, 8, 0, 0)
+        row = QtWidgets.QHBoxLayout()
         self.count = QtWidgets.QLabel("")
-        u.addWidget(self.count)
+        self.count.setWordWrap(True)
+        self.sync_btn = QtWidgets.QPushButton(_("Sync now"))
+        self.sync_btn.setToolTip(_("Send and fetch changes to the list now. It also happens by itself."))
+        self.sync_btn.clicked.connect(self.refresh_list)
+        row.addWidget(self.count, 1)
+        row.addWidget(self.sync_btn)
+        u.addLayout(row)
+
         u.addWidget(QtWidgets.QLabel(_("Projects on the list that aren't on this computer:")))
         self.find = QtWidgets.QLineEdit()
         self.find.setPlaceholderText(_("Search by name or tag…"))
@@ -97,27 +179,86 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.find.textChanged.connect(lambda _text: self.apply_find())
         u.addWidget(self.find)
         self.items = QtWidgets.QListWidget()
+        self.items.setMaximumHeight(130)
         self.items.itemDoubleClicked.connect(lambda _item: self.join())
-        u.addWidget(self.items, 1)
+        u.addWidget(self.items)
         row = QtWidgets.QHBoxLayout()
         join = QtWidgets.QPushButton(_("Join…"))
         join.clicked.connect(self.join)
-        copy = QtWidgets.QPushButton(_("Copy sync link"))
-        copy.clicked.connect(lambda: (QtWidgets.QApplication.clipboard().setText(listsync.saved_link() or ""), copy.setText(_("Copied"))))
-        off = QtWidgets.QPushButton(_("Stop using it here"))
-        off.clicked.connect(self.off)
         row.addWidget(join)
         row.addStretch(1)
-        row.addWidget(copy)
-        row.addWidget(off)
         u.addLayout(row)
-        u.addWidget(grey_note(_("Keep the sync link in a password manager: it opens every project on the list, and a lost list can’t be recovered.")))
-        u.addWidget(self.heading(_("Copies of this list")))
-        u.addWidget(grey_note(_("Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.")))
+
+        u.addSpacing(6)
+        u.addWidget(self.heading(_("Your sync link")))
+        u.addWidget(grey_note(_("It opens this list on any computer or browser. Save it in a password manager.")))
+        row = QtWidgets.QHBoxLayout()
+        self.copy_btn = QtWidgets.QPushButton(_("Copy sync link"))
+        self.copy_btn.setToolTip(_("Copy the link, to paste into another browser or a password manager"))
+        self.copy_btn.clicked.connect(self.copy_link)
+        row.addWidget(self.copy_btn)
+        row.addStretch(1)
+        u.addLayout(row)
+        keep = QtWidgets.QLabel(_("Nobody can recover a lost list, not even the server’s owner: keep the sync link safe."))
+        keep.setWordWrap(True)
+        keep.setStyleSheet(f"color: {AMBER}")
+        keep.setToolTip(NO_RECOVERY())
+        u.addWidget(keep)
+
+        u.addSpacing(6)
+        u.addWidget(self.heading(_("Other ways to open it")))
+        self.ways = QtWidgets.QVBoxLayout()
+        self.ways.setSpacing(2)
+        u.addLayout(self.ways)
+        row = QtWidgets.QHBoxLayout()
+        add_passkey = QtWidgets.QPushButton(_("Add a passkey…"))
+        add_passkey.setToolTip(_("Opens the list in your browser, where you can add a passkey: Touch ID, Windows Hello, your phone or a security key"))
+        add_passkey.clicked.connect(self.add_passkey)
+        set_pw = QtWidgets.QPushButton(_("Set a password…"))
+        set_pw.setToolTip(_("Open the list with a username and password of your choice. Nobody can reset it if you forget it."))
+        set_pw.clicked.connect(self.set_password)
+        row.addWidget(add_passkey)
+        row.addWidget(set_pw)
+        row.addStretch(1)
+        u.addLayout(row)
+
+        u.addSpacing(6)
+        self.more_btn = QtWidgets.QToolButton()
+        self.more_btn.setText(_("More options"))
+        self.more_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.more_btn.setAutoRaise(True)
+        self.more_btn.setStyleSheet("QToolButton { border: none; padding: 2px 0; } QToolButton:checked { background: transparent; }")
+        self.more_btn.setCheckable(True)
+        self.more_btn.setIcon(chevron(self.more_btn, down=False))
+        self.more_btn.toggled.connect(self.show_more)
+        u.addWidget(self.more_btn)
+        self.more = QtWidgets.QWidget()
+        m = QtWidgets.QVBoxLayout(self.more)
+        m.setContentsMargins(0, 0, 0, 0)
+        m.addWidget(self.heading(_("Copies on other servers")))
+        m.addWidget(grey_note(_("Kept on more than one server, the list outlives any one of them, and each device keeps them all up to date. Every copy is encrypted. The sync link works on any of them; passkeys only work on the server where they were added.")))
         self.copies = QtWidgets.QListWidget()
-        self.copies.setMaximumHeight(110)
+        self.copies.setMaximumHeight(90)
         self.copies.itemChanged.connect(self.copy_changed)
-        u.addWidget(self.copies)
+        m.addWidget(self.copies)
+        m.addWidget(self.heading(_("Stop or start over")))
+        row = QtWidgets.QHBoxLayout()
+        off = QtWidgets.QPushButton(_("Stop using it here…"))
+        off.setToolTip(_("This computer keeps its folders but stops syncing the list. Other devices carry on."))
+        off.clicked.connect(self.off)
+        replace = QtWidgets.QPushButton(_("Replace the sync link…"))
+        replace.setToolTip(_("If the link has got out: a new link, and the old one stops working everywhere"))
+        replace.clicked.connect(self.replace)
+        delete = QtWidgets.QPushButton(_("Delete this list…"))
+        delete.setToolTip(_("Delete the list from the server for every device. Projects aren’t deleted."))
+        delete.clicked.connect(self.delete)
+        for b in (off, replace, delete):
+            row.addWidget(b)
+        row.addStretch(1)
+        m.addLayout(row)
+        self.more.setVisible(False)
+        u.addWidget(self.more)
+        u.addStretch(1)
         self.pages.addWidget(inuse)
 
         self.status = QtWidgets.QLabel("")
@@ -184,7 +325,11 @@ class ProjectListDialog(QtWidgets.QDialog):
             return
         server, doc, away = found
         self.show_copies(server)
-        self.count.setText(ngettext(len(doc["projects"]), "The list has {n} project.", "The list has {n} projects.", n=len(doc["projects"])))
+        n = len(doc["projects"])
+        self.count.setText("✓ " + (ngettext(n, "Your {n} project is synced, encrypted.", "Your {n} projects are synced, encrypted.", n=n) if n
+                                   else _("Your list is synced, encrypted.")) + " " + synced_ago(listsync.last_synced))
+        key = listsync.ListKey.from_link(listsync.saved_link() or "")[0]
+        self.in_background(lambda: listsync.read_slots(key, server), self.show_ways)
         of = tags.reader()
         for project, entry in away:
             names = [t.name for t in of(project)]
@@ -197,6 +342,78 @@ class ProjectListDialog(QtWidgets.QDialog):
             item.setData(Qt.UserRole, f"{there.rstrip('/')}/#{entry['f']}")  # on its own server
             self.items.addItem(item)
         self.apply_find()
+
+    def show_ways(self, slots: dict) -> None:
+        """The passkeys and password that open the list, each with Remove."""
+        while self.ways.count():
+            item = self.ways.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if not slots:
+            self.ways.addWidget(grey_note(_("None yet: only the sync link opens it.")))
+            return
+        for sid, slot in sorted(slots.items(), key=lambda x: x[1].get("at", 0)):
+            row = QtWidgets.QWidget()
+            r = QtWidgets.QHBoxLayout(row)
+            r.setContentsMargins(0, 0, 0, 0)
+            when = time.strftime("%d %b %Y", time.localtime(slot.get("at", 0) / 1000))
+            passkey = slot.get("kind") == listsync.PASSKEY
+            r.addWidget(QtWidgets.QLabel(_("Passkey, added {when}", when=when) if passkey else _("Password, set {when}", when=when)), 1)
+            remove = QtWidgets.QPushButton(_("Remove"))
+            remove.setToolTip(_("Stop this passkey opening the list") if passkey else _("Stop this password opening the list"))
+            remove.clicked.connect(lambda _c=False, sid=sid, slot=slot: self.remove_way(sid, slot))
+            r.addWidget(remove)
+            self.ways.addWidget(row)
+
+    def _key_home(self) -> tuple[listsync.ListKey, str]:
+        return listsync.ListKey.from_link(listsync.saved_link() or "")
+
+    def remove_way(self, sid: str, slot: dict) -> None:
+        passkey = slot.get("kind") == listsync.PASSKEY
+        ask = _("Stop this passkey opening the list? You can also delete it from your password manager.") if passkey else _("Remove this password?")
+        if QtWidgets.QMessageBox.question(self, _("Project list"), ask) != QtWidgets.QMessageBox.Yes:
+            return
+        key, home = self._key_home()
+        self.in_background(lambda: listsync.remove_slot(key, home, sid, slot), lambda _r: self.refresh_list())
+
+    def set_password(self) -> None:
+        asked = PasswordDialog.ask(self, setting=True)
+        if not asked:
+            return
+        key, home = self._key_home()
+        self.in_background(lambda: listsync.set_password(key, home, *asked), lambda _r: (self.refresh_list(), self.status.setText(_("Password set."))))
+
+    def add_passkey(self) -> None:
+        """A passkey is made by a browser, so the list opens there, where one can be added."""
+        _key, home = self._key_home()
+        if QtWidgets.QMessageBox.question(self, _("Add a passkey"), _(
+                "Your browser will open this list on {server}. There, choose Add a passkey under “Other ways to open it”. "
+                "That browser keeps the list too.", server=urlparse(home).netloc)) != QtWidgets.QMessageBox.Yes:
+            return
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(listsync.saved_link() or ""))
+        self.status.setText(_("Add the passkey in your browser, then come back and choose Sync now."))
+
+    def copy_link(self) -> None:
+        QtWidgets.QApplication.clipboard().setText(listsync.saved_link() or "")
+        self.copy_btn.setText(_("Copied"))
+        QtCore.QTimer.singleShot(2000, lambda: self.copy_btn.setText(_("Copy sync link")))
+
+    def show_more(self, on: bool) -> None:
+        self.more.setVisible(on)
+        self.more_btn.setIcon(chevron(self.more_btn, down=on))
+
+    def replace(self) -> None:
+        if QtWidgets.QMessageBox.question(self, _("Replace the sync link"), _(
+                "Replace the sync link? The old link, and every passkey and password, will stop working. Other devices will need the new link.")) != QtWidgets.QMessageBox.Yes:
+            return
+        self.in_background(listsync.replace_list, lambda link: (self.link.setText(link), self.refresh_list(),
+                           self.status.setText(_("Done. Copy the new sync link and keep it safe. Add any passkeys and password again."))))
+
+    def delete(self) -> None:
+        if QtWidgets.QMessageBox.question(self, _("Delete this list"), _(
+                "Delete this list from the server, for every device? Your projects aren’t deleted, and this computer keeps its folders.")) != QtWidgets.QMessageBox.Yes:
+            return
+        self.in_background(listsync.delete_list, lambda _r: self.stopped(_("The list is deleted. This computer keeps its folders.")))
 
     def show_copies(self, home: str) -> None:
         """The servers keeping a copy of the list, and the others this computer knows, to tick."""
@@ -252,19 +469,22 @@ class ProjectListDialog(QtWidgets.QDialog):
 
     def password(self) -> None:
         server = self._server()
-        username, ok = QtWidgets.QInputDialog.getText(self, _("Project list"), _("Username or email:"))
-        if not ok or not username.strip():
-            return
-        secret, ok = QtWidgets.QInputDialog.getText(self, _("Project list"), _("Password:"), QtWidgets.QLineEdit.Password)
-        if ok and secret:
-            self.in_background(lambda: listsync.unlock_with_password(server, username, secret), lambda key: self.adopt(key.link(server)))
+        asked = PasswordDialog.ask(self, setting=False)
+        if asked:
+            self.in_background(lambda: listsync.unlock_with_password(server, *asked), lambda key: self.adopt(key.link(server)))
 
     def off(self) -> None:
+        if QtWidgets.QMessageBox.question(self, _("Project list"), _(
+                "Stop using the list on this computer? Its folders stay, and other devices carry on.")) != QtWidgets.QMessageBox.Yes:
+            return
         listsync.save_link(None)
+        self.stopped(_("This computer no longer uses a project list. The list itself stays on the server."))
+
+    def stopped(self, text: str) -> None:
         self.link.clear()
         self.items.clear()
         self.pages.setCurrentIndex(0)
-        self.status.setText(_("This computer no longer uses a project list. The list itself stays on the server."))
+        self.status.setText(text)
 
     def join(self) -> None:
         item = self.items.currentItem()
