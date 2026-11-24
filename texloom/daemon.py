@@ -22,6 +22,7 @@ from .paths import state_dir
 log = logging.getLogger("texloom")
 
 FOLDER: contextvars.ContextVar[str] = contextvars.ContextVar("folder", default="")
+POLL = 5  # seconds between looks at the folder list
 
 
 class FolderProblem(Exception):
@@ -71,29 +72,25 @@ class FolderState:
 CURRENT: contextvars.ContextVar[FolderState | None] = contextvars.ContextVar("current", default=None)
 
 
-async def supervise(d: Path, run: Callable[[Path], Awaitable[None]], state: FolderState | None = None) -> None:
+async def supervise(d: Path, run: Callable[[Path], Awaitable[None]], state: FolderState) -> None:
     FOLDER.set(d.name)  # tasks this one creates inherit it
     CURRENT.set(state)
     delay = 5.0
     while True:
         try:
-            if state:
-                state.problem = ""
+            state.problem = ""
             await run(d)
             return
         except asyncio.CancelledError:
             raise
         except FolderProblem as e:
             log.warning("not syncing: %s (retrying in 5 minutes)", e)
-            if state:
-                state.problem = str(e)
+            state.problem = str(e)
             delay = 300
         except Exception as e:  # noqa: BLE001 - one folder's failure mustn't stop the others
             log.warning("stopped with an error (%s: %s); retrying in %ds", type(e).__name__, e, int(delay))
-            if state:
-                state.problem = f"{type(e).__name__}: {e}"
-        if state:
-            state.replica = state.fs = None
+            state.problem = f"{type(e).__name__}: {e}"
+        state.replica = state.fs = None
         await asyncio.sleep(delay)
         delay = min(delay * 2, 300)
 
@@ -148,7 +145,7 @@ class Daemon:
     def poke(self) -> None:
         self._wake.set()
 
-    async def loop(self, poll: float = 5) -> None:
+    async def loop(self) -> None:
         first = True
         while True:
             self.reconcile()
@@ -157,10 +154,10 @@ class Daemon:
             first = False
             self._wake.clear()
             try:
-                await asyncio.wait_for(self._wake.wait(), poll)
+                await asyncio.wait_for(self._wake.wait(), POLL)
             except asyncio.TimeoutError:
                 pass
 
 
-async def start(run: Callable[[Path], Awaitable[None]], poll: float = 5) -> None:
-    await Daemon(run).loop(poll)
+async def start(run: Callable[[Path], Awaitable[None]]) -> None:
+    await Daemon(run).loop()
