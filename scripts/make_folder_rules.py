@@ -54,7 +54,7 @@ synced = [
     ("tools/__pycache__/a.pyc", "main.tex", False), (".github/workflows/build.yml", "main.tex", False),
     ("sub/.cache/x.tex", "main.tex", False),
     # paths a project refuses
-    ("latexmkrc", "main.tex", False), ("sub/.latexmkrc", "main.tex", False), ("texmf.cnf", "main.tex", False),
+    ("latexmkrc", "main.tex", False), ("sub/.latexmkrc", "main.tex", False), ("texmf.cnf", "main.tex", False), ("biber.conf", "main.tex", False),
     ("trailing.", "main.tex", False), ("PROGRA~1/x.tex", "main.tex", False), ("a:b.tex", "main.tex", False),
 ]
 

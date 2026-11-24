@@ -20,23 +20,38 @@ STATE = ".texloom"
 SHARED_STATE = {"computers", "folder-id", "lock", ".gitignore"}
 
 
-def write_json(path: Path, data, private: bool = False, **dump) -> None:
-    """Write a JSON file so that a crash leaves the old one or the new one, never half of one: a
-    temporary file beside it, then a rename. `private`: readable by you only (it holds keys or
-    links). `dump`: json.dump's options (indent, ensure_ascii). The temporary file has a name of its
-    own each time, made only if nothing is there (so never through a link planted beside the file,
-    say by another computer sharing the folder through Dropbox)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")  # 0600, O_EXCL
+_UMASK = os.umask(0)
+os.umask(_UMASK)  # (read once, here: changing it later, from a thread, would race)
+
+
+def replace_file(path: Path, data: bytes, mode: int | None = None) -> os.stat_result:
+    """Put `data` at `path` in one step, so that a crash leaves the old file or the new one, never
+    half of one, and readers never see it half written: a temporary file beside it, then a
+    rename. The temporary file has a name of its own each time (.<name>.<random>.texloom-tmp),
+    made only if nothing is there, so never through a link planted beside the file (a folder can
+    be shared through Dropbox, a git repository or an archive). A link at `path` itself is
+    replaced, not followed. `mode`: the file's permissions (default: as for any new file).
+    Returns the temporary file's stat, taken before the rename: the date and size of what was
+    written, not of an editor's save a moment later."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name[:100]}.", suffix=".texloom-tmp")
     try:
-        if not private:
-            os.chmod(tmp, 0o644)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, **dump)
+        if os.name != "nt":
+            os.fchmod(fd, mode if mode is not None else 0o666 & ~_UMASK)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        st = os.stat(tmp)
         os.replace(tmp, path)
+        return st
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def write_json(path: Path, data, private: bool = False, **dump) -> None:
+    """Write a JSON file in one step (replace_file). `private`: readable by you only (it holds
+    keys or links). `dump`: json.dumps's options (indent, ensure_ascii)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    replace_file(path, json.dumps(data, **dump).encode("utf-8"), 0o600 if private else None)
 
 
 class CachedFile:
@@ -91,7 +106,7 @@ def state_dir(folder: Path) -> Path:
 
 # Files that TeX tools read as configuration or execute (latexmk runs latexmkrc as Perl).
 # They are never written from, or sent to, the shared project.
-UNSAFE_NAMES = {"latexmkrc", ".latexmkrc", "texmf.cnf", ".texmf.cnf", "mktexlsr", "ls-r"}
+UNSAFE_NAMES = {"latexmkrc", ".latexmkrc", "texmf.cnf", ".texmf.cnf", "mktexlsr", "ls-r", "biber.conf"}
 # Folders whose contents tools act on (version control hooks and config, which can name programs
 # to run, and editor settings). Keep these rules in sync with cleanPath() in web/src/projectfiles.ts.
 PROTECTED_DIRS = {STATE, ".git", ".hg", ".jj", ".sl", ".bzr", ".svn", ".vscode", ".idea"}
@@ -174,8 +189,10 @@ RECORD = (
     "local $ENV{openout_any} = q(a) if $cmd[0] eq q(bibtex); my $r = system(@cmd); "
     "if (open(my $in, q(<), qq($base.$ext)) and open(my $out, q(>>), qq($base.$ext-reads))) "
     "{ print $out q(PWD ), getcwd(), qq(\\n), <$in>; close $out } return $r } "
-    + " ".join(f"${p} = q(internal texloom_run {ext} %Y%R {p} %O %S);"
-               for p, ext in (("pdflatex", "fls"), ("xelatex", "fls"), ("lualatex", "fls"), ("bibtex", "blg"), ("biber", "blg")))
+    # (biber: --noconf, never a biber.conf in the project, which can name where its output goes)
+    + " ".join(f"${p} = q(internal texloom_run {ext} %Y%R {p}{extra} %O %S);"
+               for p, ext, extra in (("pdflatex", "fls", ""), ("xelatex", "fls", ""), ("lualatex", "fls", ""),
+                                     ("bibtex", "blg", ""), ("biber", "blg", " --noconf")))
     + " sub texloom_exec { return system(@_) } "
     + " ".join(f"${p} = q(internal texloom_exec {cmd});" for p, cmd in (
         ("makeindex", "makeindex %O -o %D %S"), ("xdvipdfmx", "xdvipdfmx -E -o %D %O %S"),

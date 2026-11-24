@@ -32,7 +32,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import STATE, state_dir, write_json
+from .paths import STATE, replace_file, state_dir, write_json
 from .registry import computer_id
 
 log = logging.getLogger("texloom.shared")
@@ -57,9 +57,7 @@ def folder_id(root: Path) -> str:
         pass
     fid = secrets.token_hex(16)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name("folder-id.tmp")
-    tmp.write_text(fid)
-    tmp.replace(p)
+    replace_file(p, fid.encode())
     return fid
 
 

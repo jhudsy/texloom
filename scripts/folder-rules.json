@@ -242,6 +242,11 @@
    "want": false
   },
   {
+   "path": "biber.conf",
+   "main": "main.tex",
+   "want": false
+  },
+  {
    "path": "trailing.",
    "main": "main.tex",
    "want": false

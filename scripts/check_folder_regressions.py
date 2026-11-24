@@ -232,14 +232,27 @@ async def settings() -> None:
         check("not through a link at the old temporary name", victim.read_text() == "keep me", victim.read_text())
         if os.name != "nt":
             check("readable by you only", stat.S_IMODE((d / "config.json").stat().st_mode) == 0o600)
-        check("no temporary file left behind", not [x for x in d.iterdir() if x.name.endswith(".tmp") and not x.is_symlink()])
+        check("no temporary file left behind", not [x for x in d.iterdir() if x.name.endswith("tmp") and not x.is_symlink()])
+
+        # a project file the sync writes: links planted at the temporary name it used to use, and
+        # at the file itself, are replaced, never written through (the security review of 2026-11-24)
+        from texloom.paths import replace_file
+        if os.name != "nt":
+            os.symlink(victim, d / ".main.tex.texloom-tmp")
+            os.symlink(victim, d / "main.tex")
+            st = replace_file(d / "main.tex", b"\\documentclass{article}\n")
+            check("a project file is written in place of a link, not through it",
+                  victim.read_text() == "keep me" and not (d / "main.tex").is_symlink()
+                  and (d / "main.tex").read_bytes() == b"\\documentclass{article}\n", victim.read_text())
+            check("with the usual permissions, and the date and size of what was written",
+                  stat.S_IMODE((d / "main.tex").stat().st_mode) & 0o044 and st.st_size == (d / "main.tex").stat().st_size, (oct(stat.S_IMODE((d / "main.tex").stat().st_mode)), st.st_size))
 
 
 async def main() -> int:
     for name, part in (("A file deleted or renamed while a change arrives", deletions),
                        ("A file read while it's being saved", reads),
                        ("A folder renamed or deleted", renames),
-                       ("A folder's settings written", settings)):
+                       ("Files written in one step (settings, project files)", settings)):
         print(f"{name}:", flush=True)
         await part()
     return summary("folder regressions")

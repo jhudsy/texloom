@@ -24,6 +24,7 @@ from pycrdt import Doc, Map, merge_updates
 from . import __version__, tls
 from .crypto import Keys, b64d, b64e, canonical_pub, revoke_msg
 from .packing import packed, unpack
+from .paths import replace_file
 
 log = logging.getLogger("texloom")
 
@@ -192,15 +193,13 @@ class Replica:
         self.revoked_doc.observe(lambda _e: self._revoked([{"p": p, "s": v} for p, v in self.revoked_doc.items()], save=False))
 
     def save(self) -> None:
-        (self.dir / "doc.bin.tmp").write_bytes(self.doc.get_update())
-        (self.dir / "doc.bin.tmp").replace(self.dir / "doc.bin")
+        replace_file(self.dir / "doc.bin", self.doc.get_update(), 0o600)  # the project, readable
         state = {"since": self.since, **({"last": list(self.last)} if self.last else {}),
                  "pending_mode": self.pending_mode, "heard_mode": self.heard_mode,
                  "outbox": {k: b64e(v) for k, v in self.outbox.items()}, "revoked": self._revocations,
                  **({"refs": self.refs} if self.refs else {}),
                  **({"deleted": self.deleted_at} if self.deleted_at is not None else {})}
-        (self.dir / "state.json.tmp").write_text(json.dumps(state))
-        (self.dir / "state.json.tmp").replace(self.dir / "state.json")
+        replace_file(self.dir / "state.json", json.dumps(state).encode(), 0o600)
 
     # --- local changes -------------------------------------------------------
     def local_change(self, fn: Callable[[], None]) -> None:

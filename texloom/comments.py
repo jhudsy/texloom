@@ -17,6 +17,7 @@ from pycrdt import Array, Assoc, Map, Text
 
 from .anchors import index_in
 from .crypto import b64e, signed_name
+from .paths import replace_file
 from .replica import Replica
 from .textpos import Char, char_of_u16, u16_of
 
@@ -154,9 +155,7 @@ def write_overview(folder: Path, r: Replica, me: str) -> bool:
             return False
     except OSError:
         pass  # (not there yet)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(text, "utf-8")
-    tmp.replace(path)
+    replace_file(path, text.encode("utf-8"))
     return True
 
 

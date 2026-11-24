@@ -32,7 +32,7 @@ from .replica import BLOB_RE, Replica
 from .confine import OUTSIDE_NOTE, forget_reads, outside_reads, sandboxed
 from .scan import SCANNED, added, allowed, binaries_on_disk, shell_lines
 from .xr import compile_order, external_documents
-from .paths import STATE, latexmk_command, main_file, safe_rel, tex_env, tex_names_refused
+from .paths import STATE, latexmk_command, main_file, replace_file, safe_rel, tex_env, tex_names_refused
 from .folderrules import (
     Bases,
     conflict_copy,
@@ -373,7 +373,7 @@ class FolderSync:
         return False
 
     def save_known(self) -> None:
-        self._known_file.write_text(json.dumps(self.known))
+        replace_file(self._known_file, json.dumps(self.known).encode())
         self._known_dirs_file.write_text(json.dumps(sorted(self.known_dirs)))
         self._save_bases()
 
@@ -390,9 +390,7 @@ class FolderSync:
                 p = self._bases_dir / h
                 if not p.exists():
                     self._bases_dir.mkdir(exist_ok=True)
-                    tmp = self._bases_dir / f"{h}.part"
-                    tmp.write_bytes(zlib.compress(text.encode("utf-8"), 1))
-                    os.replace(tmp, p)
+                    replace_file(p, zlib.compress(text.encode("utf-8"), 1))
             if self._bases_dir.is_dir():
                 for p in self._bases_dir.iterdir():
                     if p.name not in keep:
@@ -981,17 +979,10 @@ class FolderSync:
             return
         new_lines = self._program_lines(rel, full, data)
         full.parent.mkdir(parents=True, exist_ok=True)
-        tmp = full.with_name(f".{full.name}.texloom-tmp")
-        tmp.write_bytes(data)
         # Date and size of what we wrote, taken before it goes into place: read afterwards, they
         # could be those of an editor saving at that very moment, and its edit would then look
         # like our own write and never be shared.
-        st = tmp.stat()
-        try:
-            tmp.replace(full)
-        except OSError:
-            tmp.unlink(missing_ok=True)
-            raise
+        st = replace_file(full, data)
         self._remember(rel, h, st=st, wrote=True)
         log.info("↓ %s", rel)
         for f in new_lines:

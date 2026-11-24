@@ -11,7 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-from .paths import CachedFile, write_json
+from .paths import CachedFile, replace_file, write_json
 
 
 def config_dir() -> Path:
@@ -39,9 +39,7 @@ def computer_id() -> str:
     import secrets
     cid = secrets.token_hex(8)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(cid)
-    os.replace(tmp, p)
+    replace_file(p, cid.encode())
     return cid
 
 
