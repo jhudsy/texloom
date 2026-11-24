@@ -35,7 +35,7 @@ from .app_list import ProjectListPart
 from .app_updates import SOURCE_URL, UpdatesPart
 from .daemon import CURRENT, FOLDER, FolderTag
 from .dialogs import SettingsDialog
-from .dialogs_list import ProjectListDialog
+from .dialogs_list import ProjectListDialog, just_asked
 from .dialogs_share import JoinDialog, LinksDialog, ShareFolderDialog
 from .dialogs_tools import ConnectToolDialog, EditorDialog
 from .i18n import _, app_pref, ngettext, set_app_pref
@@ -388,7 +388,16 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
 
     def project_list(self, link: str = "", from_web: bool = False) -> None:
         self.show_window()
-        ProjectListDialog(self, link, from_web).exec()
+        if (open_now := ProjectListDialog.current) is not None:  # one is open: the list goes there, not to a second
+            if link:
+                open_now.receive(link, from_web)
+            open_now.raise_()
+            open_now.activateWindow()
+            return
+        d = ProjectListDialog(self, link, from_web and not just_asked())
+        if link and from_web and just_asked():  # the list this app sent someone to their browser for
+            d.receive(link, from_web=False)
+        d.exec()
         self.list_data = None if not listsync.saved_link() else self.list_data
         self.keep_list_updated(force=True)
         self.refresh()

@@ -239,6 +239,38 @@ def list_window() -> None:
         check(listsync.saved_link() is None and d2.pages.currentIndex() == 0, "Stop using it here stops, after asking")
         d.close()
         d2.close()
+        settle()
+
+        # setting one up: a new list with a password
+        calls.clear()
+        d3 = dialogs_list.ProjectListDialog(None)
+        d3.show()
+        check(d3.pages.currentIndex() == 0, "with no list, it opens on setting one up")
+        d3.start("password")
+        check(wait(lambda: ("password", "ada") in calls and listsync.saved_link() is not None and d3.pages.currentIndex() == 1),
+              "Start syncing With a password… starts a list and sets the password")
+        check(wait(lambda: "copy the sync link" in d3.status.text().lower()), "and says to copy the sync link")
+        d3.close()
+        settle()
+        listsync.save_link(None)
+
+        # a list coming back from the browser goes to the window that's open, not a second one
+        asked: list[str] = []
+        QtWidgets.QMessageBox.question = lambda *a, **k: asked.append(a[2] if len(a) > 2 else "") or QtWidgets.QMessageBox.Yes
+        d4 = dialogs_list.ProjectListDialog(None)
+        d4.show()
+        d4.passkey()  # (opens the browser: offscreen, nothing happens)
+        sent = listsync.ListKey.generate().link("https://example.org")
+        check(dialogs_list.ProjectListDialog.current is d4, "the open window is the one a list from the browser goes to")
+        d4.receive(sent, from_web=True)
+        check(listsync.saved_link() == sent and not asked and d4.pages.currentIndex() == 1,
+              "a list the app just asked the browser for is used without a warning")
+        other = listsync.ListKey.generate().link("https://example.org")
+        d4.receive(other, from_web=True)
+        check(bool(asked) and listsync.saved_link() == other, "one that arrives unasked is used only once confirmed")
+        d4.close()
+        settle()
+        check(dialogs_list.ProjectListDialog.current is None, "once closed, it's no longer the one")
     finally:
         for name, f in kept.items():
             setattr(listsync, name, f)

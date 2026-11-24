@@ -192,14 +192,8 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     # -- project list
     'Project list':
         'Liste de projets',
-    'Use this link':
-        'Utiliser ce lien',
     'Creation code (if the server needs one)':
         'Code de création (si le serveur en demande un)',
-    'Start a new list':
-        'Créer une liste',
-    'Unlock with a passkey…':
-        'Déverrouiller avec une clé d’accès…',
     "Opens the server's page in your browser, which sends the list back to this app.":
         'Ouvre la page du serveur dans votre navigateur, qui renvoie la liste à cette application.',
     'Join…':
@@ -211,7 +205,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Close': 'Fermer',
     "There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it.":
         'Une liste perdue ne peut pas être récupérée. Le serveur ne peut pas la lire, donc personne ne peut la réinitialiser pour vous. Si vous perdez le lien de synchronisation et toutes vos clés d’accès, et oubliez tout mot de passe, la liste est définitivement perdue. Vos projets ne sont pas supprimés, mais il vous faudra le lien de chaque projet pour l’ouvrir.',
-    'Unlock with a password…': 'Déverrouiller avec un mot de passe…',
     'This list was replaced or deleted. Use its new sync link.': 'Cette liste a été remplacée ou supprimée. Utilisez son nouveau lien de synchronisation.',
     "That username and password don't open a list on this server.": 'Ce nom d’utilisateur et ce mot de passe n’ouvrent aucune liste sur ce serveur.',
     'That username and password are already in use. Choose another password.': 'Ce nom d’utilisateur et ce mot de passe sont déjà utilisés. Choisissez un autre mot de passe.',
@@ -351,8 +344,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'TeXLoom keeps a folder on this computer in step with a project that you and your collaborators edit in the browser, so you can also work on it with your own tools.': 'TeXLoom synchronise un dossier de cet ordinateur avec un projet que vous et vos collaborateurs modifiez dans le navigateur, pour que vous puissiez aussi y travailler avec vos propres outils.',
     'More': 'Plus',
     'This folder isn’t a git repository. Run “git init” in it first to use this.': 'Ce dossier n’est pas un dépôt git. Lancez «\xa0git init\xa0» dedans pour utiliser cette option.',
-    'Already have a list?': 'Vous avez déjà une liste\xa0?',
-    'New here?': 'Première fois\xa0?',
     'A new language is used the next time TeXLoom starts.': 'Une nouvelle langue est utilisée au prochain démarrage de TeXLoom.',
     'Keeps the list of your projects in step across your computers and browsers.': 'Synchronise la liste de vos projets entre vos ordinateurs et navigateurs.',
     'In use on this computer': 'Utilisée sur cet ordinateur',
@@ -516,4 +507,22 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'On your list, not here ({n})': 'Sur votre liste, pas ici ({n})',
     'Not on this computer. Double-click to join it.': 'Pas sur cet ordinateur. Double-cliquez pour le rejoindre.',
     'Show projects on your list that aren’t here': 'Afficher les projets de votre liste qui ne sont pas ici',
+    'Passkey…': 'Clé d’accès…',
+    'Password…': 'Mot de passe…',
+    'The username and password you set for the list': 'Le nom d’utilisateur et le mot de passe que vous avez choisis pour la liste',
+    'Open': 'Ouvrir',
+    'Open the list this sync link belongs to': 'Ouvrir la liste à laquelle appartient ce lien de synchronisation',
+    'With a password…': 'Avec un mot de passe…',
+    'A username and password of your choice. Nobody can reset it if you forget it.': 'Un nom d’utilisateur et un mot de passe de votre choix. Personne ne peut le réinitialiser si vous l’oubliez.',
+    'With a passkey…': 'Avec une clé d’accès…',
+    'Touch ID, Windows Hello, your phone or a security key, added in your browser. Works on this server only.': 'Touch ID, Windows Hello, votre téléphone ou une clé de sécurité, ajoutée dans votre navigateur. Ne fonctionne que sur ce serveur.',
+    'With the link only': 'Avec le lien seulement',
+    'Paste the sync link into each browser or computer where you want the list.': 'Collez le lien de synchronisation dans chaque navigateur ou ordinateur où vous voulez la liste.',
+    'The list is open here now.': 'La liste est maintenant ouverte ici.',
+    'Already syncing on another device?': 'Déjà synchronisé sur un autre appareil ?',
+    'Open the same list here with:': 'Ouvrir ici la même liste avec :',
+    'First time? Start syncing': 'Première fois ? Commencez la synchronisation',
+    'Choose how you’ll open the list elsewhere. You also get a sync link, which always works.': 'Choisissez comment vous ouvrirez la liste ailleurs. Vous obtenez aussi un lien de synchronisation, qui fonctionne toujours.',
+    'Syncing. Now copy the sync link and keep it safe: it’s your way back in if you forget this password.': 'Synchronisation en cours. Copiez maintenant le lien de synchronisation et gardez-le en lieu sûr : il vous permet de revenir si vous oubliez ce mot de passe.',
+    'Syncing. Now copy the sync link and keep it safe.': 'Synchronisation en cours. Copiez maintenant le lien de synchronisation et gardez-le en lieu sûr.',
 }

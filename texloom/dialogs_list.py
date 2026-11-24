@@ -18,6 +18,11 @@ def NO_RECOVERY() -> str:  # a constant, translated when shown
     return _("There is no way to recover a lost list. The server can't read it, so nobody can reset it for you. If you lose the sync link and every passkey, and forget any password, the list is gone for good. Your projects aren't deleted, but you'll need each project's own link to open it.")
 
 
+def just_asked() -> bool:
+    """Whether this app sent someone to their browser to unlock the list a moment ago."""
+    return time.time() - asked_browser_at < EXPECTED_FOR
+
+
 def synced_ago(at: float) -> str:
     """When the list was last synced, in words."""
     if not at:
@@ -86,8 +91,14 @@ class PasswordDialog(QtWidgets.QDialog):
         return (d.username.text(), d.password.text()) if d.exec() == QtWidgets.QDialog.Accepted else None
 
 
+asked_browser_at = 0.0  # when this app last sent someone to their browser to unlock the list there
+EXPECTED_FOR = 600  # seconds: a list coming back from the browser within this is the one asked for
+
+
 class ProjectListDialog(QtWidgets.QDialog):
-    """The encrypted project list: set it up or unlock it, then join projects from it."""
+    """The encrypted project list: set it up or open it here, then its sync settings."""
+
+    current: ProjectListDialog | None = None  # the one open now: a list coming back from the browser goes there
 
     work_done = QtCore.Signal(object, object, object)  # what to do next, its result, or the error
 
@@ -98,16 +109,15 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.setWindowTitle(_("Project list"))
         self.setMinimumWidth(600)
         lay = QtWidgets.QVBoxLayout(self)
+        ProjectListDialog.current = self
+        self.finished.connect(lambda _r: ProjectListDialog.current is self and setattr(ProjectListDialog, "current", None))
         if from_web and link and link == listsync.saved_link():
             from_web = False  # the list this computer already uses: nothing to decide
-        if from_web:
-            text = _("A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.")
-            if listsync.saved_link() and listsync.saved_link() != link:
-                text += " " + _("This computer uses a different list now: this one would take its place.")
-            warn = QtWidgets.QLabel(text)
-            warn.setWordWrap(True)
-            warn.setStyleSheet(f"color: {AMBER}")
-            lay.addWidget(warn)
+        self.web_warn = QtWidgets.QLabel(self.web_warning(link) if from_web else "")
+        self.web_warn.setWordWrap(True)
+        self.web_warn.setStyleSheet(f"color: {AMBER}")
+        self.web_warn.setVisible(from_web)
+        lay.addWidget(self.web_warn)
         intro = QtWidgets.QLabel(_("Your project list follows you to your other computers and browsers. It is kept on the "
                                    "server, encrypted, and opened by a sync link that only you have."))
         intro.setWordWrap(True)
@@ -115,44 +125,58 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.pages = QtWidgets.QStackedWidget()
         lay.addWidget(self.pages, 1)
 
-        # not set up on this computer: unlock a list you have, or start one
+        # not set up on this computer: open a list you have, or start one
         setup = QtWidgets.QWidget()
         s = QtWidgets.QVBoxLayout(setup)
         s.setContentsMargins(0, 8, 0, 0)
-        s.addWidget(self.heading(_("Already have a list?")))
+        s.addWidget(self.heading(_("Already syncing on another device?")))
+        s.addWidget(grey_note(_("Open the same list here with:")))
         row = QtWidgets.QHBoxLayout()
-        passkey = QtWidgets.QPushButton(_("Unlock with a passkey…"))
+        passkey = QtWidgets.QPushButton(_("Passkey…"))
         passkey.setToolTip(_("Opens the server's page in your browser, which sends the list back to this app."))
         passkey.clicked.connect(self.passkey)
-        password = QtWidgets.QPushButton(_("Unlock with a password…"))
+        password = QtWidgets.QPushButton(_("Password…"))
+        password.setToolTip(_("The username and password you set for the list"))
         password.clicked.connect(self.password)
         row.addWidget(passkey)
         row.addWidget(password)
-        row.addStretch(1)
-        s.addLayout(row)
-        row = QtWidgets.QHBoxLayout()
         self.link = QtWidgets.QLineEdit(link or listsync.saved_link() or "")
         self.link.setEchoMode(QtWidgets.QLineEdit.Password)
         self.link.setPlaceholderText(_("or paste its sync link"))
-        use = QtWidgets.QPushButton(_("Use this link"))
+        use = QtWidgets.QPushButton(_("Open"))
+        use.setToolTip(_("Open the list this sync link belongs to"))
         use.clicked.connect(self.use)
         self.link.returnPressed.connect(self.use)
         row.addWidget(self.link, 1)
         row.addWidget(use)
         s.addLayout(row)
         s.addSpacing(12)
-        s.addWidget(self.heading(_("New here?")))
+        s.addWidget(self.heading(_("First time? Start syncing")))
+        s.addWidget(grey_note(_("Choose how you’ll open the list elsewhere. You also get a sync link, which always works.")))
+        row = QtWidgets.QHBoxLayout()
+        with_pw = QtWidgets.QPushButton(_("With a password…"))
+        with_pw.setToolTip(_("A username and password of your choice. Nobody can reset it if you forget it."))
+        with_pw.setDefault(True)
+        with_pw.clicked.connect(lambda: self.start("password"))
+        with_pk = QtWidgets.QPushButton(_("With a passkey…"))
+        with_pk.setToolTip(_("Touch ID, Windows Hello, your phone or a security key, added in your browser. Works on this server only."))
+        with_pk.clicked.connect(lambda: self.start("passkey"))
+        with_link = QtWidgets.QPushButton(_("With the link only"))
+        with_link.setToolTip(_("Paste the sync link into each browser or computer where you want the list."))
+        with_link.clicked.connect(lambda: self.start("link"))
+        for b in (with_pw, with_pk, with_link):
+            row.addWidget(b)
+        row.addStretch(1)
+        s.addLayout(row)
         row = QtWidgets.QHBoxLayout()
         self.code = QtWidgets.QLineEdit(listsync.code_for(known_server()))
         self.code.setPlaceholderText(_("Creation code (if the server needs one)"))
-        new = QtWidgets.QPushButton(_("Start a new list"))
-        new.clicked.connect(self.start)
         row.addWidget(self.code, 1)
-        row.addWidget(new)
         s.addLayout(row)
-        no_recovery = QtWidgets.QLabel(NO_RECOVERY())
+        no_recovery = QtWidgets.QLabel(_("Nobody can recover a lost list, not even the server’s owner: keep the sync link safe."))
         no_recovery.setWordWrap(True)
         no_recovery.setStyleSheet(f"color: {AMBER}")
+        no_recovery.setToolTip(NO_RECOVERY())
         s.addWidget(no_recovery)
         s.addStretch(1)
         self.pages.addWidget(setup)
@@ -268,9 +292,16 @@ class ProjectListDialog(QtWidgets.QDialog):
         except ValueError:
             return known_server()
 
-    def in_background(self, work, then) -> None:
-        """Network and password hashing are slow: keep the window responsive."""
-        self.status.setText(_("Working…"))
+    def in_background(self, work, then, quiet: bool = False) -> None:
+        """Network and password hashing are slow: keep the window responsive. `quiet`: leave the
+        status line alone (what's under way is only filling in the window)."""
+        if quiet:
+            def done(result, then=then):
+                then(result)
+            done.quiet = True  # (after_work leaves the status line alone)
+            then = done
+        else:
+            self.status.setText(_("Working…"))
 
         def run() -> None:
             try:
@@ -278,7 +309,7 @@ class ProjectListDialog(QtWidgets.QDialog):
             except Exception as e:  # noqa: BLE001 - shown to the user
                 result, error = None, e
             try:
-                self.work_done.emit(then, result, error)
+                self.work_done.emit(then, result, error if not quiet else None)
             except RuntimeError:  # the dialog was closed meanwhile
                 pass
 
@@ -286,7 +317,8 @@ class ProjectListDialog(QtWidgets.QDialog):
 
     def after_work(self, then, result, error) -> None:
         if error is None:
-            self.status.setText("")
+            if not getattr(then, "quiet", False):
+                self.status.setText("")
             then(result)
         else:
             self.status.setText(listsync.explain(error.code) if isinstance(error, listsync.ListError) else str(error))
@@ -307,7 +339,7 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.count.setText("✓ " + (ngettext(n, "Your {n} project is synced, encrypted.", "Your {n} projects are synced, encrypted.", n=n) if n
                                    else _("Your list is synced, encrypted.")) + " " + synced_ago(listsync.last_synced))
         key = listsync.ListKey.from_link(listsync.saved_link() or "")[0]
-        self.in_background(lambda: listsync.read_slots(key, server), self.show_ways)
+        self.in_background(lambda: listsync.read_slots(key, server), lambda slots: slots is not None and self.show_ways(slots), quiet=True)
 
     def show_ways(self, slots: dict) -> None:
         """The passkeys and password that open the list, each with Remove."""
@@ -420,12 +452,59 @@ class ProjectListDialog(QtWidgets.QDialog):
             return
         self.adopt(self.link.text().strip())
 
-    def start(self) -> None:
-        self.adopt(listsync.ListKey.generate().link(known_server()))
+    def start(self, way: str) -> None:
+        """A new list, opened elsewhere with a password, a passkey (added in the browser) or the link only."""
+        asked = PasswordDialog.ask(self, setting=True) if way == "password" else None
+        if way == "password" and not asked:
+            return
+        server, code = known_server(), self.code.text().strip() or None
+        link = listsync.ListKey.generate().link(server)
+        self.link.setText(link)
+        listsync.save_link(link)
+        self.web_warn.setVisible(False)
+        self.pages.setCurrentIndex(1)
+
+        def work():
+            found = listsync.sync_this_computer(code)
+            if asked:
+                listsync.set_password(listsync.ListKey.from_link(link)[0], server, *asked)
+            return found
+
+        def then(found) -> None:
+            self.show_list(found)
+            self.status.setText(_("Syncing. Now copy the sync link and keep it safe: it’s your way back in if you forget this password.") if asked
+                                else _("Syncing. Now copy the sync link and keep it safe."))
+            if way == "passkey":
+                self.add_passkey()
+        self.in_background(work, then)
 
     def passkey(self) -> None:
+        global asked_browser_at
+        asked_browser_at = time.time()
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(f"{self._server()}/#unlock-for-app"))
         self.status.setText(_("Unlock the list in your browser; it will come back here."))
+
+    @staticmethod
+    def web_warning(link: str) -> str:
+        text = _("A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.")
+        if listsync.saved_link() and listsync.saved_link() != link:
+            text += " " + _("This computer uses a different list now: this one would take its place.")
+        return text
+
+    def receive(self, link: str, from_web: bool) -> None:
+        """A list sent here (from the browser) while this window is open: used straight away if this
+        app just asked for it, else only once confirmed."""
+        if link == listsync.saved_link():
+            self.refresh_list()
+            return
+        if from_web and not just_asked() and QtWidgets.QMessageBox.question(
+                self, _("Project list"), self.web_warning(link)) != QtWidgets.QMessageBox.Yes:
+            return
+        global asked_browser_at
+        asked_browser_at = 0.0  # (once)
+        self.web_warn.setVisible(False)
+        self.adopt(link)
+        self.status.setText(_("The list is open here now."))
 
     def password(self) -> None:
         server = self._server()
