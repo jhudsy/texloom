@@ -1,4 +1,4 @@
-import { quiet, STORAGE } from './quiet'
+import { getString, setString } from './store'
 // Interface translations. The English text is the key: t('Share') shows the current
 // language's version of "Share", or the English when there is none (so text added later
 // shows in English until it is translated). Placeholders are {{name}}, so LaTeX braces in
@@ -21,11 +21,12 @@ export const LANGUAGES: { id: Lang; name: string }[] = [
 
 /** The chosen language ('auto': the browser's). */
 export function langPref(): Lang | 'auto' {
-  try { const v = localStorage.getItem(LANG_KEY); if (LANGUAGES.some((l) => l.id === v)) return v as Lang } catch (e) { quiet(STORAGE, e) }
+  const v = getString(LANG_KEY)
+  if (LANGUAGES.some((l) => l.id === v)) return v as Lang
   return 'auto'
 }
 export function setLangPref(v: Lang | 'auto') {
-  try { if (v === 'auto') localStorage.removeItem(LANG_KEY); else localStorage.setItem(LANG_KEY, v) } catch (e) { quiet(STORAGE, e) }
+  setString(LANG_KEY, v === 'auto' ? null : v)
 }
 
 function detect(): Lang {
@@ -84,6 +85,3 @@ export function tNodes(en: string, vars: Record<string, Node | string>): (Node |
   if (at < s.length) out.push(s.slice(at))
   return out
 }
-
-/** Every key the catalogue has (for the completeness check in development). */
-export const catalogKeys = () => Object.keys(catalog)

@@ -7,13 +7,13 @@ import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import type { Replica } from './replica'
 import { b64d, b64e, signer } from './crypto'
-import { h } from './dom'
+import { debounce, h } from './dom'
 import { t, tn, locale } from './i18n'
 import { applyChange, placeOf } from './suggestcore'
 import { byReading, readingOrder } from './navigate'
 import { isWordChar, refine, wordDiff, type DiffOp } from './worddiff'
-import { quiet, STORAGE } from './quiet'
 import { collaborators, mentionPicker, mentionsMe } from './mention'
+import { getString, setString } from './store'
 
 export type Kind = 'comment' | 'suggestion'
 export interface Item {
@@ -212,13 +212,14 @@ export type Markup = 'none' | 'simple' | 'all'
 export const editorMarkup = (() => {
   const KEY = 'texloom.markup'
   let mode: Markup = 'none'
-  try { const v = localStorage.getItem(KEY); if (v === 'simple' || v === 'all') mode = v } catch (e) { quiet(STORAGE, e) }
+  const v = getString(KEY)
+  if (v === 'simple' || v === 'all') mode = v
   const watchers = new Set<() => void>()
   return {
     mode: () => mode,
     set(v: Markup) {
       mode = v
-      try { if (v === 'none') localStorage.removeItem(KEY); else localStorage.setItem(KEY, v) } catch (e) { quiet(STORAGE, e) }
+      setString(KEY, v === 'none' ? null : v)
       watchers.forEach((f) => f())
     },
     watch(f: () => void) { watchers.add(f); return () => { watchers.delete(f) } },
@@ -318,15 +319,14 @@ export function reviewExtension(r: Replica, file: string, onPick: (id: string) =
     view.dispatch({ effects: setDecos.of(Decoration.set(ranges, true)) })
   }
   const plugin = ViewPlugin.define((view) => {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const schedule = () => { clearTimeout(timer); timer = setTimeout(() => compute(view), 120) }
+    const schedule = debounce(() => compute(view), 120)
     r.review.observeDeep(schedule)
     pendingWatchers.add(schedule)
     const unwatch = editorMarkup.watch(schedule)
     schedule()
     return {
       update(u: ViewUpdate) { if (u.docChanged) schedule() },
-      destroy() { clearTimeout(timer); r.review.unobserveDeep(schedule); pendingWatchers.delete(schedule); unwatch() },
+      destroy() { schedule.cancel(); r.review.unobserveDeep(schedule); pendingWatchers.delete(schedule); unwatch() },
     }
   })
   return [

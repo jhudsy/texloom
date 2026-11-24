@@ -14,7 +14,12 @@ import { packed, unpack } from './packing'
 import { t } from './i18n'
 import { APP_VERSION } from './version'
 import type { Link } from './versions'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
+import { randomHex } from './bytes'
+import { local } from './store'
+import { textStore } from './accounts'
+import { connect, req } from './idb'
+import { debounce, sleep } from './dom'
 
 const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
@@ -47,29 +52,15 @@ const COLOR = /^#[0-9a-fA-F]{3,8}$/
 
 // ---- tiny IndexedDB key-value helper (one DB per project) -----------------
 type Store = 'kv' | 'outbox' | 'blobs' | 'pending'
-function openDb(name: string): Promise<IDBDatabase> {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open(name, 1)
-    r.onupgradeneeded = () => {
-      for (const s of ['kv', 'outbox', 'blobs', 'pending']) r.result.createObjectStore(s)
-    }
-    r.onsuccess = () => res(r.result)
-    r.onerror = () => rej(r.error)
-  })
-}
-function tx<T>(db: IDBDatabase, store: Store, mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  return new Promise((res, rej) => {
-    const req = fn(db.transaction(store, mode).objectStore(store))
-    req.onsuccess = () => res(req.result)
-    req.onerror = () => rej(req.error)
-  })
-}
+// (a connection of its own, closed with the replica: another copy of the project may be open too)
+const openDb = (name: string) => connect(name, 1, (db) => { for (const s of ['kv', 'outbox', 'blobs', 'pending']) db.createObjectStore(s) })
+const tx = <T>(db: IDBDatabase, store: Store, mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> =>
+  req(fn(db.transaction(store, mode).objectStore(store)))
 const idbGet = <T>(db: IDBDatabase, s: Store, k: string) => tx<T>(db, s, 'readonly', (o) => o.get(k))
 const idbPut = (db: IDBDatabase, s: Store, k: string, v: unknown) => tx(db, s, 'readwrite', (o) => o.put(v, k))
 const idbDel = (db: IDBDatabase, s: Store, k: string) => tx(db, s, 'readwrite', (o) => o.delete(k))
 const idbKeys = (db: IDBDatabase, s: Store) => tx<IDBValidKey[]>(db, s, 'readonly', (o) => o.getAllKeys())
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** Delete this browser's copy of a project (document, outbox, cached files).
  *  Other people's copies, folder copies and the server's copy are not affected. */
@@ -87,18 +78,12 @@ export async function forgetLocalCopy(project: string): Promise<void> {
  *  app's own by default. Each follows the project list (listsync.ts), with when it was entered. */
 const codeKey = (server: string) => (server === location.origin ? 'texloom.code' : `texloom.code@${server}`)
 export const creationCode = {
-  get(server = location.origin): string { try { return localStorage.getItem(codeKey(server)) || '' } catch { return '' } },
+  get: (server = location.origin): string => textStore(codeKey(server)).get(),
   /** When it was entered here (0: before this was recorded), so the latest one follows the project list. */
-  at(server = location.origin): number { try { return Number(localStorage.getItem(codeKey(server) + 'At')) || 0 } catch { return 0 } },
-  set(v: string, at = Date.now(), server = location.origin) {
-    try { localStorage.setItem(codeKey(server), v); localStorage.setItem(codeKey(server) + 'At', String(at)) } catch (e) { quiet(STORAGE, e) }
-  },
+  at: (server = location.origin): number => textStore(codeKey(server)).at(),
+  set: (v: string, at = Date.now(), server = location.origin) => textStore(codeKey(server)).set(v, at),
   /** The other servers this browser has a code for. */
-  servers(): string[] {
-    const out: string[] = []
-    try { for (const k of Object.keys(localStorage)) if (k.startsWith('texloom.code@') && !k.endsWith('At') && localStorage.getItem(k)) out.push(k.slice('texloom.code@'.length)) } catch (e) { quiet(STORAGE, e) }
-    return out.sort()
-  },
+  servers: (): string[] => local.keys().filter((k) => k.startsWith('texloom.code@') && !k.endsWith('At') && local.get(k)).map((k) => k.slice('texloom.code@'.length)).sort(),
 }
 
 /** Why the server isn't storing this project's changes (they still reach people online). */
@@ -272,8 +257,7 @@ export class Replica {
       const changed = added.concat(updated, removed)
       this.sendAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed))
     })
-    let pruneTimer: ReturnType<typeof setTimeout> | undefined
-    this.out.observe(() => { clearTimeout(pruneTimer); pruneTimer = setTimeout(() => this.pruneOutputs().catch((e) => quiet('old outputs are pruned at the next change', e)), 3000) })
+    this.out.observe(debounce(() => { this.pruneOutputs().catch((e) => quiet('old outputs are pruned at the next change', e)) }, 3000))
     if (this.syncMode === 'live') this.connect()
     else { this.status = 'paused'; this.onStatus() }
   }
@@ -611,22 +595,38 @@ export class Replica {
     return id
   }
 
-  /** The change a reference points to, from the server (null if it can't be had). */
+  // ---- uploads on the server (files, and changes too big to send as they are) ----
+  private blobUrl(id: string) { return `${this.server}/blob/${this.keys.project}/${id}` }
+  /** The upload `id` from the server: null if it couldn't be reached. */
+  private fetchBlob(id: string) { return fetch(this.blobUrl(id)).catch(() => null) }
+  /** Decrypted, if it is what `id` names (the id is an HMAC of the content: the server can't
+   *  substitute another file); else null. Throws if it doesn't decrypt. */
+  private async verified(id: string, data: Uint8Array): Promise<Uint8Array | null> {
+    const plain = await this.keys.decrypt(data)
+    return (await this.keys.blobId(plain)) === id ? plain : null
+  }
+  /** Delete the upload `id` from the server (`onlyOutput`: unless it's a project file); null if it couldn't be reached. */
+  private deleteBlob(id: string, onlyOutput = false) {
+    return fetch(this.blobUrl(id), {
+      method: 'DELETE', headers: { 'X-Sig': b64e(this.keys.sign(`del:${id}`, new Uint8Array())), ...(onlyOutput ? { 'X-Only-Output': '1' } : {}) },
+    }).catch(() => null)
+  }
+
   /** The upload a change refers to: 'retry' if it couldn't be fetched just now, 'gone' if it isn't
    *  there (or isn't what the change names). */
   private async fetchRef(ref: Uint8Array): Promise<{ id: string; content: Uint8Array } | 'retry' | 'gone'> {
     let id: unknown
     try { id = JSON.parse(dec.decode(ref.subarray(REF.length))).b } catch { return 'gone' }
     if (typeof id !== 'string' || !BLOB_ID.test(id)) return 'gone'
-    const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`).catch(() => null)
+    const r = await this.fetchBlob(id)
     if (!r) return 'retry'
     if (r.status === 404 || r.status === 410) return 'gone'
     if (!r.ok) return 'retry'
     let data: Uint8Array
     try { data = new Uint8Array(await r.arrayBuffer()) } catch { return 'retry' }
     try {
-      const content = await this.keys.decrypt(data)
-      return (await this.keys.blobId(content)) === id ? { id, content } : 'gone'
+      const content = await this.verified(id, data)
+      return content ? { id, content } : 'gone'
     } catch { return 'gone' }
   }
 
@@ -647,9 +647,7 @@ export class Replica {
     for (const [q, id] of Object.entries(this.refs)) {
       if (Number(q) > upto || id === keep) continue
       delete this.refs[Number(q)]
-      await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
-        method: 'DELETE', headers: { 'X-Sig': b64e(this.keys.sign(`del:${id}`, new Uint8Array())), 'X-Only-Output': '1' },
-      }).catch(() => null)
+      await this.deleteBlob(id, true)
     }
     await idbPut(this.db, 'kv', 'refs', this.refs)
   }
@@ -711,7 +709,7 @@ export class Replica {
     // signed: changes, and compile requests (only writers may ask another computer to compile)
     const s = SIGNED_P2P.has(String(payload.k)) && this.keys.writable ? b64e(this.keys.sign('p2p:', data)) : undefined
     if (d.length <= P2P_PIECE) { await this.sendP2p(d, s, to); return }
-    const id = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('')
+    const id = randomHex(8)
     const n = Math.ceil(d.length / P2P_PIECE)
     for (let i = 0; i < n; i++) {
       const part: Record<string, unknown> = { k: 'part', id, i, n, c: d.slice(i * P2P_PIECE, (i + 1) * P2P_PIECE) }
@@ -889,7 +887,7 @@ export class Replica {
         added = true
         if (pub === this.keys.memberPub && !this.withdrawn) {
           this.withdrawn = true
-          try { localStorage.setItem(`texloom.withdrawn.${this.keys.project}`, '1') } catch (e) { quiet(STORAGE, e) }
+          local.set(`texloom.withdrawn.${this.keys.project}`, '1')
           this.onStatus()
         }
       } catch (e) { quiet('a malformed or unverifiable revocation: skipped', e) }
@@ -1043,10 +1041,7 @@ export class Replica {
     for (const id of old) {
       await idbDel(this.db, 'blobs', id); await idbDel(this.db, 'pending', id)
       if (toServer) {
-        const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
-          method: 'DELETE', headers: { 'X-Sig': b64e(this.keys.sign(`del:${id}`, new Uint8Array())) },
-        }).catch(() => null)
-        if (!r) continue // offline: try again later
+        if (!(await this.deleteBlob(id))) continue // offline: try again later
       }
       done.add(id) // deleted, gone already, or kept for the owner's browser to remove
     }
@@ -1085,7 +1080,7 @@ export class Replica {
       const output = marked || (hist.outputs.has(id) && !hist.files.has(id))
       const d = await this.keys.encrypt(plain)
       const code = this.creationCode()
-      const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
+      const r = await fetch(this.blobUrl(id), {
         method: 'PUT', body: d as BodyInit,
         headers: { 'X-Sig': b64e(this.keys.sign(`blob:${id}:`, d)), ...(code ? { 'X-Create-Code': code } : {}), ...(output ? { 'X-Kind': 'output' } : {}) },
       }).catch(() => null)
@@ -1104,11 +1099,10 @@ export class Replica {
     const cached = await idbGet<Uint8Array>(this.db, 'blobs', id)
     if (cached) return cached
     if (this.serverMode === 'server') {
-      const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`).catch(() => null)
+      const r = await this.fetchBlob(id)
       if (r?.ok) {
-        const plain = await this.keys.decrypt(new Uint8Array(await r.arrayBuffer()))
-        // The id is an HMAC of the content: the server can't substitute another file.
-        if ((await this.keys.blobId(plain)) === id) {
+        const plain = await this.verified(id, new Uint8Array(await r.arrayBuffer()))
+        if (plain) {
           await idbPut(this.db, 'blobs', id, plain)
           return plain
         }

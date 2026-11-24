@@ -1,14 +1,13 @@
 // The Zotero screens: connecting an account (start page and project Settings), and linking a
 // collection to a .bib file in project Settings. The work itself is in zotero.ts.
 import type { Replica } from './replica'
-import { dialog, h } from './dom'
+import { dialog, errorText, h, shortTime } from './dom'
 import { t, tn } from './i18n'
 import type { Status } from './integrationcard'
 import { collections, connect, libraries, links, refresh, setLink, validLink, zoteroAccount, type Collection, type Library, type Link } from './zotero'
 import { cleanPath } from './projectfiles'
 
 const NEW_KEY = 'https://www.zotero.org/settings/keys/new'
-const ago = (at: number) => new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 /** Connected as …, or a box to connect with an API key. `changed` runs after either. */
 /** The account this browser has, in a line (the start page's card). */
@@ -39,7 +38,7 @@ export function zoteroAccountBox(changed: () => void = () => {}): HTMLElement {
       msg.textContent = ''
       go.setAttribute('disabled', '')
       try { zoteroAccount.set(await connect(key.value)); render(); changed() }
-      catch (e) { msg.textContent = e instanceof Error ? e.message : String(e) }
+      catch (e) { msg.textContent = errorText(e) }
       finally { go.removeAttribute('disabled') }
     } }, t('Connect'))
     key.addEventListener('keydown', (e) => { if (e.key === 'Enter') go.click() })
@@ -65,13 +64,13 @@ export function zoteroSection(r: Replica, me: () => string, writable: boolean): 
       return h('div', { class: 'zlink' },
         h('div', {}, h('code', {}, file), ' ← ', h('b', {}, String(l.collName ?? '')), h('span', { class: 'muted' }, ` (${String(l.libName ?? '')}, ${l.format === 'biblatex' ? 'BibLaTeX' : 'BibTeX'})`)),
         h('div', { class: 'row' },
-          h('span', { class: 'muted small spacer' }, t('Refreshed {{when}} by {{name}}.', { when: ago(l.at), name: l.by || '?' })),
+          h('span', { class: 'muted small spacer' }, t('Refreshed {{when}} by {{name}}.', { when: shortTime(l.at), name: l.by || '?' })),
           msg,
           writable && mine && validLink(file, l) ? h('button', { class: 'small', onclick: async (e: Event) => {
             const b = e.currentTarget as HTMLButtonElement
             b.disabled = true; msg.className = 'small muted'; msg.textContent = t('Fetching…')
             try { msg.textContent = (await refresh(r, file, me())) ? t('Updated.') : t('Already up to date.'); render() }
-            catch (err) { msg.className = 'small err'; msg.textContent = err instanceof Error ? err.message : String(err) }
+            catch (err) { msg.className = 'small err'; msg.textContent = errorText(err) }
             finally { b.disabled = false }
           } }, t('Refresh')) : null,
           writable ? h('button', { class: 'small', onclick: () => { if (confirm(t('Stop keeping {{file}} in step with Zotero? The file stays as it is.', { file }))) { setLink(r, file, null); render() } } }, t('Unlink')) : null))
@@ -120,7 +119,7 @@ function linkDialog(r: Replica, me: () => string, done: () => void) {
       colls = await collections(a, lib.value)
       coll.replaceChildren(h('option', { value: '' }, t('The whole library')), ...colls.map((c) => h('option', { value: c.key }, c.name)))
       coll.disabled = false; go.disabled = false; say('')
-    } catch (e) { say(e instanceof Error ? e.message : String(e), true) }
+    } catch (e) { say(errorText(e), true) }
   }
   lib.addEventListener('change', loadCollections)
   ;(async () => {
@@ -129,7 +128,7 @@ function linkDialog(r: Replica, me: () => string, done: () => void) {
       libs = await libraries(a)
       lib.replaceChildren(...libs.map((l) => h('option', { value: l.id }, l.name)))
       await loadCollections()
-    } catch (e) { say(e instanceof Error ? e.message : String(e), true) }
+    } catch (e) { say(errorText(e), true) }
   })()
   async function run() {
     const path = file.value.trim().replace(/^\/+/, '')
@@ -141,6 +140,6 @@ function linkDialog(r: Replica, me: () => string, done: () => void) {
     go.disabled = true; say(t('Fetching…'))
     setLink(r, path, link)
     try { await refresh(r, path, me()); dlg.close(); done() }
-    catch (e) { setLink(r, path, null); say(e instanceof Error ? e.message : String(e), true); go.disabled = false }
+    catch (e) { setLink(r, path, null); say(errorText(e), true); go.disabled = false }
   }
 }

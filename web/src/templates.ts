@@ -3,7 +3,7 @@
 import * as Y from 'yjs'
 import { unzipSync } from 'fflate'
 import type { Replica } from './replica'
-import { dialog, h } from './dom'
+import { dialog, errorText, h } from './dom'
 import { cleanPath, confirmAdding, detectMain, isText, putBinary, putText } from './projectfiles'
 import { latexTitle } from './projects'
 import { latexOutput } from './texscan'
@@ -300,7 +300,7 @@ export function importDialog(r: Replica, opts: { onDone?: () => void; fresh?: bo
       (n.skipped.length ? ' ' + tn(n.skipped.length, 'Skipped {{n}} (build files or unsupported names).', 'Skipped {{n}} (build files or unsupported names).') : '')
     opts.onDone?.()
   }
-  const fail = (e: unknown) => { msg.className = 'err small'; msg.textContent = String(e instanceof Error ? e.message : e) }
+  const fail = (e: unknown) => { msg.className = 'err small'; msg.textContent = errorText(e) }
   const nonEmpty = r.files.size + r.bin.size > 0 && !opts.fresh
   const dlg = dialog('settings importdlg',
     h('h3', {}, t('Import')),

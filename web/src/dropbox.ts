@@ -20,16 +20,20 @@
 // Only one copy syncs at a time (the lease `dropboxLease`, as `githubLease` in github.ts).
 import * as Y from 'yjs'
 import type { Replica } from './replica'
-import { applyText, merge3, merge3Strict } from './diff'
 import { BUILD, CONFLICT_COPY } from './foldersync'
 import { cleanPath, isText } from './projectfiles'
 import { t } from './i18n'
 import { accountStore } from './accounts'
 import { EXPIRE, RENEW, type Lease } from './github'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
 import { shaCache, type ShaCache } from './gitshacache'
+import { digest, hex, randomHex } from './bytes'
+import { b64e } from './crypto'
+import { devOverride, serverInfo } from './servers'
+import { getString, session } from './store'
+import { approval as approvalOf, applySteps, bytesOf, clashing, hashOf, MAX, projectFiles, putFile, storeBinaries, storedIds, tabId, type Mine, type Step } from './remotesync'
+import { errorText, sleep } from './dom'
 
-const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 // (quiet: each send is a new version of the changed files in Dropbox, as each save is in its own app)
 const PULL_EVERY = 60_000, QUIET = 10_000, TICK = 5000 // ms
 const PARALLEL = 4 // files moved at once
@@ -59,18 +63,17 @@ const MOVED = 409
 
 // ---- talking to Dropbox ----------------------------------------------------------------
 
-const local = () => /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
 /** Dropbox's addresses, or stand-ins when testing on this computer (texloom.dropboxApi in localStorage). */
 function ep(): { api: string; content: string; www: string; notify: string } {
   try {
-    const o = JSON.parse(localStorage.getItem('texloom.dropboxApi') || 'null')
-    if (o && local()) return { notify: o.api, ...o }
+    const o = JSON.parse(devOverride('texloom.dropboxApi') || 'null')
+    if (o) return { notify: o.api, ...o }
   } catch (e) { quiet('no stand-in for Dropbox (testing only)', e) }
   return { api: 'https://api.dropboxapi.com', content: 'https://content.dropboxapi.com', www: 'https://www.dropbox.com', notify: 'https://notify.dropboxapi.com' }
 }
 
 /** With debugging on (localStorage texloom.debug = 1): requests to Dropbox and the time they took, for the console. */
-const debugging = () => { try { return localStorage.getItem('texloom.debug') === '1' } catch { return false } }
+const debugging = () => getString('texloom.debug') === '1'
 const requests = { n: 0, ms: 0 }
 
 /** Run `fn` on each item, `n` at a time. */
@@ -86,13 +89,12 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Prom
 let keyAsked: Promise<string> | null = null
 /** This server's Dropbox app (its `dropbox_app_key` setting), or '' if it has none. */
 export function dropboxAppKey(): Promise<string> {
-  try { const k = localStorage.getItem('texloom.dropboxKey'); if (k && local()) return Promise.resolve(k) } catch (e) { quiet(STORAGE, e) }
-  keyAsked ??= fetch('/api/info', { cache: 'no-store' }).then((r) => r.json()).then((j) => String(j?.dropboxAppKey ?? ''), () => '')
+  const k = devOverride('texloom.dropboxKey')
+  if (k) return Promise.resolve(k)
+  keyAsked ??= serverInfo().then((j) => String(j?.dropboxAppKey ?? ''))
   return keyAsked
 }
 
-const b64url = (d: Uint8Array) => btoa(String.fromCharCode(...d)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-const hex = (d: ArrayBuffer) => [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('')
 /** JSON for an HTTP header: anything outside ASCII escaped, as Dropbox asks. */
 const headerJson = (v: unknown) => JSON.stringify(v).replace(/[\u007f-￿]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
 
@@ -104,12 +106,11 @@ const headerJson = (v: unknown) => JSON.stringify(v).replace(/[\u007f-￿]/g, (c
 export async function signIn(back = location.href): Promise<never> {
   const key = await dropboxAppKey()
   if (!key) throw new DropboxError(t('This server isn’t set up for Dropbox.'))
-  const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)))
-  const challenge = b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))))
-  const state = b64url(crypto.getRandomValues(new Uint8Array(16)))
+  const verifier = b64e(crypto.getRandomValues(new Uint8Array(48)))
+  const challenge = b64e(await digest('SHA-256', new TextEncoder().encode(verifier)))
+  const state = b64e(crypto.getRandomValues(new Uint8Array(16)))
   const redirect = `${location.origin}/dropbox-auth.html`
-  try { sessionStorage.setItem('texloom.dropboxPending', JSON.stringify({ verifier, state, key, back, redirect, api: ep().api })) }
-  catch { throw new DropboxError(t('This browser won’t keep the sign-in for a moment (private browsing?), so Dropbox can’t be connected here.')) }
+  if (!session.setJson('texloom.dropboxPending', { verifier, state, key, back, redirect, api: ep().api })) throw new DropboxError(t('This browser won’t keep the sign-in for a moment (private browsing?), so Dropbox can’t be connected here.'))
   const q = new URLSearchParams({ client_id: key, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256',
     token_access_type: 'offline', redirect_uri: redirect, state, scope: SCOPES })
   location.assign(`${ep().www}/oauth2/authorize?${q}`)
@@ -118,12 +119,9 @@ export async function signIn(back = location.href): Promise<never> {
 
 /** What the last sign-in left to say, if it didn't work (dropbox-auth.html keeps it), once. */
 export function signInProblem(): string {
-  try {
-    const why = sessionStorage.getItem('texloom.dropboxProblem')
-    sessionStorage.removeItem('texloom.dropboxProblem')
-    if (!why) return ''
-    return why === 'access_denied' ? t('Dropbox access wasn’t allowed.') : t('Dropbox didn’t sign you in ({{why}}).', { why })
-  } catch { return '' }
+  const why = session.take('texloom.dropboxProblem')
+  if (!why) return ''
+  return why === 'access_denied' ? t('Dropbox access wasn’t allowed.') : t('Dropbox didn’t sign you in ({{why}}).', { why })
 }
 
 async function tokenRequest(form: Record<string, string>): Promise<any> {
@@ -194,10 +192,10 @@ async function upload(a: DropboxAccount, path: string, data: Uint8Array, rev: st
 /** Dropbox's content hash: SHA-256 of each 4 MiB block, then SHA-256 of those together. */
 export async function contentHash(d: Uint8Array): Promise<string> {
   const parts: Uint8Array[] = [] // (an empty file has no blocks)
-  for (let i = 0; i < d.length; i += BLOCK) parts.push(new Uint8Array(await crypto.subtle.digest('SHA-256', d.subarray(i, i + BLOCK) as BufferSource)))
+  for (let i = 0; i < d.length; i += BLOCK) parts.push(await digest('SHA-256', d.subarray(i, i + BLOCK)))
   const all = new Uint8Array(parts.length * 32)
   parts.forEach((p, i) => all.set(p, i * 32))
-  return hex(await crypto.subtle.digest('SHA-256', all as BufferSource))
+  return hex(await digest('SHA-256', all))
 }
 
 /** A folder path as Dropbox wants it: "/Papers/thesis", no slash at the end; null if it isn't one. */
@@ -270,7 +268,7 @@ export async function folderIdOf(a: DropboxAccount, root: string, make: boolean)
     if (/^[0-9a-f]{32}$/.test(id)) return id
   } catch (e) { if (!(e instanceof DropboxError && e.status === 409)) throw e }
   if (!make) return null
-  const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('')
+  const id = randomHex(16)
   try { await upload(a, at, new TextEncoder().encode(id), null) }
   catch (e) { if (e instanceof DropboxError && e.tag === 'moved') return folderIdOf(a, root, false); throw e } // made elsewhere just now
   return id
@@ -285,47 +283,24 @@ export function linkOf(r: Replica): DropboxLink | null {
 export function setLink(r: Replica, l: DropboxLink | null) { if (l) r.meta.set('dropbox', l); else r.meta.delete('dropbox') }
 const baseMap = (r: Replica) => r.doc.getMap<Entry>('dropboxBase')
 
-// As for GitHub: the link is in the shared settings, and syncing uses this browser's own token, so
-// a browser syncs only a link its user made or approved here: the folder, at this Dropbox's path.
-const approvedKey = (r: Replica) => `texloom.dropboxApproved.${r.keys.project}`
+// As for GitHub, a browser syncs only a link its user made or approved here (remotesync.ts): the
+// folder, at this Dropbox's path.
+const approval = approvalOf<any>('dropbox')
 export function approvedPath(r: Replica, l: DropboxLink | null = linkOf(r)): string | null {
-  try {
-    const v = JSON.parse(localStorage.getItem(approvedKey(r)) || 'null')
-    return l && v && v.folder === l.folder && typeof v.path === 'string' && v.account === dropboxAccount.get()?.id ? v.path : null
-  } catch { return null }
+  const v = approval.get(r)
+  return l && v && v.folder === l.folder && typeof v.path === 'string' && v.account === dropboxAccount.get()?.id ? v.path : null
 }
 export function approve(r: Replica, l: { folder: string } | null, path = '') {
-  try {
-    if (l) localStorage.setItem(approvedKey(r), JSON.stringify({ folder: l.folder, path, account: dropboxAccount.get()?.id ?? '' }))
-    else localStorage.removeItem(approvedKey(r))
-  } catch (e) { quiet(STORAGE, e) }
+  approval.set(r, l && { folder: l.folder, path, account: dropboxAccount.get()?.id ?? '' })
 }
 
 /** A Dropbox file the project keeps: a name TeXLoom accepts, not build output, not a conflicted copy, not too big. */
 const kept = (rel: string, size: number) => cleanPath(rel) === rel && !BUILD.test(rel) && !CONFLICT_COPY.test(rel.split('/').pop()!) && size <= MAX
 
-type Mine = { text: string } | { h: string; size: number }
-function projectFiles(r: Replica): Map<string, Mine> {
-  const out = new Map<string, Mine>()
-  r.files.forEach((yt, p) => { if (kept(p, 0)) out.set(p, { text: yt.toString() }) })
-  for (const [p, b] of r.bin.entries()) if (b && typeof b.h === 'string' && kept(p, b.size ?? 0)) out.set(p, { h: b.h, size: b.size })
-  return out
-}
-const bytesOf = async (r: Replica, m: Mine) => ('text' in m ? new TextEncoder().encode(m.text) : await r.getBlob(m.h))
+const filesOf = (r: Replica) => projectFiles(r, kept)
 /** Content hashes of stored files, by TeXLoom id (gitshacache.ts): only the files the project has now. */
-function hashCache(r: Replica): ShaCache {
-  const now: string[] = []
-  for (const b of r.bin.values()) if (b && typeof b.h === 'string') now.push(b.h)
-  return shaCache(r.keys.project, now, `texloom.dropboxHash.${r.keys.project}`)
-}
-async function hashOfMine(r: Replica, m: Mine, cache: ShaCache): Promise<string> {
-  if ('text' in m) return contentHash(new TextEncoder().encode(m.text))
-  const known = cache.get(m.h)
-  if (known) return known
-  const h = await contentHash(await r.getBlob(m.h))
-  cache.set(m.h, h)
-  return h
-}
+const hashCache = (r: Replica): ShaCache => shaCache(r.keys.project, storedIds(r), `texloom.dropboxHash.${r.keys.project}`)
+const hashOfMine = (r: Replica, m: Mine, cache: ShaCache) => hashOf(r, m, cache, contentHash)
 
 /** Whether the TeXLoom app on someone's computer keeps this folder in step (Dropbox bringing it there). */
 export function appHolds(r: Replica, l: DropboxLink | null = linkOf(r)): { by: string } | null {
@@ -359,8 +334,7 @@ export async function pull(r: Replica, a: DropboxAccount, by: string, oursWins =
   const { link, root } = await where(r, a)
   const now = (await listFiles(a, root)).files
   const base = new Map(baseMap(r).entries())
-  const cache = hashCache(r), mine = projectFiles(r)
-  type Step = { rel: string; was: Mine | null; take?: Uint8Array | null; merge?: { base: string; theirs: string } }
+  const cache = hashCache(r), mine = filesOf(r)
   const steps: Step[] = [], clash: string[] = [], same: string[] = []
   const changed = [...new Set([...base.keys(), ...now.keys()])].filter((rel) => {
     const b = base.get(rel), th = now.get(rel)
@@ -386,50 +360,23 @@ export async function pull(r: Replica, a: DropboxAccount, by: string, oursWins =
     clash.push(rel)
   })
   if (!still()) return { files: [], clash: [] }
-  for (const st of steps) if (st.merge && !oursWins && merge3Strict(st.merge.base, st.merge.theirs, (st.was as { text: string }).text) === null) clash.push(st.rel)
+  clash.push(...clashing(steps, oursWins))
   const blocked = clash.sort().map((p) => `${p}@${now.get(p)?.rev ?? '-'}`).join(' ')
   if (clash.length && !oursWins) {
     setLink(r, { ...linkOf(r)!, blocked, clash, by, at: Date.now() })
     return { files: [], clash }
   }
-  const uploads = new Map<string, string>()
-  for (const st of steps) if (st.take && isText(st.rel, st.take) === null) uploads.set(st.rel, await r.putBlob(st.take))
-  const files: string[] = []
-  let moved = false
+  const ids = await storeBinaries(r, steps.map((st) => [st.rel, st.take] as const))
+  let files = null as string[] | null
   r.doc.transact(() => {
-    const cur = (rel: string): Mine | null => { const yt = r.files.get(rel), b = r.bin.get(rel); return yt ? { text: yt.toString() } : b ? { h: b.h, size: b.size } : null }
-    const sameMine = (x: Mine | null, y: Mine | null) => (!x || !y ? x === y : 'text' in x ? 'text' in y && x.text === y.text : 'h' in y && x.h === y.h)
-    const todo: (() => void)[] = []
-    for (const st of steps) {
-      const c = cur(st.rel)
-      if (st.merge) {
-        if (!c || !('text' in c)) { moved = true; return }
-        const merged = oursWins ? merge3(st.merge.base, st.merge.theirs, c.text) : merge3Strict(st.merge.base, st.merge.theirs, c.text)
-        if (merged === null) { moved = true; return }
-        if (merged !== c.text) { const yt = r.files.get(st.rel)!; todo.push(() => applyText(yt, c.text, merged)); files.push(st.rel) }
-        continue
-      }
-      if (!sameMine(c, st.was)) { moved = true; return } // changed here meanwhile: next round decides again
-      const data = st.take
-      if (!data) todo.push(() => { r.files.delete(st.rel); r.bin.delete(st.rel) })
-      else {
-        const text = isText(st.rel, data)
-        if (text === null) todo.push(() => { r.files.delete(st.rel); r.bin.set(st.rel, { h: uploads.get(st.rel)!, size: data.length }) })
-        else todo.push(() => {
-          r.bin.delete(st.rel)
-          const yt = r.files.get(st.rel)
-          if (yt) applyText(yt, yt.toString(), text); else r.files.set(st.rel, new Y.Text(text))
-        })
-      }
-      files.push(st.rel)
-    }
-    todo.forEach((f) => f())
+    files = applySteps(r, steps, ids, oursWins)
+    if (!files) return // changed here meanwhile: next round decides again
     // what was taken, merged or already the same is now in step with Dropbox's revision
     const bm = baseMap(r)
     for (const rel of [...steps.map((s) => s.rel), ...same]) { const th = now.get(rel); if (th) bm.set(rel, th); else bm.delete(rel) }
     if (link.blocked) setLink(r, { ...linkOf(r)!, blocked: null, clash: [], by, at: Date.now() })
   })
-  return moved ? { files: [], clash: [] } : { files, clash: [] }
+  return { files: files ?? [], clash: [] }
 }
 
 // ---- sending changes out -------------------------------------------------------------------
@@ -438,7 +385,7 @@ export async function pull(r: Replica, a: DropboxAccount, by: string, oursWins =
  *  DropboxError with status MOVED if Dropbox changed one meanwhile (bring that in first). */
 export async function push(r: Replica, a: DropboxAccount, by: string, still: () => boolean = () => true): Promise<string[]> {
   const { root } = await where(r, a)
-  const base = baseMap(r), cache = hashCache(r), mine = projectFiles(r)
+  const base = baseMap(r), cache = hashCache(r), mine = filesOf(r)
   const sent: string[] = []
   const ups: [string, Mine][] = []
   for (const [rel, m] of mine) { const b = base.get(rel); if (!b || b.h !== await hashOfMine(r, m, cache)) ups.push([rel, m]) }
@@ -473,7 +420,7 @@ export async function linkFolder(r: Replica, a: DropboxAccount, by: string, path
   const name = path.split('/').pop() || path
   approve(r, { folder }, path) // linking it is approving it
   const now = (await listFiles(a, path)).files
-  const cache = hashCache(r), mine = projectFiles(r)
+  const cache = hashCache(r), mine = filesOf(r)
   const take: [string, Uint8Array, Entry][] = []
   for (const [rel, e] of now) {
     if (!kept(rel, e.size)) continue
@@ -481,19 +428,12 @@ export async function linkFolder(r: Replica, a: DropboxAccount, by: string, path
     if (m && (prefer === 'project' || (await hashOfMine(r, m, cache)) === e.h)) continue
     take.push([rel, await download(a, `rev:${e.rev}`), e])
   }
-  const uploads = new Map<string, string>()
-  for (const [rel, d] of take) if (isText(rel, d) === null) uploads.set(rel, await r.putBlob(d))
+  const ids = await storeBinaries(r, take.map(([rel, d]) => [rel, d] as const))
   r.doc.transact(() => {
     const bm = baseMap(r)
     for (const k of [...bm.keys()]) bm.delete(k)
     for (const [rel, e] of now) if (kept(rel, e.size)) bm.set(rel, e) // (the project's differing files go up as changes to these)
-    for (const [rel, d] of take) {
-      const text = isText(rel, d)
-      if (text === null) { r.files.delete(rel); r.bin.set(rel, { h: uploads.get(rel)!, size: d.length }); continue }
-      r.bin.delete(rel)
-      const yt = r.files.get(rel)
-      if (yt) applyText(yt, yt.toString(), text); else r.files.set(rel, new Y.Text(text))
-    }
+    for (const [rel, d] of take) putFile(r, rel, d, ids)
     setLink(r, { folder, path, name, by, at: Date.now(), blocked: null, clash: [] })
   })
   return take.length
@@ -505,14 +445,6 @@ export function unlink(r: Replica) {
 }
 
 // ---- who syncs: the lease -------------------------------------------------------------------
-
-function tabId(): string {
-  try {
-    let id = sessionStorage.getItem('texloom.tab')
-    if (!id) { id = 'web:' + crypto.randomUUID(); sessionStorage.setItem('texloom.tab', id) }
-    return id
-  } catch { return 'web:' + Math.random().toString(36).slice(2) }
-}
 
 export interface SyncState { role: 'off' | 'syncing' | 'standby' | 'waiting' | 'app'; holder: string | null; error: string | null; busy: boolean }
 
@@ -579,7 +511,7 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
       }
       set({ error: null })
     } catch (e) {
-      set({ error: e instanceof Error ? e.message : String(e) })
+      set({ error: errorText(e) })
     } finally {
       set({ busy: false })
       if (debugging() && (force || came.length || went.length)) console.debug(`[dropbox] ${force ? 'sync now' : 'round'}: ${Math.round(performance.now() - began)} ms, `
@@ -600,12 +532,12 @@ export function startDropbox(r: Replica, me: () => string, onChange: () => void)
     while (!stopped) {
       const a = dropboxAccount.get(), l = linkOf(r), root = l && approvedPath(r, l)
       const cursor = a && root ? listings.get(`${a.id} ${root.toLowerCase()}`)?.cursor : undefined
-      if (state.role !== 'syncing' || !cursor) { await new Promise((ok) => setTimeout(ok, TICK)); continue }
+      if (state.role !== 'syncing' || !cursor) { await sleep(TICK); continue }
       try {
         const { changes, backoff } = await changesAfter(cursor, 120)
         if (changes && !stopped) { nextPull = 0; await round().catch((e) => console.error('Dropbox sync:', e)) }
-        if (backoff) await new Promise((ok) => setTimeout(ok, backoff * 1000))
-      } catch { await new Promise((ok) => setTimeout(ok, 30_000)) } // offline, or Dropbox busy: the minute's round goes on
+        if (backoff) await sleep(backoff * 1000)
+      } catch { await sleep(30_000) } // offline, or Dropbox busy: the minute's round goes on
     }
   })()
   round().catch((e) => console.error('Dropbox sync:', e))

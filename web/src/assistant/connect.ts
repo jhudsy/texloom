@@ -1,6 +1,6 @@
 // How to connect an MCP tool that's already on this computer. It runs under the person's own
 // account with that tool, as a collaborator: nothing here goes through the assistant.
-import { dialog, h } from '../dom'
+import { copyButton, dialog, h } from '../dom'
 import { t } from '../i18n'
 
 type Access = 'suggest' | 'edit' | 'read'
@@ -12,7 +12,7 @@ const onMac = () => /Mac/i.test(navigator.platform || navigator.userAgent)
 
 function codeBlock(text: () => string): { el: HTMLElement; update(): void } {
   const pre = h('pre', {})
-  const copy = h('button', { class: 'small', onclick: (e: any) => { navigator.clipboard.writeText(text()); e.target.textContent = t('Copied') } }, t('Copy'))
+  const copy = copyButton(text, t('Copy'), { class: 'small' })
   return { el: h('div', { class: 'cmds' }, pre, copy), update() { pre.textContent = text(); copy.textContent = t('Copy') } }
 }
 

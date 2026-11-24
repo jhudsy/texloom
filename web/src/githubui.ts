@@ -2,14 +2,12 @@
 // Forgejo): connecting accounts (start page and project Settings), and linking the project to a
 // repository in project Settings, with what's happening. The work is in github.ts and forges.ts.
 import type { Replica } from './replica'
-import { dialog, h } from './dom'
+import { dialog, errorText, h, shortTime } from './dom'
 import { t, tn } from './i18n'
 import { accountFor, accounts, approve, approved, connect, GitError, linkOf, linkRepo, pull, push, setAccount, setLink, startGitHub } from './github'
 import { forge, hostOf, kindOf, normalHost, repoPath, serviceName, tokenPage, type Account, type Kind } from './forges'
 import type { Status } from './integrationcard'
 
-const ago = (at: number) => new Date(at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-const say = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const DEFAULT_HOST: Record<Kind, string> = { github: 'https://github.com', gitlab: 'https://gitlab.com', gitea: 'https://codeberg.org' }
 
 // the running link for the open project (main.ts starts it), and who wants to hear about it
@@ -86,7 +84,7 @@ export function githubAccountBox(changed: () => void = () => {}, only?: { kind?:
       if (!s) { msg.textContent = t('That isn’t a server address.'); return }
       go.setAttribute('disabled', '')
       try { const a = await connect(k(), s, key.value); setAccount(a, a); render(); changed() }
-      catch (e) { msg.textContent = say(e) }
+      catch (e) { msg.textContent = errorText(e) }
       finally { go.removeAttribute('disabled') }
     } }, t('Connect'))
     key.addEventListener('keydown', (e) => { if (e.key === 'Enter') go.click() })
@@ -141,12 +139,12 @@ export function githubSection(r: Replica, me: () => string, writable: boolean): 
         const b = e.currentTarget as HTMLButtonElement
         if (!confirm(t('Bring in the repository’s changes, keeping the project’s version where the two clash? The project’s version then goes to the repository.'))) return
         b.disabled = true; note(t('Syncing…'))
-        try { await pull(r, a, me(), true); await push(r, a, me()); note(t('Done.')) } catch (err) { note(say(err), true) } finally { b.disabled = false; render() }
+        try { await pull(r, a, me(), true); await push(r, a, me()); note(t('Done.')) } catch (err) { note(errorText(err), true) } finally { b.disabled = false; render() }
       } }, t('Keep the project’s version'))) : null) : null
     box.replaceChildren(...[
       where,
       h('p', { class: 'muted small' }, role),
-      l.head ? h('p', { class: 'muted small' }, t('Last synced {{when}} by {{name}}, at commit {{commit}}.', { when: ago(l.at), name: l.by || '?', commit: l.head.slice(0, 7) })) : null,
+      l.head ? h('p', { class: 'muted small' }, t('Last synced {{when}} by {{name}}, at commit {{commit}}.', { when: shortTime(l.at), name: l.by || '?', commit: l.head.slice(0, 7) })) : null,
       blocked,
       st?.error ? h('p', { class: 'small err' }, st.error) : null,
       msg,
@@ -155,12 +153,12 @@ export function githubSection(r: Replica, me: () => string, writable: boolean): 
           const cur = linkOf(r)
           if (!cur || !confirm(t('Sync this project with {{repo}} on {{service}} (branch {{branch}}) using your token?', { repo: cur.repo, service: svc, branch: cur.branch }))) return
           approve(r, cur); note(t('Syncing…'))
-          try { await engine?.now(); note(engine?.state.error ?? '') } catch (err) { note(say(err), true) }
+          try { await engine?.now(); note(engine?.state.error ?? '') } catch (err) { note(errorText(err), true) }
           render()
         } }, t('Approve and sync')) : null,
         a && ok && st?.role !== 'standby' ? h('button', { class: 'small', disabled: st?.busy, onclick: async () => {
           note(t('Syncing…'))
-          try { await engine?.now(); note(engine?.state.error ?? (engine?.state.role === 'syncing' && !linkOf(r)?.blocked ? t('Done.') : '')) } catch (err) { note(say(err), true) }
+          try { await engine?.now(); note(engine?.state.error ?? (engine?.state.role === 'syncing' && !linkOf(r)?.blocked ? t('Done.') : '')) } catch (err) { note(errorText(err), true) }
           render()
         } }, t('Sync now')) : null,
         h('button', { class: 'small', onclick: () => {
@@ -192,7 +190,7 @@ function linkDialog(r: Replica, me: () => string, done: () => void) {
   const fill = async () => {
     const n = name()
     if (!n || branch.value) return
-    try { const d = (await forge(account()).repoInfo(n)).defaultBranch; if (!branch.value) branch.value = d } catch (e) { tell(say(e), true) } // (unless one was typed meanwhile)
+    try { const d = (await forge(account()).repoInfo(n)).defaultBranch; if (!branch.value) branch.value = d } catch (e) { tell(errorText(e), true) } // (unless one was typed meanwhile)
   }
   const hint = () => { repo.placeholder = kindOf(account()) === 'gitlab' ? 'group/repository' : 'owner/repository' }
   hint()
@@ -226,6 +224,6 @@ function linkDialog(r: Replica, me: () => string, done: () => void) {
       tell(got ? tn(got, 'Linked; {{n}} file came in from the repository.', 'Linked; {{n}} files came in from the repository.') : t('Linked.'))
       dlg.close(); done()
       engine?.now()
-    } catch (e) { tell(say(e), true) } finally { go.removeAttribute('disabled') }
+    } catch (e) { tell(errorText(e), true) } finally { go.removeAttribute('disabled') }
   }
 }

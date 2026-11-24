@@ -9,7 +9,8 @@ import {
 import { projects } from './projects'
 import { creationCode } from './replica'
 import { normalServer, serverName } from './servers'
-import { askCode, serverInfo } from './storagenotice'
+import { askCode } from './storagenotice'
+import { serverInfo } from './servers'
 import { sendListToApp } from './openinapp'
 
 function explain(code: string | null): string {

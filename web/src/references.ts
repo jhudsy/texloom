@@ -5,12 +5,12 @@
 import * as Y from 'yjs'
 import type { Replica } from './replica'
 import type { ProjectIndex } from './latex'
-import { dialog, h } from './dom'
+import { dialog, errorText, h } from './dom'
 import { cleanPath, mainFile } from './projectfiles'
 import { stripComments } from './texscan'
 import { t } from './i18n'
 import { changeOrSuggest, isSuggesting } from './suggestmode'
-import { quiet, STORAGE } from './quiet'
+import { getString, setString } from './store'
 
 /** The DOI for a pasted DOI, doi.org/arXiv URL or arXiv id, or null. */
 export function parseId(input: string): string | null {
@@ -276,11 +276,11 @@ export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: st
   function render() {
     plan = bibPlan(r, index)
     let prev = select?.value
-    try { prev ??= localStorage.getItem(REMEMBER) ?? undefined } catch (e) { quiet(STORAGE, e) }
+    prev ??= getString(REMEMBER) ?? undefined
     const label = (f: string) => (plan.missing.has(f) ? t('{{file}} (new file)', { file: f }) : f)
     const kids: (HTMLElement | string)[] = []
     if (plan.options.length > 1) {
-      select = h('select', { 'aria-label': t('Bibliography file'), onchange: () => { try { localStorage.setItem(REMEMBER, select!.value) } catch (e) { quiet(STORAGE, e) }; lineText() } },
+      select = h('select', { 'aria-label': t('Bibliography file'), onchange: () => { setString(REMEMBER, select!.value); lineText() } },
         ...plan.options.map((f) => h('option', { value: f }, label(f))))
       if (prev && plan.options.includes(prev)) select.value = prev
       kids.push(h('div', { class: 'row' }, h('span', { class: 'small' }, t('Add to')), select))
@@ -306,7 +306,7 @@ export function referenceDialog(r: Replica, index: ProjectIndex, onKey: (key: st
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run() } })
   render()
   input.focus()
-  const problem = (e: unknown, where: string) => String(e instanceof Error ? e.message : e)
+  const problem = (e: unknown, where: string) => errorText(e)
     .replace(/^(TypeError: )?(Failed to fetch|Load failed|NetworkError.*)$/, t('Couldn’t reach {{site}} (offline?).', { site: where }))
 
   /** A DOI or arXiv id is added at once; anything else is searched for. */

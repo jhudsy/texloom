@@ -17,6 +17,9 @@ import * as Y from 'yjs'
 import type { Replica } from './replica'
 import { addItem, allItems, mergeText, rangeOf } from './review'
 import { quiet } from './quiet'
+import { b64, unb64 } from './bytes'
+import { readJson, writeJson } from './store'
+import { debounce } from './dom'
 
 export const MIN_APART = 30_000 // ms: edits apart for less than this aren't flagged
 const SETTLE = 1500 // ms after the last change from others before notes are added
@@ -27,8 +30,8 @@ const LONG = 3000 // characters: a "paragraph" longer than this is narrowed to t
 interface Place { s: Y.RelativePosition; e: Y.RelativePosition; at: number }
 type Stored = Record<string, [string, string, number][]>
 
-const enc = (p: Y.RelativePosition) => btoa(String.fromCharCode(...Y.encodeRelativePosition(p)))
-const dec = (s: string) => Y.decodeRelativePosition(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)))
+const enc = (p: Y.RelativePosition) => b64(Y.encodeRelativePosition(p))
+const dec = (s: string) => Y.decodeRelativePosition(unb64(s))
 
 /** The paragraph around [from, to) in `text`: between blank lines, or just the lines if it's very long. */
 export function paragraphAt(text: string, from: number, to: number): [number, number] {
@@ -63,21 +66,13 @@ export function watchMerges(r: Replica, myName: () => string) {
   const key = `texloom-apart-${r.keys.project}`
   const places = new Map<string, Place[]>()
   try {
-    const stored = JSON.parse(localStorage.getItem(key) ?? '{}') as Stored
-    for (const [file, ps] of Object.entries(stored)) places.set(file, ps.map(([s, e, at]) => ({ s: dec(s), e: dec(e), at })))
+    for (const [file, ps] of Object.entries(readJson<Stored>(key, {}))) places.set(file, ps.map(([s, e, at]) => ({ s: dec(s), e: dec(e), at })))
   } catch (e) { quiet('none kept', e) }
-  let saveTimer: ReturnType<typeof setTimeout> | undefined
-  const save = () => {
-    clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => {
-      try {
-        if (!places.size) { localStorage.removeItem(key); return }
-        const out: Stored = {}
-        for (const [file, ps] of places) out[file] = ps.map((p) => [enc(p.s), enc(p.e), p.at])
-        localStorage.setItem(key, JSON.stringify(out))
-      } catch (e) { quiet('storage full or blocked: kept in memory only', e) }
-    }, 1000)
-  }
+  const save = debounce(() => {
+    const out: Stored = {}
+    for (const [file, ps] of places) out[file] = ps.map((p) => [enc(p.s), enc(p.e), p.at])
+    writeJson(key, places.size ? out : null) // (storage full or blocked: kept in memory only)
+  }, 1000)
   const resolve = (yt: Y.Text, p: Place): [number, number] | null => {
     const a = Y.createAbsolutePositionFromRelativePosition(p.s, r.doc), b = Y.createAbsolutePositionFromRelativePosition(p.e, r.doc)
     if (!a || !b || a.type !== yt || b.type !== yt) return null

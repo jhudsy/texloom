@@ -5,6 +5,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { ProviderConfig } from './providers'
 import { jsonSchema, type ToolDef } from './tools'
 import { t } from '../i18n'
+import { errorText } from '../dom'
 
 export interface ToolCall { id: string; name: string; input: unknown; rawInput?: string }
 export type Stop = 'end' | 'tool_use' | 'max_tokens' | 'refusal'
@@ -85,7 +86,7 @@ export function explainError(e: unknown, cfg: ProviderConfig): string {
     return t('Couldn’t reach {{url}}. Is it running, and does it allow requests from this page (CORS)?', { url: cfg.baseUrl }) +
       (cfg.baseUrl.includes(':1234') ? ' ' + t('For LM Studio: `lms server start --cors`.') : cfg.baseUrl.includes(':11434') ? ' ' + t('For Ollama: set OLLAMA_ORIGINS.') : '')
   if (e instanceof Anthropic.APIError) return t('Anthropic API error {{status}}: {{message}}', { status: e.status, message: e.message })
-  return String(e instanceof Error ? e.message : e)
+  return errorText(e)
 }
 
 // ---------------------------------------------------------------------------

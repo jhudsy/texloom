@@ -1,11 +1,8 @@
 // Keys, links, encryption and signing. Must match texloom/crypto.py exactly.
 import { ed25519 } from '@noble/curves/ed25519.js'
+import { b64, hex } from './bytes'
 
-export const b64e = (b: Uint8Array): string => {
-  let s = ''
-  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000))
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
+export const b64e = (b: Uint8Array): string => b64(b).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 export const b64d = (s: string): Uint8Array => {
   const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4))
   const out = new Uint8Array(bin.length)
@@ -182,6 +179,6 @@ export class Keys {
   async blobId(plain: Uint8Array): Promise<string> {
     this.hmac ??= await crypto.subtle.importKey('raw', this.key as BufferSource, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
     const mac = new Uint8Array(await crypto.subtle.sign('HMAC', this.hmac, plain as BufferSource))
-    return Array.from(mac.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
+    return hex(mac.subarray(0, 16))
   }
 }

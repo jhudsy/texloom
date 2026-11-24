@@ -1,6 +1,8 @@
 // Past assistant conversations, kept only in this browser and per project. They can quote the
 // documents, so they go when the project is removed from this browser. A conversation's list entry
 // and its contents are stored apart, because the contents can be large and the list reads every entry.
+import { openDb, req } from '../idb'
+
 export type Entry =
   | { k: 'user' | 'text' | 'think'; text: string }
   | { k: 'tool'; text: string; ok: boolean; err?: string }
@@ -14,25 +16,13 @@ export interface ChatBody { id: string; entries: Entry[]; state: unknown; sys?: 
 
 const DB = 'texloom-assistant', MAX_PER_PROJECT = 50
 
-let opened: Promise<IDBDatabase> | null = null
-function open(): Promise<IDBDatabase> {
-  return opened ??= new Promise<IDBDatabase>((resolve, reject) => {
-    const q = indexedDB.open(DB, 1)
-    q.onupgradeneeded = () => {
-      q.result.createObjectStore('meta', { keyPath: 'id' }).createIndex('project', 'project')
-      q.result.createObjectStore('body', { keyPath: 'id' })
-    }
-    q.onsuccess = () => resolve(q.result)
-    q.onerror = () => { opened = null; reject(q.error) }
-  })
-}
+const open = () => openDb(DB, 1, (db) => {
+  db.createObjectStore('meta', { keyPath: 'id' }).createIndex('project', 'project')
+  db.createObjectStore('body', { keyPath: 'id' })
+})
 const done = (tx: IDBTransaction) => new Promise<void>((resolve, reject) => {
   tx.oncomplete = () => resolve()
   tx.onerror = tx.onabort = () => reject(tx.error)
-})
-const result = <T>(q: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
-  q.onsuccess = () => resolve(q.result)
-  q.onerror = () => reject(q.error)
 })
 function drop(tx: IDBTransaction, id: string) {
   tx.objectStore('meta').delete(id)
@@ -43,13 +33,13 @@ export const chats = {
   /** Newest first. */
   async list(project: string): Promise<ChatMeta[]> {
     const db = await open()
-    const all = await result(db.transaction('meta').objectStore('meta').index('project').getAll(project)) as ChatMeta[]
+    const all = await req(db.transaction('meta').objectStore('meta').index('project').getAll(project)) as ChatMeta[]
     return all.sort((a, b) => b.at - a.at)
   },
 
   async body(id: string): Promise<ChatBody | undefined> {
     const db = await open()
-    return result(db.transaction('body').objectStore('body').get(id)) as Promise<ChatBody | undefined>
+    return req(db.transaction('body').objectStore('body').get(id)) as Promise<ChatBody | undefined>
   },
 
   async save(meta: ChatMeta, body: ChatBody) {
@@ -75,7 +65,7 @@ export const chats = {
   /** How many are kept, in every project. */
   async count(): Promise<number> {
     const db = await open()
-    return result(db.transaction('meta').objectStore('meta').count())
+    return req(db.transaction('meta').objectStore('meta').count())
   },
 
   async forgetAll() {
@@ -88,7 +78,7 @@ export const chats = {
 
   async forgetProject(project: string) {
     const db = await open()
-    const ids = await result(db.transaction('meta').objectStore('meta').index('project').getAllKeys(project))
+    const ids = await req(db.transaction('meta').objectStore('meta').index('project').getAllKeys(project))
     const tx = db.transaction(['meta', 'body'], 'readwrite')
     for (const id of ids) drop(tx, id as string)
     await done(tx)

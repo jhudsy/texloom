@@ -23,12 +23,13 @@ import { dropboxAccountBox, dropboxAccountStatus } from './dropboxui'
 import { fragmentFor, fragmentOfLink, serverName, serverOr } from './servers'
 import { savedFolder } from './foldersync'
 import { chooseTemplate, type NewProject } from './templates'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
 import { inAppKey, APP, UNTITLED, brand, refreshProjects, onRefresh } from './appinfo'
+import { getString, readJson, setString } from './store'
 
 /** Logos of the Dropbox folder or git repository this browser keeps a project in step with (what it has approved). */
 function keptIn(project: string): HTMLElement[] {
-  const saved = (key: string) => { try { return JSON.parse(localStorage.getItem(`texloom.${key}.${project}`) || 'null') } catch { return null } }
+  const saved = (key: string) => readJson<any>(`texloom.${key}.${project}`, null)
   const out: HTMLElement[] = []
   const dbx = saved('dropboxApproved')
   if (dbx) out.push(h('span', { class: 'kept', title: t('Kept in step with the Dropbox folder {{folder}}', { folder: dbx.path || dbx.folder || '' }) }, brandIcon('dropbox')))
@@ -36,13 +37,13 @@ function keptIn(project: string): HTMLElement[] {
   if (git) out.push(h('span', { class: 'kept', title: t('Kept in step with {{repo}} on {{service}}', { repo: git.repo ?? '', service: serviceName(git) }) }, brandIcon(kindOf(git))))
   return out
 }
-const keptByApp = (project: string) => { try { return !!localStorage.getItem(inAppKey(project)) } catch { return false } }
+const keptByApp = (project: string) => !!getString(inAppKey(project))
 
 /** What the start page's list is narrowed to. */
 const finding = { text: '', tags: new Set<string>(), page: 0 }
 const PAGE_SIZES = [25, 50, 100, 0] // 0: everything on one page
 const PAGE_KEY = 'texloom.projectPageSize'
-let pageSize = (() => { try { const n = Number(localStorage.getItem(PAGE_KEY) ?? 25); return PAGE_SIZES.includes(n) ? n : 25 } catch { return 25 } })()
+let pageSize = (() => { const n = Number(getString(PAGE_KEY) ?? 25); return PAGE_SIZES.includes(n) ? n : 25 })()
 const pageCount = (total: number) => (pageSize ? Math.max(1, Math.ceil(total / pageSize)) : 1)
 /** Projects ticked on the start page. Kept across pages and searches. */
 const selected = new Set<string>()
@@ -121,11 +122,9 @@ async function createProject(choice?: NewProject) {
   const where = await chooseNewProject(server)
   if (!where) return
   const k = Keys.generate()
-  try {
-    if (where === 'relay') localStorage.setItem(`texloom.newRelay.${k.project}`, '1')
-    localStorage.setItem(`texloom.newTemplate.${k.project}`, c.from)
-    if (c.name) localStorage.setItem(`texloom.newName.${k.project}`, c.name)
-  } catch (e) { quiet(STORAGE, e) }
+  if (where === 'relay') setString(`texloom.newRelay.${k.project}`, '1')
+  setString(`texloom.newTemplate.${k.project}`, c.from)
+  if (c.name) setString(`texloom.newName.${k.project}`, c.name)
   location.hash = fragmentFor(k.fragment(), server)
 }
 
@@ -185,12 +184,12 @@ const SORTS: Record<string, { label: () => string; order: (a: Recent, b: Recent)
   za: { label: () => t('Name (Z to A)'), order: (a, b) => byName(b, a) },
 }
 const SORT_KEY = 'texloom.projectSort'
-let sorting = (() => { try { const s = localStorage.getItem(SORT_KEY); return s && SORTS[s] ? s : 'opened' } catch { return 'opened' } })()
+let sorting = (() => { const s = getString(SORT_KEY); return s && SORTS[s] ? s : 'opened' })()
 
 function sortPicker(): HTMLElement {
   const select = h('select', { class: 'sorter', 'aria-label': t('Sort projects'), onchange: (e: any) => {
     sorting = e.target.value
-    try { localStorage.setItem(SORT_KEY, sorting) } catch (e) { quiet(STORAGE, e) }
+    setString(SORT_KEY, sorting)
     finding.page = 0
     refreshProjects()
   } }, ...Object.entries(SORTS).map(([id, s]) => h('option', { value: id, ...(id === sorting ? { selected: true } : {}) }, s.label())))
@@ -255,7 +254,7 @@ function goToPage(page: number, then: string) {
 function pageSizePicker(): HTMLElement {
   return h('select', { class: 'pagesize', 'aria-label': t('Projects per page'), onchange: (e: any) => {
     pageSize = Number(e.target.value)
-    try { localStorage.setItem(PAGE_KEY, String(pageSize)) } catch (e) { quiet(STORAGE, e) }
+    setString(PAGE_KEY, String(pageSize))
     finding.page = 0
     refreshProjects()
     document.querySelector<HTMLElement>('.pagesize')?.focus()

@@ -6,22 +6,15 @@ import { dialog, h } from './dom'
 import { t } from './i18n'
 import { projects, sameKeys, tabKeysItem } from './projects'
 import { fragmentFor, normalServer, serverName, serverOr } from './servers'
-import { quiet, STORAGE } from './quiet'
+import { session } from './store'
 
 /** Remember this tab's link, so that reloading keeps the same access. False if the browser won't store it. */
 function rememberForTab(project: string, fragment: string): boolean {
-  try {
-    sessionStorage.setItem(tabKeysItem(project), fragment)
-    return sessionStorage.getItem(tabKeysItem(project)) === fragment
-  } catch { return false }
+  return session.set(tabKeysItem(project), fragment) && session.get(tabKeysItem(project)) === fragment
 }
 
 function linkKnownHere(project: string): string | null {
-  try {
-    const here = sessionStorage.getItem(tabKeysItem(project))
-    if (here) return here
-  } catch (e) { quiet(STORAGE, e) }
-  return projects.fragmentOf(project)
+  return session.get(tabKeysItem(project)) || projects.fragmentOf(project)
 }
 
 export interface Opened { keys: Keys; server: string }

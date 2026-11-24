@@ -10,7 +10,8 @@ import { t } from './i18n'
 import { h } from './dom'
 import { icon } from './icons'
 import { openContextMenu, type MenuItem } from './contextmenu'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
+import { getString, setString } from './store'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 export { pdfjs }
@@ -22,12 +23,10 @@ const MIN_ZOOM = ZOOM_STEPS[0], MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1]
 const ZOOM_KEY = 'texloom.pdfZoom'
 /** The zoom last chosen: a number, or 'page' (a whole page in view, whatever the pane's size). */
 const savedZoom = (): number | 'page' => {
-  try {
-    const v = localStorage.getItem(ZOOM_KEY)
-    if (v === 'page') return v
-    const z = Number(v)
-    return z >= MIN_ZOOM && z <= MAX_ZOOM ? z : 1
-  } catch { return 1 }
+  const v = getString(ZOOM_KEY)
+  if (v === 'page') return v
+  const z = Number(v)
+  return z >= MIN_ZOOM && z <= MAX_ZOOM ? z : 1
 }
 const MAX_PAGE_PIXELS = 6e6 // one page's canvas, however far zoomed in
 const NEAR = 1, FAR = 3 // screens above and below: pages this near are drawn; this far, their canvases are freed
@@ -397,7 +396,7 @@ export class PdfView {
     const page = (under >= 0 ? under : Math.max(0, this.pages.findIndex((p) => p.wrap.getBoundingClientRect().bottom > view.top))) + 1
     this.setZoom(this.pageFitZoom())
     this.fitPage = true
-    try { localStorage.setItem(ZOOM_KEY, 'page') } catch (e) { quiet(STORAGE, e) }
+    setString(ZOOM_KEY, 'page')
     this.showZoom()
     this.goToPage(page)
   }
@@ -486,7 +485,7 @@ export class PdfView {
   private setZoom(zoom: number, x = this.el.clientWidth / 2, y = this.el.clientHeight / 2) {
     this.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
     this.fitPage = false
-    try { localStorage.setItem(ZOOM_KEY, String(this.zoom)) } catch (e) { quiet(STORAGE, e) }
+    setString(ZOOM_KEY, String(this.zoom))
     const across = (this.el.scrollLeft + x) / Math.max(1, this.el.scrollWidth)
     const down = (this.el.scrollTop + y) / Math.max(1, this.el.scrollHeight)
     this.showZoom()

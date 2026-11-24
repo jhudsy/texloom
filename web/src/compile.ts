@@ -5,7 +5,10 @@
 import type { BusyTexRunner } from 'texlyre-busytex'
 import { stripComments } from './texscan'
 import { compileOrder, externalDocuments } from './xr'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
+import { digest, hex } from './bytes'
+import { serverInfo } from './servers'
+import { getString, setString } from './store'
 
 const BASE = '/core/busytex'
 let runner: Promise<BusyTexRunner> | null = null
@@ -46,14 +49,12 @@ let progressCb: ((p: Progress) => void) | undefined
 const ENDPOINT_KEY = 'texloom.texliveEndpoint'
 let endpoint: Promise<string | null> | null = null
 export function texliveEndpoint(): Promise<string | null> {
-  return (endpoint ??= fetch('/api/info', { cache: 'no-store' })
-    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-    .then((j) => {
-      const e = typeof j?.texlive?.endpoint === 'string' && j.texlive.endpoint.startsWith('/') ? new URL(j.texlive.endpoint, location.origin).href : null
-      try { if (e) localStorage.setItem(ENDPOINT_KEY, e); else localStorage.removeItem(ENDPOINT_KEY) } catch (e) { quiet(STORAGE, e) }
-      return e
-    })
-    .catch(() => { try { return localStorage.getItem(ENDPOINT_KEY) } catch { return null } }))
+  return (endpoint ??= serverInfo().then((j) => {
+    if (!j) return getString(ENDPOINT_KEY) // offline: as last heard
+    const e = typeof j.texlive?.endpoint === 'string' && j.texlive.endpoint.startsWith('/') ? new URL(j.texlive.endpoint, location.origin).href : null
+    setString(ENDPOINT_KEY, e)
+    return e
+  }))
 }
 
 // The TeX bundles are nested: basic ⊂ recommended ⊂ extra, and each carries its own file
@@ -189,7 +190,7 @@ async function auxKey(files: Map<string, string | Uint8Array>, main: string, doc
   const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
   let at = 0
   for (const p of parts) { all.set(p, at); at += p.length }
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', all))].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return hex(await digest('SHA-256', all))
 }
 
 export class CompileStopped extends Error {}

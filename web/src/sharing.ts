@@ -3,17 +3,18 @@
 import * as Y from 'yjs'
 import { Keys, canonicalPub } from './crypto'
 import { Replica } from './replica'
-import { dialog, h } from './dom'
+import { copyButton, dialog, h, sleep } from './dom'
 import { projects, whoIn } from './projects'
 import { t, locale } from './i18n'
 import { privateServerAllows } from './storagenotice'
 import { awayServer, serverName } from './servers'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
+import { getString, readJson, setString, writeJson } from './store'
 
 function copyRow(text: string, mail?: { subject: string; body: string }) {
   const inp = h('input', { value: text, readonly: true, onfocus: (e: any) => e.target.select() })
   return h('div', { class: 'row' }, inp,
-    h('button', { onclick: (e: any) => { navigator.clipboard.writeText(text); e.target.textContent = t('Copied') } }, t('Copy')),
+    copyButton(text, t('Copy')),
     mail ? h('a', { class: 'button mail', href: mailto(mail), title: t('Opens your own email app with the link filled in') }, t('Email…')) : null)
 }
 
@@ -52,12 +53,8 @@ const when = (at: number) => new Date(at).toLocaleDateString(locale, { dateStyle
 // no new exposure: this browser already holds the owner key, which can do more than any of them.
 type Issued = Record<string, { name: string; at: number; link?: string }>
 const issuedKey = (project: string) => `texloom.issued.${project}`
-function loadIssued(project: string): Issued {
-  try { return JSON.parse(localStorage.getItem(issuedKey(project)) || '{}') } catch { return {} }
-}
-function saveIssued(project: string, v: Issued) {
-  try { localStorage.setItem(issuedKey(project), JSON.stringify(v)) } catch (e) { quiet(STORAGE, e) }
-}
+const loadIssued = (project: string): Issued => readJson<Issued>(issuedKey(project), {})
+const saveIssued = (project: string, v: Issued) => writeJson(issuedKey(project), v)
 
 interface Person { pub: string; name: string; at: number; revoked?: boolean; verified: boolean; link?: string }
 
@@ -99,7 +96,7 @@ export function shareDialog(r: Replica, server: string, me: string) {
       h('code', { class: 'muted small', title: t('Start of this link’s key: tells apart people with the same name') }, ` ${p.pub.slice(0, 6)}`),
       h('span', { class: 'muted small' }, p.revoked ? ' ' + t('revoked') : p.at ? ' ' + t('since {{date}}', { date: when(p.at) }) : ''),
       h('span', { class: 'spacer' }),
-      keys.owner && !p.revoked && p.link ? h('button', { title: t('Copy {{name}}’s edit link', { name: p.name }), onclick: (e: any) => { navigator.clipboard.writeText(p.link!); e.target.textContent = t('Copied') } }, t('Copy link')) : null,
+      keys.owner && !p.revoked && p.link ? copyButton(p.link!, t('Copy link'), { title: t('Copy {{name}}’s edit link', { name: p.name }) }) : null,
       keys.owner && !p.revoked && p.link ? h('a', { class: 'button mail', href: mailto(invitation(r, p.link, 'edit', me, p.name)), title: t('Opens your own email app with the link filled in') }, t('Email…')) : null,
       keys.owner && !p.revoked ? h('button', { onclick: () => revoke(p.pub, p.name) }, t('Revoke')) : null))
       : [h('li', { class: 'muted small' }, t('No personal links yet.'))]))
@@ -193,17 +190,17 @@ export async function rotateKeys(old: Replica, server: string) {
       for (const k of ['movedAt', 'storage']) fresh.meta.delete(k)
     })
     // let it reach the server (or stay in this browser if offline: it syncs when opened)
-    for (let i = 0; i < 60 && (fresh.status !== 'online' || fresh.pending); i++) await new Promise((res) => setTimeout(res, 250))
+    for (let i = 0; i < 60 && (fresh.status !== 'online' || fresh.pending); i++) await sleep(250)
     await fresh.close()
     // Retire the old project: tell its readers (signed, so no editor can fake it), then remove the server's copy.
     retiring = true
     const at = Date.now()
     old.meta.set('movedAt', { at, s: old.keys.ownerSign(`moved:${at}`) })
-    await new Promise((res) => setTimeout(res, 800))
+    await sleep(800)
     await old.setStorage('relay')
-    await new Promise((res) => setTimeout(res, 500))
+    await sleep(500)
     projects.update(keys.project, { fragment: keys.fragment(), writable: true, name: String(old.meta.get('name') ?? ''), at: Date.now() })
-    try { localStorage.setItem(`texloom.device.${keys.project}`, localStorage.getItem(`texloom.device.${old.keys.project}`) ?? '{}') } catch (e) { quiet(STORAGE, e) }
+    setString(`texloom.device.${keys.project}`, getString(`texloom.device.${old.keys.project}`) ?? '{}')
     await old.close()
     await projects.forget(old.keys.project).catch((e) => quiet('the old project is forgotten at the next clean-up', e))
     note.close()

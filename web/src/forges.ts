@@ -8,7 +8,8 @@
 // Bitbucket isn't here: its API doesn't give files' git ids, so every file would have to be
 // downloaded each minute to see what changed. The TeXLoom app's git bridge works with any host.
 import { t } from './i18n'
-import { quiet } from './quiet'
+import { b64, unb64 } from './bytes'
+import { devOverride, isLoopback } from './servers'
 
 export type Kind = 'github' | 'gitlab' | 'gitea'
 
@@ -53,8 +54,7 @@ export function normalHost(s: string): string | null {
   if (!/^[a-z]+:\/\//i.test(v)) v = 'https://' + v
   try {
     const u = new URL(v)
-    const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname)
-    if (u.protocol !== 'https:' && !(local && u.protocol === 'http:')) return null
+    if (u.protocol !== 'https:' && !(isLoopback(u.hostname) && u.protocol === 'http:')) return null
     if (u.username || u.password || u.search || u.hash) return null
     return (u.origin + u.pathname).replace(/\/+$/, '') // GitLab can live under a path
   } catch { return null }
@@ -76,8 +76,6 @@ export function repoPath(kind: Kind, host: string, s: string): string | null {
 }
 
 const enc = (s: string) => s.split('/').map(encodeURIComponent).join('/')
-const b64 = (d: Uint8Array) => { let s = ''; for (let i = 0; i < d.length; i += 0x8000) s += String.fromCharCode(...d.subarray(i, i + 0x8000)); return btoa(s) }
-const unb64 = (s: string) => Uint8Array.from(atob(s.replace(/\s/g, '')), (c) => c.charCodeAt(0))
 const FILE = (mode: string) => mode === '100644' || mode === '100755'
 
 export interface Forge {
@@ -124,11 +122,7 @@ const tooMany = () => new GitError(t('The repository has too many files for TeXL
 // ---- GitHub ------------------------------------------------------------------------------------
 /** api.github.com, or a stand-in when testing on this computer (set texloom.githubApi in localStorage). */
 function githubApi(): string {
-  try {
-    const o = localStorage.getItem('texloom.githubApi')
-    if (o && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return o.replace(/\/+$/, '')
-  } catch (e) { quiet('no stand-in for GitHub (testing only)', e) }
-  return 'https://api.github.com'
+  return devOverride('texloom.githubApi')?.replace(/\/+$/, '') || 'https://api.github.com'
 }
 
 function github(token: string): Forge {

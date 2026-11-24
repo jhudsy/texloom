@@ -3,9 +3,11 @@
 // collaborator's Assistant uses only the servers they added themselves.
 import { z } from 'zod'
 import { t } from '../i18n'
-import { quiet, STORAGE } from '../quiet'
+import { quiet } from '../quiet'
 import { McpClient, McpError, prefixFor, qualified, type McpTool } from './mcpclient'
 import { ToolError, type ToolDef } from './tools'
+import { isLoopback } from '../servers'
+import { readJson, writeJson } from '../store'
 
 export interface ToolServer {
   id: string
@@ -23,13 +25,11 @@ const CONNECT_MS = 15_000 // to connect and list the tools
 
 export const toolServers = {
   list(): ToolServer[] {
-    try {
-      const v = JSON.parse(localStorage.getItem(KEY) || '[]')
-      return Array.isArray(v) ? v.filter((s) => s && typeof s.url === 'string') : []
-    } catch { return [] }
+    const v = readJson<unknown>(KEY, [])
+    return Array.isArray(v) ? v.filter((s) => s && typeof s.url === 'string') : []
   },
   save(list: ToolServer[]) {
-    try { localStorage.setItem(KEY, JSON.stringify(list)) } catch (e) { quiet(STORAGE, e) }
+    writeJson(KEY, list)
     for (const [k, c] of connections) if (!list.some((s) => key(s) === k)) { connections.delete(k); c.then((x) => x.client.close(), (e) => quiet('a removed server had never connected: nothing to close', e)) }
   },
 }
@@ -39,7 +39,7 @@ export function checkUrl(url: string): string | null {
   let u: URL
   try { u = new URL(url) } catch { return t('That isn’t a web address.') }
   if (u.protocol === 'https:') return null
-  if (u.protocol === 'http:' && /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(u.hostname)) return null
+  if (u.protocol === 'http:' && isLoopback(u.hostname)) return null
   return t('Use an https:// address (http:// only for this computer).')
 }
 

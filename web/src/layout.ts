@@ -1,7 +1,7 @@
 // Resizable, collapsible three-pane layout: files | editor | PDF/assistant.
 // Widths are remembered per browser. The editor takes whatever space is left.
 import { t } from './i18n'
-import { quiet, STORAGE } from './quiet'
+import { readJson, writeJson } from './store'
 
 const KEY = 'texloom.layout'
 const MIN_LEFT = 140, MIN_RIGHT = 260, MIN_EDITOR = 280
@@ -14,7 +14,7 @@ interface State { left: number; right: number; leftHidden: boolean; rightHidden:
 
 function load(): State {
   const def: State = { left: 220, right: Math.round(Math.max(360, (innerWidth - 220) * 0.45)), leftHidden: false, rightHidden: false }
-  try { return { ...def, ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return def }
+  return { ...def, ...readJson(KEY, {}) }
 }
 
 export type Pane = 'left' | 'right'
@@ -41,7 +41,7 @@ interface Mode {
 
 export function setupLayout(main: HTMLElement, splitL: HTMLElement, splitR: HTMLElement): Layout {
   const s = load()
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(s)) } catch (e) { quiet(STORAGE, e) } }
+  const save = () => writeJson(KEY, s)
   const classes = (left: boolean, right: boolean, editor: boolean, drawer: boolean) => {
     main.classList.toggle('no-left', !left)
     main.classList.toggle('no-right', !right)

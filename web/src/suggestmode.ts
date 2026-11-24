@@ -17,7 +17,7 @@ import { addItem, allItems, ChangeMark, changeTitle, editorMarkup, onFlushTyped,
 import type { Replica } from './replica'
 import { anchor, compose, edit, loadHunks, normalize, refresh, saveHunks, settle, toShared, toView, type Hunk } from './suggestcore'
 import { commonEnds, refine, wordDiff } from './worddiff'
-import { quiet, STORAGE } from './quiet'
+import { getString, readJson, setString, writeJson } from './store'
 
 /** Marks changes to the review map that this tab's suggesting made (not news to it). */
 const ORIGIN = { suggestMode: true }
@@ -29,12 +29,9 @@ const fromShared = Annotation.define<boolean>()
  *  browser uses its own page's id there, so two tabs never edit the same ones. */
 const PAGE = crypto.randomUUID()
 function browserId(project: string): string {
-  try {
-    const key = `texloom.suggester.${project}`
-    const id = localStorage.getItem(key) || crypto.randomUUID()
-    localStorage.setItem(key, id)
-    return id
-  } catch { return PAGE }
+  const key = `texloom.suggester.${project}`
+  const id = getString(key) || crypto.randomUUID()
+  return setString(key, id) ? id : PAGE
 }
 
 /** The suggestions this browser made in a project. The `typed` id in a suggestion is public, so
@@ -42,8 +39,8 @@ function browserId(project: string): string {
 function madeHere(project: string) {
   const key = `texloom.madehere.${project}`
   let ids: Set<string>
-  try { ids = new Set(JSON.parse(localStorage.getItem(key) || '[]')) } catch { ids = new Set() }
-  const save = () => { try { localStorage.setItem(key, JSON.stringify([...ids].slice(-5000))) } catch (e) { quiet(STORAGE, e) } }
+  try { ids = new Set(readJson<string[]>(key, [])) } catch { ids = new Set() } // (not a list: none)
+  const save = () => writeJson(key, [...ids].slice(-5000))
   return {
     has: (id: string) => ids.has(id),
     add(more: Iterable<string>) { const n = ids.size; for (const id of more) ids.add(id); if (ids.size !== n) save() },
@@ -58,14 +55,12 @@ const LOCK_FRESH = 15_000 // ms: a lock not renewed for this long was left by a 
 function claim(project: string, file: string): { me: string; release(): void } {
   const key = `texloom.suggestlock.${project}.${file}`
   const mine = () => JSON.stringify({ tab: PAGE, at: Date.now() })
-  try {
-    const held = JSON.parse(localStorage.getItem(key) || 'null') as { tab: string; at: number } | null
-    if (held && held.tab !== PAGE && Date.now() - held.at < LOCK_FRESH) return { me: PAGE, release() {} }
-    const BROWSER = browserId(project)
-    localStorage.setItem(key, mine())
-    const renew = setInterval(() => { try { localStorage.setItem(key, mine()) } catch (e) { quiet(STORAGE, e) } }, LOCK_FRESH / 3)
-    return { me: BROWSER, release() { clearInterval(renew); try { if (JSON.parse(localStorage.getItem(key) || 'null')?.tab === PAGE) localStorage.removeItem(key) } catch (e) { quiet(STORAGE, e) } } }
-  } catch { return { me: PAGE, release() {} } }
+  const held = readJson<{ tab: string; at: number } | null>(key, null)
+  if (held && held.tab !== PAGE && Date.now() - held.at < LOCK_FRESH) return { me: PAGE, release() {} }
+  const BROWSER = browserId(project)
+  if (!setString(key, mine())) return { me: PAGE, release() {} } // (no storage: no lock)
+  const renew = setInterval(() => setString(key, mine()), LOCK_FRESH / 3)
+  return { me: BROWSER, release() { clearInterval(renew); if (readJson<{ tab?: string } | null>(key, null)?.tab === PAGE) setString(key, null) } }
 }
 const SAVE_AFTER = 800 // ms after typing stops
 
@@ -86,14 +81,14 @@ export const suggestMode = (() => {
       key = `texloom.suggesting.${project}`
       allowed = writable
       suggester = by
-      try { on = writable && localStorage.getItem(key) === '1' } catch { on = false }
+      on = writable && getString(key) === '1'
     },
     on: () => on,
     set(v: boolean) {
       v &&= allowed
       if (v === on) return
       on = v
-      try { if (on) localStorage.setItem(key, '1'); else localStorage.removeItem(key) } catch (e) { quiet(STORAGE, e) }
+      setString(key, on ? '1' : null)
       watchers.forEach((f) => f())
     },
     watch(f: () => void) { watchers.add(f); return () => { watchers.delete(f) } },

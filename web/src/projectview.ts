@@ -10,7 +10,7 @@ import { prefs, setupDialog, settingsDialog, type Device, type SettingsTab } fro
 import { createAssistantPanel, type AssistantStatus } from './assistant/panel'
 import { setupLayout } from './layout'
 import { riskBanner } from './storagenotice'
-import { $, h, saveFile } from './dom'
+import { $, debounce, errorText, h, saveFile, sleep } from './dom'
 import { icon } from './icons'
 import { t, tn, tNodes, locale } from './i18n'
 import { fileBase, mainFile, projectZip } from './projectfiles'
@@ -48,24 +48,23 @@ import { createOutlinePanel, createSearchPanel, blankNonProse, countWords } from
 import { allItems, createReviewPanel, reviewExtension, type ReviewPanel } from './review'
 import { mentionsMe } from './mention'
 import { suggestMode } from './suggestmode'
-import { quiet, quieted, STORAGE } from './quiet'
+import { quiet, quieted } from './quiet'
 import { openedByApp, appCompiles, inAppKey, APP, UNTITLED, brand, programWhat, onRefresh } from './appinfo'
+import { getString, setString, takeString } from './store'
 
 // ---- project view -----------------------------------------------------------------
 /** Open a project, syncing with `server`: this app's own, or the project's if it lives elsewhere. */
 export async function openProject(keys: Keys, server: string) {
   // a personal link the owner revoked opens read-only
-  try {
-    if (keys.member && localStorage.getItem(`texloom.withdrawn.${keys.project}`)) keys = new Keys(keys.project, keys.key, null)
-  } catch (e) { quiet(STORAGE, e) }
-  if (openedByApp) try { localStorage.setItem(inAppKey(keys.project), '1') } catch (e) { quiet(STORAGE, e) }
+  if (keys.member && getString(`texloom.withdrawn.${keys.project}`)) keys = new Keys(keys.project, keys.key, null)
+  if (openedByApp) setString(inAppKey(keys.project), '1')
   let device: Device = prefs.device(keys.project)
   const r = new Replica(keys, server, device.sync)
   await r.open()
   const writable = keys.writable && !r.deletedAt // a project its owner deleted for everyone stays as it was
   let removing = false // set while deleting, so the page doesn't re-save it to "recent"
   if (!device.setup) {
-    if (r.syncMode === 'live') await new Promise((res) => setTimeout(res, 800)) // fetch the name first
+    if (r.syncMode === 'live') await sleep(800) // fetch the name first
     device = await setupDialog(r, keys.link(server, writable), openedByApp, appCompiles)
     r.setSyncMode(device.sync)
   }
@@ -73,21 +72,12 @@ export async function openProject(keys: Keys, server: string) {
   r.awareness.setLocalStateField('user', { ...me, colorLight: me.color + '33' })
   if (writable && r.clients.get(String(r.doc.clientID)) !== me.name) r.clients.set(String(r.doc.clientID), me.name) // for "who wrote this"
   autoSave(r, () => me.name)
-  try { // the name given in Create project
-    const named = localStorage.getItem(`texloom.newName.${keys.project}`)
-    localStorage.removeItem(`texloom.newName.${keys.project}`)
-    if (named && writable && !r.meta.get('name')) r.meta.set('name', named)
-  } catch (e) { quiet(STORAGE, e) }
+  const named = takeString(`texloom.newName.${keys.project}`) // the name given in Create project
+  if (named && writable && !r.meta.get('name')) r.meta.set('name', named)
   if (writable && !r.meta.get('name')) r.meta.set('name', UNTITLED)
-  try {
-    if (writable && localStorage.getItem(`texloom.newRelay.${keys.project}`)) {
-      localStorage.removeItem(`texloom.newRelay.${keys.project}`)
-      r.setStorage('relay') // chosen at creation: no server copy
-    }
-  } catch (e) { quiet(STORAGE, e) }
+  if (writable && takeString(`texloom.newRelay.${keys.project}`)) r.setStorage('relay') // chosen at creation: no server copy
   // a brand-new project: fill it from the chosen template (or open Import)
-  let template: string | null = null
-  try { template = localStorage.getItem(`texloom.newTemplate.${keys.project}`); localStorage.removeItem(`texloom.newTemplate.${keys.project}`) } catch (e) { quiet(STORAGE, e) }
+  const template = takeString(`texloom.newTemplate.${keys.project}`)
   // Only projects made here with Create project: one opened from a link already exists, and
   // starter files added before its own arrive would clash with them (clashes.ts).
   if (template && writable && r.files.size === 0 && r.bin.size === 0 && !r.meta.get('seeded')) {
@@ -135,7 +125,7 @@ export async function openProject(keys: Keys, server: string) {
     preview: (p) => { preview.show(p); showInPanel(true); layout.reveal('right'); showTab('pdf') },
     compile: (p) => { showInPanel(false); layout.reveal('right'); showTab('pdf'); output.compile(true, false, p) },
     zotero: (p) => (writable && zoteroLinks(r)[p] && zoteroAccount.get()
-      ? () => { zoteroRefresh(r, p, me.name).catch((e) => alert(e instanceof Error ? e.message : String(e))) } : null),
+      ? () => { zoteroRefresh(r, p, me.name).catch((e) => alert(errorText(e))) } : null),
     insert: () => {
       const v = editor.view()
       if (!v || !isTexFile(editor.current())) return null
@@ -289,7 +279,7 @@ export async function openProject(keys: Keys, server: string) {
     currentTab = t
     markAssistant()
     showInPanel(showingFile)
-    try { localStorage.setItem('texloom.tab', t) } catch (e) { quiet(STORAGE, e) }
+    setString('texloom.tab', t)
   }
 
   // left-hand tabs: files, search across files, outline with word count, symbols
@@ -317,7 +307,7 @@ export async function openProject(keys: Keys, server: string) {
     if (t === 'outline') outlinePanel.refresh()
     if (t === 'search') search.focus()
     if (t === 'symbols') palette.refresh()
-    try { localStorage.setItem('texloom.ltab', t) } catch (e) { quiet(STORAGE, e) }
+    setString('texloom.ltab', t)
   }
 
   // ---- folder sync from the browser (Chromium) ----
@@ -487,9 +477,9 @@ export async function openProject(keys: Keys, server: string) {
     leftBtn.setAttribute('aria-pressed', String(left))
     rightBtn.setAttribute('aria-pressed', String(right))
   }
-  const savedLeft = localStorage.getItem('texloom.ltab') as LeftTab | null
+  const savedLeft = getString('texloom.ltab') as LeftTab | null
   if (savedLeft === 'outline' || (savedLeft === 'symbols' && writable)) showLeft(savedLeft)
-  const savedTab = localStorage.getItem('texloom.tab') as Tab | null
+  const savedTab = getString('texloom.tab') as Tab | null
   if (savedTab && savedTab in panes && savedTab !== 'pdf') showTab(savedTab)
   // the desktop app's "Review in browser" and mention notices (?tab=review, &mentions=1 for just yours)
   const asked = new URLSearchParams(location.search)
@@ -646,15 +636,11 @@ export async function openProject(keys: Keys, server: string) {
   keepLF(r) // line breaks are \n only (files saved on Windows have \r\n): see lineends.ts
   // End-to-end checks (scripts/check_synconly.py) type into the editor for real and read the shared
   // text back: only on this computer's own addresses, and only when a check turns it on.
-  try {
-    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && localStorage.getItem('texloom.testHooks') === '1') {
-      (window as any).__texloom = { r, view: () => editor.view(), open: (p: string) => { layout.showEditor(); tree.open(p) } }
-    }
-    if (checking()) { // every shared text stays well formed once changes settle (invariants.ts)
-      let t: ReturnType<typeof setTimeout> | undefined
-      r.files.observeDeep(() => { clearTimeout(t); t = setTimeout(() => r.files.forEach((yt, p) => wellFormed(`the shared ${p}`, yt.toString())), 200) })
-    }
-  } catch (e) { quiet('storage blocked: no hooks', e) }
+  if (checking()) {
+    (window as any).__texloom = { r, view: () => editor.view(), open: (p: string) => { layout.showEditor(); tree.open(p) } }
+    // every shared text stays well formed once changes settle (invariants.ts)
+    r.files.observeDeep(debounce(() => r.files.forEach((yt, p) => wellFormed(`the shared ${p}`, yt.toString())), 200))
+  }
   runGitHub(r, () => me.name) // keep it in step with a GitHub repository, if it's linked to one
   runDropbox(r, () => me.name) // and with a Dropbox folder
   r.meta.observe(renderMoved); renderMoved()
@@ -728,5 +714,5 @@ export async function openProject(keys: Keys, server: string) {
   output.compileBtn.addEventListener('click', () => { showInPanel(false); if (layout.narrow) { layout.reveal('right'); showTab('pdf') } }) // the result is what you want to see
 
   // debugging handle, only when enabled with localStorage['texloom.debug'] = '1'
-  try { if (localStorage.getItem('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor, startFolderSync, quiet: quieted } } catch (e) { quiet(STORAGE, e) }
+  if (getString('texloom.debug') === '1') (window as any).texloom = { replica: r, Y, output, pdfjs, SyncTex, editor, startFolderSync, quiet: quieted }
 }
