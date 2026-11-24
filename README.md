@@ -952,9 +952,7 @@ uv run --with mypy python scripts/check_textpos.py               # character, by
 uv run python scripts/check_compat.py                              # code kept for older apps, servers and data: listed, markers well formed (DESIGN.md)
 uv run python scripts/check_server_state.py                        # what each server keeps in memory, and its addresses, each listed for several servers (SCALING.md)
 uv run --with hypothesis python scripts/check_folder_model.py     # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
-uv run python scripts/check_folder_deletions.py                   # a file deleted or renamed in the folder isn't brought back by a change arriving just then
-uv run python scripts/check_folder_reads.py                       # a file is shared only as it was once it stopped changing, not mid-way through the next save
-uv run python scripts/check_folder_renames.py                     # a folder renamed or moved takes its files (and their comments) with it at once
+uv run python scripts/check_folder_regressions.py                 # folder sync's old bugs: a deleted file brought back, a half-saved file shared, a renamed folder's files left behind
 uv run --extra server python scripts/check_shared_folder.py       # two computers on one folder shared through a stand-in Dropbox: they take turns, nothing arrives twice
 uv run --extra server python scripts/check_store.py               # the server's database: SQLite and PostgreSQL give the same answers, and copy into each other
 uv run --extra server python scripts/check_files.py               # the server's file store: a folder, and Garage (S3) if installed
