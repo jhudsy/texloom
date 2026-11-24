@@ -204,12 +204,12 @@ async def _codes_command(a: argparse.Namespace, codes: CodeBook, files: Files) -
               f"{sum(1 for o in store.owners.values() if o == 'default')} project(s)")
         for c, (allowance, label) in codes.codes.items():
             n = sum(1 for o in store.owners.values() if o == c)
-            print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {fmt_size(allowance):>9}  used {fmt_size(store.owner_usage(c)):>7}  "
+            print(f"{codes.display(c)}  {fmt_size(allowance):>9}  used {fmt_size(store.owner_usage(c)):>7}  "
                   f"{n} project(s){expiry(c)}  {label}")
         removed = sorted({o for o in store.owners.values() if o not in codes.codes and o != "default"})
         for c in removed:
             if store.owner_usage(c):
-                print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {'removed':>9}  used {fmt_size(store.owner_usage(c)):>7}  "
+                print(f"{codes.display(c)}  {'removed':>9}  used {fmt_size(store.owner_usage(c)):>7}  "
                       f"{len(store.stored_by(c))} stored project(s)  (--purge-code to delete them)")
     finally:
         await store.close()
@@ -275,7 +275,7 @@ def main() -> None:
                 sys.exit(f"no such code in {', '.join(map(str, a.codes_file))}: {a.renew_code}")
             print(f"{label or a.renew_code}: {size}, {f'valid until {until}' if until else 'no expiry'}")
             return
-        codes._load()
+        codes.load()
         asyncio.run(_codes_command(a, codes, files))
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")

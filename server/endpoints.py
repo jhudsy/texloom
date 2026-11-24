@@ -4,7 +4,6 @@ lists and checking a creation code; and the headers every response gets."""
 from __future__ import annotations
 
 import asyncio
-import binascii
 import json
 import logging
 import tempfile
@@ -30,6 +29,22 @@ MAX_BLOB = 50 * MiB  # uploaded over HTTP
 UPLOAD_TIME = 600  # seconds an upload may take; slow ones use only a connection and a temporary file
 
 
+def blob_ids(request: web.Request) -> tuple[str, str]:
+    """The project and stored file a /blob/{project}/{id} request names."""
+    project, bid = request.match_info["project"], request.match_info["id"]
+    if not PROJECT_RE.match(project) or not BLOB_RE.match(bid):
+        raise web.HTTPBadRequest()
+    return project, bid
+
+
+def x_sig(request: web.Request) -> bytes:
+    """The signature a request carries (X-Sig); one that isn't base64 is refused."""
+    try:
+        return b64d(request.headers.get("X-Sig", ""))
+    except ValueError:  # (binascii.Error is one)
+        raise web.HTTPForbidden(text="bad signature") from None
+
+
 class Endpoints(StoragePolicy):
     """HTTP requests (part of Relay)."""
 
@@ -40,9 +55,7 @@ class Endpoints(StoragePolicy):
     memory: Budget
 
     async def put_blob(self, request: web.Request) -> web.Response:
-        project, bid = request.match_info["project"], request.match_info["id"]
-        if not PROJECT_RE.match(project) or not BLOB_RE.match(bid):
-            raise web.HTTPBadRequest()
+        project, bid = blob_ids(request)
         if (request.content_length or 0) > MAX_BLOB:
             raise web.HTTPRequestEntityTooLarge(max_size=MAX_BLOB, actual_size=request.content_length or 0)
         if await self.store.deleted(project):
@@ -51,10 +64,7 @@ class Endpoints(StoragePolicy):
         why = await self.denied(project, request.headers.get("X-Create-Code"), claim=False)
         if why:
             return web.json_response({"code": why}, status=403)
-        try:
-            sig = b64d(request.headers.get("X-Sig", ""))
-        except (ValueError, binascii.Error):
-            raise web.HTTPForbidden(text="bad signature")
+        sig = x_sig(request)
         if not (len(sig) == 64 or 162 <= len(sig) <= 417):  # an owner or personal-link signature
             raise web.HTTPForbidden(text="bad signature")
         # Read to a temporary file, so a slow or stalled upload holds up nobody else. Then it takes
@@ -122,13 +132,8 @@ class Endpoints(StoragePolicy):
         """Erase stored content. Any writer may erase compiled output (replaced by every compile);
         only the owner may erase other content (e.g. outputs stored before outputs were marked).
         This isn't deleting a file from the project, which any editor does in the document."""
-        project, bid = request.match_info["project"], request.match_info["id"]
-        if not PROJECT_RE.match(project) or not BLOB_RE.match(bid):
-            raise web.HTTPBadRequest()
-        try:
-            sig = b64d(request.headers.get("X-Sig", ""))
-        except (ValueError, binascii.Error):
-            raise web.HTTPForbidden(text="bad signature")
+        project, bid = blob_ids(request)
+        sig = x_sig(request)
         who = signer(project, f"del:{bid}".encode(), sig)
         if who is None or who in await self.store.revoked(project):
             raise web.HTTPForbidden(text="bad signature")
@@ -140,9 +145,7 @@ class Endpoints(StoragePolicy):
         return web.Response(status=404 if not await self.store.has_blob(project, bid) else 403)
 
     async def get_blob(self, request: web.Request) -> web.Response:
-        project, bid = request.match_info["project"], request.match_info["id"]
-        if not PROJECT_RE.match(project) or not BLOB_RE.match(bid):
-            raise web.HTTPBadRequest()
+        project, bid = blob_ids(request)
         if await self.store.deleted(project):
             raise web.HTTPGone()
         if await self.denied(project, None):
@@ -177,8 +180,8 @@ class Endpoints(StoragePolicy):
         return {"code": "update-needed", "min": m, "m": f"this server needs TeXLoom {m} or later"}
 
     async def info(self, _request: web.Request) -> web.Response:
-        self.codes._load()
-        d = self.codes.default if self.codes.path else UNLIMITED
+        self.codes.load()
+        d = self.codes.default
         return web.json_response({
             "private": self.private,
             "creation": "open" if self._open() else "code",
@@ -213,11 +216,9 @@ class Endpoints(StoragePolicy):
         return web.Response(body=row[1], content_type="application/octet-stream",
                             headers={"X-Seq": str(row[0]), "Cache-Control": "no-store"})
 
-    def _list_signed(self, lid: str, msg: bytes, request: web.Request) -> bool:
-        try:
-            sig = b64d(request.headers.get("X-Sig", ""))
-        except (ValueError, binascii.Error):
-            return False
+    @staticmethod
+    def _list_signed(lid: str, msg: bytes, request: web.Request) -> bool:
+        sig = x_sig(request)
         return len(sig) == 64 and signer(lid, msg, sig) == "owner"
 
     async def put_list(self, request: web.Request) -> web.Response:

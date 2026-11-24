@@ -15,18 +15,10 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
+from .policy import fmt_size
+
 if TYPE_CHECKING:
     from .relay import Relay
-
-
-def _size(n: float) -> str:
-    if n == float("inf"):
-        return "unlimited"
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(n) < 1024 or unit == "TB":
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1024
-    return str(n)
 
 
 def _ago(t: float) -> str:
@@ -75,7 +67,7 @@ class Admin:
             return web.Response(status=401, text="admin token required",
                                 headers={"WWW-Authenticate": 'Basic realm="TeXLoom admin"'})
         r, st = self.relay, self.relay.store
-        r.codes._load()
+        r.codes.load()
         e = html.escape
         modes, rows, apps, snaps = await st.admin_rows()
         online = {p: len(ws) for p, ws in r.rooms.items() if ws}
@@ -97,12 +89,12 @@ class Admin:
             """A project's whole history, compressed: snapshots stop at 50 MB (issue #18)."""
             if n is None:
                 return "<span class=muted>—</span>"
-            return "<b>over 12 MB</b>" if n < 200 else _size(n)  # (a reference to an upload: a real snapshot is bigger)
+            return "<b>over 12 MB</b>" if n < 200 else fmt_size(n)  # (a reference to an upload: a real snapshot is bigger)
 
         projects = sorted(rows, key=lambda x: -st.usage.get(x[0], 0))
         prow = "".join(
             f"<tr><td><code>{e(p[:10])}…</code></td><td>{e(code_name(o))}</td>"
-            f"<td class=n>{_size(st.usage.get(p, 0))}</td><td class=n>{snapshot_cell(snaps.get(p))}</td>"
+            f"<td class=n>{fmt_size(st.usage.get(p, 0))}</td><td class=n>{snapshot_cell(snaps.get(p))}</td>"
             f"<td>{'relay-only' if modes.get(p) else ('evicted' if ev and not st.usage.get(p) else 'stored')}</td>"
             f"<td>{_ago(created)}</td><td>{_ago(st.seen.get(p, seen))}</td><td class=n>{online.get(p, 0) or ''}</td></tr>"
             for p, created, o, seen, ev in projects[:500])
@@ -113,12 +105,12 @@ class Admin:
             """The code itself, for handing out: the start shown, the rest on click (no script needed)."""
             if c not in r.codes.codes:
                 return "<td class=muted>—</td>"
-            full = f"{c[:4]}-{c[4:8]}-{c[8:]}"
+            full = r.codes.display(c)
             return f"<td><details><summary><code>{e(full[:4])}-…</code></summary><code>{e(full)}</code></details></td>"
 
         crow = "".join(
-            f"<tr><td>{e(code_name(c))}</td>{code_cell(c)}{expiry_cell(c)}<td class=n>{_size(r.codes.allowance(c))}</td>"
-            f"<td class=n>{_size(st.owner_usage(c))}</td><td class=n>{len(owners.get(c, []))}</td></tr>"
+            f"<tr><td>{e(code_name(c))}</td>{code_cell(c)}{expiry_cell(c)}<td class=n>{fmt_size(r.codes.allowance(c))}</td>"
+            f"<td class=n>{fmt_size(st.owner_usage(c))}</td><td class=n>{len(owners.get(c, []))}</td></tr>"
             for c in ["default", *r.codes.codes.keys()])
         mv = ".".join(map(str, r.min_version)) if r.min_version else ""
         arow = "".join(
@@ -130,10 +122,10 @@ class Admin:
 <title>TeXLoom admin</title><style>{STYLE}</style></head><body>
 <h1>TeXLoom admin</h1>
 <div class=grid>
-<span>Stored</span><b>{_size(st.total)}</b>
-<span>Disk free</span><span>{_size(st.free_disk())} (keeps {_size(lim.min_free)} free)</span>
-<span>Total cap</span><span>{_size(lim.max_bytes)}</span>
-<span>Per project</span><span>{_size(lim.project_max)} (unlimited codes exempt)</span>
+<span>Stored</span><b>{fmt_size(st.total)}</b>
+<span>Disk free</span><span>{fmt_size(st.free_disk())} (keeps {fmt_size(lim.min_free)} free)</span>
+<span>Total cap</span><span>{fmt_size(lim.max_bytes)}</span>
+<span>Per project</span><span>{fmt_size(lim.project_max)} (unlimited codes exempt)</span>
 <span>Projects</span><span>{len(rows)} registered, {sum(1 for p in rows if st.usage.get(p[0]))} with stored data</span>
 <span>Deleted for everyone</span><span>{await st.deleted_count()} (only the owner's signed deletion is kept, so that a copy can't bring one back)</span>
 <span>Connected now</span><span>{sum(online.values())} connection(s) in {len(online)} project(s)</span>

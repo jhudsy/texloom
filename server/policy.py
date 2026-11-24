@@ -121,7 +121,7 @@ class CodeBook:
         parse_size(rest[0])
         return rest[0], rest[1:], dates[-1] if dates else None
 
-    def _load(self) -> None:
+    def load(self) -> None:
         if not self.path:
             return
         def mtime(p: Path) -> float:
@@ -174,7 +174,7 @@ class CodeBook:
 
     def lapsed(self, owner: str) -> bool:
         """True if `owner` was a creation code that has since expired or been removed."""
-        self._load()
+        self.load()
         return bool(self.path) and owner != "default" and (owner not in self.codes or self.expired(owner))
 
     def lapsed_since(self, code: str) -> int | None:
@@ -183,14 +183,14 @@ class CodeBook:
 
     @property
     def open_creation(self) -> bool:
-        self._load()
+        self.load()
         return self.default > 0
 
     def check(self, code: object) -> str | None:
         """The normalized code if valid (constant-time comparison), else None."""
         if not code:
             return None
-        self._load()
+        self.load()
         given = self.normalize(code)
         found = None
         for c in self.codes:
@@ -200,21 +200,24 @@ class CodeBook:
 
     def allowance(self, owner: str) -> float:
         """Allowance for an owner: a code, or 'default'."""
-        self._load()
-        if self.path is None:
-            return UNLIMITED
+        self.load()
         if owner in self.codes and not self.expired(owner):
             return self.codes[owner][0]
-        return self.default  # 'default', or a code that has since been removed or has expired
+        # 'default' (unlimited without a codes file), or a code since removed or expired
+        return self.default
 
     def label(self, owner: str) -> str:
         return self.codes.get(owner, (0, owner))[1] or owner
 
+    @staticmethod
+    def display(code: str) -> str:
+        """A normalized code as people see it: XXXX-XXXX-XXXX."""
+        return f"{code[:4]}-{code[4:8]}-{code[8:]}"
+
     def add(self, label: str, allowance: str, until: dt.date | None = None) -> str:
         assert self.path
         parse_size(allowance)
-        raw = "".join(secrets.choice(self.ALPHABET) for _ in range(12))  # 60 bits
-        code = f"{raw[:4]}-{raw[4:8]}-{raw[8:]}"
+        code = self.display("".join(secrets.choice(self.ALPHABET) for _ in range(12)))  # 60 bits
         self.path.parent.mkdir(parents=True, exist_ok=True)
         new = not self.path.exists()
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o640)
@@ -382,7 +385,7 @@ class StoragePolicy:
     async def purge_expired(self, after_days: float) -> None:
         """Purge the projects of codes that expired more than `after_days` ago, letting live
         editing through between projects (a lapsed plan can hold gigabytes)."""
-        self.codes._load()
+        self.codes.load()
         for c in list(self.codes.until):
             days = self.codes.lapsed_since(c)
             if days is None or days <= after_days or not (self.store.stored_by(c) or (self.lists and await self.lists.count(c))):

@@ -9,7 +9,6 @@ the command line (and how storage allowances work) in cli.py.
 from __future__ import annotations
 
 import asyncio
-import binascii
 import json
 import logging
 import time
@@ -390,7 +389,7 @@ class Relay(Endpoints):
                     await self.handle(project, ws, conn, t, msg)
                 except ConnectionError:  # it went while its message was handled (an answer had nowhere to go)
                     break
-                except (BadMessage, ValueError, TypeError, KeyError, OverflowError, binascii.Error, RecursionError) as e:
+                except (BadMessage, ValueError, TypeError, KeyError, OverflowError, RecursionError) as e:  # (binascii.Error is a ValueError)
                     await ws.send_json({"t": "err", "m": f"bad message: {e}"[:200]})
                 except Exception:
                     log.exception("error handling message")
