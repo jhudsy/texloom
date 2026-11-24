@@ -16,6 +16,7 @@ that created it has expired. Reading needs only the id, a 256-bit value derived 
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 
 from .db import Database
 
@@ -26,16 +27,14 @@ RETIRED = -1  # sequence number of a replaced or deleted list: its id can't be u
 RETIRED_KEEP = 365 * 86400  # seconds a retired id is remembered (like removal records in a list)
 
 
-
-
 class Lists:
     """Entries in the table `lists` (created with the store's schema, store.py)."""
 
-    def __init__(self, db: Database, grew=None):
+    def __init__(self, db: Database, grew: Callable[[str, int], None]):
         self.db = db
         # grew(owner, bytes): told of every change in what an owner's entries take, so they count
         # against its allowance and the server's total (Store.lists_grew)
-        self.grew = grew or (lambda owner, n: None)
+        self.grew = grew
 
     async def get(self, lid: str) -> tuple[int, bytes, str] | None:
         """(sequence number, data, owner) of an entry; reading it counts as using it."""
@@ -90,16 +89,16 @@ class Lists:
             return False
         return owner == "default" or await self.count(owner) < MAX_PER_OWNER
 
-    async def _deleted(self, rows) -> int:
+    def _deleted(self, rows) -> int:
         for r in rows:
             self.grew(r["owner"], -r["n"])
         return len(rows)
 
     async def purge_owner(self, owner: str) -> int:
-        return await self._deleted(await self.db.fetch(
+        return self._deleted(await self.db.fetch(
             "DELETE FROM lists WHERE owner=$1 RETURNING owner, octet_length(data) AS n", owner))
 
     async def drop_idle(self, before: float) -> int:
         """Drop lists unused since `before`. Not the markers of retired ids: those stay a year (see retire)."""
-        return await self._deleted(await self.db.fetch(
+        return self._deleted(await self.db.fetch(
             "DELETE FROM lists WHERE seen < $1 AND seq <> $2 RETURNING owner, octet_length(data) AS n", before, RETIRED))

@@ -31,9 +31,10 @@ import sqlite3
 import tarfile
 import tempfile
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 
-from aiohttp import ClientError, ClientSession, ClientTimeout, web
+from aiohttp import ClientError, ClientResponse, ClientSession, ClientTimeout, web
 
 log = logging.getLogger("texloom.texlive")
 
@@ -204,18 +205,30 @@ class TexLive:
         return list(dict.fromkeys([*self.extra_mirrors, *rest, *([pinned] if pinned else []), *archive]))
 
     @staticmethod
-    async def _download(session: ClientSession, url: str, limit: int) -> tuple[bytes, str]:
+    def _body(r: ClientResponse, limit: int) -> AsyncIterator[bytes]:
+        """A response's body, a piece at a time; ClientError if it isn't a 200 of at most `limit` bytes
+        (checked before the first piece, as far as the response says)."""
+        if r.status != 200:
+            raise ClientError(f"HTTP {r.status}")
+        if (r.content_length or 0) > limit:
+            raise ClientError("too large")
+
+        async def pieces() -> AsyncIterator[bytes]:
+            n = 0
+            async for chunk in r.content.iter_chunked(1 << 16):  # read() can return early
+                n += len(chunk)
+                if n > limit:
+                    raise ClientError("too large")
+                yield chunk
+        return pieces()
+
+    @classmethod
+    async def _download(cls, session: ClientSession, url: str, limit: int) -> tuple[bytes, str]:
         """(body, final URL after redirects)."""
         async with session.get(url, allow_redirects=True) as r:
-            if r.status != 200:
-                raise ClientError(f"HTTP {r.status}")
-            if (r.content_length or 0) > limit:
-                raise ClientError("too large")
             buf = bytearray()
-            async for chunk in r.content.iter_chunked(1 << 16):  # read() can return early
+            async for chunk in cls._body(r, limit):
                 buf += chunk
-                if len(buf) > limit:
-                    raise ClientError("too large")
             return bytes(buf), str(r.url)
 
     async def build_index(self, preferred: list[str] | None = None) -> None:
@@ -355,21 +368,14 @@ class TexLive:
         with self.db:
             self.db.execute("UPDATE pkgs SET used=? WHERE name=?", (now, pkg))
 
-    @staticmethod
-    async def _download_to(session: ClientSession, url: str, limit: int, dest: Path) -> str:
+    @classmethod
+    async def _download_to(cls, session: ClientSession, url: str, limit: int, dest: Path) -> str:
         """Write the body to `dest` (it never sits whole in memory); its SHA-512."""
         h = hashlib.sha512()
         async with session.get(url, allow_redirects=True) as r:
-            if r.status != 200:
-                raise ClientError(f"HTTP {r.status}")
-            if (r.content_length or 0) > limit:
-                raise ClientError("too large")
-            n = 0
+            body = cls._body(r, limit)
             with open(dest, "wb") as out:  # noqa: ASYNC230 - small writes to local disk, between network reads
-                async for chunk in r.content.iter_chunked(1 << 16):
-                    n += len(chunk)
-                    if n > limit:
-                        raise ClientError("too large")
+                async for chunk in body:
                     h.update(chunk)
                     out.write(chunk)
         return h.hexdigest()

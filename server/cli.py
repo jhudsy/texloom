@@ -54,13 +54,15 @@ from .policy import (
     GiB,
     Limits,
     MiB,
+    Policy,
     add_months,
     fmt_size,
     parse_date,
     parse_size,
     today,
 )
-from .relay import LISTEN_BACKLOG, SHUTDOWN_WAIT, Relay, make_app
+from .app import Settings, make_app
+from .relay import LISTEN_BACKLOG, SHUTDOWN_WAIT
 from .store import Store
 from .wire import version_tuple
 
@@ -189,7 +191,7 @@ async def _codes_command(a: argparse.Namespace, codes: CodeBook, files: Files) -
             if c in codes.codes and not codes.expired(c):
                 sys.exit(f"{a.purge_code} is still valid{f' (until {codes.until[c]})' if c in codes.until else ''}: "
                          "let it expire, or delete its line, first")
-            n, freed, _ = await Relay(store, codes=codes).purge(c)
+            n, freed, _ = await Policy(store, codes).purge(c)
             await store.empty_trash()
             print(f"purged {n} project(s), {fmt_size(freed)} freed. If the server is running, restart it so its "
                   "storage totals are up to date.")
@@ -204,12 +206,12 @@ async def _codes_command(a: argparse.Namespace, codes: CodeBook, files: Files) -
               f"{sum(1 for o in store.owners.values() if o == 'default')} project(s)")
         for c, (allowance, label) in codes.codes.items():
             n = sum(1 for o in store.owners.values() if o == c)
-            print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {fmt_size(allowance):>9}  used {fmt_size(store.owner_usage(c)):>7}  "
+            print(f"{codes.display(c)}  {fmt_size(allowance):>9}  used {fmt_size(store.owner_usage(c)):>7}  "
                   f"{n} project(s){expiry(c)}  {label}")
         removed = sorted({o for o in store.owners.values() if o not in codes.codes and o != "default"})
         for c in removed:
             if store.owner_usage(c):
-                print(f"{c[:4]}-{c[4:8]}-{c[8:]}  {'removed':>9}  used {fmt_size(store.owner_usage(c)):>7}  "
+                print(f"{codes.display(c)}  {'removed':>9}  used {fmt_size(store.owner_usage(c)):>7}  "
                       f"{len(store.stored_by(c))} stored project(s)  (--purge-code to delete them)")
     finally:
         await store.close()
@@ -275,7 +277,7 @@ def main() -> None:
                 sys.exit(f"no such code in {', '.join(map(str, a.codes_file))}: {a.renew_code}")
             print(f"{label or a.renew_code}: {size}, {f'valid until {until}' if until else 'no expiry'}")
             return
-        codes._load()
+        codes.load()
         asyncio.run(_codes_command(a, codes, files))
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -298,13 +300,12 @@ def main() -> None:
         p.error("--codes-url must be an http:// or https:// address")
     if a.dropbox_app_key and not re.fullmatch(r"[a-z0-9]{8,32}", a.dropbox_app_key):
         p.error("--dropbox-app-key is the app key from the Dropbox App Console (letters and digits), not the secret")
-    web.run_app(make_app(a.database, a.static, a.tex_assets, limits, codes, arxiv=not a.no_arxiv, codes_url=a.codes_url,
-                        dropbox_app_key=a.dropbox_app_key,
-                        admin_token=admin_token, evict_days=a.evict_idle_days, texlive=a.texlive,
-                        texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror,
-                        purge_days=a.purge_expired_after, lists=not a.no_project_lists, private=a.private,
-                        min_version=a.min_version, files=files, data=a.data), host=a.host, port=a.port,
-                backlog=LISTEN_BACKLOG, shutdown_timeout=SHUTDOWN_WAIT)
+    settings = Settings(
+        a.database, static=a.static, data=a.data, files=files, tex=a.tex_assets, limits=limits, codes=codes,
+        private=a.private, min_version=a.min_version, codes_url=a.codes_url, dropbox_app_key=a.dropbox_app_key,
+        lists=not a.no_project_lists, arxiv=not a.no_arxiv, admin_token=admin_token, evict_days=a.evict_idle_days,
+        purge_days=a.purge_expired_after, texlive=a.texlive, texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror)
+    web.run_app(make_app(settings), host=a.host, port=a.port, backlog=LISTEN_BACKLOG, shutdown_timeout=SHUTDOWN_WAIT)
 
 
 if __name__ == "__main__":

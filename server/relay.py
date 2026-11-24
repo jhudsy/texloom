@@ -2,29 +2,24 @@
 
 Stores and relays opaque, end-to-end encrypted Yjs updates and file blobs. It never
 sees keys or plaintext, and verifies Ed25519 signatures so read-only link holders
-can't write. The storage rules are in policy.py, the HTTP endpoints in endpoints.py,
-the command line (and how storage allowances work) in cli.py.
+can't write. The storage rules are in policy.py, the HTTP endpoints in endpoints.py, the
+application (its addresses, database and background upkeep) in app.py, and the command line
+(and how storage allowances work) in cli.py.
 """
 
 from __future__ import annotations
 
 import asyncio
-import binascii
 import json
 import logging
 import time
 from collections import defaultdict, deque
-from pathlib import Path
 
 from aiohttp import WSCloseCode, WSMsgType, web
 
 from texloom.crypto import b64e, canonical_pub, revoke_msg, signer
 
-from .db import redact
-from .endpoints import MAX_BLOB, Endpoints, headers
-from .files import Files
-from .lists import Lists
-from .policy import PURGE_PAUSE, CodeBook, GiB, KiB, Limits, MiB, fmt_size
+from .policy import KiB, MiB, Policy
 from .store import Store
 from .wire import PROJECT_RE, b64d, verify, version_tuple
 
@@ -182,33 +177,25 @@ class Budget:
                 turn.set_result(None)
 
 
-class Relay(Endpoints):
-    def __init__(self, store: Store | None, limits: Limits | None = None, codes: CodeBook | None = None, lists: bool = True,
-                 private: bool = False, min_version: str = ""):
-        # the oldest app version allowed (--min-version): older ones, or apps too old to say, are
-        # asked to update, so that support for older data and protocols can be dropped
-        self.min_version = version_tuple(min_version) if min_version else None
-        self.codes_url = ""  # where people learn how to get a creation code (/api/info)
-        self.dropbox_app_key = ""  # the server's Dropbox app, for the web app's Dropbox integration (/api/info)
-        self.store: Store = store  # type: ignore[assignment]  # (attach, when the server starts)
-        self.private = private  # only projects created with a valid creation code may use this server
-        self.want_lists = lists
-        self.lists: Lists | None = None
-        if store is not None:
-            self.attach(store)
-        self.limits = limits or Limits()
-        self.codes = codes or CodeBook(None)
+class Relay:
+    """The WebSocket protocol: a room of connections per project."""
+
+    def __init__(self, policy: Policy):
+        self.policy = policy
         self.rooms: dict[str, set[web.WebSocketResponse]] = defaultdict(set)
         self.conns: dict[web.WebSocketResponse, Conn] = {}
         self._next_id = 1
-        self.texlive = None  # TexLive, when serving TeX Live files on demand
-        self.memory = Budget(int(self.limits.memory))  # big work at once (see MEMORY)
+        self.memory = Budget(int(policy.limits.memory))  # big work at once (see MEMORY)
         self.held = 0  # bytes held for connections, see Metered
         self.stopping = False
 
-    def attach(self, store: Store) -> None:
-        self.store = store
-        self.lists = Lists(store.db, store.lists_grew) if self.want_lists else None
+    @property
+    def store(self) -> Store:
+        return self.policy.store
+
+    def has_peers(self, project: str) -> bool:
+        """Someone has the project open here."""
+        return bool(self.rooms.get(project))
 
     async def _admit(self, project: str, ws: web.WebSocketResponse, conn: Conn) -> dict | None:
         """On a private server a connection does nothing until its hello is accepted. Returns the hello."""
@@ -221,7 +208,7 @@ class Relay(Endpoints):
         if not isinstance(msg, dict) or msg.get("t") != "hello":
             await ws.close(code=1008, message=b"hello first")
             return None
-        why = await self.denied(project, msg.get("code"))
+        why = await self.policy.denied(project, msg.get("code"))
         if why:
             await self._refuse(ws, why)
             return None
@@ -348,7 +335,7 @@ class Relay(Endpoints):
             await ws.close(code=1008, message=b"deleted")
             return ws
         first = None
-        if self.private:
+        if self.policy.private:
             try:
                 first = await self._admit(project, ws, conn)
             finally:
@@ -370,9 +357,9 @@ class Relay(Endpoints):
                 if not conn.allow(len(raw.data)):
                     await ws.close(code=1008, message=b"rate limit")
                     break
-                if self.private and time.monotonic() >= conn.recheck:
+                if self.policy.private and time.monotonic() >= conn.recheck:
                     conn.recheck = time.monotonic() + RECHECK
-                    why = await self.denied(project, conn.code)
+                    why = await self.policy.denied(project, conn.code)
                     if why:
                         await self._refuse(ws, why)
                         break
@@ -390,7 +377,7 @@ class Relay(Endpoints):
                     await self.handle(project, ws, conn, t, msg)
                 except ConnectionError:  # it went while its message was handled (an answer had nowhere to go)
                     break
-                except (BadMessage, ValueError, TypeError, KeyError, OverflowError, binascii.Error, RecursionError) as e:
+                except (BadMessage, ValueError, TypeError, KeyError, OverflowError, RecursionError) as e:  # (binascii.Error is a ValueError)
                     await ws.send_json({"t": "err", "m": f"bad message: {e}"[:200]})
                 except Exception:
                     log.exception("error handling message")
@@ -442,269 +429,217 @@ class Relay(Endpoints):
         if await self.store.deleted(project):  # deleted while this connection was closing: nothing more
             return
         relay_only = await self.store.relay_only(project)
-        if t == "hello":
-            if not conn.allow_hello():
-                await ws.close(code=1008, message=b"rate limit")
-                return
-            if not conn.counted:  # (once per connection: hellos repeat)
-                conn.counted = True
-                await self.note_client(msg.get("app"), msg.get("v"))
-            if self.too_old(msg.get("v")):
-                await ws.send_json({"t": "err", "denied": True, **self.update_needed()})
-                if version_tuple(msg.get("v")) is None:
-                    await self._hold(project, ws, conn)
-                await ws.close(code=1008, message=b"update needed")
-                return
-            await self.store.touch(project)
-            if msg.get("code") and not conn.code_tried:  # one code check per connection
-                conn.code_tried = True
-                conn.code = self.codes.check(field(msg, "code", str))
-            since = max(0, min(field(msg, "since", int, 0), 2**62))
-            # Is the log here the one the app last saw? Not if it was put back from a backup since:
-            # the app then starts again from the beginning and sends all it has (as after eviction)
-            lost = not relay_only and await self._not_as_seen(project, msg.get("last"))
-            if lost:
-                since = 0
-            start = await self.store.catch_up_start(project, since)
-            size = await self.store.since_size(project, start)
-            # An app that takes pages ("pages" in its hello) gets a long log a page at a time, so a
-            # catch-up needs a page's memory whatever the log's size; others get it whole.
-            # compat(app 0.4.33): apps that don't take pages get a long log whole: page every catch-up instead
-            paged = msg.get("pages") == 1 and size > PAGE
-            # (a page is one entry at least, and a snapshot can be bigger than a page)
-            cost = (max(PAGE, MAX_SNAPSHOT) if paged else size) * CATCHUP_OVERHEAD if size >= MiB else 0
-            await self.memory.take(cost)
-            try:
-                entries, last, done = await self.store.since(project, start, PAGE if paged else None)
-                head, floor, count = await self.store.log_state(project)
-                await asyncio.wait_for(self.send_large(ws,
-                    {"t": "log", "entries": entries, "head": head, "floor": floor, "count": count, "you": conn.id,
-                     "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
-                     "store": self.store_status(project, conn),
-                     "rv": [{"p": p, "s": b64e(sig)} for p, sig in (await self.store.revoked(project)).items()],
-                     **({"lost": True} if lost else {}), **({} if done else {"more": True})}), CATCHUP_TIMEOUT)
-                while not done:
-                    del entries
-                    entries, last, done = await self.store.since(project, last, PAGE)
-                    await asyncio.wait_for(self.send_large(ws, {"t": "logmore", "entries": entries, **({} if done else {"more": True})}),
-                                           CATCHUP_TIMEOUT)
-            except (asyncio.TimeoutError, ConnectionError, RuntimeError):  # too slow, or it has gone
-                self.cut_off(ws, "was too slow to catch up")
-            finally:
-                self.memory.give(cost)
-        elif t == "up":
-            d, s = field(msg, "d", str), field(msg, "s", str)
-            data, sig = b64d(d), b64d(s)
-            revoked = await self.store.revoked(project)
-            ok = len(data) <= MAX_UPDATE and (verify(project, b"upd:" + data, sig, revoked) if len(data) < 64 * KiB
-                                              else await asyncio.to_thread(verify, project, b"upd:" + data, sig, revoked))
-            if not ok:
-                await ws.send_json({"t": "err", "m": "rejected update (bad signature, or this personal link was revoked)"})
-                return
-            if relay_only:  # pass it on, but keep nothing
-                await ws.send_json({"t": "ack", "q": 0, "id": msg.get("id")})
-                await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
-                return
-            async with self.store.lock(project):
-                dup = await self.store.duplicate(project, data)
-                refused = None if dup is not None else await self.may_store(project, len(data) + len(sig), conn.code)
-                seq = None if dup is not None or refused else await self.store.append(project, data, sig)
-            if dup is not None:  # a replay of something already stored (or compacted): acknowledge, keep nothing
-                await ws.send_json({"t": "ack", "q": dup, "id": msg.get("id")})
-                return
-            if refused:
-                # Collaborators online still get it; the sender keeps it (no ack) and retries later.
-                await ws.send_json({"t": "err", "code": refused, "m": f"not stored: {refused}", "id": msg.get("id")})
-                await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
-                return
-            await ws.send_json({"t": "ack", "q": seq, "id": msg.get("id")})
-            await self.broadcast(project, {"t": "up", "q": seq, "d": d, "s": s}, ws)
-        elif t == "snap":
-            upto = field(msg, "upto", int)
-            data, sig = b64d(field(msg, "d", str)), b64d(field(msg, "s", str))
-            if relay_only or self.store.owner(project) is None:
-                return
-            if len(data) > MAX_SNAPSHOT or not await asyncio.to_thread(
-                    verify, project, f"snap:{upto}:".encode() + data, sig, await self.store.revoked(project)):
+        handler = self.HANDLERS.get(t)
+        if handler is None:
+            raise BadMessage(f"unknown type {t!r}")
+        await handler(self, project, ws, conn, msg, relay_only)
+
+    @staticmethod
+    def _owner_signed(project: str, text: str, ts: int, sig: bytes) -> bool:
+        """An owner's command (mode, move, delete): signed with the owner key, and recent (MODE_SKEW)."""
+        return abs(time.time() - ts) <= MODE_SKEW and signer(project, text.encode(), sig) == "owner"
+
+    async def _may_add(self, project: str, logged: bool = False) -> bool:
+        """A project this server has never held anything for costs a permanent row: from the same
+        budget as other rows that store nothing, so ids can't be minted to fill the disk. True if
+        it's known here (registered, a storage mode set; with `logged`, or anything in its log, as
+        another server sharing the database may have stored), or the budget has room."""
+        return (self.store.owner(project) is not None or await self.store.has_mode(project)
+                or logged and await self.store.head(project) > 0 or self.store.meta_budget())
+
+    async def _hello(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
+        if not conn.allow_hello():
+            await ws.close(code=1008, message=b"rate limit")
+            return
+        if not conn.counted:  # (once per connection: hellos repeat)
+            conn.counted = True
+            await self.policy.note_client(msg.get("app"), msg.get("v"))
+        if self.policy.too_old(msg.get("v")):
+            await ws.send_json({"t": "err", "denied": True, **self.policy.update_needed()})
+            if version_tuple(msg.get("v")) is None:
+                await self._hold(project, ws, conn)
+            await ws.close(code=1008, message=b"update needed")
+            return
+        await self.store.touch(project)
+        if msg.get("code") and not conn.code_tried:  # one code check per connection
+            conn.code_tried = True
+            conn.code = self.policy.codes.check(field(msg, "code", str))
+        since = max(0, min(field(msg, "since", int, 0), 2**62))
+        # Is the log here the one the app last saw? Not if it was put back from a backup since:
+        # the app then starts again from the beginning and sends all it has (as after eviction)
+        lost = not relay_only and await self._not_as_seen(project, msg.get("last"))
+        if lost:
+            since = 0
+        start = await self.store.catch_up_start(project, since)
+        size = await self.store.since_size(project, start)
+        # An app that takes pages ("pages" in its hello) gets a long log a page at a time, so a
+        # catch-up needs a page's memory whatever the log's size; others get it whole.
+        # compat(app 0.4.33): apps that don't take pages get a long log whole: page every catch-up instead
+        paged = msg.get("pages") == 1 and size > PAGE
+        # (a page is one entry at least, and a snapshot can be bigger than a page)
+        cost = (max(PAGE, MAX_SNAPSHOT) if paged else size) * CATCHUP_OVERHEAD if size >= MiB else 0
+        await self.memory.take(cost)
+        try:
+            entries, last, done = await self.store.since(project, start, PAGE if paged else None)
+            head, floor, count = await self.store.log_state(project)
+            await asyncio.wait_for(self.send_large(ws,
+                {"t": "log", "entries": entries, "head": head, "floor": floor, "count": count, "you": conn.id,
+                 "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
+                 "store": self.policy.store_status(project, conn.code),
+                 "rv": [{"p": p, "s": b64e(sig)} for p, sig in (await self.store.revoked(project)).items()],
+                 **({"lost": True} if lost else {}), **({} if done else {"more": True})}), CATCHUP_TIMEOUT)
+            while not done:
+                del entries
+                entries, last, done = await self.store.since(project, last, PAGE)
+                await asyncio.wait_for(self.send_large(ws, {"t": "logmore", "entries": entries, **({} if done else {"more": True})}),
+                                       CATCHUP_TIMEOUT)
+        except (asyncio.TimeoutError, ConnectionError, RuntimeError):  # too slow, or it has gone
+            self.cut_off(ws, "was too slow to catch up")
+        finally:
+            self.memory.give(cost)
+
+    async def _up(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
+        d, s = field(msg, "d", str), field(msg, "s", str)
+        data, sig = b64d(d), b64d(s)
+        revoked = await self.store.revoked(project)
+        ok = len(data) <= MAX_UPDATE and (verify(project, b"upd:" + data, sig, revoked) if len(data) < 64 * KiB
+                                          else await asyncio.to_thread(verify, project, b"upd:" + data, sig, revoked))
+        if not ok:
+            await ws.send_json({"t": "err", "m": "rejected update (bad signature, or this personal link was revoked)"})
+            return
+        if relay_only:  # pass it on, but keep nothing
+            await ws.send_json({"t": "ack", "q": 0, "id": msg.get("id")})
+            await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
+            return
+        async with self.store.lock(project):
+            dup = await self.store.duplicate(project, data)
+            refused = None if dup is not None else await self.policy.may_store(project, len(data) + len(sig), conn.code)
+            seq = None if dup is not None or refused else await self.store.append(project, data, sig)
+        if dup is not None:  # a replay of something already stored (or compacted): acknowledge, keep nothing
+            await ws.send_json({"t": "ack", "q": dup, "id": msg.get("id")})
+            return
+        if refused:
+            # Collaborators online still get it; the sender keeps it (no ack) and retries later.
+            await ws.send_json({"t": "err", "code": refused, "m": f"not stored: {refused}", "id": msg.get("id")})
+            await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
+            return
+        await ws.send_json({"t": "ack", "q": seq, "id": msg.get("id")})
+        await self.broadcast(project, {"t": "up", "q": seq, "d": d, "s": s}, ws)
+
+    async def _snap(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
+        upto = field(msg, "upto", int)
+        data, sig = b64d(field(msg, "d", str)), b64d(field(msg, "s", str))
+        if relay_only or self.store.owner(project) is None:
+            return
+        if len(data) > MAX_SNAPSHOT or not await asyncio.to_thread(
+                verify, project, f"snap:{upto}:".encode() + data, sig, await self.store.revoked(project)):
+            await ws.send_json({"t": "err", "m": "rejected snapshot"})
+            return
+        async with self.store.lock(project):
+            # A snapshot must replace part of the log: after the previous snapshot (and anything
+            # evicted), up to head.
+            after = max(await self.store.last_snapshot(project), await self.store.floor(project))
+            if not (after < upto <= await self.store.head(project)):
                 await ws.send_json({"t": "err", "m": "rejected snapshot"})
                 return
-            async with self.store.lock(project):
-                # A snapshot must replace part of the log: after the previous snapshot (and anything
-                # evicted), up to head.
-                after = max(await self.store.last_snapshot(project), await self.store.floor(project))
-                if not (after < upto <= await self.store.head(project)):
-                    await ws.send_json({"t": "err", "m": "rejected snapshot"})
-                    return
-                if await self.may_store(project, await self.store.snapshot_delta(project, upto, len(data) + len(sig)), conn.code):
-                    return  # over a limit: skip compaction; the log stays as it is
-                await self.store.snapshot(project, upto, data, sig)
-            log.info("compacted %s… up to %d", project[:8], upto)
-            # the sender may now delete what the snapshot replaced (changes it kept as uploads)
-            await ws.send_json({"t": "snapped", "upto": upto})
-        elif t == "aw":
-            conn.aware = True
-            await self.broadcast(project, {"t": "aw", "d": field(msg, "d", str), "from": conn.id}, ws)
-        elif t == "p2p":
-            # Opaque peer-to-peer payload (state-vector sync, blob transfer). Never stored.
-            out = {"t": "p2p", "d": field(msg, "d", str), "from": conn.id}
-            if "s" in msg:  # a signed update: don't pass on one from a revoked personal link
-                out["s"] = field(msg, "s", str)
-                revoked = await self.store.revoked(project)
-                if revoked and not verify(project, b"p2p:" + b64d(out["d"]), b64d(out["s"]), revoked):
-                    return
-            to = msg.get("to")
-            if to is None:
-                await self.broadcast(project, out, ws)
-            else:
-                to = field(msg, "to", int)
-                for peer in list(self.rooms[project]):
-                    c = self.conns.get(peer)
-                    if c and c.id == to:
-                        await self.send(peer, json.dumps(out))  # cut off, rather than waited on, if it isn't reading
-        elif t == "usage":  # the figures above, fresh (an app showing how much is used asks when it shows them)
-            await ws.send_json({"t": "usage", "store": self.store_status(project, conn)})
-        elif t == "mode":
-            mode, ts, sig = field(msg, "m", str), field(msg, "ts", int), b64d(field(msg, "s", str))
-            who = signer(project, f"mode:{mode}:{ts}".encode(), sig)
-            # Only the owner chooses where the project is kept: turning storage off deletes the
-            # server's copy, and turning it on stores the project against the owner's allowance.
-            if mode not in ("server", "relay") or abs(time.time() - ts) > MODE_SKEW or who != "owner":
-                await ws.send_json({"t": "err", "code": "mode-rejected", "m": "rejected mode change"})
+            if await self.policy.may_store(project, await self.store.snapshot_delta(project, upto, len(data) + len(sig)), conn.code):
+                return  # over a limit: skip compaction; the log stays as it is
+            await self.store.snapshot(project, upto, data, sig)
+        log.info("compacted %s… up to %d", project[:8], upto)
+        # the sender may now delete what the snapshot replaced (changes it kept as uploads)
+        await ws.send_json({"t": "snapped", "upto": upto})
+
+    async def _aw(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
+        conn.aware = True
+        await self.broadcast(project, {"t": "aw", "d": field(msg, "d", str), "from": conn.id}, ws)
+
+    async def _p2p(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
+        # Opaque peer-to-peer payload (state-vector sync, blob transfer). Never stored.
+        out = {"t": "p2p", "d": field(msg, "d", str), "from": conn.id}
+        if "s" in msg:  # a signed update: don't pass on one from a revoked personal link
+            out["s"] = field(msg, "s", str)
+            revoked = await self.store.revoked(project)
+            if revoked and not verify(project, b"p2p:" + b64d(out["d"]), b64d(out["s"]), revoked):
                 return
-            if self.store.owner(project) is None and not await self.store.has_mode(project) and not self.store.meta_budget():
-                await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
-                return
-            async with self.store.lock(project):
-                await self.store.set_mode(project, mode == "relay")
-            log.info("project %s… storage mode -> %s", project[:8], mode)
-            await self.broadcast(project, {"t": "mode", "m": mode})
-        elif t == "move":  # the owner moves the project to another creation code (issue #32)
-            code, ts, sig = field(msg, "c", str)[:64], field(msg, "ts", int), b64d(field(msg, "s", str))
-            if abs(time.time() - ts) > MODE_SKEW or signer(project, f"move:{code}:{ts}".encode(), sig) != "owner":
-                await ws.send_json({"t": "err", "code": "move-rejected", "m": "rejected move"})
-                return
-            if conn.moves >= MOVE_TRIES:  # each move checks a code: not a way to try many
-                await ws.send_json({"t": "err", "code": "move-busy", "m": "too many tries: reconnect and try again"})
-                return
-            no = await self.move(project, code)
-            if no:
-                conn.moves += no["code"] == "move-bad-code"
-                await ws.send_json({"t": "err", **no})
-                return
-            conn.code = self.codes.check(code)  # proven to hold it: it sees the code's usage now
-            await ws.send_json({"t": "moved"})
-            # everyone connected: what's stored and the limits have changed (a refusal may be over)
-            for peer in list(self.rooms.get(project, ())):
+        to = msg.get("to")
+        if to is None:
+            await self.broadcast(project, out, ws)
+        else:
+            to = field(msg, "to", int)
+            for peer in list(self.rooms[project]):
                 c = self.conns.get(peer)
-                if c is not None:
-                    await self.send(peer, json.dumps({"t": "usage", "store": self.store_status(project, c), "moved": True}))
-        elif t == "delete":  # the owner deletes the project for everyone
-            ts, sig = field(msg, "ts", int), b64d(field(msg, "s", str))
-            if abs(time.time() - ts) > MODE_SKEW or signer(project, f"delete:{ts}".encode(), sig) != "owner":
-                await ws.send_json({"t": "err", "code": "delete-rejected", "m": "rejected deletion"})
-                return
-            # a project this server has never held anything for costs a permanent row: from the
-            # same budget as other rows that store nothing, so ids can't be minted to fill the disk
-            known = self.store.owner(project) is not None or await self.store.has_mode(project) or await self.store.head(project) > 0
-            if not known and not self.store.meta_budget():
-                await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
-                return
-            async with self.store.lock(project):
-                gone = await self.store.delete_project(project, sig, ts)
-            log.info("project %s… deleted for everyone by its owner", project[:8])
-            room = list(self.rooms.get(project, ()))
-            await self.broadcast(project, gone)  # including the owner
-            for peer in room:  # each at once: one that isn't reading mustn't hold up the rest
-                asyncio.create_task(self.close_or_cut(peer, b"deleted"))
-        elif t == "revoke":  # the owner withdraws a personal edit link
-            pub, sig = canonical_pub(field(msg, "p", str)[:64]), b64d(field(msg, "s", str))
-            if pub is None or signer(project, revoke_msg(pub), sig) != "owner":
-                await ws.send_json({"t": "err", "m": "rejected revocation"})
-                return
-            known = self.store.owner(project) is not None or await self.store.has_mode(project)
-            if not known and not self.store.meta_budget() or not await self.store.revoke(project, pub, sig):
-                await ws.send_json({"t": "err", "m": "rejected revocation: too many"})
-                return
-            log.info("project %s…: revoked a personal link", project[:8])
-            await self.broadcast(project, {"t": "rv", "p": pub, "s": b64e(sig)})  # including the owner
-        else:
-            raise BadMessage(f"unknown type {t!r}")
+                if c and c.id == to:
+                    await self.send(peer, json.dumps(out))  # cut off, rather than waited on, if it isn't reading
 
+    async def _usage(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
+        # the figures in the hello's reply, fresh (an app showing how much is used asks when it shows them)
+        await ws.send_json({"t": "usage", "store": self.policy.store_status(project, conn.code)})
 
-def make_app(database: str, static: Path | None, tex: Path | None = None,
-             limits: Limits | None = None, codes: CodeBook | None = None, arxiv: bool = True,
-             admin_token: str = "", evict_days: float = 0, texlive: Path | None = None,
-             texlive_max: float = 4 * GiB, texlive_mirrors: list[str] | None = None,
-             purge_days: float | None = None, lists: bool = True, private: bool = False,
-             codes_url: str = "", min_version: str = "", files: Files | None = None,
-             data: Path = Path("data"), dropbox_app_key: str = "") -> web.Application:
-    relay = Relay(None, limits, codes, lists, private, min_version)
-    relay.codes_url = codes_url
-    relay.dropbox_app_key = dropbox_app_key
-    if texlive:  # TeX Live files on demand for the in-browser engine
-        from .texlive import TexLive
-        tl = TexLive(texlive, texlive_max, (limits or Limits()).min_free, texlive_mirrors)
-        if tl.ready:
-            relay.texlive = tl
-        else:
-            log.warning("--texlive %s has no index yet: run with --texlive-init first", texlive)
-    app = web.Application(middlewares=[headers], client_max_size=MAX_BLOB + 1024)
+    async def _mode(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
+        mode, ts, sig = field(msg, "m", str), field(msg, "ts", int), b64d(field(msg, "s", str))
+        # Only the owner chooses where the project is kept: turning storage off deletes the
+        # server's copy, and turning it on stores the project against the owner's allowance.
+        if mode not in ("server", "relay") or not self._owner_signed(project, f"mode:{mode}:{ts}", ts, sig):
+            await ws.send_json({"t": "err", "code": "mode-rejected", "m": "rejected mode change"})
+            return
+        if not await self._may_add(project):
+            await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
+            return
+        async with self.store.lock(project):
+            await self.store.set_mode(project, mode == "relay")
+        log.info("project %s… storage mode -> %s", project[:8], mode)
+        await self.broadcast(project, {"t": "mode", "m": mode})
 
-    async def store(_app: web.Application):
-        s = await Store.open(database, files, data, serving=True)
-        log.info("database: %s", redact(database))
-        relay.attach(s)
-        await s.start()
-        yield
-        await s.close()
-    app.cleanup_ctx.append(store)
-    if admin_token:
-        from .admin import Admin
-        app.router.add_get("/admin", Admin(relay, admin_token, evict_days, purge_days).page)
-    if evict_days > 0 or purge_days is not None:
-        async def maintenance(_app: web.Application):
-            async def loop():
-                while True:
-                    try:
-                        if evict_days > 0:
-                            for p in relay.store.idle(evict_days):
-                                if relay.rooms.get(p):
-                                    continue  # someone is connected right now
-                                freed = await relay.store.evict(p)
-                                log.info("evicted idle project %s… (%s, unopened for %g days)", p[:8], fmt_size(freed), evict_days)
-                                await asyncio.sleep(PURGE_PAUSE)
-                        if purge_days is not None:
-                            await relay.purge_expired(purge_days)
-                        if evict_days > 0 and relay.lists:
-                            await relay.lists.drop_idle(time.time() - evict_days * 86400)
-                    except Exception:
-                        log.exception("maintenance")
-                    await asyncio.sleep(min(3600, max(60, evict_days * 8640)) if evict_days > 0 else 3600)
-            task = asyncio.create_task(loop())
-            yield
-            task.cancel()
-        app.cleanup_ctx.append(maintenance)
-    app.on_shutdown.append(relay.close_all)
-    app.router.add_get("/ws/{project}", relay.ws_handler)
-    app.router.add_put("/blob/{project}/{id}", relay.put_blob)
-    app.router.add_get("/blob/{project}/{id}", relay.get_blob)
-    app.router.add_delete("/blob/{project}/{id}", relay.delete_blob)
-    app.router.add_get("/api/info", relay.info)
-    app.router.add_get("/api/list/{id}", relay.get_list)
-    app.router.add_put("/api/list/{id}", relay.put_list)
-    app.router.add_delete("/api/list/{id}", relay.delete_list)
-    if relay.texlive:
-        app.router.add_get("/texlive/{year}/{fmt}/{name}", relay.texlive.handle)
-    app.router.add_post("/api/code", relay.check_code)
-    if arxiv:  # importing a paper's source (arXiv has no CORS, so the relay fetches it)
-        from .arxiv import ArxivFetcher
-        app.router.add_get("/api/arxiv/{id}", ArxivFetcher(relay.memory).handle)
-    if tex and (tex / "busytex").is_dir():  # WebAssembly TeX Live for in-browser compiles
-        app.router.add_static("/core", tex)
-    if static and static.is_dir():
-        async def index(_):
-            return web.FileResponse(static / "index.html")
-        app.router.add_get("/", index)
-        app.router.add_static("/", static)
-    return app
+    async def _move(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
+        """The owner moves the project to another creation code (issue #32)."""
+        code, ts, sig = field(msg, "c", str)[:64], field(msg, "ts", int), b64d(field(msg, "s", str))
+        if not self._owner_signed(project, f"move:{code}:{ts}", ts, sig):
+            await ws.send_json({"t": "err", "code": "move-rejected", "m": "rejected move"})
+            return
+        if conn.moves >= MOVE_TRIES:  # each move checks a code: not a way to try many
+            await ws.send_json({"t": "err", "code": "move-busy", "m": "too many tries: reconnect and try again"})
+            return
+        no = await self.policy.move(project, code)
+        if no:
+            conn.moves += no["code"] == "move-bad-code"
+            await ws.send_json({"t": "err", **no})
+            return
+        conn.code = self.policy.codes.check(code)  # proven to hold it: it sees the code's usage now
+        await ws.send_json({"t": "moved"})
+        # everyone connected: what's stored and the limits have changed (a refusal may be over)
+        for peer in list(self.rooms.get(project, ())):
+            c = self.conns.get(peer)
+            if c is not None:
+                await self.send(peer, json.dumps({"t": "usage", "store": self.policy.store_status(project, c.code), "moved": True}))
 
+    async def _delete(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
+        """The owner deletes the project for everyone."""
+        ts, sig = field(msg, "ts", int), b64d(field(msg, "s", str))
+        if not self._owner_signed(project, f"delete:{ts}", ts, sig):
+            await ws.send_json({"t": "err", "code": "delete-rejected", "m": "rejected deletion"})
+            return
+        if not await self._may_add(project, logged=True):
+            await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
+            return
+        async with self.store.lock(project):
+            gone = await self.store.delete_project(project, sig, ts)
+        log.info("project %s… deleted for everyone by its owner", project[:8])
+        room = list(self.rooms.get(project, ()))
+        await self.broadcast(project, gone)  # including the owner
+        for peer in room:  # each at once: one that isn't reading mustn't hold up the rest
+            asyncio.create_task(self.close_or_cut(peer, b"deleted"))
+
+    async def _revoke(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
+        """The owner withdraws a personal edit link."""
+        pub, sig = canonical_pub(field(msg, "p", str)[:64]), b64d(field(msg, "s", str))
+        if pub is None or signer(project, revoke_msg(pub), sig) != "owner":
+            await ws.send_json({"t": "err", "m": "rejected revocation"})
+            return
+        if not await self._may_add(project) or not await self.store.revoke(project, pub, sig):
+            await ws.send_json({"t": "err", "m": "rejected revocation: too many"})
+            return
+        log.info("project %s…: revoked a personal link", project[:8])
+        await self.broadcast(project, {"t": "rv", "p": pub, "s": b64e(sig)})  # including the owner
+
+    HANDLERS = {"hello": _hello, "up": _up, "snap": _snap, "aw": _aw, "p2p": _p2p, "usage": _usage,
+                "mode": _mode, "move": _move, "delete": _delete, "revoke": _revoke}

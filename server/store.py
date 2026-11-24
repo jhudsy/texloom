@@ -47,6 +47,13 @@ GONE_COST = 100  # bytes a remembered edit counts for
 # so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
 META_RATE, META_BURST = 1.0, 600
 FACTS_KEPT = 20_000  # projects whose deletion and storage mode are kept in memory (see Store._facts)
+REVOKED_KEPT = 10_000  # projects whose revocations are kept in memory
+ENTRY_BYTES = "octet_length(data) + octet_length(sig)"  # what a log entry stores
+# What projects' data counts for, as (project, bytes) rows to add up: the log, stored files, and
+# remembered edits (GONE_COST each). `where` narrows it, to one project say.
+USAGE = (f"SELECT project, SUM({ENTRY_BYTES}) AS n FROM log {{where}} GROUP BY project"
+         " UNION ALL SELECT project, SUM(size) AS n FROM stored {where} GROUP BY project"
+         f" UNION ALL SELECT project, COUNT(*) * {GONE_COST} AS n FROM gone {{where}} GROUP BY project")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS log (
@@ -100,6 +107,30 @@ TABLES = {"log": ("project", "seq"), "head": ("project",), "mode": ("project",),
 BOOLEANS = frozenset({"snap", "relay"})
 
 
+class Recent:
+    """The `most` most recently used of something kept in the database, kept in memory."""
+
+    def __init__(self, most: int):
+        self.most = most
+        self.items: OrderedDict = OrderedDict()
+
+    def get(self, key: str):
+        """What's kept for `key` (now the most recently used), or None."""
+        if key not in self.items:
+            return None
+        self.items.move_to_end(key)
+        return self.items[key]
+
+    def put(self, key: str, value) -> None:
+        self.items[key] = value
+        self.items.move_to_end(key)
+        while len(self.items) > self.most:
+            self.items.popitem(last=False)
+
+    def drop(self, key: str) -> None:
+        self.items.pop(key, None)
+
+
 class Store:
     """Open with `await Store.open(url, ...)`; close with `await store.close()`."""
 
@@ -107,14 +138,14 @@ class Store:
         self.db = db
         self.files = files
         self.dir = data  # this server's own disk: uploads are spooled here, and it must keep room
-        self._revoked: dict[str, dict[str, bytes]] = {}
+        self._revoked = Recent(REVOKED_KEPT)  # project -> {canonical pub: owner's signature}
         self.usage: dict[str, int] = defaultdict(int)
         self.total = 0
         self.owners: dict[str, str] = {}
         # Per project: its owner-signed deletion (the message telling clients) and its storage mode
         # (None: none set), for the projects in use. Anyone can add these rows, a few a second, so
         # they stay in the database, not all in memory (FACTS_KEPT at most).
-        self._facts: OrderedDict[str, tuple[dict | None, bool | None]] = OrderedDict()
+        self._facts = Recent(FACTS_KEPT)
         self.owner_bytes: dict[str, int] = defaultdict(int)  # checked on every stored edit: kept, not added up
         self.list_bytes: dict[str, int] = defaultdict(int)  # bytes of project lists, by owner
         self.seen: dict[str, float] = {}
@@ -132,24 +163,20 @@ class Store:
             db = await connect(url, SCHEMA, SCHEMA_POSTGRESQL, serving)
         except DatabaseError as e:
             raise SystemExit(str(e)) from None
-        # a deleted project keeps only its tombstone
-        await db.execute("DELETE FROM projects WHERE project IN (SELECT project FROM deleted)")
         s = cls(db, files or FolderFiles(data / "files"), data)
         await s._load()
         return s
 
     async def _load(self) -> None:
         c = self.db
-        for q in ("SELECT project, SUM(octet_length(data) + octet_length(sig)) FROM log GROUP BY project",
-                  "SELECT project, SUM(size) FROM stored GROUP BY project",
-                  f"SELECT project, COUNT(*) * {GONE_COST} FROM gone GROUP BY project"):
-            for project, n in await c.fetch(q):
-                self.usage[project] += int(n or 0)
+        for project, n in await c.fetch(USAGE.format(where="")):
+            self.usage[project] += int(n or 0)
         self.list_bytes = defaultdict(int, {r["owner"]: int(r["n"]) for r in await c.fetch(
             "SELECT owner, SUM(octet_length(data)) AS n FROM lists GROUP BY owner")})
         self.total = sum(self.usage.values()) + sum(self.list_bytes.values())
-        self.owners = {r["project"]: r["owner"] for r in await c.fetch("SELECT project, owner FROM projects")}
-        self.seen = {r["project"]: max(r["seen"], r["created"]) for r in await c.fetch("SELECT project, seen, created FROM projects")}
+        projects = await c.fetch("SELECT project, owner, seen, created FROM projects")
+        self.owners = {r["project"]: r["owner"] for r in projects}
+        self.seen = {r["project"]: max(r["seen"], r["created"]) for r in projects}
         for project, n in self.usage.items():
             if project in self.owners:
                 self.owner_bytes[self.owners[project]] += n
@@ -255,13 +282,20 @@ class Store:
         `floor` tells clients that everything up to it is gone."""
         freed = self.usage.get(project, 0)
         async with self.lock(project), self.tx() as c:
-            await c.execute("DELETE FROM log WHERE project=$1", project)
-            await c.execute("DELETE FROM gone WHERE project=$1", project)
-            await c.execute("INSERT INTO floor(project, seq) SELECT $1, COALESCE((SELECT seq FROM head WHERE project=$1), 0) "
-                            "WHERE true ON CONFLICT (project) DO UPDATE SET seq=excluded.seq", project)
+            await self._forget_log(c, project)
             await c.execute("UPDATE projects SET evicted=$1 WHERE project=$2", time.time(), project)
         await self._drop_files(project)
         return freed
+
+    @staticmethod
+    async def _forget_log(c, project: str) -> None:
+        """In transaction `c`, drop a project's log (eviction, relay-only mode). Its numbers keep
+        counting, and `floor` says that nothing up to head can be stored again (a replay of an old,
+        validly signed change or snapshot)."""
+        await c.execute("DELETE FROM log WHERE project=$1", project)
+        await c.execute("DELETE FROM gone WHERE project=$1", project)
+        await c.execute("INSERT INTO floor(project, seq) SELECT $1, COALESCE((SELECT seq FROM head WHERE project=$1), 0) "
+                        "WHERE true ON CONFLICT (project) DO UPDATE SET seq=excluded.seq", project)
 
     def owner_usage(self, owner: str) -> int:
         """What an owner (a creation code, or "default") stores: projects and project lists."""
@@ -277,10 +311,7 @@ class Store:
         return [p for p, o in self.owners.items() if o == owner and self.usage.get(p, 0) > 0]
 
     async def _recount(self, project: str) -> None:
-        n = await self.db.fetchval(
-            "SELECT (SELECT COALESCE(SUM(octet_length(data) + octet_length(sig)), 0) FROM log WHERE project=$1)"
-            f" + (SELECT COALESCE(SUM(size), 0) FROM stored WHERE project=$1) + {GONE_COST} * (SELECT COUNT(*) FROM gone WHERE project=$1)",
-            project)
+        n = await self.db.fetchval(f"SELECT COALESCE(SUM(n), 0) FROM ({USAGE.format(where='WHERE project=$1')}) u", project)
         self._grew(project, int(n) + self.pending.get(project, 0) - self.usage[project])
 
     def free_disk(self) -> int:
@@ -327,7 +358,7 @@ class Store:
     async def snapshot_delta(self, project: str, upto: int, size: int) -> int:
         """Bytes a snapshot would add (negative when it frees space)."""
         r = await self.db.fetchrow(
-            "SELECT COALESCE(SUM(octet_length(data) + octet_length(sig)), 0) AS freed, COUNT(*) FILTER (WHERE NOT snap) AS remembered, "
+            f"SELECT COALESCE(SUM({ENTRY_BYTES}), 0) AS freed, COUNT(*) FILTER (WHERE NOT snap) AS remembered, "
             "(SELECT COUNT(*) FROM gone WHERE project=$1 AND seq<=$3) AS forgotten FROM log WHERE project=$1 AND seq<=$2",
             project, upto, upto - GONE_KEEP)
         return size - int(r["freed"]) + (r["remembered"] - r["forgotten"]) * GONE_COST
@@ -352,7 +383,7 @@ class Store:
     async def since_size(self, project: str, start: int) -> int:
         """Bytes that since() would return."""
         return int(await self.db.fetchval(
-            "SELECT COALESCE(SUM(octet_length(data) + octet_length(sig)), 0) FROM log WHERE project=$1 AND seq>$2",
+            f"SELECT COALESCE(SUM({ENTRY_BYTES}), 0) FROM log WHERE project=$1 AND seq>$2",
             project, start))
 
     async def since(self, project: str, start: int, limit: int | None = None) -> tuple[list[dict], int, bool]:
@@ -361,8 +392,8 @@ class Store:
         first, then only that page's rows, so a long log goes out without ever being in memory whole."""
         upto, done = None, True
         if limit:
-            sizes = await self.db.fetch("SELECT seq, octet_length(data) + octet_length(sig) AS n FROM log"
-                                          " WHERE project=$1 AND seq>$2 ORDER BY seq LIMIT 4096", project, start)
+            sizes = await self.db.fetch(f"SELECT seq, {ENTRY_BYTES} AS n FROM log"
+                                        " WHERE project=$1 AND seq>$2 ORDER BY seq LIMIT 4096", project, start)
             size, done = 0, len(sizes) < 4096
             for r in sizes:
                 if upto is not None and size + r["n"] > limit:
@@ -387,12 +418,12 @@ class Store:
     # --- storage mode & revocations ---------------------------------------------------
     async def revoked(self, project: str) -> dict[str, bytes]:
         """Personal keys the owner revoked: canonical pub -> owner's signature."""
-        if project not in self._revoked:
+        known = self._revoked.get(project)
+        if known is None:
             rows = await self.db.fetch("SELECT pub, sig FROM revoked WHERE project=$1", project)
-            self._revoked[project] = {c: r["sig"] for r in rows if (c := canonical_pub(r["pub"]))}
-            if len(self._revoked) > 10000:
-                self._revoked.pop(next(iter(self._revoked)))
-        return self._revoked[project]
+            known = {c: r["sig"] for r in rows if (c := canonical_pub(r["pub"]))}
+            self._revoked.put(project, known)
+        return known
 
     async def revoke(self, project: str, pub: str, sig: bytes) -> bool:
         """Record a revocation (`pub` canonical). False if this project has too many already."""
@@ -403,27 +434,21 @@ class Store:
             return False
         await self.db.execute("INSERT INTO revoked(project, pub, sig, at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
                                 project, pub, sig, time.time())
-        self._revoked.pop(project, None)
+        self._revoked.drop(project)
         return True
 
     async def _fact(self, project: str) -> tuple[dict | None, bool | None]:
         """(its deletion message or None, its storage mode or None), cached."""
-        if project in self._facts:
-            self._facts.move_to_end(project)
-            return self._facts[project]
+        fact = self._facts.get(project)
+        if fact is not None:
+            return fact
         r = await self.db.fetchrow(
             "SELECT d.at, d.ts, d.sig, (SELECT relay FROM mode WHERE project=$1) AS relay "
             "FROM (SELECT 1) one LEFT JOIN deleted d ON d.project=$1", project)
         fact = (self._deleted_msg(r["at"], r["ts"], r["sig"]) if r["sig"] is not None else None,
                 None if r["relay"] is None else bool(r["relay"]))
-        self._remember(project, fact)
+        self._facts.put(project, fact)
         return fact
-
-    def _remember(self, project: str, fact: tuple[dict | None, bool | None]) -> None:
-        self._facts[project] = fact
-        self._facts.move_to_end(project)
-        while len(self._facts) > FACTS_KEPT:
-            self._facts.popitem(last=False)
 
     async def deleted(self, project: str) -> dict | None:
         """The owner-signed message saying the project was deleted for everyone, if it was."""
@@ -442,14 +467,9 @@ class Store:
         async with self.tx() as c:
             await c.execute("INSERT INTO mode(project, relay) VALUES ($1,$2) "
                             "ON CONFLICT (project) DO UPDATE SET relay=excluded.relay", project, relay_only)
-            if relay_only:  # forget everything we stored for this project
-                await c.execute("DELETE FROM log WHERE project=$1", project)
-                await c.execute("DELETE FROM gone WHERE project=$1", project)
-                # as eviction does: nothing up to head can be stored again (a replay of an old,
-                # validly signed change or snapshot, should the project go back to server storage)
-                await c.execute("INSERT INTO floor(project, seq) SELECT $1, COALESCE((SELECT seq FROM head WHERE project=$1), 0) "
-                                "WHERE true ON CONFLICT (project) DO UPDATE SET seq=excluded.seq", project)
-        self._remember(project, ((await self._fact(project))[0], relay_only))
+            if relay_only:  # forget everything we stored for this project, as eviction does
+                await self._forget_log(c, project)
+        self._facts.put(project, ((await self._fact(project))[0], relay_only))
         if relay_only:
             await self._drop_files(project)
         else:
@@ -469,7 +489,7 @@ class Store:
             # the tombstone above is all that's kept: its registration (owner, dates) goes too
             for table in ("log", "gone", "head", "floor", "mode", "projects"):
                 await c.execute(f"DELETE FROM {table} WHERE project=$1", project)
-        self._facts.pop(project, None)
+        self._facts.drop(project)
         msg = await self.deleted(project)  # the first deletion's, if there were two
         assert msg is not None
         await self._drop_files(project)
