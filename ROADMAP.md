@@ -12,7 +12,8 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
 1. **[A warm standby](https://github.com/jhudsy/texloom/issues/12)**: PostgreSQL streaming to a
    second server (or a hosted PostgreSQL), stored files in a bucket, and a written switch-over; then
    automatic failover using a lease in the bucket. About 2 days for the standby; no change to the
-   relay's code.
+   relay's code. Until then, a cold standby restored nightly from the backups covers
+   losing the server (SCALING.md, "Today: a cold standby from the backups").
 2. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:
    most of the traffic, off the relay. About 2 days.
 3. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
