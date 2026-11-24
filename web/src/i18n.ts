@@ -85,6 +85,3 @@ export function tNodes(en: string, vars: Record<string, Node | string>): (Node |
   if (at < s.length) out.push(s.slice(at))
   return out
 }
-
-/** Every key the catalogue has (for the completeness check in development). */
-export const catalogKeys = () => Object.keys(catalog)

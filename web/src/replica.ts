@@ -595,22 +595,38 @@ export class Replica {
     return id
   }
 
-  /** The change a reference points to, from the server (null if it can't be had). */
+  // ---- uploads on the server (files, and changes too big to send as they are) ----
+  private blobUrl(id: string) { return `${this.server}/blob/${this.keys.project}/${id}` }
+  /** The upload `id` from the server: null if it couldn't be reached. */
+  private fetchBlob(id: string) { return fetch(this.blobUrl(id)).catch(() => null) }
+  /** Decrypted, if it is what `id` names (the id is an HMAC of the content: the server can't
+   *  substitute another file); else null. Throws if it doesn't decrypt. */
+  private async verified(id: string, data: Uint8Array): Promise<Uint8Array | null> {
+    const plain = await this.keys.decrypt(data)
+    return (await this.keys.blobId(plain)) === id ? plain : null
+  }
+  /** Delete the upload `id` from the server (`onlyOutput`: unless it's a project file); null if it couldn't be reached. */
+  private deleteBlob(id: string, onlyOutput = false) {
+    return fetch(this.blobUrl(id), {
+      method: 'DELETE', headers: { 'X-Sig': b64e(this.keys.sign(`del:${id}`, new Uint8Array())), ...(onlyOutput ? { 'X-Only-Output': '1' } : {}) },
+    }).catch(() => null)
+  }
+
   /** The upload a change refers to: 'retry' if it couldn't be fetched just now, 'gone' if it isn't
    *  there (or isn't what the change names). */
   private async fetchRef(ref: Uint8Array): Promise<{ id: string; content: Uint8Array } | 'retry' | 'gone'> {
     let id: unknown
     try { id = JSON.parse(dec.decode(ref.subarray(REF.length))).b } catch { return 'gone' }
     if (typeof id !== 'string' || !BLOB_ID.test(id)) return 'gone'
-    const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`).catch(() => null)
+    const r = await this.fetchBlob(id)
     if (!r) return 'retry'
     if (r.status === 404 || r.status === 410) return 'gone'
     if (!r.ok) return 'retry'
     let data: Uint8Array
     try { data = new Uint8Array(await r.arrayBuffer()) } catch { return 'retry' }
     try {
-      const content = await this.keys.decrypt(data)
-      return (await this.keys.blobId(content)) === id ? { id, content } : 'gone'
+      const content = await this.verified(id, data)
+      return content ? { id, content } : 'gone'
     } catch { return 'gone' }
   }
 
@@ -631,9 +647,7 @@ export class Replica {
     for (const [q, id] of Object.entries(this.refs)) {
       if (Number(q) > upto || id === keep) continue
       delete this.refs[Number(q)]
-      await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
-        method: 'DELETE', headers: { 'X-Sig': b64e(this.keys.sign(`del:${id}`, new Uint8Array())), 'X-Only-Output': '1' },
-      }).catch(() => null)
+      await this.deleteBlob(id, true)
     }
     await idbPut(this.db, 'kv', 'refs', this.refs)
   }
@@ -1027,10 +1041,7 @@ export class Replica {
     for (const id of old) {
       await idbDel(this.db, 'blobs', id); await idbDel(this.db, 'pending', id)
       if (toServer) {
-        const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
-          method: 'DELETE', headers: { 'X-Sig': b64e(this.keys.sign(`del:${id}`, new Uint8Array())) },
-        }).catch(() => null)
-        if (!r) continue // offline: try again later
+        if (!(await this.deleteBlob(id))) continue // offline: try again later
       }
       done.add(id) // deleted, gone already, or kept for the owner's browser to remove
     }
@@ -1069,7 +1080,7 @@ export class Replica {
       const output = marked || (hist.outputs.has(id) && !hist.files.has(id))
       const d = await this.keys.encrypt(plain)
       const code = this.creationCode()
-      const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`, {
+      const r = await fetch(this.blobUrl(id), {
         method: 'PUT', body: d as BodyInit,
         headers: { 'X-Sig': b64e(this.keys.sign(`blob:${id}:`, d)), ...(code ? { 'X-Create-Code': code } : {}), ...(output ? { 'X-Kind': 'output' } : {}) },
       }).catch(() => null)
@@ -1088,11 +1099,10 @@ export class Replica {
     const cached = await idbGet<Uint8Array>(this.db, 'blobs', id)
     if (cached) return cached
     if (this.serverMode === 'server') {
-      const r = await fetch(`${this.server}/blob/${this.keys.project}/${id}`).catch(() => null)
+      const r = await this.fetchBlob(id)
       if (r?.ok) {
-        const plain = await this.keys.decrypt(new Uint8Array(await r.arrayBuffer()))
-        // The id is an HMAC of the content: the server can't substitute another file.
-        if ((await this.keys.blobId(plain)) === id) {
+        const plain = await this.verified(id, new Uint8Array(await r.arrayBuffer()))
+        if (plain) {
           await idbPut(this.db, 'blobs', id, plain)
           return plain
         }
