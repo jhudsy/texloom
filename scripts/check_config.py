@@ -50,6 +50,35 @@ def load(text: str, env: dict[str, str] | None = None):
         os.unlink(f.name)
 
 
+def unreadable_default() -> None:
+    """A default settings file that this user can't even look for (/etc/texloom for another
+    service's user) is refused by name, not a traceback, and --config /dev/null gets past it."""
+    import server.config as config
+    if os.name != "posix" or os.geteuid() == 0:
+        print("  - (an unreadable settings folder: skipped as root or off POSIX)")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        shut = Path(d) / "etc-texloom"
+        shut.mkdir()
+        shut.chmod(0)
+        saved = config.DEFAULT_FILES
+        config.DEFAULT_FILES = (shut / "texloom.toml",)
+        try:
+            err = StringIO()
+            try:
+                with redirect_stderr(err):
+                    parse(parser(), ["--list-codes"])
+                refused = False
+            except SystemExit:
+                refused = "can't look for the settings file" in err.getvalue() and "--config" in err.getvalue()
+            ok(refused, "a settings folder this user can't read is refused by name, saying what to do")
+            a = parse(parser(), ["--config", os.devnull, "--list-codes"])
+            ok(str(a.config) == os.devnull, "and --config /dev/null gets past it")
+        finally:
+            config.DEFAULT_FILES = saved
+            shut.chmod(0o700)
+
+
 def main() -> None:
     text = EXAMPLE.read_text()
     a = load(text)
@@ -72,6 +101,7 @@ def main() -> None:
     except SystemExit:
         refused = "unknown setting 'min_fre'" in err.getvalue()
     ok(refused, "a misspelled setting is refused by name")
+    unreadable_default()
     print("settings: all checks passed" if not failures else f"settings: FAILED ({len(failures)})")
     sys.exit(1 if failures else 0)
 

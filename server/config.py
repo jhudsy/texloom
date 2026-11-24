@@ -63,6 +63,21 @@ def _convert(action: argparse.Action, value: object, where: str) -> object:
     return value
 
 
+def _default_file() -> Path | None:
+    """The first of DEFAULT_FILES that exists. One that can't even be looked for (a folder this user
+    may not read, such as /etc/texloom for another service's user) is an error, not a missing file:
+    carrying on without the server's settings could be wrong in quiet ways."""
+    for f in DEFAULT_FILES:
+        try:
+            if f.exists():
+                return f
+        except OSError as e:
+            raise ConfigError(f"can't look for the settings file {f.resolve()}: {e.strerror}. Run this as a user "
+                              "that may read it, or name a settings file with --config (an empty one, such as "
+                              "--config /dev/null, if none is needed)") from None
+    return None
+
+
 def parse(parser: argparse.ArgumentParser, argv: list[str] | None = None) -> argparse.Namespace:
     """Parse the command line, with defaults from the settings file and the environment."""
     argv = sys.argv[1:] if argv is None else argv
@@ -70,11 +85,11 @@ def parse(parser: argparse.ArgumentParser, argv: list[str] | None = None) -> arg
     pre.add_argument("--config", type=Path)
     known, _ = pre.parse_known_args(argv)
     path = known.config or (Path(os.environ["TEXLOOM_CONFIG"]) if os.environ.get("TEXLOOM_CONFIG") else None)
-    if path is None:
-        path = next((f for f in DEFAULT_FILES if f.exists()), None)
     actions = {a.dest: a for a in parser._actions if a.dest not in COMMANDS}
     values: dict[str, object] = {}
     try:
+        if path is None:
+            path = _default_file()
         if path is not None:
             try:
                 raw = tomllib.loads(path.read_text())
