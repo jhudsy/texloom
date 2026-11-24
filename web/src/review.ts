@@ -12,8 +12,8 @@ import { t, tn, locale } from './i18n'
 import { applyChange, placeOf } from './suggestcore'
 import { byReading, readingOrder } from './navigate'
 import { isWordChar, refine, wordDiff, type DiffOp } from './worddiff'
-import { quiet, STORAGE } from './quiet'
 import { collaborators, mentionPicker, mentionsMe } from './mention'
+import { getString, setString } from './store'
 
 export type Kind = 'comment' | 'suggestion'
 export interface Item {
@@ -212,13 +212,14 @@ export type Markup = 'none' | 'simple' | 'all'
 export const editorMarkup = (() => {
   const KEY = 'texloom.markup'
   let mode: Markup = 'none'
-  try { const v = localStorage.getItem(KEY); if (v === 'simple' || v === 'all') mode = v } catch (e) { quiet(STORAGE, e) }
+  const v = getString(KEY)
+  if (v === 'simple' || v === 'all') mode = v
   const watchers = new Set<() => void>()
   return {
     mode: () => mode,
     set(v: Markup) {
       mode = v
-      try { if (v === 'none') localStorage.removeItem(KEY); else localStorage.setItem(KEY, v) } catch (e) { quiet(STORAGE, e) }
+      setString(KEY, v === 'none' ? null : v)
       watchers.forEach((f) => f())
     },
     watch(f: () => void) { watchers.add(f); return () => { watchers.delete(f) } },

@@ -9,14 +9,14 @@ import type { Replica } from './replica'
 import { SYMBOLS, type Symbol } from './symbols'
 import { stripComments } from './texscan'
 import { changeOrSuggest, isSuggesting, suggested } from './suggestmode'
-import { quiet, STORAGE } from './quiet'
+import { readJson, writeJson } from './store'
 
 const LABELS: Record<string, () => string> = {
   greek: () => t('Greek'), relations: () => t('Relations'), operators: () => t('Operators'), large: () => t('Large operators'), arrows: () => t('Arrows'),
   delimiters: () => t('Delimiters'), misc: () => t('Miscellaneous'), letters: () => t('Letters'), structures: () => t('Accents and structures'), text: () => t('Text'),
 }
 const RECENT_KEY = 'texloom.symbolsRecent', MAX_RECENT = 16
-const readRecent = (): string[] => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]') } catch { return [] } }
+const readRecent = (): string[] => readJson<string[]>(RECENT_KEY, [])
 
 /** Packages that a class or another package already provides. */
 const PROVIDED_BY: Record<string, RegExp> = {
@@ -97,7 +97,7 @@ export function createSymbolPalette({ r, view, file, inserted }: PaletteHost): {
         : t('This symbol needs {{line}} in your preamble.', { line })
     }
     const list = [sym.latex, ...readRecent().filter((x) => x !== sym.latex)].slice(0, MAX_RECENT)
-    try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch (e) { quiet(STORAGE, e) }
+    writeJson(RECENT_KEY, list)
     showRecent()
     if (!status.textContent) inserted() // on a phone, get out of the way unless there's something to read
   }

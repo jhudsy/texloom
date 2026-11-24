@@ -31,6 +31,7 @@ import { shaCache, type ShaCache } from './gitshacache'
 import { digest, hex, randomHex } from './bytes'
 import { b64e } from './crypto'
 import { devOverride, serverInfo } from './servers'
+import { getString, session } from './store'
 
 const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 // (quiet: each send is a new version of the changed files in Dropbox, as each save is in its own app)
@@ -72,7 +73,7 @@ function ep(): { api: string; content: string; www: string; notify: string } {
 }
 
 /** With debugging on (localStorage texloom.debug = 1): requests to Dropbox and the time they took, for the console. */
-const debugging = () => { try { return localStorage.getItem('texloom.debug') === '1' } catch { return false } }
+const debugging = () => getString('texloom.debug') === '1'
 const requests = { n: 0, ms: 0 }
 
 /** Run `fn` on each item, `n` at a time. */
@@ -109,8 +110,7 @@ export async function signIn(back = location.href): Promise<never> {
   const challenge = b64e(await digest('SHA-256', new TextEncoder().encode(verifier)))
   const state = b64e(crypto.getRandomValues(new Uint8Array(16)))
   const redirect = `${location.origin}/dropbox-auth.html`
-  try { sessionStorage.setItem('texloom.dropboxPending', JSON.stringify({ verifier, state, key, back, redirect, api: ep().api })) }
-  catch { throw new DropboxError(t('This browser won’t keep the sign-in for a moment (private browsing?), so Dropbox can’t be connected here.')) }
+  if (!session.setJson('texloom.dropboxPending', { verifier, state, key, back, redirect, api: ep().api })) throw new DropboxError(t('This browser won’t keep the sign-in for a moment (private browsing?), so Dropbox can’t be connected here.'))
   const q = new URLSearchParams({ client_id: key, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256',
     token_access_type: 'offline', redirect_uri: redirect, state, scope: SCOPES })
   location.assign(`${ep().www}/oauth2/authorize?${q}`)
@@ -119,12 +119,9 @@ export async function signIn(back = location.href): Promise<never> {
 
 /** What the last sign-in left to say, if it didn't work (dropbox-auth.html keeps it), once. */
 export function signInProblem(): string {
-  try {
-    const why = sessionStorage.getItem('texloom.dropboxProblem')
-    sessionStorage.removeItem('texloom.dropboxProblem')
-    if (!why) return ''
-    return why === 'access_denied' ? t('Dropbox access wasn’t allowed.') : t('Dropbox didn’t sign you in ({{why}}).', { why })
-  } catch { return '' }
+  const why = session.take('texloom.dropboxProblem')
+  if (!why) return ''
+  return why === 'access_denied' ? t('Dropbox access wasn’t allowed.') : t('Dropbox didn’t sign you in ({{why}}).', { why })
 }
 
 async function tokenRequest(form: Record<string, string>): Promise<any> {

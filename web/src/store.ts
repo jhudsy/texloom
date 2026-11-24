@@ -17,6 +17,12 @@ function kept(area: () => Storage) {
   }
   return {
     get, set,
+    /** The text kept under `key`, removed as it's read (a note left for the next page). */
+    take(key: string): string | null {
+      const v = get(key)
+      if (v !== null) set(key, null)
+      return v
+    },
     /** What's kept under `key` as JSON, or `fallback` if nothing is (or it isn't JSON). */
     json<T>(key: string, fallback: T): T {
       const s = get(key)
@@ -37,4 +43,4 @@ export const local = kept(() => localStorage)
 /** sessionStorage: kept for this tab. */
 export const session = kept(() => sessionStorage)
 
-export const getString = local.get, setString = local.set, readJson = local.json, writeJson = local.setJson
+export const getString = local.get, setString = local.set, readJson = local.json, writeJson = local.setJson, takeString = local.take

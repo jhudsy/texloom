@@ -18,6 +18,7 @@ import type { Replica } from './replica'
 import { addItem, allItems, mergeText, rangeOf } from './review'
 import { quiet } from './quiet'
 import { b64, unb64 } from './bytes'
+import { readJson, writeJson } from './store'
 
 export const MIN_APART = 30_000 // ms: edits apart for less than this aren't flagged
 const SETTLE = 1500 // ms after the last change from others before notes are added
@@ -64,19 +65,15 @@ export function watchMerges(r: Replica, myName: () => string) {
   const key = `texloom-apart-${r.keys.project}`
   const places = new Map<string, Place[]>()
   try {
-    const stored = JSON.parse(localStorage.getItem(key) ?? '{}') as Stored
-    for (const [file, ps] of Object.entries(stored)) places.set(file, ps.map(([s, e, at]) => ({ s: dec(s), e: dec(e), at })))
+    for (const [file, ps] of Object.entries(readJson<Stored>(key, {}))) places.set(file, ps.map(([s, e, at]) => ({ s: dec(s), e: dec(e), at })))
   } catch (e) { quiet('none kept', e) }
   let saveTimer: ReturnType<typeof setTimeout> | undefined
   const save = () => {
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
-      try {
-        if (!places.size) { localStorage.removeItem(key); return }
-        const out: Stored = {}
-        for (const [file, ps] of places) out[file] = ps.map((p) => [enc(p.s), enc(p.e), p.at])
-        localStorage.setItem(key, JSON.stringify(out))
-      } catch (e) { quiet('storage full or blocked: kept in memory only', e) }
+      const out: Stored = {}
+      for (const [file, ps] of places) out[file] = ps.map((p) => [enc(p.s), enc(p.e), p.at])
+      writeJson(key, places.size ? out : null) // (storage full or blocked: kept in memory only)
     }, 1000)
   }
   const resolve = (yt: Y.Text, p: Place): [number, number] | null => {

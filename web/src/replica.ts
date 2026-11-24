@@ -14,8 +14,10 @@ import { packed, unpack } from './packing'
 import { t } from './i18n'
 import { APP_VERSION } from './version'
 import type { Link } from './versions'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
 import { randomHex } from './bytes'
+import { local } from './store'
+import { textStore } from './accounts'
 
 const REMOTE = Symbol('remote')
 const COMPACT_AFTER = 300
@@ -88,18 +90,12 @@ export async function forgetLocalCopy(project: string): Promise<void> {
  *  app's own by default. Each follows the project list (listsync.ts), with when it was entered. */
 const codeKey = (server: string) => (server === location.origin ? 'texloom.code' : `texloom.code@${server}`)
 export const creationCode = {
-  get(server = location.origin): string { try { return localStorage.getItem(codeKey(server)) || '' } catch { return '' } },
+  get: (server = location.origin): string => textStore(codeKey(server)).get(),
   /** When it was entered here (0: before this was recorded), so the latest one follows the project list. */
-  at(server = location.origin): number { try { return Number(localStorage.getItem(codeKey(server) + 'At')) || 0 } catch { return 0 } },
-  set(v: string, at = Date.now(), server = location.origin) {
-    try { localStorage.setItem(codeKey(server), v); localStorage.setItem(codeKey(server) + 'At', String(at)) } catch (e) { quiet(STORAGE, e) }
-  },
+  at: (server = location.origin): number => textStore(codeKey(server)).at(),
+  set: (v: string, at = Date.now(), server = location.origin) => textStore(codeKey(server)).set(v, at),
   /** The other servers this browser has a code for. */
-  servers(): string[] {
-    const out: string[] = []
-    try { for (const k of Object.keys(localStorage)) if (k.startsWith('texloom.code@') && !k.endsWith('At') && localStorage.getItem(k)) out.push(k.slice('texloom.code@'.length)) } catch (e) { quiet(STORAGE, e) }
-    return out.sort()
-  },
+  servers: (): string[] => local.keys().filter((k) => k.startsWith('texloom.code@') && !k.endsWith('At') && local.get(k)).map((k) => k.slice('texloom.code@'.length)).sort(),
 }
 
 /** Why the server isn't storing this project's changes (they still reach people online). */
@@ -890,7 +886,7 @@ export class Replica {
         added = true
         if (pub === this.keys.memberPub && !this.withdrawn) {
           this.withdrawn = true
-          try { localStorage.setItem(`texloom.withdrawn.${this.keys.project}`, '1') } catch (e) { quiet(STORAGE, e) }
+          local.set(`texloom.withdrawn.${this.keys.project}`, '1')
           this.onStatus()
         }
       } catch (e) { quiet('a malformed or unverifiable revocation: skipped', e) }

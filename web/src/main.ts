@@ -7,9 +7,10 @@ import { refreshProjects } from './appinfo'
 import { landing } from './startpage'
 import { openProject } from './projectview'
 import './style.css'
+import { getString } from './store'
 
 // Offline app: a service worker caches the app itself (projects already live in IndexedDB).
-const noSW = (() => { try { return localStorage.getItem('texloom.nosw') === '1' } catch { return false } })() // debugging switch
+const noSW = getString('texloom.nosw') === '1' // debugging switch
 if ('serviceWorker' in navigator && !noSW && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('service worker:', e))
 }

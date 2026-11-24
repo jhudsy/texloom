@@ -12,11 +12,11 @@ import { zoteroSection, zoteroStatus } from './zoteroui'
 import { githubSection, gitStatus } from './githubui'
 import { dropboxSection, dropboxStatus } from './dropboxui'
 import { integrationCard } from './integrationcard'
-import { quiet, STORAGE } from './quiet'
 import { serverInfo } from './servers'
 import { usageBox } from './usage'
 import { moveCodeDialog } from './movecode'
 import { confirmStopStoring } from './storagenotice'
+import { getString, readJson, setString, writeJson } from './store'
 
 /** "Codes come from whoever runs this server", with the server's own page about them once known. */
 function codeSourceSlot(): HTMLElement {
@@ -34,17 +34,13 @@ export const prefs = {
   get name(): string { return myName.get() },
   set name(v: string) { if (v !== myName.get()) myName.set(v) },
   device(project: string): Device {
-    try {
-      const global = JSON.parse(localStorage.getItem('texloom.device') || '{}')
-      const local = JSON.parse(localStorage.getItem(`texloom.device.${project}`) || '{}')
-      return { ...DEFAULTS, ...global, ...local }
-    } catch { return { ...DEFAULTS } }
+    return { ...DEFAULTS, ...readJson('texloom.device', {}), ...readJson(`texloom.device.${project}`, {}) }
   },
   saveDevice(project: string, d: Device) {
-    localStorage.setItem(`texloom.device.${project}`, JSON.stringify(d))
+    writeJson(`texloom.device.${project}`, d)
     // New projects default to the choices made most recently.
     const { sync, compile, autoCompile, spell, mathPreview, checks } = d
-    localStorage.setItem('texloom.device', JSON.stringify({ sync, compile, autoCompile, spell, mathPreview, checks }))
+    writeJson('texloom.device', { sync, compile, autoCompile, spell, mathPreview, checks })
   },
 }
 
@@ -260,7 +256,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
   }
 
   const ids = Object.keys(tabs) as SettingsTab[]
-  let current: SettingsTab = open ?? (() => { try { const v = localStorage.getItem(TAB_KEY) as SettingsTab; return ids.includes(v) ? v : 'project' } catch { return 'project' } })()
+  let current: SettingsTab = open ?? (() => { const v = getString(TAB_KEY) as SettingsTab; return ids.includes(v) ? v : 'project' })()
   const panel = h('div', { class: 'tabpanel', role: 'tabpanel' })
   const buttons = ids.map((id) => h('button', { class: 'tab', role: 'tab', id: `settings-tab-${id}`, onclick: () => show(id), onkeydown: (e: KeyboardEvent) => {
     const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key]
@@ -272,7 +268,7 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
   } }, tabs[id].label))
   function show(id: SettingsTab) {
     current = id
-    try { localStorage.setItem(TAB_KEY, id) } catch (e) { quiet(STORAGE, e) }
+    setString(TAB_KEY, id)
     buttons.forEach((b, i) => { const on = ids[i] === id; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1 })
     panel.setAttribute('aria-labelledby', `settings-tab-${id}`)
     panel.replaceChildren(...tabs[id].body().filter((x): x is HTMLElement => !!x))

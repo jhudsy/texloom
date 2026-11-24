@@ -14,7 +14,7 @@ import { allFiles, fileBase, mainFile, isDocument } from './projectfiles'
 import { parseLog, type Problem } from './latexlog'
 import { SyncTex } from './synctex'
 import { t, tn, locale } from './i18n'
-import { quiet, STORAGE } from './quiet'
+import { getString, setString } from './store'
 
 export type CompileOut = { ok: boolean; log: string } | null
 type Fail = (msg: (tr: typeof t) => string) => CompileOut
@@ -72,7 +72,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     logBox.hidden = !open
     logBtn.classList.toggle('on', open)
     logBtn.setAttribute('aria-pressed', String(open))
-    try { localStorage.setItem(LOG_KEY, open ? '1' : '') } catch (e) { quiet(STORAGE, e) }
+    setString(LOG_KEY, open ? '1' : '')
   }
   const logBtn = h('button', { title: t('Show/hide the compile log'), onclick: () => setLogOpen(!!logBox.hidden) }, t('Log'))
   const dlBtn = h('button', { class: 'iconbtn', title: t('Download the PDF'), 'aria-label': t('Download the PDF'), disabled: true, onclick: () => lastPdf && saveFile(`${pdfName ?? fileBase(r)}.pdf`, lastPdf, 'application/pdf') }, icon('download'))
@@ -107,7 +107,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       h('span', { class: 'pdftools' }, pdfView.controls, windowBtn, dlBtn, logBtn)),
     progress, pdfView.el, logBox)
   verticalResizer(logSplit, logBox, 'texloom.logHeight', 60, 180)
-  setLogOpen(localStorage.getItem(LOG_KEY) === '1')
+  setLogOpen(getString(LOG_KEY) === '1')
 
   // double-click or right-click → “Go to source” in the PDF: jump to the source line
   pdfView.menuExtras = () => [[t('Open the PDF in a separate window'), popOut], [t('Download the PDF'), () => dlBtn.click()], [t('Compile'), () => { compile() }]]

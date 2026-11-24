@@ -4,8 +4,8 @@ import { creationCode, type Replica } from './replica'
 import { dialog, h } from './dom'
 import { t, tn } from './i18n'
 import { normalServer, serverInfo, serverName } from './servers'
-import { quiet, STORAGE } from './quiet'
 import { bytes } from './usage'
+import { getString, setString } from './store'
 
 const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent)
 export const SAFARI_NOTE = isSafari ? ' ' + t('Safari may also delete a site’s data after about 7 days without a visit.') : ''
@@ -193,7 +193,7 @@ export function chooseServer(listed: Iterable<string | undefined>): Promise<stri
   const home = location.origin
   const known = [...new Set([home, ...[...listed].map((s) => normalServer(s)).filter((s): s is string => !!s), ...creationCode.servers()])]
   let last = home
-  try { last = normalServer(localStorage.getItem(LAST_SERVER)) ?? home } catch (e) { quiet(STORAGE, e) }
+  last = normalServer(getString(LAST_SERVER)) ?? home
   if (!known.includes(last)) last = home
   if (known.length === 1) return Promise.resolve(home)
   return new Promise((resolve) => {
@@ -210,7 +210,7 @@ export function chooseServer(listed: Iterable<string | undefined>): Promise<stri
       const server = picked ? picked : normalServer(other.value.trim())
       if (!server) { msg.textContent = t('Give a server’s address, starting with https://'); return }
       choice = server
-      try { localStorage.setItem(LAST_SERVER, server) } catch (e) { quiet(STORAGE, e) }
+      setString(LAST_SERVER, server)
       dlg.close()
     }
     const dlg = dialog('settings',

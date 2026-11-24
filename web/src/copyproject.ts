@@ -9,7 +9,8 @@ import { projects } from './projects'
 import { Replica } from './replica'
 import { awayServer, fragmentFor } from './servers'
 import { chooseNewProject, chooseServer } from './storagenotice'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
+import { setString } from './store'
 
 const SETTINGS = ['main', 'bib', 'engine', 'lang'] // what else in the shared document a copy keeps
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
@@ -94,7 +95,7 @@ export function copyDialog(source: { name: string; by: string; server: string } 
       const missing = await fill(from, to, name, source.by, (done, total) => { status.textContent = t('Copying… ({{done}} of {{total}})', { done: done + 1, total }) })
       await to.close()
       const storage = where === 'relay' || from.storage === 'relay' ? 'relay' : 'server'
-      try { if (storage === 'relay') localStorage.setItem(`texloom.newRelay.${keys.project}`, '1') } catch (e) { quiet(STORAGE, e) }
+      if (storage === 'relay') setString(`texloom.newRelay.${keys.project}`, '1')
       projects.update(keys.project, { fragment: keys.fragment(), server: awayServer(server), writable: true, at: Date.now(), name, storage, createdBy: source.by || undefined })
       if (missing.length) alert(tn(missing.length, 'The copy is missing {{n}} file whose content isn’t available right now: {{files}}', 'The copy is missing {{n}} files whose content isn’t available right now: {{files}}', { files: missing.slice(0, 5).join(', ') }))
       location.hash = fragmentFor(keys.fragment(), server)

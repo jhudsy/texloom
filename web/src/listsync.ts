@@ -20,7 +20,8 @@ import type { AccountStore } from './accounts'
 import { tags } from './tags'
 import { normalServer } from './servers'
 import { APP_HEADER } from './version'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
+import { getString, readJson, setString, writeJson } from './store'
 
 /** The message is a code: needs-code, code-expired, list-full, list-retired, password-taken,
  *  wrong-password, no-prf, passkey-failed, busy or server. */
@@ -44,10 +45,10 @@ const COPIES = 'texloom.listCopies'
 type Copies = Record<string, { on: boolean; at: number }>
 const firstCopy = (server = location.origin): Copies => ({ [server]: { on: true, at: 1 } })
 function readCopies(): Copies {
-  try { const c = JSON.parse(localStorage.getItem(COPIES) || 'null'); if (c && typeof c === 'object') return c } catch (e) { quiet(STORAGE, e) }
-  return firstCopy()
+  const c = readJson<Copies | null>(COPIES, null)
+  return c && typeof c === 'object' ? c : firstCopy()
 }
-function writeCopies(c: Copies) { try { localStorage.setItem(COPIES, JSON.stringify(c)) } catch (e) { quiet(STORAGE, e) } }
+const writeCopies = (c: Copies) => writeJson(COPIES, c)
 /** The servers keeping copies of this browser's list, this app's own first. */
 export function copyServers(): string[] {
   const c = readCopies()
@@ -252,19 +253,14 @@ let running: Promise<void> | null = null
 let changed: () => void = () => {}
 
 export function savedSecret(): Uint8Array | null {
-  try {
-    const s = localStorage.getItem(STORE)
-    return s ? b64d(s) : null
-  } catch { return null }
+  const s = getString(STORE)
+  try { return s ? b64d(s) : null } catch { return null } // (not base64: none)
 }
 
 /** Use this list on this browser, or none. `server`: one keeping a copy of it (where its link
  *  points); the others are learnt from the list's settings. */
 export function saveSecret(secret: Uint8Array | null, server = location.origin) {
-  try {
-    if (secret) localStorage.setItem(STORE, b64e(secret))
-    else localStorage.removeItem(STORE)
-  } catch (e) { quiet(STORAGE, e) }
+  setString(STORE, secret && b64e(secret))
   writeCopies(firstCopy(server))
   copyProblems.clear()
   lastSynced = ''

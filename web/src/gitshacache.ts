@@ -4,7 +4,7 @@
 // images change often would fill the browser's storage with ids of old versions (issue 29). So each
 // time a sync opens it, it keeps only the files the project has now: those are all a sync looks up.
 // No imports that need a page: scripts/check-gitshacache.mjs runs it in node.
-import { quiet, STORAGE } from './quiet'
+import { readJson, writeJson } from './store'
 
 export interface ShaCache {
   get(h: string): string | undefined
@@ -16,17 +16,9 @@ export const cacheKey = (project: string) => `texloom.gitsha.${project}`
 /** The cache for `project`, trimmed to `current`: the TeXLoom ids of the files it has now. `key`: where
  *  it's kept (Dropbox's hashes are kept apart from git's). */
 export function shaCache(project: string, current: Iterable<string>, key = cacheKey(project)): ShaCache {
-  let m: Record<string, string> = {}
-  try {
-    const v = JSON.parse(localStorage.getItem(key) || '{}')
-    if (v && typeof v === 'object' && !Array.isArray(v)) m = v
-  } catch (e) { quiet(STORAGE, e) }
-  const save = () => {
-    try {
-      if (Object.keys(m).length) localStorage.setItem(key, JSON.stringify(m))
-      else localStorage.removeItem(key)
-    } catch (e) { quiet(STORAGE, e) }
-  }
+  const v = readJson<unknown>(key, {})
+  const m: Record<string, string> = v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, string> : {}
+  const save = () => writeJson(key, Object.keys(m).length ? m : null)
   const keep = new Set(current)
   const before = Object.keys(m).length
   for (const h of Object.keys(m)) if (!keep.has(h) || typeof m[h] !== 'string') delete m[h]

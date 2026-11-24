@@ -1,7 +1,7 @@
 // Tiny DOM helpers shared by the UI modules. Children are added as text nodes or
 // elements, never parsed as HTML, so user-controlled strings can't inject markup.
 import { t } from './i18n'
-import { quiet, STORAGE } from './quiet'
+import { getString, setString } from './store'
 
 type Kid = Node | string | null | undefined | false
 export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs?: Record<string, any>, ...kids: Kid[]): HTMLElementTagNameMap[K]
@@ -55,12 +55,12 @@ export function saveFile(name: string, data: Uint8Array | string, type = 'applic
 
 /** Make `handle` resize `target` vertically by dragging (height stored under `key`). */
 export function verticalResizer(handle: HTMLElement, target: HTMLElement, key: string, min = 60, def = 180) {
-  const get = () => { try { return Number(localStorage.getItem(key)) || def } catch { return def } }
+  const get = () => Number(getString(key)) || def
   const set = (px: number) => {
     const max = Math.max(min, (target.parentElement?.clientHeight ?? 600) - 120)
     const v = Math.round(Math.min(max, Math.max(min, px)))
     target.style.height = `${v}px`
-    try { localStorage.setItem(key, String(v)) } catch (e) { quiet(STORAGE, e) }
+    setString(key, String(v))
   }
   target.style.height = `${get()}px`
   handle.setAttribute('role', 'separator')

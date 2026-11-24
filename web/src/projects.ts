@@ -8,7 +8,8 @@ import { t, locale } from './i18n'
 import type { ListDoc, ListEntry } from './listcore'
 import { tags } from './tags'
 import { awayServer, fragmentFor } from './servers'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
+import { local, readJson, session, writeJson } from './store'
 
 export interface Recent {
   project: string // unique id (from the link)
@@ -30,7 +31,7 @@ export interface Recent {
 }
 
 const KEY = 'texloom.recent'
-const read = (): Recent[] => { try { return JSON.parse(localStorage.getItem(KEY) || '[]') } catch { return [] } }
+const read = (): Recent[] => readJson<Recent[]>(KEY, [])
 /** Where a tab keeps the link it was opened with (see addressbar.ts). */
 export const tabKeysItem = (project: string) => `texloom.keys.${project}`
 
@@ -38,11 +39,11 @@ const GONE = 'texloom.recentGone' // project -> when it was removed, so other de
 let changed: (() => void) | null = null
 const MAX_KEPT = 1000 // the most recently opened; a synced list keeps the rest on the server
 const write = (list: Recent[], quietly = false) => {
-  try { localStorage.setItem(KEY, JSON.stringify([...list].sort((a, b) => b.at - a.at).slice(0, MAX_KEPT))) } catch (e) { quiet(STORAGE, e) }
+  writeJson(KEY, [...list].sort((a, b) => b.at - a.at).slice(0, MAX_KEPT))
   if (!quietly) changed?.()
 }
-const readGone = (): Record<string, number> => { try { return JSON.parse(localStorage.getItem(GONE) || '{}') } catch { return {} } }
-const writeGone = (gone: Record<string, number>) => { try { localStorage.setItem(GONE, JSON.stringify(gone)) } catch (e) { quiet(STORAGE, e) } }
+const readGone = (): Record<string, number> => readJson<Record<string, number>>(GONE, {})
+const writeGone = (gone: Record<string, number>) => writeJson(GONE, gone)
 
 /** How much a link's keys give: 0 to read, 1 a personal edit link, 2 the owner's; null if they're no keys. */
 function access(fragment: string): { level: number; keys: Keys } | null {
@@ -153,13 +154,13 @@ export const projects = {
 
   async forget(project: string) {
     await forgetLocalCopy(project)
-    try { sessionStorage.removeItem(tabKeysItem(project)) } catch (e) { quiet(STORAGE, e) }
+    session.set(tabKeysItem(project), null)
     writeGone({ ...readGone(), [project]: Date.now() })
     write(read().filter((x) => x.project !== project))
     tags.forgetProject(project)
     await chats.forgetProject(project).catch((e) => quiet('the project’s assistant conversations stay until the next clean-up', e))
     // every per-project setting (texloom.<what>.<project>) and the linked folder
-    try { for (const k of Object.keys(localStorage)) if (k.startsWith('texloom.') && k.endsWith(`.${project}`)) localStorage.removeItem(k) } catch (e) { quiet(STORAGE, e) }
+    for (const k of local.keys()) if (k.startsWith('texloom.') && k.endsWith(`.${project}`)) local.set(k, null)
     await rememberFolder(project, null).catch((e) => quiet('the project’s linked folder wasn’t forgotten (storage unavailable)', e))
   },
 }

@@ -8,7 +8,7 @@ import { icon } from './icons'
 import { t, tn } from './i18n'
 import { allFiles, allFolders, cleanPath, confirmAdding, deletePath, exists, IMAGE_RE, isDocument, mainFile, movePath, newFolder, putFile } from './projectfiles'
 import { isJunk } from './templates'
-import { quiet, STORAGE } from './quiet'
+import { readJson, writeJson } from './store'
 
 export interface FileTree {
   el: HTMLElement
@@ -37,8 +37,8 @@ export function createFileTree(r: Replica, writable: boolean, onOpen: (path: str
   let current: string | null = null // open file
   let folder = '' // folder new things go into (selected folder, or the open file's folder)
   const KEY = `texloom.tree.${r.keys.project}`
-  const collapsed = new Set<string>((() => { try { return JSON.parse(localStorage.getItem(KEY) || '[]') } catch { return [] } })())
-  const saveCollapsed = () => { try { localStorage.setItem(KEY, JSON.stringify([...collapsed])) } catch (e) { quiet(STORAGE, e) } }
+  const collapsed = new Set<string>(readJson<string[]>(KEY, []))
+  const saveCollapsed = () => writeJson(KEY, [...collapsed])
 
   const list = h('ul', { class: 'files', role: 'tree' })
   const uploadIn = h('input', { type: 'file', multiple: true, hidden: true, onchange: (e: any) => { upload([...e.target.files].map((file) => ({ file, rel: file.name })), [], folder); e.target.value = '' } })

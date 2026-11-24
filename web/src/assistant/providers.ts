@@ -2,7 +2,7 @@
 // synced into the project: API keys must not travel with a share link.
 
 import { t } from '../i18n'
-import { quiet, STORAGE } from '../quiet'
+import { getString, readJson, setString, writeJson } from '../store'
 
 export type Kind = 'anthropic' | 'openai'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -52,7 +52,7 @@ type Saved = { active: string; configs: Record<string, Partial<ProviderConfig>> 
 const KEY = 'texloom.ai'
 
 function load(): Saved {
-  try { return { active: 'anthropic', configs: {}, ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return { active: 'anthropic', configs: {} } }
+  return { active: 'anthropic', configs: {}, ...readJson(KEY, {}) }
 }
 
 export const aiPrefs: {
@@ -66,7 +66,7 @@ export const aiPrefs: {
   instructions: string
 } = {
   get activeId(): string { return load().active in PRESETS ? load().active : 'anthropic' },
-  set activeId(id: string) { const s = load(); s.active = id; localStorage.setItem(KEY, JSON.stringify(s)) },
+  set activeId(id: string) { const s = load(); s.active = id; writeJson(KEY, s) },
   get(id = aiPrefs.activeId): ProviderConfig {
     const saved = load().configs[id] ?? {}
     return { ...PRESETS[id], ...saved, models: saved.models?.length ? saved.models : PRESETS[id].models }
@@ -74,14 +74,14 @@ export const aiPrefs: {
   save(id: string, cfg: Partial<ProviderConfig>) {
     const s = load()
     s.configs[id] = { ...s.configs[id], ...cfg }
-    localStorage.setItem(KEY, JSON.stringify(s))
+    writeJson(KEY, s)
   },
-  get reviewEdits(): boolean { return localStorage.getItem('texloom.ai.review') !== 'off' },
-  set reviewEdits(v: boolean) { localStorage.setItem('texloom.ai.review', v ? 'on' : 'off') },
-  get keepChats(): boolean { try { return localStorage.getItem('texloom.ai.keep') !== 'off' } catch { return true } },
-  set keepChats(v: boolean) { try { localStorage.setItem('texloom.ai.keep', v ? 'on' : 'off') } catch (e) { quiet(STORAGE, e) } },
-  get instructions(): string { try { return localStorage.getItem('texloom.ai.instructions') ?? '' } catch { return '' } },
-  set instructions(v: string) { try { if (v.trim()) localStorage.setItem('texloom.ai.instructions', v); else localStorage.removeItem('texloom.ai.instructions') } catch (e) { quiet(STORAGE, e) } },
+  get reviewEdits(): boolean { return getString('texloom.ai.review') !== 'off' },
+  set reviewEdits(v: boolean) { setString('texloom.ai.review', v ? 'on' : 'off') },
+  get keepChats(): boolean { return getString('texloom.ai.keep') !== 'off' },
+  set keepChats(v: boolean) { setString('texloom.ai.keep', v ? 'on' : 'off') },
+  get instructions(): string { return getString('texloom.ai.instructions') ?? '' },
+  set instructions(v: string) { setString('texloom.ai.instructions', v.trim() ? v : null) },
 }
 
 /** List models from an OpenAI-compatible /models endpoint. */

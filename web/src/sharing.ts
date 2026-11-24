@@ -8,7 +8,8 @@ import { projects, whoIn } from './projects'
 import { t, locale } from './i18n'
 import { privateServerAllows } from './storagenotice'
 import { awayServer, serverName } from './servers'
-import { quiet, STORAGE } from './quiet'
+import { quiet } from './quiet'
+import { getString, readJson, setString, writeJson } from './store'
 
 function copyRow(text: string, mail?: { subject: string; body: string }) {
   const inp = h('input', { value: text, readonly: true, onfocus: (e: any) => e.target.select() })
@@ -52,12 +53,8 @@ const when = (at: number) => new Date(at).toLocaleDateString(locale, { dateStyle
 // no new exposure: this browser already holds the owner key, which can do more than any of them.
 type Issued = Record<string, { name: string; at: number; link?: string }>
 const issuedKey = (project: string) => `texloom.issued.${project}`
-function loadIssued(project: string): Issued {
-  try { return JSON.parse(localStorage.getItem(issuedKey(project)) || '{}') } catch { return {} }
-}
-function saveIssued(project: string, v: Issued) {
-  try { localStorage.setItem(issuedKey(project), JSON.stringify(v)) } catch (e) { quiet(STORAGE, e) }
-}
+const loadIssued = (project: string): Issued => readJson<Issued>(issuedKey(project), {})
+const saveIssued = (project: string, v: Issued) => writeJson(issuedKey(project), v)
 
 interface Person { pub: string; name: string; at: number; revoked?: boolean; verified: boolean; link?: string }
 
@@ -203,7 +200,7 @@ export async function rotateKeys(old: Replica, server: string) {
     await old.setStorage('relay')
     await new Promise((res) => setTimeout(res, 500))
     projects.update(keys.project, { fragment: keys.fragment(), writable: true, name: String(old.meta.get('name') ?? ''), at: Date.now() })
-    try { localStorage.setItem(`texloom.device.${keys.project}`, localStorage.getItem(`texloom.device.${old.keys.project}`) ?? '{}') } catch (e) { quiet(STORAGE, e) }
+    setString(`texloom.device.${keys.project}`, getString(`texloom.device.${old.keys.project}`) ?? '{}')
     await old.close()
     await projects.forget(old.keys.project).catch((e) => quiet('the old project is forgotten at the next clean-up', e))
     note.close()
