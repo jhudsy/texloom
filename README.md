@@ -990,6 +990,18 @@ uv run --extra server --with playwright python scripts/check_web_listsync.py  # 
 uv run --extra server --with playwright python scripts/check_web_dropbox.py # keeping a project in step with a Dropbox folder (stand-in: scripts/fakedropbox.py)
 ```
 
+The same checks against a real deployment, such as a staging server tried before production
+(issue 23): set `TEXLOOM_CHECK_SERVER` to its address and, if it asks for creation codes,
+`TEXLOOM_CHECK_CODE_FILE` to a file holding one. The browser opens it through a pass-through on
+127.0.0.1 (the test hooks are only for pages from localhost); past that it's all the deployment's
+own: TLS, the web server in front, the server. They store small test projects and a project list
+there, so use a server meant for testing:
+
+```bash
+TEXLOOM_CHECK_SERVER=https://staging.example.org TEXLOOM_CHECK_CODE_FILE=~/staging-code \
+  uv run --extra server --with playwright python scripts/check_web_review.py
+```
+
 The desktop app's windows: `uv run --extra app python scripts/check_app.py` opens the main window
 and each dialog the way its menus do (offscreen, any system), and checks a dialog asked for from
 another opens over it. On a Mac, `--native` also checks the menu-bar icon's right click and the

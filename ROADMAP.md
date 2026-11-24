@@ -45,8 +45,6 @@ Not broken, but costing more the longer it's left (label `tech-debt`), roughly m
 
 - **[Browser checks for the PDF view, comments from the PDF, the service worker and the arXiv
   download](https://github.com/jhudsy/texloom/issues/21)**: only the git hosts and the Review tab have kept browser checks so far.
-- **[A staging server](https://github.com/jhudsy/texloom/issues/23)** to deploy to before production; could be the standby of
-  [#12](https://github.com/jhudsy/texloom/issues/12).
 - **[Code kept for older apps and data](https://github.com/jhudsy/texloom/issues/27)**: each place is marked and listed
   (`scripts/check_compat.py`, DESIGN.md). Left: removing the batch the server's minimum version allows, converting
   list entries without their server, renaming the `github` settings, and noting which app versions wrote to each stored project.
