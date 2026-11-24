@@ -1,0 +1,47 @@
+# Publishes the VS Code extension (editors/vscode) to the Visual Studio Marketplace and Open VSX
+# when a tag like vscode-v0.1.0 is pushed; the tag must match the version in its package.json.
+# Needs the repository secrets VSCE_PAT (a Marketplace token, scope Marketplace → Manage, for all
+# accessible organizations) and OVSX_PAT (an Open VSX token). The .vsix is attached to the run.
+name: VS Code extension
+
+on:
+  push:
+    tags: ['vscode-v*']
+  workflow_dispatch:  # builds the .vsix without publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: The tag matches the version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          want="vscode-v$(node -p 'require("./package.json").version')"
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME, but package.json says $want"; exit 1; }
+      - run: npx vsce package --out texloom.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: texloom-vsix
+          path: editors/vscode/texloom.vsix
+      - name: Visual Studio Marketplace
+        if: startsWith(github.ref, 'refs/tags/')
+        run: npx vsce publish --packagePath texloom.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - name: Open VSX
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          publisher=$(node -p 'require("./package.json").publisher')
+          # Once only; after that it says the namespace exists, and publishing says if anything's wrong.
+          npx --yes ovsx@0.10.1 create-namespace "$publisher" || true
+          npx --yes ovsx@0.10.1 publish texloom.vsix
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
