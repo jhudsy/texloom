@@ -4,7 +4,7 @@ import type { Replica } from './replica'
 import { dialog, errorText, h, shortTime } from './dom'
 import { t, tn } from './i18n'
 import type { Status } from './integrationcard'
-import { collections, connect, libraries, links, refresh, setLink, validLink, zoteroAccount, type Collection, type Library, type Link } from './zotero'
+import { approve, collections, connect, libraries, links, refresh, setLink, validLink, zoteroAccount, type Collection, type Library, type Link } from './zotero'
 import { cleanPath } from './projectfiles'
 
 const NEW_KEY = 'https://www.zotero.org/settings/keys/new'
@@ -53,6 +53,13 @@ export function zoteroAccountBox(changed: () => void = () => {}): HTMLElement {
   return box
 }
 
+/** Asked before refreshing a link someone else made (or changed): it would read your own Zotero
+ *  library, with your key, into a file everyone in the project sees. */
+export function confirmFetch(file: string, link: Link): boolean {
+  return confirm(t('{{file}} was linked to Zotero by someone else. Refreshing it reads “{{coll}}” from your library “{{lib}}”, with your key, into the project, where everyone in it can see the entries. Go ahead only if you mean to share them.',
+    { file, coll: String(link.collName ?? t('The whole library')), lib: String(link.libName ?? link.lib) }))
+}
+
 /** Project Settings: the account if needed, then the project's links with Refresh and Unlink. */
 export function zoteroSection(r: Replica, me: () => string, writable: boolean): HTMLElement {
   const box = h('div', { class: 'zotero' })
@@ -69,7 +76,7 @@ export function zoteroSection(r: Replica, me: () => string, writable: boolean): 
           writable && mine && validLink(file, l) ? h('button', { class: 'small', onclick: async (e: Event) => {
             const b = e.currentTarget as HTMLButtonElement
             b.disabled = true; msg.className = 'small muted'; msg.textContent = t('Fetching…')
-            try { msg.textContent = (await refresh(r, file, me())) ? t('Updated.') : t('Already up to date.'); render() }
+            try { msg.textContent = (await refresh(r, file, me(), confirmFetch)) ? t('Updated.') : t('Already up to date.'); render() }
             catch (err) { msg.className = 'small err'; msg.textContent = errorText(err) }
             finally { b.disabled = false }
           } }, t('Refresh')) : null,
@@ -139,6 +146,7 @@ function linkDialog(r: Replica, me: () => string, done: () => void) {
       collName: chosen?.name ?? t('The whole library'), format: format.value as Link['format'], by: me(), at: Date.now() }
     go.disabled = true; say(t('Fetching…'))
     setLink(r, path, link)
+    approve(r, path, link) // made here: this browser's own choice
     try { await refresh(r, path, me()); dlg.close(); done() }
     catch (e) { setLink(r, path, null); say(errorText(e), true); go.disabled = false }
   }

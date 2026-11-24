@@ -26,6 +26,7 @@ const zh: Catalog = {
   "The whole library": "整个文献库",
   "Choose a .bib file name, such as zotero.bib.": "请选择一个 .bib 文件名，例如 zotero.bib。",
   "{{file}} already exists. Replace its contents with the collection’s entries?": "{{file}} 已存在。要用分类中的条目替换其内容吗？",
+  "{{file}} was linked to Zotero by someone else. Refreshing it reads “{{coll}}” from your library “{{lib}}”, with your key, into the project, where everyone in it can see the entries. Go ahead only if you mean to share them.": "{{file}} 是由其他人链接到 Zotero 的。刷新会用您的密钥把您的文库“{{lib}}”中的“{{coll}}”读入项目，项目中的每个人都能看到这些条目。只有在您确实想分享它们时才继续。",
 }
 
 export default zh

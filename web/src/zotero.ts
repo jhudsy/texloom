@@ -11,6 +11,7 @@ import { applyText } from './diff'
 import { t } from './i18n'
 import { cleanPath } from './projectfiles'
 import { accountStore } from './accounts'
+import { approval } from './remotesync'
 
 const API = 'https://api.zotero.org'
 
@@ -115,8 +116,22 @@ export function setLink(r: Replica, file: string, link: Link | null) {
   r.meta.set('zotero', next)
 }
 
-/** Fetch the collection again and update the file with what changed. True if the file changed. */
-export async function refresh(r: Replica, file: string, by: string): Promise<boolean> {
+// A link is in the project's shared settings, which any collaborator can write, and refreshing it
+// reads with this browser's own key: a collaborator could point it at your own library (Zotero user
+// ids are public) and have it exported into the shared file. So, as for GitHub and Dropbox, a
+// browser refreshes only a link (library and collection) its user made or approved here.
+const approved = approval<Record<string, string>>('zotero')
+const linkId = (l: Link) => `${l.lib}|${l.coll ?? ''}`
+export function isApproved(r: Replica, file: string, link: Link): boolean {
+  return approved.get(r)?.[file] === linkId(link)
+}
+export function approve(r: Replica, file: string, link: Link) {
+  approved.set(r, { ...(approved.get(r) ?? {}), [file]: linkId(link) })
+}
+
+/** Fetch the collection again and update the file with what changed. True if the file changed.
+ *  `ask`: whether to fetch a link this browser hasn't approved (someone else made or changed it). */
+export async function refresh(r: Replica, file: string, by: string, ask?: (file: string, link: Link) => boolean): Promise<boolean> {
   const a = zoteroAccount.get()
   if (!a) throw new Error(t('Connect your Zotero account first (⚙ Settings on the start page, or here).'))
   const link = links(r)[file]
@@ -124,6 +139,10 @@ export async function refresh(r: Replica, file: string, by: string): Promise<boo
   if (!validLink(file, link)) throw new Error(t('This Zotero link isn’t valid. Unlink it and link the collection again.'))
   // Only a library this key is meant for: a collaborator can't make it fetch from (or reveal) another
   if (!(await libraries(a)).some((l) => l.id === link.lib)) throw new Error(t('{{file}} is linked to a Zotero library your key can’t read.', { file }))
+  if (!isApproved(r, file, link)) {
+    if (!ask?.(file, link)) throw new Error(t('Not refreshed: {{file}}’s Zotero link wasn’t made in this browser.', { file }))
+    approve(r, file, link)
+  }
   const text = await exportBib(a, link)
   let changed = false
   r.doc.transact(() => {

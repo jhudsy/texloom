@@ -26,6 +26,7 @@ const fr: Catalog = {
   "The whole library": "Toute la bibliothèque",
   "Choose a .bib file name, such as zotero.bib.": "Choisissez un nom de fichier .bib, par exemple zotero.bib.",
   "{{file}} already exists. Replace its contents with the collection’s entries?": "{{file}} existe déjà. Remplacer son contenu par les entrées de la collection ?",
+  "{{file}} was linked to Zotero by someone else. Refreshing it reads “{{coll}}” from your library “{{lib}}”, with your key, into the project, where everyone in it can see the entries. Go ahead only if you mean to share them.": "Quelqu’un d’autre a lié {{file}} à Zotero. L’actualiser lit « {{coll}} » depuis votre bibliothèque « {{lib}} », avec votre clé, dans le projet, où tous ses membres voient les entrées. Ne continuez que si vous voulez les partager.",
 }
 
 export default fr

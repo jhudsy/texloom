@@ -51,6 +51,7 @@ import { suggestMode } from './suggestmode'
 import { quiet, quieted } from './quiet'
 import { openedByApp, appCompiles, inAppKey, APP, UNTITLED, brand, programWhat, onRefresh } from './appinfo'
 import { getString, setString, takeString } from './store'
+import { confirmFetch } from './zoteroui'
 
 // ---- project view -----------------------------------------------------------------
 /** Open a project, syncing with `server`: this app's own, or the project's if it lives elsewhere. */
@@ -125,7 +126,7 @@ export async function openProject(keys: Keys, server: string) {
     preview: (p) => { preview.show(p); showInPanel(true); layout.reveal('right'); showTab('pdf') },
     compile: (p) => { showInPanel(false); layout.reveal('right'); showTab('pdf'); output.compile(true, false, p) },
     zotero: (p) => (writable && zoteroLinks(r)[p] && zoteroAccount.get()
-      ? () => { zoteroRefresh(r, p, me.name).catch((e) => alert(errorText(e))) } : null),
+      ? () => { zoteroRefresh(r, p, me.name, confirmFetch).catch((e) => alert(errorText(e))) } : null),
     insert: () => {
       const v = editor.view()
       if (!v || !isTexFile(editor.current())) return null

@@ -21,7 +21,8 @@
     "check-replica": "node scripts/check-replica.mjs",
     "check-folder-rules": "node scripts/check-folder-rules.mjs",
     "check-mcpclient": "node scripts/check-mcpclient.mjs",
-    "check-gitshacache": "node scripts/check-gitshacache.mjs"
+    "check-gitshacache": "node scripts/check-gitshacache.mjs",
+    "check-zotero": "node scripts/check-zotero.mjs"
   },
   "keywords": [],
   "author": "",

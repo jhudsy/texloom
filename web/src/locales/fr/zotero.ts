@@ -12,6 +12,7 @@ const fr: Catalog = {
   "{{file}} isn’t linked to Zotero.": "{{file}} n’est pas lié à Zotero.",
   "This Zotero link isn’t valid. Unlink it and link the collection again.": "Ce lien Zotero n’est pas valide. Supprimez-le et liez à nouveau la collection.",
   "{{file}} is linked to a Zotero library your key can’t read.": "{{file}} est lié à une bibliothèque Zotero que votre clé ne peut pas lire.",
+  "Not refreshed: {{file}}’s Zotero link wasn’t made in this browser.": "Non actualisé : le lien Zotero de {{file}} n’a pas été créé dans ce navigateur.",
 }
 
 export default fr

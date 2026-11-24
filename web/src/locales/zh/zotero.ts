@@ -12,6 +12,7 @@ const zh: Catalog = {
   "{{file}} isn’t linked to Zotero.": "{{file}} 未与 Zotero 关联。",
   "This Zotero link isn’t valid. Unlink it and link the collection again.": "此 Zotero 链接无效。请取消链接后重新链接该收藏集。",
   "{{file}} is linked to a Zotero library your key can’t read.": "{{file}} 链接到的 Zotero 文库是您的密钥无法读取的。",
+  "Not refreshed: {{file}}’s Zotero link wasn’t made in this browser.": "未刷新：{{file}} 的 Zotero 链接不是在此浏览器中创建的。",
 }
 
 export default zh
