@@ -1,0 +1,14 @@
+name: Chromium
+description: Headless Chromium for Playwright (and on Linux the system libraries it needs), with a few tries.
+runs:
+  using: composite
+  steps:
+    - name: Chromium
+      shell: bash
+      # Ubuntu's package mirrors are sometimes unreachable for a while: try again before failing
+      run: |
+        for i in 1 2 3; do
+          uv run --with playwright python -m playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium && exit 0
+          echo "Chromium install failed (attempt $i); trying again in a minute"; sleep 60
+        done
+        exit 1

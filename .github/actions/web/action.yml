@@ -1,0 +1,23 @@
+name: The web app's packages
+description: Node, the web app's packages (npm ci in web/), and unless build is 'false', web/dist built (a server serves it).
+inputs:
+  build:
+    description: Build web/dist too
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+    - name: The web app's packages
+      shell: bash
+      working-directory: web
+      run: npm ci
+    - name: Build the web app
+      if: inputs.build != 'false'
+      shell: bash
+      working-directory: web
+      run: npm run build

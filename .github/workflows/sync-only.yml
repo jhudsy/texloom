@@ -14,11 +14,15 @@ on:
       - 'server/**'
       - 'scripts/check_synconly.py'
       - 'scripts/check_shared_folder.py'
+      - 'scripts/checklib.py'
       - 'scripts/testdb.py'
+      - 'scripts/pg.py'
       - 'scripts/refuse_writes/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/sync-only.yml'
+      - '.github/actions/web/**'
+      - '.github/actions/chromium/**'
       - 'web/src/replica.ts'
       - 'web/src/editor.ts'
       - 'web/src/foldersync.ts'
@@ -35,11 +39,15 @@ on:
       - 'server/**'
       - 'scripts/check_synconly.py'
       - 'scripts/check_shared_folder.py'
+      - 'scripts/checklib.py'
       - 'scripts/testdb.py'
+      - 'scripts/pg.py'
       - 'scripts/refuse_writes/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/sync-only.yml'
+      - '.github/actions/web/**'
+      - '.github/actions/chromium/**'
       - 'web/src/replica.ts'
       - 'web/src/editor.ts'
       - 'web/src/foldersync.ts'
@@ -64,18 +72,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Build the web app (the server serves it)
-        working-directory: web
-        run: |
-          npm ci
-          npm run build
+      - uses: ./.github/actions/web  # npm ci, and web/dist built: the server serves it
       - name: Chromium for the web app's pairings
-        run: uv run --with playwright python -m playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+        uses: ./.github/actions/chromium
       - run: uv run --extra server --with playwright python scripts/check_synconly.py
         env:
           CHECK_DIR: ${{ runner.temp }}/synconly

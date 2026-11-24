@@ -1,7 +1,8 @@
-# The quick checks, on every push to main and every pull request: translations, the clients that
-# must agree with each other (project lists, cross-references, merging), the web app's own checks,
-# property checks with random texts and edits, and that positions in texts can't be mixed up. The
-# longer end-to-end check of sync-only projects is in sync-only.yml.
+# The quick checks, on every push to main and every pull request, as four jobs side by side: the
+# desktop's own (translations, the clients that must agree with each other: project lists,
+# cross-references, merging; positions in texts can't be mixed up), the server's (some against a
+# real server), the web app's own, and property and model checks with random texts, edits and
+# steps. The longer end-to-end check of sync-only projects is in sync-only.yml.
 name: Checks
 
 on:
@@ -11,16 +12,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  checks:
+  desktop:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
       - run: uv run --locked python scripts/check_version.py  # --locked: a uv.lock behind pyproject.toml fails rather than being updated
       - name: No error swallowed without a trace (issue #24)
         run: uv run python scripts/check_quiet.py
@@ -38,6 +34,14 @@ jobs:
       - name: folder-rules.json is what make_folder_rules.py writes
         run: uv run python scripts/make_folder_rules.py --check
       - run: uv run python scripts/check_folder_regressions.py
+      - name: Positions can't be mixed up (textpos, mypy)
+        run: uv run --with mypy python scripts/check_textpos.py
+
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
       - name: The example settings file matches the server's settings
         run: uv run --extra server python scripts/check_config.py
       - name: The server's database, SQLite and PostgreSQL alike, and copying from one to the other (issue 30)
@@ -50,14 +54,29 @@ jobs:
         run: uv run --extra server python scripts/check_move_code.py
       - name: Comments for a synced folder (the overview, texloom comments, texloom lsp; a real server)
         run: uv run --extra server python scripts/check_comments.py
-      - name: Positions can't be mixed up (textpos, mypy)
-        run: uv run --with mypy python scripts/check_textpos.py
-      - name: Web app
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/web
+        with:
+          build: 'false'
+      - name: Types
         working-directory: web
-        run: |
-          npm ci
-          npx tsc --noEmit -p .
-          npm run checks  # every scripts/check-*.mjs
+        run: npx tsc --noEmit -p .
+      - name: Every web/scripts/check-*.mjs
+        working-directory: web
+        run: npm run checks
+
+  properties:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: ./.github/actions/web  # check_props.py asks the web app's check-props.mjs too
+        with:
+          build: 'false'
       - name: Property checks of the desktop's text handling, and the same rules as the web app
         run: uv run --with hypothesis python scripts/check_props.py
       - name: Model-based check of the desktop's folder sync (two computers and a collaborator, random steps)
