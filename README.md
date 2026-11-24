@@ -250,9 +250,10 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   a diagnostic on its text (a warning when it mentions you), the thread on hover, and **Resolve** and
   **Open the Review tab** as code actions; it keeps its own copy of the project, so new comments appear
   while you work, and follows the quoted text when the buffer has unsaved edits. In VS Code,
-  `editors/vscode` is an extension that starts it and shows native comment threads with reply and
-  resolve, and starts new comments from the + beside a line or **Add Comment** on a selection
-  (`vsce package` there makes the .vsix). Other editors start it as an extra server for `.tex`
+  the **TeXLoom comments** extension ([Marketplace](https://marketplace.visualstudio.com/items?itemName=texloom.texloom),
+  [Open VSX](https://open-vsx.org/extension/texloom/texloom) for VSCodium and similar; source in
+  `editors/vscode`) starts it and shows native comment threads with reply and resolve, and starts
+  new comments from the + beside a line or **Add Comment** on a selection. Other editors start it as an extra server for `.tex`
   files: Neovim `vim.lsp.config('texloom', { cmd = { 'texloom', 'lsp' }, filetypes = { 'tex', 'plaintex' },
   root_markers = { '.texloom' } })` then `vim.lsp.enable('texloom')` (the setting names are for Neovim
   0.11 or later); Emacs with lsp-mode `(lsp-register-client (make-lsp-client :new-connection

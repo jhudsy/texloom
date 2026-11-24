@@ -302,7 +302,7 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Show comments in your editor': '在编辑器中显示评论',
     'Your editor can show a synced folder’s comments beside the text they are about, through TeXLoom’s language server. The editor starts it when it needs it, in the folder you open.': '你的编辑器可以通过 TeXLoom 的语言服务器，在同步文件夹的评论所针对的文本旁边显示这些评论。编辑器会在需要时，在你打开的文件夹中启动它。',
     'Choose your editor': '选择你的编辑器',
-    'Install the TeXLoom extension (it isn’t in the Marketplace yet: build it with vsce package in editors/vscode of the TeXLoom source, then use Install from VSIX in the Extensions view), and add this to your settings:': '安装 TeXLoom 扩展（它还没有上架 Marketplace：请在 TeXLoom 源码的 editors/vscode 中用 vsce package 构建，然后在“扩展”视图中使用“从 VSIX 安装”），并把下面的内容添加到你的设置中：',
+    'Install the TeXLoom comments extension from the Extensions view (search for TeXLoom; in VSCodium and similar editors it comes from Open VSX). If it doesn’t find TeXLoom by itself, add this to your settings:': '在“扩展”视图中安装 TeXLoom comments 扩展（搜索 TeXLoom；在 VSCodium 等编辑器中，它来自 Open VSX）。如果它没有自动找到 TeXLoom，请把下面的内容添加到你的设置中：',
     'Neovim 0.11 or later: add this to your init.lua': 'Neovim 0.11 或更高版本：把下面的内容添加到你的 init.lua',
     'Emacs with lsp-mode (eglot runs one server per buffer, so use lsp-mode if you also use texlab): add this to your init file': 'Emacs（使用 lsp-mode；eglot 每个缓冲区只运行一个服务器，所以如果你也用 texlab，请使用 lsp-mode）：把下面的内容添加到你的初始化文件',
     'Helix: add this to your languages.toml': 'Helix：把下面的内容添加到你的 languages.toml',

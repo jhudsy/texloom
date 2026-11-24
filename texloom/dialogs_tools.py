@@ -132,7 +132,7 @@ class EditorDialog(ConnectToolDialog):
         lay.addWidget(self.note(_("Your editor can show a synced folder’s comments beside the text they are about, through TeXLoom’s language server. The editor starts it when it needs it, in the folder you open.")))
         lay.addWidget(self.heading(_("Choose your editor")))
         self.notes = {
-            "VS Code": _("Install the TeXLoom extension (it isn’t in the Marketplace yet: build it with vsce package in editors/vscode of the TeXLoom source, then use Install from VSIX in the Extensions view), and add this to your settings:"),
+            "VS Code": _("Install the TeXLoom comments extension from the Extensions view (search for TeXLoom; in VSCodium and similar editors it comes from Open VSX). If it doesn’t find TeXLoom by itself, add this to your settings:"),
             "Neovim": _("Neovim 0.11 or later: add this to your init.lua"),
             "Emacs": _("Emacs with lsp-mode (eglot runs one server per buffer, so use lsp-mode if you also use texlab): add this to your init file"),
             "Helix": _("Helix: add this to your languages.toml"),

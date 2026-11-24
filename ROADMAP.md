@@ -27,10 +27,9 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
 ## Later
 
 1. **[Comments in your own editor](https://github.com/jhudsy/texloom/issues/36)**: `texloom lsp` and
-   the VS Code extension (editors/vscode) are written, with reply, resolve and new comments. Left:
-   publishing the extension on the Marketplace and Open VSX (needs the maintainer's publisher
-   accounts and tokens). Later, if used: live updates and a standalone VS Code plugin with the web
-   app's collaboration.
+   the TeXLoom comments extension for VS Code (on the Marketplace and Open VSX since 2026-11-24) are
+   done. Left, if they're used: live updates in VS Code, and a standalone VS Code extension with the
+   web app's collaboration.
 2. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
 
