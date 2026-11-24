@@ -16,14 +16,13 @@ Keep the patterns in sync with programRequests() in web/src/texscan.ts.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .paths import safe_rel, state_dir
+from .paths import safe_rel
 
 if TYPE_CHECKING:
     from pycrdt import Map
@@ -151,17 +150,17 @@ def added(path: str, old: str | None, new: str) -> list[Finding]:
 
 
 # --- approvals for shell-escape compiles (per folder, never shared) -------------
-def _allowed_file(root: Path) -> Path:
-    return state_dir(root) / "allowed.json"
-
-
+# Kept with the folder's other settings in your own configuration folder (config.py), never in the
+# folder, where someone sharing it through Dropbox or the like could write them.
 def allowed(root: Path) -> set[str]:
+    from .config import load_config
     try:
-        return set(json.loads(_allowed_file(root).read_text()))
-    except (OSError, ValueError):
+        keys = load_config(root).get("allowed")
+    except (OSError, ValueError, KeyError):
         return set()
+    return {k for k in keys if isinstance(k, str)} if isinstance(keys, list) else set()
 
 
 def allow(root: Path, keys: set[str]) -> None:
-    p = _allowed_file(root)
-    p.write_text(json.dumps(sorted(keys)))
+    from .config import update_config
+    update_config(root, allowed=sorted(keys))

@@ -13,7 +13,7 @@ PDF and log a compile publishes would carry what was read. So:
   reads). If anything else was read, the output isn't
   shared and the build folder is emptied (its .aux and .bbl may hold what was read).
 
-A folder's "confine": false (in .texloom/config.json) turns both off, for projects whose
+A folder's "confine": false (a local setting, config.py) turns both off, for projects whose
 collaborators you trust.
 """
 

@@ -483,7 +483,7 @@ the commands with `uv run`.)
 
 **Several folders, and starting at login.** `clone` and `new` add the folder to this
 computer's folder list. One `texloom start` then keeps every folder on the list in sync:
-each with its own settings (`.texloom/config.json`: compile, git, …), log lines labelled
+each with its own settings (compile, git, …: `texloom settings <dir>`), log lines labelled
 with the folder's name, and folders added or left while it runs picked up within seconds.
 `texloom autostart on` starts it at login (a launchd agent on macOS, a systemd user
 service on Linux, a hidden script in the Startup folder on Windows) and writes a log
@@ -509,13 +509,22 @@ collaborators type in their browsers. With `--compile`:
 | `texloom storage <dir> server\|relay` | keep an encrypted copy on the server, or nothing |
 | `texloom links <dir>` | print the project code and the edit / read-only links |
 | `texloom allow <dir>` | review lines that run programs; allow them for `--shell-escape` compiles |
+| `texloom settings <dir> [KEY=VALUE …]` | this computer's settings for the folder (compile, engine, latexmk_args, …) |
 
-Per-folder options are in `<dir>/.texloom/config.json`, which only you can read. They are
-never shared:
+Per-folder options are kept in TeXLoom's own settings folder on this computer, never in the
+synced folder (someone sharing the folder through Dropbox or the like could write them there),
+and never shared. `texloom settings <dir>` shows them; `texloom settings <dir> KEY=VALUE …`
+changes them (values as JSON):
 
-```json
-{ "compile": false, "engine": null, "latexmk_args": [], "shell_escape": false, "confine": true, "label": "", "create_code": "" }
 ```
+compile = false   engine = null   latexmk_args = []   shell_escape = false   confine = true   git = false   label = ""
+```
+
+They belong to the folder where it is, and its project: a folder that is moved or renamed
+starts over with these defaults. (Up to 0.4.55 they were in `<dir>/.texloom/config.json`: the
+first run of a later version brings them over, but from a folder that may be shared, such as
+one in Dropbox, only `compile`, `engine` and `label`; the log says which must be set again.)
+The project link and `create_code` stay in `<dir>/.texloom/config.json`, which only you can read.
 
 Collaborators write the document, so compiling is locked down by default:
 - **No running programs:** TeX may not run programs (`-no-shell-escape`).
@@ -538,7 +547,7 @@ Collaborators write the document, so compiling is locked down by default:
   `.idea` (however it's capitalised), nor any path outside the folder.
 
 **Running programs.** Some packages need TeX to run programs (shell escape). Choose how
-much with `"shell_escape"` in `.texloom/config.json`, or on the command line:
+much with the `shell_escape` setting (in the app, or `texloom settings`), or on the command line:
 - `false` (default): nothing runs. Browser compiles are always like this.
 - `"restricted"` / `--shell-restricted`: only TeX Live's list of safe programs (enough for
   e.g. `epstopdf`, not for minted).
@@ -659,7 +668,7 @@ texloom run ~/papers/demo --git
   never reach collaborators.
 - **Credentials:** git uses your own setup (SSH key or credential helper). The TeXLoom
   server isn't involved, so the project stays end-to-end encrypted.
-- **Options** in `.texloom/config.json`: `"git": {"interval": 60, "quiet": 120, "push": true}`.
+- **Options:** `texloom settings <dir> 'git={"interval": 60, "quiet": 120, "push": true}'`.
   `texloom sync <dir> --git` does one round and exits (e.g. from cron).
 
 To set it up from an existing repository: `git clone <repo> ~/papers/demo`, then
