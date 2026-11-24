@@ -21,18 +21,16 @@
 // folder bridged to the same repository and a browser never both bring the same commit in.
 import * as Y from 'yjs'
 import type { Replica } from './replica'
-import { applyText, merge3, merge3Strict } from './diff'
 import { BUILD } from './foldersync'
 import { cleanPath, isText } from './projectfiles'
 import { t } from './i18n'
 import { accountStore } from './accounts'
 import { forge, GitError, hostOf, kindOf, MOVED, type Account, type Change, type Entry, type Forge, type Kind, type Tree } from './forges'
-import { quiet, STORAGE } from './quiet'
 import { shaCache as gitShaCache, type ShaCache } from './gitshacache'
 import { digest, hex } from './bytes'
 import { concat } from './crypto'
+import { approval as approvalOf, applySteps, bytesOf, clashing, hashOf, MAX, projectFiles, putFile, storeBinaries, storedIds, tabId, type Mine, type Step } from './remotesync'
 
-const MAX = 50 * 1024 * 1024 // files larger than this aren't synced (as everywhere in TeXLoom)
 export const RENEW = 30_000, EXPIRE = 100_000 // ms
 const PULL_EVERY = 60_000, QUIET = 120_000, TICK = 5000 // ms
 
@@ -115,27 +113,21 @@ export function linkOf(r: Replica): Link | null {
 }
 export function setLink(r: Replica, l: Link | null) { if (l) r.meta.set('github', l); else r.meta.delete('github') }
 
-// The link is in the project's shared settings, which any collaborator can write, and syncing uses
-// this browser's own token: a collaborator could point it at a private repository of yours (bringing
-// it into the project) or at any repository the token can write to. So a browser syncs only a link
-// its user made or approved here: the repository, branch and folder approved, by project.
+// A collaborator could point the link at a private repository of yours (bringing it into the
+// project) or at any repository the token can write to: so a browser syncs only the repository,
+// branch and folder its user approved (remotesync.ts).
 type Target = Pick<Link, 'kind' | 'host' | 'repo' | 'branch' | 'dir'>
-const approvedKey = (r: Replica) => `texloom.githubApproved.${r.keys.project}`
+const approval = approvalOf<any>('github')
 
 /** What this browser's user approved syncing for this project, if anything. */
 export function approvedTarget(r: Replica): Target | null {
-  try {
-    const v = JSON.parse(localStorage.getItem(approvedKey(r)) || 'null')
-    return v && typeof v.repo === 'string' && typeof v.branch === 'string' && typeof v.dir === 'string' ? { ...v, kind: v.kind || undefined, host: v.host || undefined } : null
-  } catch { return null }
+  const v = approval.get(r)
+  return v && typeof v.repo === 'string' && typeof v.branch === 'string' && typeof v.dir === 'string' ? { ...v, kind: v.kind || undefined, host: v.host || undefined } : null
 }
 
 /** Approve syncing this repository, branch and folder from this browser (null: none). */
 export function approve(r: Replica, l: Target | null) {
-  try {
-    if (l) localStorage.setItem(approvedKey(r), JSON.stringify({ kind: kindOf(l), host: hostOf(l), repo: l.repo, branch: l.branch, dir: l.dir ?? '' }))
-    else localStorage.removeItem(approvedKey(r))
-  } catch (e) { quiet(STORAGE, e) }
+  approval.set(r, l && { kind: kindOf(l), host: hostOf(l), repo: l.repo, branch: l.branch, dir: l.dir ?? '' })
 }
 
 /** Whether this browser's user approved the project's link (as it is now). */
@@ -156,31 +148,12 @@ function kept(l: Link, path: string, size: number): string | null {
   return p && cleanPath(p) === p && !BUILD.test(p) && size <= MAX ? p : null
 }
 
-type Mine = { text: string } | { h: string; size: number }
-
 /** The project's files, by repository path. */
-function projectFiles(r: Replica, l: Link): Map<string, Mine> {
-  const out = new Map<string, Mine>()
-  r.files.forEach((yt, p) => { if (cleanPath(p) === p && !BUILD.test(p)) out.set(toRepo(l, p), { text: yt.toString() }) })
-  for (const [p, b] of r.bin.entries()) if (cleanPath(p) === p && !BUILD.test(p) && b && typeof b.h === 'string' && (b.size ?? 0) <= MAX) out.set(toRepo(l, p), { h: b.h, size: b.size })
-  return out
-}
+const filesOf = (r: Replica, l: Link) => projectFiles(r, (p, size) => cleanPath(p) === p && !BUILD.test(p) && size <= MAX, (p) => toRepo(l, p))
 
 /** Git ids of stored files, by TeXLoom id (gitshacache.ts): only the files the project has now. */
-function shaCache(r: Replica): ShaCache {
-  const now: string[] = []
-  for (const b of r.bin.values()) if (b && typeof b.h === 'string') now.push(b.h)
-  return gitShaCache(r.keys.project, now)
-}
-
-async function shaOfMine(r: Replica, f: Mine, cache: ShaCache): Promise<string> {
-  if ('text' in f) return gitSha(new TextEncoder().encode(f.text))
-  const known = cache.get(f.h)
-  if (known) return known
-  const sha = await gitSha(await r.getBlob(f.h))
-  cache.set(f.h, sha)
-  return sha
-}
+const shaCache = (r: Replica): ShaCache => gitShaCache(r.keys.project, storedIds(r))
+const shaOfMine = (r: Replica, m: Mine, cache: ShaCache) => hashOf(r, m, cache, gitSha)
 
 // ---- bringing commits in --------------------------------------------------------------
 
@@ -203,10 +176,9 @@ export async function pull(r: Replica, a: Account, by: string, oursWins = false,
     throw e
   }) : none
   const cache = shaCache(r)
-  const mine = projectFiles(r, link)
+  const mine = filesOf(r, link)
 
   // 1. decide each file the repository changed since `head`: take its version, merge, or clash
-  type Step = { rel: string; path: string; was: Mine | null; take?: Uint8Array | null; merge?: { base: string; theirs: string } }
   const steps: Step[] = [], clash: string[] = []
   for (const path of new Set([...base.files.keys(), ...theirs.files.keys()])) {
     const b = base.files.get(path), th = theirs.files.get(path)
@@ -219,64 +191,30 @@ export async function pull(r: Replica, a: Account, by: string, oursWins = false,
     if (sha === (b?.sha ?? null)) { // unchanged here
       const take = th ? await f.blob(link.repo, th.sha) : null
       if (take && take.length > MAX) continue
-      steps.push({ rel, path, was: m, take }); continue
+      steps.push({ rel, was: m, take }); continue
     }
     if (m && 'text' in m && b && th) {
       const bt = isText(rel, await f.blob(link.repo, b.sha)), tt = isText(rel, await f.blob(link.repo, th.sha))
-      if (bt !== null && tt !== null) { steps.push({ rel, path, was: m, merge: { base: bt, theirs: tt } }); continue }
+      if (bt !== null && tt !== null) { steps.push({ rel, was: m, merge: { base: bt, theirs: tt } }); continue }
     }
     clash.push(rel) // changed on both sides (or deleted on one), and not text that merges
   }
   if (!still()) return { commit: c, files: [], clash: [] }
-  for (const st of steps) { // text merges that clash
-    if (!st.merge || oursWins) continue
-    if (merge3Strict(st.merge.base, st.merge.theirs, (st.was as { text: string }).text) === null) clash.push(st.rel)
-  }
+  clash.push(...clashing(steps, oursWins)) // text merges that clash
   if (clash.length && !oursWins) {
     setLink(r, { ...linkOf(r)!, blocked: c, clash: clash.sort(), by, at: Date.now() })
     return { commit: c, files: [], clash }
   }
 
   // 2. apply, unless the project changed underneath (then next round decides again)
-  const uploads = new Map<string, string>()
-  for (const st of steps) if (st.take && isText(st.rel, st.take) === null) uploads.set(st.rel, await r.putBlob(st.take))
-  const files: string[] = []
-  let moved = false
+  const ids = await storeBinaries(r, steps.map((st) => [st.rel, st.take] as const))
+  let files = null as string[] | null
   r.doc.transact(() => {
-    if (linkOf(r)?.head !== link.head) { moved = true; return } // someone else brought it in meanwhile
-    const now = (rel: string): Mine | null => {
-      const yt = r.files.get(rel), b = r.bin.get(rel)
-      return yt ? { text: yt.toString() } : b ? { h: b.h, size: b.size } : null
-    }
-    const same = (x: Mine | null, y: Mine | null) => (!x || !y ? x === y : 'text' in x ? 'text' in y && x.text === y.text : 'h' in y && x.h === y.h)
-    const todo: (() => void)[] = []
-    for (const st of steps) {
-      const cur = now(st.rel)
-      if (st.merge) {
-        if (!cur || !('text' in cur)) { moved = true; return }
-        const merged = oursWins ? merge3(st.merge.base, st.merge.theirs, cur.text) : merge3Strict(st.merge.base, st.merge.theirs, cur.text)
-        if (merged === null) { moved = true; return }
-        if (merged !== cur.text) { const yt = r.files.get(st.rel)!; todo.push(() => applyText(yt, cur.text, merged)); files.push(st.rel) }
-        continue
-      }
-      if (!same(cur, st.was)) { moved = true; return }
-      const data = st.take
-      if (!data) todo.push(() => { r.files.delete(st.rel); r.bin.delete(st.rel) })
-      else {
-        const text = isText(st.rel, data)
-        if (text === null) todo.push(() => { r.files.delete(st.rel); r.bin.set(st.rel, { h: uploads.get(st.rel)!, size: data.length }) })
-        else todo.push(() => {
-          r.bin.delete(st.rel)
-          const yt = r.files.get(st.rel)
-          if (yt) applyText(yt, yt.toString(), text); else r.files.set(st.rel, new Y.Text(text))
-        })
-      }
-      files.push(st.rel)
-    }
-    todo.forEach((f) => f())
-    setLink(r, { ...linkOf(r)!, head: c, blocked: null, clash: [], by, at: Date.now() })
+    if (linkOf(r)?.head !== link.head) return // someone else brought it in meanwhile
+    files = applySteps(r, steps, ids, oursWins)
+    if (files) setLink(r, { ...linkOf(r)!, head: c, blocked: null, clash: [], by, at: Date.now() })
   })
-  return moved ? { commit: null, files: [], clash: [] } : { commit: c, files, clash: [] }
+  return files ? { commit: c, files, clash: [] } : { commit: null, files: [], clash: [] }
 }
 
 // ---- sending changes out ---------------------------------------------------------------
@@ -292,14 +230,14 @@ export async function push(r: Replica, a: Account, by: string, still: () => bool
   const f = forge(a)
   const base: Tree = link.head ? await filesAt(f, link, link.head) : { tree: '', files: new Map<string, Entry>() }
   const cache = shaCache(r)
-  const mine = projectFiles(r, link)
+  const mine = filesOf(r, link)
   const changes: Change[] = []
   const names: string[] = []
   for (const [path, m] of mine) {
     const sha = await shaOfMine(r, m, cache)
     const was = base.files.get(path)
     if (was?.sha === sha) continue
-    changes.push({ path, was, data: 'text' in m ? new TextEncoder().encode(m.text) : await r.getBlob(m.h) })
+    changes.push({ path, was, data: await bytesOf(r, m) })
     names.push(inDir(link, path)!)
   }
   for (const [path, e] of base.files) {
@@ -331,7 +269,7 @@ export async function linkRepo(r: Replica, a: Account, by: string, repo: string,
   }
   if (!c) { setLink(r, l); return 0 } // an empty repository: the project goes up on the first send
   const theirs = await filesAt(f, l, c)
-  const cache = shaCache(r), mine = projectFiles(r, l)
+  const cache = shaCache(r), mine = filesOf(r, l)
   const take: [string, Uint8Array][] = []
   for (const [path, e] of theirs.files) {
     const rel = kept(l, path, e.size)
@@ -341,31 +279,15 @@ export async function linkRepo(r: Replica, a: Account, by: string, repo: string,
     const data = await f.blob(repo, e.sha)
     if (data.length <= MAX) take.push([rel, data])
   }
-  const uploads = new Map<string, string>()
-  for (const [rel, d] of take) if (isText(rel, d) === null) uploads.set(rel, await r.putBlob(d))
+  const ids = await storeBinaries(r, take)
   r.doc.transact(() => {
-    for (const [rel, d] of take) {
-      const text = isText(rel, d)
-      if (text === null) { r.files.delete(rel); r.bin.set(rel, { h: uploads.get(rel)!, size: d.length }); continue }
-      r.bin.delete(rel)
-      const yt = r.files.get(rel)
-      if (yt) applyText(yt, yt.toString(), text); else r.files.set(rel, new Y.Text(text))
-    }
+    for (const [rel, d] of take) putFile(r, rel, d, ids)
     setLink(r, { ...l, head: c })
   })
   return take.length
 }
 
 // ---- who syncs: the lease ---------------------------------------------------------------
-
-/** This tab's id for the lease (a reload keeps it, another tab gets its own). */
-function tabId(): string {
-  try {
-    let id = sessionStorage.getItem('texloom.tab')
-    if (!id) { id = 'web:' + crypto.randomUUID(); sessionStorage.setItem('texloom.tab', id) }
-    return id
-  } catch { return 'web:' + Math.random().toString(36).slice(2) }
-}
 
 export interface SyncState { role: 'off' | 'syncing' | 'standby' | 'waiting'; holder: string | null; error: string | null; busy: boolean; lastPull: number; lastPush: number }
 
