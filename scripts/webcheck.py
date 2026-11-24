@@ -52,7 +52,7 @@ class Session:
     def __enter__(self) -> Session:
         from aiohttp import web
 
-        import server.relay as relay
+        from server.app import Settings, make_app
         self.remote = os.environ.get("TEXLOOM_CHECK_SERVER", "").rstrip("/")
         code_file = os.environ.get("TEXLOOM_CHECK_CODE_FILE")
         self.code = Path(code_file).expanduser().read_text().strip() if code_file else ""
@@ -67,7 +67,7 @@ class Session:
                 sys.exit("Build the web app first: cd web && npm run build")
             self._pg = testdb.running()
             db = self._pg.__enter__()
-            apps.insert(0, ("texloom", relay.make_app(db, dist, data=Path(self._tmp.name))))
+            apps.insert(0, ("texloom", make_app(Settings(db, dist, data=Path(self._tmp.name)))))
 
         async def start():
             runners = []
