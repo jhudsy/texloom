@@ -228,6 +228,10 @@ class Store:
     async def register(self, project: str, owner: str, label: str) -> None:
         await self.db.execute("INSERT INTO projects(project, created, owner) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
                                 project, time.time(), owner)
+        # deleted meanwhile (a delete between a request's check and this, or seen by another server
+        # sharing the database): the project stays unregistered
+        if await self.db.execute("DELETE FROM projects WHERE project=$1 AND EXISTS (SELECT 1 FROM deleted WHERE project=$1)", project):
+            return
         self._own(project, owner)
         log.info("registered project %s… (%s)", project[:8], label)
 

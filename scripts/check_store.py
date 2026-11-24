@@ -158,6 +158,9 @@ async def steps(url: str, tmp: Path) -> list:
     ok(note("deleted", (msg["t"], msg["ts"], await store.deleted_count(), await store.log_state(b))) == ("deleted", 1234, 1, (0, 0, 0)),
        "a project deleted for everyone keeps only its tombstone")
     ok((await store.deleted(b))["s"] == msg["s"] and await store.deleted(a) is None, "the tombstone is what's told to clients")
+    await store.register(b, OWNER, "a request that raced the delete")
+    ok(b not in store.owners and not await store.db.fetchval("SELECT COUNT(*) FROM projects WHERE project=$1", b),
+       "registering a deleted project leaves it unregistered")
 
     # app versions and the admin page
     await store.note_client("web", "0.4.51")

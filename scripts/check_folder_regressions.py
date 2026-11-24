@@ -212,10 +212,34 @@ async def renames() -> None:
         check("a deleted folder's files leave the project", "sections/deeper/table.tex" not in r.files, sorted(r.files.keys()))
 
 
+async def settings() -> None:
+    """A folder's settings (config.json, which holds the project link) are written beside it, then
+    renamed over it: never through a link planted at a temporary name, as another computer sharing
+    the folder through Dropbox could (the security review of 2026-11-24)."""
+    import json
+    import os
+    import stat
+
+    from texloom.paths import write_json
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        victim = d / "victim.txt"
+        victim.write_text("keep me")
+        if os.name != "nt":
+            os.symlink(victim, d / "config.json.tmp")
+        write_json(d / "config.json", {"link": "secret"}, private=True, indent=2)
+        check("written in full", json.loads((d / "config.json").read_text()) == {"link": "secret"})
+        check("not through a link at the old temporary name", victim.read_text() == "keep me", victim.read_text())
+        if os.name != "nt":
+            check("readable by you only", stat.S_IMODE((d / "config.json").stat().st_mode) == 0o600)
+        check("no temporary file left behind", not [x for x in d.iterdir() if x.name.endswith(".tmp") and not x.is_symlink()])
+
+
 async def main() -> int:
     for name, part in (("A file deleted or renamed while a change arrives", deletions),
                        ("A file read while it's being saved", reads),
-                       ("A folder renamed or deleted", renames)):
+                       ("A folder renamed or deleted", renames),
+                       ("A folder's settings written", settings)):
         print(f"{name}:", flush=True)
         await part()
     return summary("folder regressions")

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
@@ -22,15 +23,20 @@ SHARED_STATE = {"computers", "folder-id", "lock", ".gitignore"}
 def write_json(path: Path, data, private: bool = False, **dump) -> None:
     """Write a JSON file so that a crash leaves the old one or the new one, never half of one: a
     temporary file beside it, then a rename. `private`: readable by you only (it holds keys or
-    links). `dump`: json.dump's options (indent, ensure_ascii)."""
+    links). `dump`: json.dump's options (indent, ensure_ascii). The temporary file has a name of its
+    own each time, made only if nothing is there (so never through a link planted beside the file,
+    say by another computer sharing the folder through Dropbox)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600 if private else 0o644)
-    if private and os.name != "nt":
-        os.fchmod(fd, 0o600)  # (a temporary file left by a crash keeps its mode otherwise)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, **dump)
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")  # 0600, O_EXCL
+    try:
+        if not private:
+            os.chmod(tmp, 0o644)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, **dump)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 class CachedFile:
