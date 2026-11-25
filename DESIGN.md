@@ -342,7 +342,12 @@ The resolved path must stay inside the project folder (no writing through symlin
   hidden but for the build folder) and, everywhere, a check: latexmk's `$pdflatex`,
   `$bibtex`, … go through a Perl hook that appends each run's `.fls`/`.blg` to
   `<name>.fls-reads`/`.blg-reads` (TeX rewrites its `.fls` every pass, so a document could
-  read a file on the first pass only). A compile that read outside those places publishes
+  read a file on the first pass only). A run's part of the record must be whole (both PWD
+  lines, then only INPUT/OUTPUT, no NULs, no OUTPUT naming a record: a document can
+  `\openout` its own `.fls`); xdvipdfmx/dvips record nothing, so the `.xdv`/`.dvi` is parsed
+  and every name in its specials and fonts that is a file outside fails the check too. On
+  macOS the sandbox also denies writes but for the project, the build folder, TeX's caches
+  and the temporary folders. A compile that read outside those places publishes
   only a note, and its build folder is deleted. The local setting `"confine": false` turns both off.
   BibTeX runs from the
   document's folder (`-bibfudge-`, so `\bibliography{../refs}` is found) with `openout_any=a`
