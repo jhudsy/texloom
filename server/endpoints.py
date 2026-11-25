@@ -17,7 +17,7 @@ from texloom.crypto import signer
 from .files import FilesError
 from .lists import MAX_LIST, RETIRED, Lists
 from .policy import UNLIMITED, KiB, MiB, Policy
-from .wire import BLOB_RE, PROJECT_RE, b64d, verify
+from .wire import b64d, blob_id, canonical_id, verify
 
 if TYPE_CHECKING:
     from .relay import Budget
@@ -26,14 +26,18 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("texloom.relay")
 
-MAX_BLOB = 50 * MiB  # uploaded over HTTP
+MAX_BLOB = 50 * MiB  # uploaded over HTTP (streamed: see put_blob)
+# What any other request's body may be, read whole (a project list, a creation code): app.py's
+# client_max_size. Uploads are read a piece at a time and checked against MAX_BLOB instead.
+MAX_BODY = MAX_LIST + 4 * KiB
+MAX_CODE_BODY = 4 * KiB
 UPLOAD_TIME = 600  # seconds an upload may take; slow ones use only a connection and a temporary file
 
 
 def blob_ids(request: web.Request) -> tuple[str, str]:
     """The project and stored file a /blob/{project}/{id} request names."""
     project, bid = request.match_info["project"], request.match_info["id"]
-    if not PROJECT_RE.match(project) or not BLOB_RE.match(bid):
+    if not canonical_id(project) or not blob_id(bid):
         raise web.HTTPBadRequest()
     return project, bid
 
@@ -68,7 +72,7 @@ class Endpoints:
         if await self.store.deleted(project):
             return web.json_response({"code": "deleted"}, status=410)
         # before reading a large body; the project is bound to the code only once the upload is signed
-        why = await self.policy.denied(project, request.headers.get("X-Create-Code"), claim=False)
+        why = await self.policy.denied(project, request.headers.get("X-Create-Code"))
         if why:
             return web.json_response({"code": why}, status=403)
         sig = x_sig(request)
@@ -113,7 +117,7 @@ class Endpoints:
             return web.Response(status=403, text="bad signature")
         if await self.store.deleted(project):  # deleted while it was uploading
             return web.json_response({"code": "deleted"}, status=410)
-        if await self.policy.denied(project, request.headers.get("X-Create-Code")):  # a genuine upload: now it may claim
+        if await self.policy.denied(project, request.headers.get("X-Create-Code"), claim=True):  # a genuine upload: now it may claim
             return web.json_response({"code": "needs-code"}, status=403)
         if await self.store.relay_only(project):
             return web.Response(status=409, text="project is relay-only: blobs are exchanged peer to peer")
@@ -123,11 +127,11 @@ class Endpoints:
                 if kind == "file":
                     await self.store.mark_file(project, bid)
                 return web.Response(status=200)
-            refused = await self.policy.may_store(project, len(data), self.policy.codes.check(request.headers.get("X-Create-Code")))
+            refused = await self.policy.may_store(project, len(data), self.policy.codes.check(request.headers.get("X-Create-Code")),
+                                                  reserve=True)  # counted from here (put_blob gives it back)
             if refused:
                 status = {"needs-code": 403, "code-expired": 403, "quota-full": 507, "project-full": 413, "server-full": 507}[refused]
                 return web.json_response({"code": refused}, status=status)
-            self.store.reserve(project, len(data))
         try:
             stored = await self.store.put_blob(project, bid, data, kind, reserved=True)
         except (FilesError, OSError):
@@ -191,7 +195,7 @@ class Endpoints:
         if p.min_version and p.too_old(request.headers.get("X-TeXLoom", "").partition("/")[2]):  # app/version
             raise web.HTTPUpgradeRequired(text=json.dumps(p.update_needed()), content_type="application/json")
         lid = request.match_info["id"]
-        if not PROJECT_RE.match(lid):
+        if not canonical_id(lid):
             raise web.HTTPBadRequest()
         return lid, p.lists
 
@@ -251,8 +255,11 @@ class Endpoints:
         return web.Response(status=204)
 
     async def check_code(self, request: web.Request) -> web.Response:
+        body = await request.content.read(MAX_CODE_BODY + 1)
+        if len(body) > MAX_CODE_BODY:
+            raise web.HTTPRequestEntityTooLarge(max_size=MAX_CODE_BODY, actual_size=len(body))
         try:
-            body = await request.json()
+            body = json.loads(body)
             code = str(body.get("code", ""))[:64] if isinstance(body, dict) else ""
         except ValueError:
             raise web.HTTPBadRequest()
@@ -271,6 +278,10 @@ CSP = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'se
        "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' blob: data:; "
        "style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; "
        "form-action 'none'; frame-ancestors 'none'")
+# The editor's PDF window is a same-origin pop-up (it uses window.opener), and Dropbox's sign-in
+# goes in the same tab, so same-origin suits. Passkeys (project lists) stay allowed.
+COOP = "same-origin"
+PERMISSIONS = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 
 
 @web.middleware
@@ -290,8 +301,11 @@ async def headers(request: web.Request, handler):
     resp.headers["Access-Control-Allow-Methods"] = "GET, PUT, POST, DELETE, OPTIONS"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "no-referrer"
-    if not request.path.startswith(("/ws/", "/blob/", "/api/", "/core/")):
+    if not request.path.startswith(("/ws/", "/blob/", "/api/")):
+        # pages, and the scripts workers run (/core/: the in-browser engine), whose policy is their own response's
         resp.headers["Content-Security-Policy"] = CSP
+        resp.headers["Cross-Origin-Opener-Policy"] = COOP
+        resp.headers["Permissions-Policy"] = PERMISSIONS
     if isinstance(resp, web.HTTPException) and resp.status >= 400:
         raise resp
     return resp
