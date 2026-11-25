@@ -80,32 +80,57 @@ def decode(data: bytes) -> tuple[int, str]:
     return d["ver"], d["holder"]
 
 
+RACERS = 8  # simultaneous writers in the check's race
+
+
 async def check_conditional(files: Files) -> None:
-    """Does the store honour conditional writes? Everything above depends on it, so a server asked
-    to fail over checks first (and --failover-check does it on demand), on an object of its own."""
-    name = f"_failover/check-{secrets.token_hex(6)}"
+    """Does the store honour conditional writes, including when writers race? Everything above
+    depends on it, so a server asked to fail over checks first (and --failover-check does it on
+    demand), on objects of its own. One at a time is the easy part; what matters is that when
+    several create-only (or same-version) writes arrive together, exactly one wins."""
+    token = secrets.token_hex(6)
+    one, race = f"_failover/check-{token}", f"_failover/check-{token}-race"
     problems = []
     try:
-        e1 = await files.lease_write(b"one", None, name)
-        if e1 is None:
-            raise FilesError("a write to an object that isn't there was refused")
-        if await files.lease_write(b"two", None, name) is not None:
-            problems.append("a write that should only create the object overwrote it (If-None-Match: * is ignored)")
-        if await files.lease_write(b"two", '"not-the-version"', name) is not None:
-            problems.append("a write for a version the object isn't at went through (If-Match is ignored)")
-        e2 = await files.lease_write(b"three", e1, name)
-        if e2 is None:
-            problems.append("a write for the current version was refused")
-        elif await files.lease_write(b"four", e1, name) is not None:
-            problems.append("a write for an old version went through (If-Match is ignored)")
-        got = await files.lease_read(name)
-        if got is None or got[0] not in (b"three", b"four"):
-            problems.append("the object read back isn't what was written")
-    finally:
         try:
-            await files.lease_delete(name)
-        except FilesError:
-            pass
+            e1 = await files.lease_write(b"one", None, one)
+            if e1 is None:
+                raise FilesError("a write to an object that isn't there was refused")
+            if await files.lease_write(b"two", None, one) is not None:
+                problems.append("a write that should only create the object overwrote it (If-None-Match: * is ignored)")
+            if await files.lease_write(b"two", '"not-the-version"', one) is not None:
+                problems.append("a write for a version the object isn't at went through (If-Match is ignored)")
+            e2 = await files.lease_write(b"three", e1, one)
+            if e2 is None:
+                problems.append("a write for the current version was refused")
+            elif await files.lease_write(b"four", e1, one) is not None:
+                problems.append("a write for an old version went through (If-Match is ignored)")
+            got = await files.lease_read(one)
+            if got is None or got[0] not in (b"three", b"four"):
+                problems.append("the object read back isn't what was written")
+
+            async def winners(round_: int, version: str | None) -> list[str]:
+                # (each round's writers send different content: an ETag is the content's, so a writer that
+                # rewrote what is there would leave the version unchanged and could "win" again)
+                done = await asyncio.gather(*(files.lease_write(f"round-{round_}-racer-{i}".encode(), version, race)
+                                              for i in range(RACERS)), return_exceptions=True)
+                return [d for d in done if isinstance(d, str)]
+
+            first = await winners(1, None)
+            if len(first) != 1:
+                problems.append(f"{len(first)} of {RACERS} simultaneous create-only writes succeeded: the check and the write "
+                                "aren't one step, so two servers could both take the lease")
+            elif len(await winners(2, first[0])) != 1:
+                problems.append(f"more than one of {RACERS} simultaneous writes for the same version succeeded")
+        except FilesError as e:
+            raise FilesError(f"{files.name} can't hold a failover lease: {e}. (A store that rejects If-Match or "
+                             "If-None-Match on writes can't: see INSTALL.md.)") from None
+    finally:
+        for name in (one, race):
+            try:
+                await files.lease_delete(name)
+            except FilesError:
+                pass
     if problems:
         raise FilesError(f"{files.name} doesn't do conditional writes properly, so it can't hold a failover lease: "
                          + "; ".join(problems))

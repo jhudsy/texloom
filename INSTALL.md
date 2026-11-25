@@ -444,12 +444,28 @@ The design and the checks behind it are in `models/failover/README.md`; `scripts
 runs two real servers through a lost primary and one cut off from the bucket.
 
 You need the pair from the section above (a primary and a streaming standby, each with its server
-installed), a bucket for the stored files, and a store that does conditional writes properly. Test
-yours first, from either server (it writes and removes a test object in the bucket):
+installed) and a bucket for the stored files that does **conditional writes** properly, because the
+lease lives in that bucket and the store is what decides who gets it. Not every S3-compatible store
+does, so test yours first, from either server (it writes and removes test objects in the bucket,
+including eight writers at once, to see that exactly one wins):
 
 ```bash
 sudo -u texloom /var/www/texloom/.venv/bin/texloom-server --config /etc/texloom/texloom.toml --failover-check
 ```
+
+A server asked to fail over runs the same test when it starts, and refuses a store that fails it.
+What is known (the stores change, so the test is what counts):
+
+| store | conditional writes |
+|---|---|
+| RustFS | passes the test (tried: the 2026-11 image) |
+| Cloudflare R2, AWS S3 | documented as supported (`If-Match`, `If-None-Match`); run the test on yours |
+| Backblaze B2 | reported by users of other tools to answer `If-None-Match` with 501, so it can't hold a lease; not tried here |
+| Garage | fails the test (v2.6.0 ignores the conditions): fine for stored files, not for the lease |
+| MinIO | not tried: its community edition no longer publishes images |
+
+If the bucket you keep files in can't, the lease can't live there (it is in the same bucket as the
+stored files); failover then isn't available until one that can is used.
 
 Then, once, on the **primary**, let the server's PostgreSQL role promote a standby (the grant is
 copied to the standby with everything else):

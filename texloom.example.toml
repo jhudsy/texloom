@@ -51,7 +51,8 @@ texlive_max = "3G"
 
 # --- failover to a standby server (INSTALL.md, "A standby server"). Off by default: nothing of it runs.
 # Needs PostgreSQL (each server's own, the standby's a replica of the primary's) and a bucket below
-# that does conditional writes: `texloom-server --failover-check` tests yours. One server holds a
+# that does conditional writes (Garage and Backblaze B2 don't; INSTALL.md lists what is known):
+# `texloom-server --failover-check` tests yours. One server holds a
 # lease in the bucket while it is the primary; the other waits, and takes over when it lapses.
 # failover = false
 # failover_name = "server-a"          # this server's name in the lease: each server needs its own (default: its host name)

@@ -172,6 +172,14 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+async def _failover_check(files: Files, check) -> None:
+    """--failover-check, and the same before a server fails over."""
+    try:
+        await check(files)
+    finally:
+        await files.close()
+
+
 async def _files_command(a: argparse.Namespace, files: Files) -> None:
     """--files-for-backup and --files-restore."""
     from .files import FolderFiles
@@ -273,7 +281,7 @@ def main() -> None:
     if a.failover_check:
         from .failover import check_conditional
         try:
-            asyncio.run(check_conditional(files))
+            asyncio.run(_failover_check(files, check_conditional))
         except FilesError as e:
             sys.exit(str(e))
         print(f"{files.name} does conditional writes properly: it can hold a failover lease")
@@ -331,7 +339,7 @@ def main() -> None:
         if a.failover_ttl < 2:
             p.error("--failover-ttl is at least 2 seconds")
         try:
-            asyncio.run(check_conditional(files))
+            asyncio.run(_failover_check(files, check_conditional))
         except FilesError as e:
             p.error(str(e))
         failover = FailoverSettings(name=a.failover_name, ttl=a.failover_ttl, database=a.database)
