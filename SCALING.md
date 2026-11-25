@@ -27,7 +27,7 @@ needed to run a relay: a small one stays one process on one machine.
 One relay process (aiohttp behind nginx, a systemd service), a PostgreSQL database for the edit
 logs, project records and project lists (a relay can use an SQLite file instead: below), and stored files in a folder or an S3-compatible bucket.
 Who is connected to which project, and some counters (usage, owners), are kept in the relay's
-memory, which is how a change reaches the others connected to it.
+memory (the usage read from a ledger in the database at the start), which is how a change reaches the others connected to it.
 
 ## Three ways to run it
 
@@ -186,17 +186,35 @@ extra capacity.
 
 ## Scaling
 
-### Where the load is
+### The limits, in the order you would hit them
 
-1. **The TeX engine and package files.** Most of the bytes. Serve them from a CDN, and compile
-   output (PDFs) only when someone is looking ([issue #15](https://github.com/jhudsy/texloom/issues/15)).
-   This is cheaper than adding servers, so it comes first.
-2. **Live editing.** Passed between connections in the relay's memory; it does not touch the
-   database.
-3. **The database.** One small write per batch of edits to each active project, and reads when
-   someone connects and catches up.
+The order is reasoned, not measured: nobody has taken a deployment to its limits. `scripts/loadtest.py`
+measures one relay on the machine it runs on (latency, CPU, memory per scenario); run it on a machine
+like yours before relying on a number. What to watch meanwhile: the admin page (stored bytes, who is
+connected now, each project's size), the relay process's CPU (`top`) and memory (`systemctl show texloom
+-p MemoryCurrent`), the number of database connections (`SELECT count(*) FROM pg_stat_activity`), and
+the host's outbound traffic.
+
+| # | The limit | What you would notice | What to do |
+|---|---|---|---|
+| 1 | **Bandwidth for the in-browser TeX engine.** The web editor compiles in the browser, so a first-time visitor downloads the engine from this server (`busytex.wasm` is 32 MB; the full TeX Live bundles are 93, 201 and 342 MB, but with "TeX Live files on demand" a document pulls only the package files it needs) and the browser keeps them afterwards. This is most of the bytes the server sends, and none of it needs the relay's CPU. | the host's outbound traffic or its provider's allowance; a slow first compile for new visitors | serve `/core` and `/texlive` from a CDN or a caching proxy in front (they are static files that change only with a release), and compile PDFs only when someone is looking ([#15](https://github.com/jhudsy/texloom/issues/15)). Cheaper than any more servers, so first. |
+| 2 | **The relay's memory.** The systemd unit caps it (`MemoryMax=1G`), and `--memory` (512 MB by default) is what big work at once may use: catch-ups, large messages, uploads, arXiv imports. | big operations are refused or slow; the process is killed at the cap | raise `--memory` and `MemoryMax` together (the cap stays about 500 MB above it), or a bigger machine |
+| 3 | **One relay's CPU.** It is one Python process, so one core. Live editing is passed between connections in its memory, so the work grows with connections times edits per second. | the process near 100% of one core; edits arriving late | a faster core helps more than more cores; then several relays, each project on one of them (way 3, "Several relays: route by project") |
+| 4 | **Database connections.** Each server uses up to 10 for queries plus one that listens, against PostgreSQL's `max_connections` (100 by default): about 8 servers. | `pg_stat_activity` near the limit; connection errors | a connection pooler (PgBouncer) between servers and database: the listening and lock connections must bypass it, and the pooler needs prepared-statement settings that suit the driver. Not tried here. |
+| 5 | **Writes to the one primary database.** One small write per batch of edits for each active project (and the usage ledger's update, in the same transaction), and reads when someone connects and catches up. | the database's CPU or disk, queries waiting | in order: batch edits for a few hundred milliseconds so a burst of typing is one write; read replicas for catch-ups; and only then, projects split across databases by project id (they never talk to each other), each with its own standby |
+| 6 | **Storage.** Stored files live in the bucket (a cost, not a limit). The database holds each project's edit log, replaced by a snapshot as it grows (over 12 MB the snapshot is stored as an upload, and above 50 MB snapshots stop and the log grows: [#18](https://github.com/jhudsy/texloom/issues/18)). | the database's disk, the bucket's bill | idle projects are dropped from the server (`--evict-idle-days`; their writers upload them again), a project may use `--project-max-bytes` (200 MB by default), and a creation code has an allowance |
+| 7 | **Availability** (these are not about capacity): the relay, the database, the bucket, and what sits in front. | people can't connect | way 2 for the relay (and, with `failover` on, everything waits on the bucket); a database tool for the database (way 3); the bucket's own redundancy; and how traffic reaches the servers, which is yours to arrange |
+
+**A project's size** on the admin page is mostly its stored files (figures, PDFs and the like), counted
+as they are stored. Its edit log is small by comparison and is compacted, so a project of tens of
+megabytes is ordinary, and the Snapshot column (the compressed editing history alone) is what the
+12 MB and 50 MB thresholds above are about. A project is a concern when it approaches the per-project
+limit, or when many of them together approach what the bucket and the database are sized for.
 
 ### Growing, in order
+
+The table above says what each limit needs. In the order to do things: the CDN first (limit 1), and the
+rest only as a limit comes near.
 
 1. **Several identical relays** behind a load balancer, sharing one PostgreSQL primary (kept
    available by a standard database tool: "Three ways to run it"), with every
