@@ -15,7 +15,7 @@ from . import listsync, tags
 from .config import load
 from .dialogs_tags import ManageTagsDialog, TagsDialog
 from .i18n import _, app_pref, ngettext, set_app_pref
-from .ui import GREY, ICON, TAGS_ROLE, chevron, dot, heading, in_background, note, project_name, tag_hex
+from .ui import GREY, ICON, TAGS_ROLE, Disclosure, dot, heading, in_background, note, project_name, shade, tag_hex
 
 log = logging.getLogger("texloom")
 
@@ -165,9 +165,7 @@ class ProjectListPart:
         self.find.textChanged.connect(lambda _text: self.refresh())
         self.view_btn = QtWidgets.QToolButton()
         self.view_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self.view_btn.setStyleSheet("QToolButton { border: none; border-radius: 4px; padding: 0 6px; }"
-                                    "QToolButton:hover, QToolButton:pressed { background: palette(midlight); }"
-                                    "QToolButton::menu-indicator { image: none; }")
+        self.view_btn.setAutoRaise(True)
         self.view_menu = QtWidgets.QMenu(self.view_btn)
         self.view_menu.aboutToShow.connect(self.fill_view_menu)
         self.view_btn.setMenu(self.view_menu)
@@ -188,14 +186,9 @@ class ProjectListPart:
         self.list_data: tuple[str, dict] | None = None  # (server, the list): set beside the window by keep_list_updated
         self.away_cache: tuple | None = None  # (what it was worked out from, the entries)
         self.away_rows: tuple | None = None  # what the rows last showed
-        self.away_head = QtWidgets.QToolButton()
-        self.away_head.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.away_head.setAutoRaise(True)
-        self.away_head.setCheckable(True)
-        self.away_head.setChecked(bool(app_pref("away_open", True)))
-        self.away_head.setStyleSheet("QToolButton { border: none; padding: 2px 0; } QToolButton:checked { background: transparent; }")
+        self.away_head = Disclosure(is_open=bool(app_pref("away_open", True)))
         self.away_head.setToolTip(_("Projects on your project list that aren’t on this computer. Join one to keep it in a folder here."))
-        self.away_head.toggled.connect(self.open_away)
+        self.away_head.opened.connect(self.open_away)
         lay.addWidget(self.away_head)
         self.away = QtWidgets.QListWidget()
         self.away.setItemDelegate(ProjectRows(self.away))
@@ -247,16 +240,15 @@ class ProjectListPart:
             if all(w in tags.fold_search(" ".join([title, *(t.name for t in own)])) for w in words):
                 rows.append((project, title, urlparse(there).netloc, f"{there}/#{entry['f']}", own))
         self.away_head.setText(_("On your list, not here ({n})", n=len(every)))
-        self.away_head.setIcon(chevron(self.away_head, down=self.away_head.isChecked()))
-        self.away.setVisible(bool(every) and self.away_head.isChecked())
-        shown = tuple((r[0], r[1], r[2], tuple(t.name for t in r[4]), tuple(t.colour for t in r[4])) for r in rows)
+        self.away.setVisible(bool(every) and self.away_head.is_open())
+        shown = (shade(GREY), *((r[0], r[1], r[2], tuple(t.name for t in r[4]), tuple(t.colour for t in r[4])) for r in rows))
         if shown == self.away_rows:
             return
         self.away_rows = shown
         keep = self.away_current()
         self.away.blockSignals(True)
         self.away.clear()
-        grey = QtGui.QBrush(QtGui.QColor(GREY))
+        grey = QtGui.QBrush(QtGui.QColor(shade(GREY)))
         for project, title, where, link, own in rows:
             it = QtWidgets.QListWidgetItem(f"{title}\n{where}" + (f"\n{', '.join(t.name for t in own)}" if own else ""))
             it.setData(Qt.UserRole, link)

@@ -36,17 +36,95 @@ def theme_icon(name: str) -> QtGui.QIcon:
         return QtGui.QIcon()
 
 
+def over(parent: QtWidgets.QWidget | None) -> QtWidgets.QWidget | None:
+    """Where a dialog asked for from `parent` opens: asked for from the main window while another
+    dialog is open over it (Join… in the project list), on top of that one, since a sheet would
+    open under it and be blocked by it."""
+    if isinstance(parent, QtWidgets.QMainWindow) and (top := QtWidgets.QApplication.activeModalWidget()) is not None:
+        return top
+    return parent
+
+
+def attach(dlg: QtWidgets.QDialog) -> QtWidgets.QDialog:
+    """`dlg` tied to the window it was opened from, blocking only that window: Qt shows it as a
+    sheet sliding from the window on macOS and as an ordinary dialog elsewhere."""
+    parent = dlg.parentWidget()
+    if parent is not None and parent.isVisible():
+        dlg.setWindowModality(Qt.WindowModal)
+    return dlg
+
+
 class Dialog(QtWidgets.QDialog):
-    """A dialog that, on macOS, slides down from the main window as a sheet."""
+    """A dialog tied to the window it was opened from (see attach)."""
 
     def __init__(self, parent=None) -> None:
-        if isinstance(parent, QtWidgets.QMainWindow) and (over := QtWidgets.QApplication.activeModalWidget()) is not None:
-            # asked for from another dialog open over the window (Join… in the project list): on top of
-            # that one, since a sheet would open under it and be blocked by it
-            parent = over
-        super().__init__(parent)
-        if MAC and isinstance(parent, QtWidgets.QMainWindow):
-            self.setWindowModality(Qt.WindowModal)
+        super().__init__(over(parent))
+        if isinstance(self.parentWidget(), QtWidgets.QMainWindow):
+            attach(self)
+
+
+def message(parent, icon: QtWidgets.QMessageBox.Icon, title: str, text: str,
+            buttons=QtWidgets.QMessageBox.Ok, default=QtWidgets.QMessageBox.NoButton) -> QtWidgets.QMessageBox.StandardButton:
+    """A message box tied to its window (a sheet on macOS), the button pressed. The title shows
+    only where the system puts one on message boxes (not macOS): the text must stand alone."""
+    box = QtWidgets.QMessageBox(icon, title, text, buttons, over(parent))
+    if default != QtWidgets.QMessageBox.NoButton:
+        box.setDefaultButton(default)
+    return QtWidgets.QMessageBox.StandardButton(attach(box).exec())
+
+
+def ask(parent, title: str, text: str, safe: bool = False) -> bool:
+    """A yes/no question; `safe`: No is the default answer (Return doesn't say yes)."""
+    yes, no = QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No
+    return message(parent, QtWidgets.QMessageBox.Question, title, text, yes | no, no if safe else yes) == yes
+
+
+def warn(parent, title: str, text: str) -> None:
+    message(parent, QtWidgets.QMessageBox.Warning, title, text)
+
+
+def inform(parent, title: str, text: str) -> None:
+    message(parent, QtWidgets.QMessageBox.Information, title, text)
+
+
+class Disclosure(QtWidgets.QPushButton):
+    """A flat button with a chevron that shows or hides part of a window (› closed, ⌄ open): text
+    alone on every system (a tool button draws a frame on macOS). It isn't Qt-checkable: a
+    checked button draws pressed in."""
+
+    opened = QtCore.Signal(bool)
+
+    def __init__(self, text: str = "", is_open: bool = False, bold: bool = False) -> None:
+        super().__init__()
+        self.setFlat(True)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)  # at the left, as a heading
+        self.setText(text)
+        if bold:
+            f = self.font()
+            f.setBold(True)
+            self.setFont(f)
+        self._open = is_open
+        self.clicked.connect(lambda: self.set_open(not self._open))
+        self._chevron()
+
+    def is_open(self) -> bool:
+        return self._open
+
+    def set_open(self, on: bool) -> None:
+        if on != self._open:
+            self._open = on
+            self._chevron()
+            self.opened.emit(on)
+
+    def _chevron(self) -> None:
+        self.setIcon(chevron(self, down=self._open))
+        h = self.fontMetrics().height()
+        self.setIconSize(QtCore.QSize(h, h))
+
+    def changeEvent(self, e: QtCore.QEvent) -> None:
+        super().changeEvent(e)
+        if e.type() in (QtCore.QEvent.PaletteChange, QtCore.QEvent.ApplicationPaletteChange):
+            self._chevron()  # drawn in the text colour: light or dark mode changed
 
 
 def chevron(w: QtWidgets.QWidget, down: bool) -> QtGui.QIcon:
@@ -138,6 +216,42 @@ def in_background(work, done) -> None:
 
 # ---- what a folder is doing ---------------------------------------------------------------
 GREEN, AMBER, RED, GREY = "#2e7d32", "#b26a00", "#b3261e", "#75736c"
+ON_DARK = {GREEN: "#81c995", AMBER: "#f6ad6b", RED: "#f28b82"}  # the same, readable on a dark window
+
+
+def dark() -> bool:
+    return QtWidgets.QApplication.palette().color(QtGui.QPalette.Window).lightness() < 128
+
+
+def shade(colour: str) -> str:
+    """`colour` as it shows in the current light or dark mode: GREY is the system's text colour
+    faded towards the window's (secondary text), the others lighter on a dark window."""
+    if colour == GREY:
+        pal = QtWidgets.QApplication.palette()
+        text, window = pal.color(QtGui.QPalette.WindowText), pal.color(QtGui.QPalette.Window)
+        mix = [round(a * 0.6 + b * 0.4) for a, b in zip(text.getRgb()[:3], window.getRgb()[:3])]
+        return QtGui.QColor(*mix).name()
+    return ON_DARK.get(colour, colour) if dark() else colour
+
+
+def tint(w: QtWidgets.QWidget, colour: str) -> QtWidgets.QWidget:
+    """`w`'s text in `colour` (shade), kept right when light or dark mode changes (Tints), through
+    its palette: a style sheet would have Qt draw the widget itself instead of the system."""
+    w.setProperty("texloom_tint", colour)
+    pal = w.palette()
+    pal.setColor(QtGui.QPalette.WindowText, QtGui.QColor(shade(colour)))
+    w.setPalette(pal)
+    return w
+
+
+class Tints(QtCore.QObject):
+    """Installed on the application: tints widgets again when light or dark mode changes."""
+
+    def eventFilter(self, obj: QtCore.QObject, e: QtCore.QEvent) -> bool:
+        if e.type() == QtCore.QEvent.ApplicationPaletteChange and isinstance(obj, QtWidgets.QWidget) \
+                and (colour := obj.property("texloom_tint")):
+            tint(obj, colour)
+        return False
 
 
 def note(text: str, colour: str | None = GREY) -> QtWidgets.QLabel:
@@ -145,7 +259,7 @@ def note(text: str, colour: str | None = GREY) -> QtWidgets.QLabel:
     label = QtWidgets.QLabel(text)
     label.setWordWrap(True)
     if colour:
-        label.setStyleSheet(f"color: {colour}")
+        tint(label, colour)
     return label
 
 
@@ -174,7 +288,7 @@ def program_what(en: str) -> str:
 
 
 def red(text: str) -> str:
-    return f"<span style='color:{RED}'>{text}</span>"
+    return f"<span style='color:{shade(RED)}'>{text}</span>"
 
 
 def describe(d: Path, engine: Engine) -> tuple[str, str, str]:

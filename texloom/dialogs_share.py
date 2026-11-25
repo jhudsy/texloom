@@ -21,7 +21,7 @@ from .crypto import Keys
 from .daemon import FolderProblem
 from .i18n import _, ngettext
 from .paths import state_dir, write_json
-from .ui import AMBER, Dialog, Engine, default_parent, folder_of, note, open_path, red, server_choices, slug
+from .ui import AMBER, Dialog, Engine, default_parent, folder_of, note, open_path, red, server_choices, slug, warn
 
 
 def issued_file(d: Path) -> Path:
@@ -125,7 +125,7 @@ class LinksDialog(Dialog):
             def done(name: str, link, err) -> None:
                 create.setEnabled(True)
                 if err:
-                    QtWidgets.QMessageBox.warning(self, _("Create link"), _("Couldn’t create it: {err}", err=err))
+                    warn(self, _("Create link"), _("Couldn’t create it: {err}", err=err))
                     return
                 who.clear()
                 show(name[:60], link)
@@ -253,7 +253,7 @@ class JoinDialog(Dialog):
         if not d.is_absolute():
             d = default_parent() / d
         if d.exists() and (not d.is_dir() or any(d.iterdir())):
-            QtWidgets.QMessageBox.warning(self, _("Join"), _("{d} isn't empty. Choose a new or empty folder.", d=d))
+            warn(self, _("Join"), _("{d} isn't empty. Choose a new or empty folder.", d=d))
             return
         self.join.setEnabled(False)
         self.what.setText(_("Downloading the project…"))

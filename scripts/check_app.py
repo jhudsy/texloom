@@ -51,6 +51,7 @@ from texloom.dialogs_tags import ManageTagsDialog  # noqa: E402
 from texloom.ui import Engine  # noqa: E402
 
 failures: list[str] = []
+opened: list[str] = []  # what the app asked the system to open
 
 
 def check(ok: bool, what: str) -> None:
@@ -196,10 +197,10 @@ def away(win: appmod.Window) -> None:
     win.refresh()
     check(win.away.count() == 1 and win.away.item(0).text().startswith("Thesis"), "the search covers them")
     win.find.setText("")
-    win.away_head.setChecked(False)
+    win.away_head.set_open(False)
     win.refresh()
     check(not win.away.isVisible() and win.away_head.isVisible(), "the heading folds them away")
-    win.away_head.setChecked(True)
+    win.away_head.set_open(True)
     win.set_show_away(False)
     check(not win.away_head.isVisible() and win.pages.currentIndex() == 0, "and View can hide them")
     win.set_show_away(True)
@@ -234,11 +235,12 @@ def list_window() -> None:
         "delete_list": lambda: calls.append(("delete",)),
     }
     kept = {name: getattr(listsync, name) for name in stand_ins}
-    yes, ask = QtWidgets.QMessageBox.question, dialogs_list.PasswordDialog.ask
+    from texloom import ui
+    yes, ask = ui.message, dialogs_list.PasswordDialog.ask  # (every question the app asks goes through ui.message)
     try:
         for name, f in stand_ins.items():
             setattr(listsync, name, f)
-        QtWidgets.QMessageBox.question = lambda *a, **k: QtWidgets.QMessageBox.Yes
+        ui.message = lambda *a, **k: QtWidgets.QMessageBox.Yes
         dialogs_list.PasswordDialog.ask = classmethod(lambda cls, parent, setting: ("ada", "correct horse battery"))
         listsync.save_link(listsync.ListKey.generate().link("https://example.org"))
 
@@ -291,7 +293,7 @@ def list_window() -> None:
 
         # a list coming back from the browser goes to the window that's open, not a second one
         asked: list[str] = []
-        QtWidgets.QMessageBox.question = lambda *a, **k: asked.append(a[2] if len(a) > 2 else "") or QtWidgets.QMessageBox.Yes
+        ui.message = lambda *a, **k: asked.append(a[3]) or QtWidgets.QMessageBox.Yes
         d4 = dialogs_list.ProjectListDialog(None)
         d4.show()
         d4.link.setText(listsync.ListKey.generate().link("https://example.org"))  # (the server it asks)
@@ -299,7 +301,7 @@ def list_window() -> None:
         nonce = dialogs_list.asked_nonce
         check(len(nonce) >= 16, "asking the browser for the list sends a fresh nonce")
         check(dialogs_list.ProjectListDialog.current is d4, "the open window is the one a list from the browser goes to")
-        QtWidgets.QMessageBox.question = lambda *a, **k: asked.append(a[2] if len(a) > 2 else "") or QtWidgets.QMessageBox.No
+        ui.message = lambda *a, **k: asked.append(a[3]) or QtWidgets.QMessageBox.No
         d4.receive(listsync.ListKey.generate().link("https://example.org"), from_web=True)
         check(len(asked) == 1 and listsync.saved_link() is None, "a list without the nonce is asked about, even just after asking the browser (and No keeps it out)")
         d4.receive(listsync.ListKey.generate().link("https://elsewhere.example"), from_web=True, nonce=nonce)
@@ -309,7 +311,7 @@ def list_window() -> None:
         d4.receive(sent, from_web=True, nonce=nonce)
         check(listsync.saved_link() == sent and not asked and d4.pages.currentIndex() == 1,
               "the list the app just asked the browser for (its nonce, its server) is used without a warning")
-        QtWidgets.QMessageBox.question = lambda *a, **k: asked.append(a[2] if len(a) > 2 else "") or QtWidgets.QMessageBox.Yes
+        ui.message = lambda *a, **k: asked.append(a[3]) or QtWidgets.QMessageBox.Yes
         other = listsync.ListKey.generate().link("https://example.org")
         d4.receive(other, from_web=True, nonce=nonce)
         check(bool(asked) and listsync.saved_link() == other, "the nonce counts once: one arriving after it is used only once confirmed")
@@ -334,7 +336,7 @@ def list_window() -> None:
     finally:
         for name, f in kept.items():
             setattr(listsync, name, f)
-        QtWidgets.QMessageBox.question, dialogs_list.PasswordDialog.ask = yes, ask
+        ui.message, dialogs_list.PasswordDialog.ask = yes, ask
         listsync.save_link(None)
 
 
@@ -437,6 +439,8 @@ def main() -> int:
     QtCore.qInstallMessageHandler(quiet_qt)
     app = QtWidgets.QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
+    # nothing here opens the browser or Finder (--native would: the passkey step opens example.org)
+    QtGui.QDesktopServices.openUrl = lambda url: opened.append(url.toString()) or True
     engine = Engine()  # not started: nothing here syncs or goes online
     win = appmod.Window(engine, appmod.Activity())
     windows(win)

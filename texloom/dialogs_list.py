@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt
 
 from . import listsync
 from .i18n import _, ngettext
-from .ui import AMBER, chevron, heading, in_background, known_server, note, red
+from .ui import AMBER, Disclosure, ask, heading, in_background, known_server, note, red
 
 log = logging.getLogger("texloom")
 
@@ -43,8 +43,7 @@ def expected(link: str, nonce: str) -> bool:
 
 def ask_yes(parent, title: str, text: str) -> bool:
     """A question whose default answer is No."""
-    return QtWidgets.QMessageBox.question(parent, title, text, QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                                          QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes
+    return ask(parent, title, text, safe=True)
 
 
 def synced_ago(at: float) -> str:
@@ -259,14 +258,8 @@ class ProjectListDialog(QtWidgets.QDialog):
         u.addLayout(row)
 
         u.addSpacing(6)
-        self.more_btn = QtWidgets.QToolButton()
-        self.more_btn.setText(_("More options"))
-        self.more_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.more_btn.setAutoRaise(True)
-        self.more_btn.setStyleSheet("QToolButton { border: none; padding: 2px 0; } QToolButton:checked { background: transparent; }")
-        self.more_btn.setCheckable(True)
-        self.more_btn.setIcon(chevron(self.more_btn, down=False))
-        self.more_btn.toggled.connect(self.show_more)
+        self.more_btn = Disclosure(_("More options"))
+        self.more_btn.opened.connect(self.show_more)
         u.addWidget(self.more_btn)
         self.more = QtWidgets.QWidget()
         m = QtWidgets.QVBoxLayout(self.more)
@@ -379,8 +372,8 @@ class ProjectListDialog(QtWidgets.QDialog):
 
     def remove_way(self, sid: str, slot: dict) -> None:
         passkey = slot.get("kind") == listsync.PASSKEY
-        ask = _("Stop this passkey opening the list? You can also delete it from your password manager.") if passkey else _("Remove this password?")
-        if QtWidgets.QMessageBox.question(self, _("Project list"), ask) != QtWidgets.QMessageBox.Yes:
+        question = _("Stop this passkey opening the list? You can also delete it from your password manager.") if passkey else _("Remove this password?")
+        if not ask(self, _("Project list"), question):
             return
         key, home = self._key_home()
         self.in_background(lambda: listsync.remove_slot(key, home, sid, slot), lambda _r: self.refresh_list())
@@ -395,9 +388,9 @@ class ProjectListDialog(QtWidgets.QDialog):
     def add_passkey(self) -> None:
         """A passkey is made by a browser, so the list opens there, where one can be added."""
         _key, home = self._key_home()
-        if QtWidgets.QMessageBox.question(self, _("Add a passkey"), _(
+        if not ask(self, _("Add a passkey"), _(
                 "Your browser will open this list on {server}. There, confirm with Use this list, then choose Add a passkey under "
-                "“Other ways to open it”. That browser keeps the list too.", server=urlparse(home).netloc)) != QtWidgets.QMessageBox.Yes:
+                "“Other ways to open it”. That browser keeps the list too.", server=urlparse(home).netloc)):
             return
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(listsync.saved_link() or ""))
         self.status.setText(_("Add the passkey in your browser, then come back and choose Sync now."))
@@ -409,7 +402,6 @@ class ProjectListDialog(QtWidgets.QDialog):
 
     def show_more(self, on: bool) -> None:
         self.more.setVisible(on)
-        self.more_btn.setIcon(chevron(self.more_btn, down=on))
 
     def replace(self) -> None:
         keep = ReplaceDialog.ask(self, self._key_home()[1])
@@ -419,8 +411,8 @@ class ProjectListDialog(QtWidgets.QDialog):
                            self.status.setText(_("Done. Copy the new sync link and keep it safe. Add any passkeys and password again.") + " " + TOKENS())))
 
     def delete(self) -> None:
-        if QtWidgets.QMessageBox.question(self, _("Delete this list"), _(
-                "Delete this list from the server, for every device? Your projects aren’t deleted, and this computer keeps its folders.")) != QtWidgets.QMessageBox.Yes:
+        if not ask(self, _("Delete this list"), _(
+                "Delete this list from the server, for every device? Your projects aren’t deleted, and this computer keeps its folders."), safe=True):
             return
         self.in_background(listsync.delete_list, lambda _r: self.stopped(_("The list is deleted. This computer keeps its folders.")))
 
@@ -526,8 +518,8 @@ class ProjectListDialog(QtWidgets.QDialog):
             self.in_background(lambda: listsync.unlock_with_password(server, *asked), lambda key: self.adopt(key.link(server)))
 
     def off(self) -> None:
-        if QtWidgets.QMessageBox.question(self, _("Project list"), _(
-                "Stop using the list on this computer? Its folders stay, and other devices carry on.")) != QtWidgets.QMessageBox.Yes:
+        if not ask(self, _("Project list"), _(
+                "Stop using the list on this computer? Its folders stay, and other devices carry on.")):
             return
         listsync.save_link(None)
         self.stopped(_("This computer no longer uses a project list. The list itself stays on the server."))

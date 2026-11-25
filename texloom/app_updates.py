@@ -11,7 +11,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from . import __version__
 from .i18n import _
-from .ui import ICON, MAC, in_background
+from .ui import ICON, MAC, attach, in_background, inform, warn
 
 log = logging.getLogger("texloom")
 
@@ -59,9 +59,9 @@ class UpdatesPart:
             if newer:
                 self.offer_update()
             elif err is not None:
-                QtWidgets.QMessageBox.warning(self, _("Check for updates"), _("Couldn’t reach GitHub to check: {err}", err=err))
+                warn(self, _("Check for updates"), _("Couldn’t reach GitHub to check: {err}", err=err))
             else:
-                QtWidgets.QMessageBox.information(self, _("Check for updates"), _("You have the newest version, {version}.", version=__version__))
+                inform(self, _("Check for updates"), _("You have the newest version, {version}.", version=__version__))
 
     def offer_update(self) -> None:
         if not self.update_info:
@@ -79,7 +79,7 @@ class UpdatesPart:
         box.setDefaultButton(box.addButton(_("Later"), QtWidgets.QMessageBox.RejectRole) if not frozen else get)
         if frozen:
             box.addButton(_("Later"), QtWidgets.QMessageBox.RejectRole)
-        box.exec()
+        attach(box).exec()
         if box.clickedButton() is get:
             QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
         elif box.clickedButton() is news:

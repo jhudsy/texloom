@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 
 from . import listsync, tags
 from .i18n import _, ngettext
-from .ui import Dialog, colour_names, dot, tag_hex
+from .ui import Dialog, ask, colour_names, dot, tag_hex
 
 
 class TagsDialog(Dialog):
@@ -182,8 +182,8 @@ class ManageTagsDialog(Dialog):
         if not ok or not clean or clean == tag.name:
             return
         other = tags.find(clean)
-        if other and other.id != tag.id and QtWidgets.QMessageBox.question(
-                self, _("Manage tags"), _("A tag called “{name}” already exists. Merge the two?", name=other.name)) != QtWidgets.QMessageBox.Yes:
+        if other and other.id != tag.id and not ask(
+                self, _("Manage tags"), _("A tag called “{name}” already exists. Merge the two?", name=other.name)):
             return
         tags.rename(tag.id, clean)
         self.render()
@@ -193,10 +193,10 @@ class ManageTagsDialog(Dialog):
         if not tag:
             return
         n = tags.uses(tag.id)
-        if n and QtWidgets.QMessageBox.question(self, _("Manage tags"), ngettext(
+        if n and not ask(self, _("Manage tags"), ngettext(
                 n, "Delete the tag “{name}”? It will be taken off {n} project. The project itself isn’t changed.",
                 "Delete the tag “{name}”? It will be taken off {n} projects. The projects themselves aren’t changed.",
-                n=n, name=tag.name)) != QtWidgets.QMessageBox.Yes:
+                n=n, name=tag.name)):
             return
         tags.remove(tag.id)
         self.render()

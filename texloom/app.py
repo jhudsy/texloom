@@ -41,7 +41,7 @@ from .dialogs_tools import ConnectToolDialog, EditorDialog
 from .i18n import _, app_pref, ngettext, set_app_pref
 from .mac import DockFollowsWindows, menu_opens_where_clicked, nsapp
 from .paths import use_tex_on_path
-from .ui import ICON, MAC, RED, TAGS_ROLE, Engine, chevron, default_parent, describe, dot, in_background, open_path, project_name, theme_icon
+from .ui import ICON, MAC, RED, TAGS_ROLE, Engine, Tints, attach, default_parent, describe, dot, in_background, open_path, project_name, shade, theme_icon, warn
 
 log = logging.getLogger("texloom")
 COMMENTS_EVERY = 15  # seconds between looks at the comments (counts and mention notices)
@@ -187,7 +187,6 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         tb.addAction(add)
         add_btn = tb.widgetForAction(add)
         add_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        add_btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0; }")  # the menu says what it holds
         tb.addAction(self.a_pause)
         tb.addAction(self.a_update)  # only while a newer version is out
         spacer = QtWidgets.QWidget()
@@ -274,9 +273,7 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
     # -- detail pane
     def show_activity(self, on: bool) -> None:
         set_app_pref("show_activity", on)
-        self.act_btn.setText(_("Activity"))
-        self.act_btn.setIcon(chevron(self.act_btn, down=on))
-        self.act_btn.setIconSize(QtCore.QSize(*[self.act_btn.fontMetrics().height()] * 2))
+        self.act_btn.set_open(on)
         self.act_btn.setToolTip(_("Hide activity") if on else _("Show activity"))
         self.log.setVisible(on)
 
@@ -318,16 +315,16 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
             it = self.list.item(i)
             name = project_name(d, self.engine)
             own = tuple(of(self.project_of(d) or ""))
-            shown = (name, short, colour, own)
+            shown = (name, short, shade(colour), own)
             if self.row_shown.get(str(d)) == shown:
                 continue  # redrawn only where something changed
             self.row_shown[str(d)] = shown
             it.setText(f"{name}\n{short}" + (f" · {d.name}" if d.name != name else "") + (f"\n{', '.join(t.name for t in own)}" if own else ""))
             it.setData(TAGS_ROLE, own)
-            it.setIcon(dot(colour))
+            it.setIcon(dot(shade(colour)))
             it.setToolTip(str(d))
         self.refresh_away()
-        away = self.has_away and self.away_head.isChecked()
+        away = self.has_away and self.away_head.is_open()
         self.pages.setCurrentIndex(1 if every or self.has_away else 0)
         has_list = bool(listsync.saved_link())  # (the welcome: with a list, opening it is done)
         self.welcome_list.setVisible(not has_list)
@@ -403,7 +400,7 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
             return
         d = Path(d)
         if not config_path(d).is_file() and not adopt(d):
-            QtWidgets.QMessageBox.warning(self, _("Add folder"), _(
+            warn(self, _("Add folder"), _(
                 "{d} isn’t a TeXLoom folder yet. To turn it into a project, use Add project ▸ New project from a folder….", d=d))
             return
         if not registry.add(d):
@@ -446,7 +443,7 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         box = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Question, _("Leave"), ask,
                                     QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, self)
         box.setTextFormat(Qt.PlainText)  # project names are chosen by collaborators
-        if box.exec() != QtWidgets.QMessageBox.Yes:
+        if attach(box).exec() != QtWidgets.QMessageBox.Yes:
             return
         for d in fs:
             registry.remove(d)
@@ -475,8 +472,9 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
 
     def changeEvent(self, e: QtCore.QEvent) -> None:
         super().changeEvent(e)
-        if e.type() == QtCore.QEvent.PaletteChange and hasattr(self, "act_btn"):
-            self.show_activity(self.a_activity.isChecked())
+        if e.type() == QtCore.QEvent.PaletteChange and hasattr(self, "row_shown"):
+            self.row_shown.clear()  # the status dots' colours, for light or dark mode
+            self.refresh()
         if e.type() == QtCore.QEvent.ActivationChange and self.isActiveWindow() and time.time() - self.list_at > 60:
             self.keep_list_updated(force=True)
 
@@ -536,7 +534,7 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
             box.setDefaultButton(keep)
             again = QtWidgets.QCheckBox(_("Don’t ask again"))
             box.setCheckBox(again)
-            box.exec()
+            attach(box).exec()
             choice = "minimise" if box.clickedButton() is keep else "quit" if box.clickedButton() is leave else ""
             if choice and again.isChecked():
                 set_app_pref("on_close", choice)
@@ -574,6 +572,7 @@ def main(argv: list[str] | None = None) -> None:
     app.setApplicationName("TeXLoom")
     app.setWindowIcon(QtGui.QIcon(str(ICON)))
     app.setQuitOnLastWindowClosed(False)
+    app.installEventFilter(Tints(app))  # grey and amber text follows light and dark mode
 
     # One copy per user: a second launch (e.g. from a texloom:// link) hands over and exits.
     from PySide6.QtNetwork import QLocalServer, QLocalSocket

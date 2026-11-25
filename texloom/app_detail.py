@@ -21,7 +21,7 @@ from .dialogs import CopyFolderDialog, ProgramsDialog
 from .dialogs_share import ask_code
 from .i18n import _, ngettext
 from .paths import state_dir, write_json
-from .ui import GREY, ICON, describe, heading, move_refusal_text, note, open_path, project_name, red, short_path, usage_text
+from .ui import GREY, ICON, Disclosure, ask, describe, heading, inform, move_refusal_text, note, open_path, project_name, red, shade, short_path, usage_text, warn
 from .wordcount import find_texcount, texcount_report
 
 log = logging.getLogger("texloom")
@@ -48,7 +48,7 @@ class ProjectDetailPart:
 
         def checked(good, err) -> None:
             if err or not good:
-                QtWidgets.QMessageBox.warning(self, _("Keep a copy on the server"),
+                warn(self, _("Keep a copy on the server"),
                                               _("The server didn't accept that code.") if not err else
                                               _("Couldn't reach the server: {err}", err=err))
                 return
@@ -81,7 +81,7 @@ class ProjectDetailPart:
 
         def done(no, err) -> None:
             if err or no:
-                QtWidgets.QMessageBox.warning(self, title, move_refusal_text(no) if no else _("Couldn't reach the server: {err}", err=err))
+                warn(self, title, move_refusal_text(no) if no else _("Couldn't reach the server: {err}", err=err))
                 return
             update_config(d, create_code=code)  # this copy holds the project's code from now on
             if not listsync.code_for(r.server):
@@ -172,7 +172,7 @@ class ProjectDetailPart:
         if not d:
             return
         if not exe:
-            QtWidgets.QMessageBox.information(self, _("Word count"), _("TeXCount wasn’t found. It comes with TeX Live and most TeX installations."))
+            inform(self, _("Word count"), _("TeXCount wasn’t found. It comes with TeX Live and most TeX installations."))
             return
         st = self.engine.daemon.states.get(d)
         if st is None or st.replica is None:
@@ -182,7 +182,7 @@ class ProjectDetailPart:
 
         def show(report, err) -> None:
             if err:
-                QtWidgets.QMessageBox.warning(self, _("Word count"), _("TeXCount couldn’t count this folder: {err}", err=err))
+                warn(self, _("Word count"), _("TeXCount couldn’t count this folder: {err}", err=err))
                 return
             dlg = QtWidgets.QDialog(self)
             dlg.setWindowTitle(_("Word count of “{name}”", name=name))
@@ -284,13 +284,8 @@ class ProjectDetailPart:
         lay.addWidget(self.options)
         lay.addSpacing(10)
 
-        self.act_btn = QtWidgets.QToolButton()
-        self.act_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.act_btn.setAutoRaise(True)
-        self.act_btn.setCursor(Qt.PointingHandCursor)
-        self.act_btn.setFont(heading("").font())
-        self.act_btn.setStyleSheet("QToolButton { border: none; padding: 0; background: transparent; }")
-        self.act_btn.clicked.connect(self.a_activity.toggle)
+        self.act_btn = Disclosure(_("Activity"), self.a_activity.isChecked(), bold=True)
+        self.act_btn.opened.connect(self.a_activity.setChecked)
         lay.addWidget(self.act_btn)
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
@@ -373,9 +368,9 @@ class ProjectDetailPart:
             return
         short, colour, longer = describe(d, self.engine)
         self.title.setText(project_name(d, self.engine))
-        self.path_lbl.setText(f"<a href='open' style='color:{GREY}; text-decoration:none'>{html.escape(short_path(d))}</a>")
+        self.path_lbl.setText(f"<a href='open' style='color:{shade(GREY)}; text-decoration:none'>{html.escape(short_path(d))}</a>")
         self.path_lbl.setToolTip(_("Open folder") + f": {d}")
-        self.status_lbl.setText(f"<span style='color:{colour}'>●</span> <b>{html.escape(short)}</b>" + (f" — {html.escape(longer)}" if longer else ""))
+        self.status_lbl.setText(f"<span style='color:{shade(colour)}'>●</span> <b>{html.escape(short)}</b>" + (f" — {html.escape(longer)}" if longer else ""))
         st = self.engine.daemon.states.get(d)
         r = st.replica if st else None
         usage = usage_text(r.store_info, r.storage) if r else ""
@@ -426,10 +421,10 @@ class ProjectDetailPart:
         if not d:
             return
         mode = self.p_mode.itemData(index)
-        if mode is True and QtWidgets.QMessageBox.question(
+        if mode is True and not ask(
                 self, _("Running programs"), _("Compiles may then run programs that the document asks for, on this "
                 "computer, once you allow each line (Review lines…).\n\nAnyone with an edit link writes the "
-                "document. Turn this on only for projects whose editors you trust.")) != QtWidgets.QMessageBox.Yes:
+                "document. Turn this on only for projects whose editors you trust."), safe=True):
             self.show_detail()
             return
         self.set_option("shell_escape", mode)

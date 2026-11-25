@@ -19,7 +19,7 @@ from .i18n import _, app_pref, lang_pref, set_app_pref, set_lang_pref
 from .locales import NAMES
 from .paths import state_dir
 from .dialogs_share import CodeField, NameBox
-from .ui import AMBER, GREY, MAC, Dialog, Engine, known_server, note, program_what, project_name, red, server_choices, slug
+from .ui import AMBER, GREY, MAC, Dialog, Engine, known_server, note, program_what, project_name, red, server_choices, shade, slug, tint
 
 
 async def program_lines(engine: Engine, d: Path) -> tuple[list, set[str]]:
@@ -68,7 +68,7 @@ class ProgramsDialog(Dialog):
             new = f.key not in allowed_keys
             it = QtWidgets.QTreeWidgetItem([_("new") if new else _("allowed"), f"{f.path}:{f.line}", program_what(f.what), f.text])
             if new:
-                it.setForeground(0, QtGui.QColor(AMBER))
+                it.setForeground(0, QtGui.QColor(shade(AMBER)))
             self.view.addTopLevelItem(it)
         if not self.found:
             self.view.addTopLevelItem(QtWidgets.QTreeWidgetItem(["", "", _("No lines in this project ask to run programs."), ""]))
@@ -203,7 +203,7 @@ class SettingsDialog(QtWidgets.QDialog):
         lay.addRow(_("Creation code"), row)
         self.code_note = note("")
         lay.addRow("", self.code_note)
-        self.code.source.setStyleSheet(f"color: {GREY}")  # a note, as the one above (its link still works)
+        tint(self.code.source, GREY)  # a note, as the one above (its link still works)
         lay.addRow("", self.code.source)
         self.login = QtWidgets.QCheckBox(_("Start TeXLoom when I log in, so folders keep syncing"))
         self.login.setChecked(autostart.status() != "off")
