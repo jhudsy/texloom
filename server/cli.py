@@ -125,6 +125,18 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--files-restore", type=Path, metavar="DIR",
                    help="put back into the file store every stored file it lacks, from DIR (a restored backup, "
                         "or the folder when moving to a bucket), then exit")
+    p.add_argument("--failover", action="store_true",
+                   help="take part in failover with a standby server (INSTALL.md, \"A standby server\"): this server "
+                        "holds a lease in the bucket while it is the primary, or waits as the standby and takes over "
+                        "when it isn't renewed. Needs PostgreSQL (this server's own, the standby's a replica) and "
+                        "--files s3://… with a store that does conditional writes. Off (the default): nothing of this runs")
+    p.add_argument("--failover-name", default="", metavar="NAME",
+                   help="this server's name in the lease; each of the two needs its own (default: its host name)")
+    p.add_argument("--failover-ttl", type=float, default=15, metavar="SECONDS",
+                   help="how long a primary may go without renewing its lease, on its own clock, before it stops (default "
+                        "15; the standby waits twice as long, plus a margin, before it takes over)")
+    p.add_argument("--failover-check", action="store_true",
+                   help="check that the --files bucket does conditional writes properly (a failover needs them), then exit")
     p.add_argument("--purge-expired-after", type=float, metavar="DAYS", default=None,
                    help="delete the stored copies of projects whose creation code expired more than DAYS days "
                         "ago (checked hourly; default: never). Their files stay on people's devices")
@@ -258,6 +270,14 @@ def main() -> None:
     if a.files_for_backup is not None or a.files_restore is not None:
         asyncio.run(_files_command(a, files))
         return
+    if a.failover_check:
+        from .failover import check_conditional
+        try:
+            asyncio.run(check_conditional(files))
+        except FilesError as e:
+            sys.exit(str(e))
+        print(f"{files.name} does conditional writes properly: it can hold a failover lease")
+        return
     codes = CodeBook(a.codes_file or None)
     if a.until and a.months:
         sys.exit("give --until or --months, not both")
@@ -300,11 +320,26 @@ def main() -> None:
         p.error("--codes-url must be an http:// or https:// address")
     if a.dropbox_app_key and not re.fullmatch(r"[a-z0-9]{8,32}", a.dropbox_app_key):
         p.error("--dropbox-app-key is the app key from the Dropbox App Console (letters and digits), not the secret")
+    failover = None
+    if a.failover:
+        from .db import sqlite_path
+        from .failover import FailoverSettings, check_conditional
+        if sqlite_path(a.database) is not None:
+            p.error("--failover needs PostgreSQL: a standby follows the primary's PostgreSQL (SQLite can't have one)")
+        if not a.files.startswith("s3://"):
+            p.error("--failover needs --files s3://… : the lease lives in the bucket the two servers share")
+        if a.failover_ttl < 2:
+            p.error("--failover-ttl is at least 2 seconds")
+        try:
+            asyncio.run(check_conditional(files))
+        except FilesError as e:
+            p.error(str(e))
+        failover = FailoverSettings(name=a.failover_name, ttl=a.failover_ttl, database=a.database)
     settings = Settings(
         a.database, static=a.static, data=a.data, files=files, tex=a.tex_assets, limits=limits, codes=codes,
         private=a.private, min_version=a.min_version, codes_url=a.codes_url, dropbox_app_key=a.dropbox_app_key,
         lists=not a.no_project_lists, arxiv=not a.no_arxiv, admin_token=admin_token, evict_days=a.evict_idle_days,
-        purge_days=a.purge_expired_after, texlive=a.texlive, texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror)
+        purge_days=a.purge_expired_after, texlive=a.texlive, texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror, failover=failover)
     web.run_app(make_app(settings), host=a.host, port=a.port, backlog=LISTEN_BACKLOG, shutdown_timeout=SHUTDOWN_WAIT)
 
 

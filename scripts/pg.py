@@ -64,8 +64,9 @@ def _run(*args: str | Path, output: Path | None = None) -> None:
         subprocess.run([str(a) for a in args], check=True, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env)
 
 
-def start(folder: Path) -> tuple[str, int]:
-    """Start (creating it if new) the database kept in `folder`. Returns its address and port."""
+def start(folder: Path, port: int | None = None) -> tuple[str, int]:
+    """Start (creating it if new) the database kept in `folder`, on `port` (default: a free one, so
+    start it again on the same port to keep its address). Returns its address and port."""
     bin_ = bindir()
     folder = folder.resolve()
     if not (folder / "PG_VERSION").exists():
@@ -77,7 +78,7 @@ def start(folder: Path) -> tuple[str, int]:
             _run(bin_ / "initdb", "-D", folder, "-U", USER, "--auth=trust", "-E", "UTF8", "--no-locale")
         except subprocess.CalledProcessError as e:
             sys.exit(f"initdb failed: {e.stderr}")
-    port = free_port()
+    port = port or free_port()
     opts = f"-p {port} -c listen_addresses=127.0.0.1 -c unix_socket_directories= -c fsync=off -c synchronous_commit=off"
     said = folder.parent / f"{folder.name}-pg_ctl.txt"
     try:

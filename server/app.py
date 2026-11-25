@@ -46,6 +46,7 @@ class Settings:
     texlive: Path | None = None  # TeX Live files on demand, cached here
     texlive_max: float = 4 * GiB
     texlive_mirrors: list[str] = field(default_factory=list)
+    failover: object | None = None  # failover.FailoverSettings, when failing over to a standby (failover.py)
 
 
 async def upkeep(policy: Policy, evict_days: float, purge_days: float | None) -> None:
@@ -81,14 +82,32 @@ def make_app(s: Settings) -> web.Application:
     # bodies read whole are small (uploads are streamed, and checked against MAX_BLOB as they come)
     app = web.Application(middlewares=[headers], client_max_size=MAX_BODY)
 
-    async def database(_app: web.Application):
+    opened: list[Store] = []
+
+    async def open_store() -> None:
         store = await Store.open(s.database, s.files, s.data, serving=True)
         log.info("database: %s", redact(s.database))
         policy.attach(store)
         await store.start()
-        yield
-        await store.close()
-    app.cleanup_ctx.append(database)
+        opened.append(store)
+
+    if s.failover:  # only then is failover.py even imported
+        from .failover import Failover
+        fo = Failover(s.failover, s.files, relay, open_store)
+        app.middlewares.append(fo.gate)
+        app.router.add_get("/api/health", fo.health)
+        app.cleanup_ctx.append(fo.context(app))
+
+        async def close_stores(_app: web.Application):
+            for store in opened:
+                await store.close()
+        app.on_cleanup.append(close_stores)
+    else:
+        async def database(_app: web.Application):
+            await open_store()
+            yield
+            await opened[0].close()
+        app.cleanup_ctx.append(database)
     if s.admin_token:
         from .admin import Admin
         app.router.add_get("/admin", Admin(relay, s.admin_token, s.evict_days, s.purge_days).page)

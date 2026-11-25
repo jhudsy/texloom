@@ -49,6 +49,15 @@ texlive_max = "3G"
 # no_project_lists = false            # storing people's encrypted project lists
 # no_arxiv = false                    # importing arXiv sources through the server
 
+# --- failover to a standby server (INSTALL.md, "A standby server"). Off by default: nothing of it runs.
+# Needs PostgreSQL (each server's own, the standby's a replica of the primary's) and a bucket below
+# that does conditional writes: `texloom-server --failover-check` tests yours. One server holds a
+# lease in the bucket while it is the primary; the other waits, and takes over when it lapses.
+# failover = false
+# failover_name = "server-a"          # this server's name in the lease: each server needs its own (default: its host name)
+# failover_ttl = 15                   # seconds a primary may go without renewing its lease before it stops itself;
+#                                     # the standby waits twice that, plus a margin, then takes over
+
 # --- stored files in an S3-compatible bucket (Garage, RustFS, Cloudflare R2, Backblaze B2, AWS S3)
 # instead of the folder data/files. To switch, see INSTALL.md → Stored files. Keep this last: in
 # TOML, every line after "[s3]" belongs to it.
