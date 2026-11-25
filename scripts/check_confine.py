@@ -9,7 +9,9 @@ that the check fails, so that the secret never reaches a shared PDF:
 - \\openout of the document's own .fls, blanking TeX's record, then \\pdfobj stream file{…};
 - \\input of a file outside (what the check caught before);
 - a .bib or .bst from outside, which BibTeX (reading unrestricted, for its .aux in .texloom/build) reads;
-and that ordinary documents (pdflatex, xelatex, BibTeX, its citations resolved) still compile and pass.
+- Lua's io.open of a file outside (LuaLaTeX reads with openin_any=r, which LuaTeX records);
+and that ordinary documents (pdflatex, xelatex, lualatex with fontspec, BibTeX, its citations
+resolved) still compile and pass.
 
 Skips (successfully) what needs a TeX that isn't installed.
 
@@ -142,7 +144,7 @@ async def main() -> int:
     secret = outside / "secret.txt"
     secret.write_text(SECRET + "\n")
     s = str(secret)
-    have = {e: bool(shutil.which(e)) for e in ("pdflatex", "xelatex", "xdvipdfmx", "bibtex")}
+    have = {e: bool(shutil.which(e)) for e in ("pdflatex", "xelatex", "xdvipdfmx", "bibtex", "lualatex")}
     modes = [False, True] if sys.platform in ("darwin", "linux") else [False]
 
     for sandbox in modes:
@@ -191,6 +193,17 @@ async def main() -> int:
                       found and not leaked(pdf), found)
         else:
             print("(xelatex isn't installed: skipped)")
+        if have["lualatex"]:
+            # paranoid reading refused luaotfload TeX's own files: no LuaLaTeX document compiled until 0.4.58
+            ok, pdf, found = await compile_doc(tmp, "lplain", "lualatex",
+                                               "\\documentclass{article}\\usepackage{fontspec}\\begin{document}Hello\\end{document}\n", sandbox)
+            check("lualatex: an ordinary document (fontspec) compiles and is shared", ok and pdf is not None and not found, found)
+            tex = ("\\documentclass{article}\\begin{document}\\directlua{local f = io.open(\"" + s + "\", \"rb\") "
+                   "if f then tex.print(f:read(\"*a\")) f:close() end}\\end{document}\n")
+            ok, pdf, found = await compile_doc(tmp, "luaopen", "lualatex", tex, sandbox)
+            check("lualatex: Lua's io.open of a file outside fails the check, and isn't shared", found and not leaked(pdf), found)
+        else:
+            print("(lualatex isn't installed: skipped)")
         if sandbox and sys.platform == "darwin" and have["pdflatex"]:
             # a program the document runs (shell escape on) writes outside: in a folder that is
             # neither temporary nor TeX's (beside this script, removed afterwards)

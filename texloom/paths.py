@@ -196,13 +196,18 @@ ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualate
 # It reads its .aux from there too, which paranoid openin refuses for the same reason, so it
 # also reads unrestricted: what it reads is in its .blg, which the read check covers like TeX's
 # .fls (a .bib from outside the project fails the check), and the sandbox still applies.
+# LuaLaTeX reads with openin_any=r (dot files refused): paranoid reading refuses Lua's io.open of
+# any absolute path, TeX's own files included, so its font loader (luaotfload) couldn't start and
+# no LuaLaTeX document compiled. Under r, LuaTeX records what io.open reads in its .fls, which the
+# read check covers; what paranoid didn't refuse either (loadfile, dofile, pdfe, img) is as before.
 # latexmk runs its other programs through the shell, the file names in double quotes, where ` and
 # $( ) still run commands: they too run as lists (texloom_exec), with no shell. kpsewhich, which
 # latexmk runs through the shell for the names a document gives (\bibliography{$(…)}), isn't
 # asked about a name the shell would act on: such a file is then only not watched for changes.
 RECORD = (
     "use Cwd; sub texloom_run { my ($ext, $base, @cmd) = @_; "
-    "local @ENV{qw(openin_any openout_any)} = (q(a), q(a)) if $cmd[0] eq q(bibtex); my $r = system(@cmd); "
+    "local @ENV{qw(openin_any openout_any)} = (q(a), q(a)) if $cmd[0] eq q(bibtex); "
+    "local $ENV{openin_any} = q(r) if $cmd[0] eq q(lualatex); my $r = system(@cmd); "
     "if (open(my $out, q(>>), qq($base.$ext-reads))) { print $out q(PWD ), getcwd(), qq(\\n); "
     "if (open(my $in, q(<), qq($base.$ext))) { my $c = do { local $/; <$in> } // q(); "
     "$c .= qq(\\n) if length($c) and substr($c, -1) ne qq(\\n); print $out $c } "
@@ -276,6 +281,7 @@ def restricted_programs() -> tuple[str, ...]:
 
 
 def tex_env(**more: str) -> dict[str, str]:
-    """TeX may only write inside the project (paranoid openout). Paranoid openin only refuses
-    dot files: reading elsewhere is stopped by texloom/confine.py."""
+    """TeX may only write inside the project (paranoid openout). Paranoid openin refuses dot
+    files, and absolute paths and .. to Lua's io.open (LuaLaTeX reads with r: see RECORD); reading
+    elsewhere is stopped by texloom/confine.py."""
     return {**os.environ, "openin_any": "p", "openout_any": "p", **more}

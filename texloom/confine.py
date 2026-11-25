@@ -1,8 +1,10 @@
 """Keep compiles of collaborators' documents from reading this computer's other files.
 
-TeX's paranoid mode (openin_any=p) only refuses dot files for reading: \\input{../../notes}, an
-absolute path or a .bib file elsewhere still work, and LuaLaTeX's Lua code can read anything. The
-PDF and log a compile publishes would carry what was read. So:
+TeX's reading modes don't keep a document in its project: paranoid (openin_any=p) refuses dot
+files and, to Lua's io.open, absolute paths, but \\input{../../notes}, an absolute path or a .bib
+file elsewhere still work; LuaLaTeX runs with r (dot files only), since paranoid refuses its font
+loader TeX's own files; and LuaLaTeX's Lua code has other ways to read. The PDF and log a compile
+publishes would carry what was read. So:
 
 - where the system has a sandbox (macOS sandbox-exec; bubblewrap on Linux, when installed), the
   compile runs with home folders and mounted volumes hidden, except the project, TeX's own
@@ -21,8 +23,8 @@ folders and mounted volumes, and there only in the user's font folders (~/Librar
 
 What the check can't see: Lua code in LuaLaTeX reading through loadfile, dofile, pdfe, img or
 fontloader (TeX doesn't record those), or rewriting the records through Lua's io. Where there's a
-sandbox it stops those reads; where there's none (Windows; Linux without bubblewrap), only TeX's
-paranoid mode stands in their way, and it doesn't cover loadfile and dofile.
+sandbox it stops those reads; where there's none (Windows; Linux without bubblewrap), nothing
+does (paranoid reading doesn't cover them either). What io.open reads is recorded.
 
 A folder's "confine": false (a local setting, config.py) turns both off, for projects whose
 collaborators you trust.
