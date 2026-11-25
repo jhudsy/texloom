@@ -280,6 +280,9 @@ CSP = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'se
        "form-action 'none'; frame-ancestors 'none'")
 # The editor's PDF window is a same-origin pop-up (it uses window.opener), and Dropbox's sign-in
 # goes in the same tab, so same-origin suits. Passkeys (project lists) stay allowed.
+# The in-browser engine's worker (/core/): the same, with eval, which its Perl (biber, through WebPerl)
+# may use. It had no policy at all before; this one still keeps it from connecting anywhere else.
+CSP_CORE = CSP.replace("script-src 'self' 'wasm-unsafe-eval'", "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'")
 COOP = "same-origin"
 PERMISSIONS = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 
@@ -303,7 +306,7 @@ async def headers(request: web.Request, handler):
     resp.headers["Referrer-Policy"] = "no-referrer"
     if not request.path.startswith(("/ws/", "/blob/", "/api/")):
         # pages, and the scripts workers run (/core/: the in-browser engine), whose policy is their own response's
-        resp.headers["Content-Security-Policy"] = CSP
+        resp.headers["Content-Security-Policy"] = CSP_CORE if request.path.startswith("/core/") else CSP
         resp.headers["Cross-Origin-Opener-Policy"] = COOP
         resp.headers["Permissions-Policy"] = PERMISSIONS
     if isinstance(resp, web.HTTPException) and resp.status >= 400:

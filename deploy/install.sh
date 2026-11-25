@@ -313,7 +313,7 @@ server {
         alias $APP_DIR/tex-assets/\$1;
         add_header Cache-Control "no-cache";
         add_header X-Content-Type-Options nosniff always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
         add_header Referrer-Policy no-referrer always;
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header Cross-Origin-Opener-Policy same-origin always;
@@ -325,7 +325,7 @@ server {
         expires 30d;
         add_header Cache-Control "public";
         add_header X-Content-Type-Options nosniff always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
         add_header Referrer-Policy no-referrer always;
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header Cross-Origin-Opener-Policy same-origin always;
@@ -466,7 +466,10 @@ if csp:
         body = m.group(2)
         if "add_header" not in body or "Content-Security-Policy" in body:
             return m.group(0)
-        add = "".join(f"        {h}\n" for h in every if h.split()[1] not in body)
+        mine = every
+        if "/core" in m.group(1):  # the engine's worker: eval too (its Perl may use it), still nothing else
+            mine = [h.replace("script-src 'self' 'wasm-unsafe-eval'", "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'") for h in every]
+        add = "".join(f"        {h}\n" for h in mine if h.split()[1] not in body)
         return m.group(1) + body + add + m.group(3)
     site = re.sub(r"(\n    location [^\n{]*\{\n)(.*?\n)(    \}\n)", headers, site, flags=re.S)
 if site != before:
