@@ -132,6 +132,7 @@ def state(r: Replica, socks: list[FakeWS], http: FakeHttp, got: dict) -> dict:
         "denied": r.denied,
         "min": r.min_version,
         "serverMode": r.server_mode,
+        "storage": r.storage,
         "storeProblem": r.store_problem,
         "closed": any(w.closed for w in socks),
         "sent": sorted(t for w in socks for t in sent_tags(r, w)),
@@ -227,6 +228,59 @@ async def run_case(c: dict, links: dict) -> list[str]:
         return bad
 
 
+async def desktop_only(links: dict) -> list[str]:
+    """What only the desktop app does: take compile requests (signed, recent, each once), and keep
+    the latest storage setting it has seen across a restart."""
+    import time
+
+    from texloom.crypto import b64e
+    owner, _ = Keys.from_link(f"{SERVER}/#{links['owner']}")
+    member, _ = Keys.from_link(f"{SERVER}/#{links['member']}")
+    bad: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        r = Replica(Path(tmp) / "state", member, SERVER)
+        r.ws, r.http = FakeWS(), FakeHttp({"uploads": {}}, member)  # type: ignore[assignment]
+        asked: list[str] = []
+
+        async def on_request(frm, clean, nonce) -> None:
+            asked.append(nonce)
+        r.on_compile_request = on_request
+
+        def creq(payload: dict, by: Keys | None = member) -> dict:
+            data = member.encrypt(json.dumps({"k": "creq", **payload}).encode())
+            return {"t": "p2p", "d": b64e(data), "from": 7, **({"s": b64e(by.sign(b"p2p:" + data))} if by else {})}
+        now = int(time.time() * 1000)
+        for what, msg, taken in [
+            ("a fresh signed compile request is taken", creq({"n": "nonce-one-abcdef", "at": now}), True),
+            ("the same request again (replayed) isn't", creq({"n": "nonce-one-abcdef", "at": now}), False),
+            ("one made ten minutes ago isn't", creq({"n": "nonce-two-abcdef", "at": now - 600_000}), False),
+            ("one dated far ahead isn't", creq({"n": "nonce-three-abcd", "at": now + 3_600_000}), False),
+            ("one without a time (an older app) isn't, and nothing breaks", creq({"n": "nonce-four-abcde"}), False),
+            ("one without a nonce isn't", creq({"at": now}), False),
+            ("an unsigned one isn't", creq({"n": "nonce-five-abcde", "at": now}, by=None), False),
+            ("another fresh one is", creq({"n": "nonce-six-abcdef", "at": now, "clean": True}), True),
+        ]:
+            before = len(asked)
+            try:
+                await r._handle(msg)
+            except Exception as e:  # noqa: BLE001
+                bad.append(f"{what}: raised {type(e).__name__}: {e}")
+            if (len(asked) > before) != taken:
+                bad.append(f"{what}: {'taken' if len(asked) > before else 'not taken'}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        def signed(mode: str, at: int) -> dict:
+            return {"m": mode, "at": at, "s": b64e(owner.sign(f"owner:storage:{mode}:{at}".encode()))}
+        r = Replica(Path(tmp) / "state", member, SERVER)
+        r.meta["storage"] = signed("relay", 2000)
+        r.save()
+        r2 = Replica(Path(tmp) / "state", member, SERVER)
+        r2.meta["storage"] = signed("server", 1000)  # (an editor putting back an older one)
+        if r2.storage != "relay":
+            bad.append(f"after a restart, an older storage setting counted: {r2.storage}")
+    return bad
+
+
 async def main() -> int:
     v = json.loads((ROOT / "scripts/replica-vectors.json").read_text())
     words = [w.lower() for w in sys.argv[1:]]
@@ -238,6 +292,10 @@ async def main() -> int:
             failed += 1
             print(f"FAIL {c['what']}\n     " + "\n     ".join(bad))
     print(f"replica (desktop): {len(cases) - failed} of {len(cases)} cases agree" + ("" if not failed else f", {failed} don't"))
+    if not words:
+        extra = await desktop_only(v["links"])
+        print(*(f"FAIL {b}" for b in extra), sep="\n") if extra else print("replica (desktop only): compile requests and the kept storage setting check out")
+        failed += len(extra)
     return 1 if failed else 0
 
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 
 import webcheck
 from webcheck import ROOT  # noqa: F401  (sets up the import path)
@@ -79,10 +80,24 @@ def main() -> None:
         p.wait_for_function("() => localStorage.getItem('texloom.listKey')", timeout=30000)
         s.check("the web app opens it with the desktop's password", p.evaluate("localStorage.getItem('texloom.listKey')") == b64e(key.secret))
 
+        # a long but predictable password is refused; a passphrase can be suggested
+        p.locator("dialog[open] button", has_text="Set a password").click()
+        password_dialog(p, WEB[0], "aaaaaaaaaaaa", again=True)
+        s.check("the web app refuses a long but predictable password", p.locator("dialog[open] form .err", has_text="too easy").count() == 1)
+        p.locator("dialog[open] form button", has_text="Suggest a passphrase").click()
+        suggested = p.locator("dialog[open] form input[autocomplete='new-password']").first.input_value()
+        s.check("and suggests a strong passphrase", listsync.password_strength(suggested)[1] is None, suggested)
+        p.locator("dialog[open] form button", has_text="Cancel").click()
+
         # the browser sets a new password: it replaces the desktop's
         p.locator("dialog[open] button", has_text="Set a password").click()
         password_dialog(p, *WEB, again=True)
         p.wait_for_selector("dialog[open] .ok:has-text('Password set')", timeout=30000)
+        slots = listsync.read_slots(key, url)
+        s.check("the record of ways in keeps the hash of the password's entry",
+                all(listsync.slot_hash(listsync._get_raw(url, sid)[1]) == v.get("h") for sid, v in slots.items()), str(slots))
+        size = len(listsync._get_raw(url, next(iter(slots)))[1])
+        s.check("and the entry is padded like any small entry", size >= listsync.PAD_TO, str(size))
         s.check("the web app's password opens it on the desktop", opens(url, WEB) == "opens " + key.id, opens(url, WEB))
         s.check("and the desktop's old one no longer does", opens(url, DESK) == "wrong-password", opens(url, DESK))
         slots = listsync.read_slots(key, url)
@@ -96,10 +111,22 @@ def main() -> None:
 
         s.check("a retired password can't be used again", _code(lambda: listsync.set_password(key, url, *DESK)) == "password-taken")
 
+        # someone with the link adds a copy on their own server, dated far ahead: this computer
+        # doesn't write there until it's ticked here, and the date counts as only a little ahead
+        evil, now = "https://copy.invalid", int(time.time() * 1000)
+        listsync.sync_settings(key, url, {"v": 1, "s": {listsync.COPY + evil: {"v": "1", "at": now + 10**12}}})
+        listsync.sync_this_computer()
+        s.check("a copy added elsewhere isn't used here", evil not in listsync.copy_servers(url) and evil in listsync.suggested_copies(url),
+                str(listsync.copies(url)))
+        got = listsync.pull(listsync.ListKey(listsync.derive(key.secret, listsync.SETTINGS_LABEL)), url)[1]["s"][listsync.COPY + evil]
+        s.check("its time far ahead counts as only a little ahead", got["at"] <= int(time.time() * 1000) + listsync.SETTING_SKEW, str(got))
+
         # replacing the list: the old link is retired, the new one has the same projects
         listsync.set_password(key, url, *THIRD)
         before = listsync.pull(key, url)[1]
         new_link = listsync.replace_list()
+        new_settings = listsync.pull(listsync.ListKey(listsync.derive(listsync.ListKey.from_link(new_link)[0].secret, listsync.SETTINGS_LABEL)), url)[1]
+        s.check("the new list doesn't carry the copy added elsewhere", listsync.COPY + evil not in new_settings["s"], str(new_settings["s"].keys()))
         fresh = listsync.ListKey.from_link(new_link)[0]
         try:
             listsync.pull(key, url)

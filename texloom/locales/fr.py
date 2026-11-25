@@ -212,8 +212,6 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Working…': 'Calcul en cours…',
     'Project list…':
         'Liste de projets…',
-    'A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.':
-        'Une page web a demandé à TeXLoom d’utiliser cette liste de projets. Vos dossiers y seraient ajoutés, et toute personne ayant ce lien pourrait les ouvrir. Ne l’utilisez que si ce lien est le vôtre.',
     'This computer has no project list yet.':
         'Cet ordinateur n’a pas encore de liste de projets.',
     'Untitled project':
@@ -486,13 +484,11 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'Opens the list in your browser, where you can add a passkey: Touch ID, Windows Hello, your phone or a security key': 'Ouvre la liste dans votre navigateur, où vous pouvez ajouter une clé d’accès\xa0: Touch ID, Windows Hello, votre téléphone ou une clé de sécurité',
     'Stop using the list on this computer? Its folders stay, and other devices carry on.': 'Ne plus utiliser la liste sur cet ordinateur\xa0? Ses dossiers restent, et les autres appareils continuent.',
     'This computer keeps its folders but stops syncing the list. Other devices carry on.': 'Cet ordinateur garde ses dossiers mais ne synchronise plus la liste. Les autres appareils continuent.',
-    'Your browser will open this list on {server}. There, choose Add a passkey under “Other ways to open it”. That browser keeps the list too.': 'Votre navigateur va ouvrir cette liste sur {server}. Là, choisissez Ajouter une clé d’accès sous «\xa0Autres façons de l’ouvrir\xa0». Ce navigateur garde aussi la liste.',
     'None yet: only the sync link opens it.': 'Aucun pour l’instant : seul le lien de synchronisation l’ouvre.',
     'Stop this passkey opening the list': 'Ne plus ouvrir la liste avec cette clé d’accès',
     'Stop this password opening the list': 'Ne plus ouvrir la liste avec ce mot de passe',
     'The list is deleted. This computer keeps its folders.': 'La liste est supprimée. Cet ordinateur garde ses dossiers.',
     'Use at least {n} characters.': 'Utilisez au moins {n} caractères.',
-    'That password is too easy to guess.': 'Ce mot de passe est trop facile à deviner.',
     'The two passwords don’t match.': 'Les deux mots de passe ne correspondent pas.',
     'Passkey, added {when}': 'Clé d’accès, ajoutée le {when}',
     'Password, set {when}': 'Mot de passe, défini le {when}',
@@ -532,4 +528,15 @@ CATALOG: dict[str, str | tuple[str, str] | dict[str, str]] = {
     'New to TeXLoom?': 'Nouveau sur TeXLoom ?',
     'Lets you keep new projects on {server}. Joining a project doesn’t need one. With a project list, it follows you to your other computers and browsers.': 'Permet de conserver de nouveaux projets sur {server}. Rejoindre un projet n’en demande pas. Avec une liste de projets, il vous suit sur vos autres ordinateurs et navigateurs.',
     'Creation code saved.': 'Code de création enregistré.',
+    # -- project list: password strength, copies, links from elsewhere
+    'That password is too easy to guess. Make it longer and less predictable, or use a suggested passphrase.': 'Ce mot de passe est trop facile à deviner. Allongez-le et rendez-le moins prévisible, ou utilisez une phrase de passe suggérée.',
+    'Keep this passphrase in your password manager, or write it down somewhere safe.': 'Gardez cette phrase de passe dans votre gestionnaire de mots de passe, ou notez-la en lieu sûr.',
+    'Fill in a random passphrase that is hard to guess': 'Remplir avec une phrase de passe aléatoire, difficile à deviner',
+    'Suggest a passphrase': 'Suggérer une phrase de passe',
+    'Whoever had the old link could also read the Zotero, GitHub, GitLab, Gitea and Dropbox tokens on the list: revoke them on those sites and connect again.': 'Quiconque avait l’ancien lien pouvait aussi lire les jetons Zotero, GitHub, GitLab, Gitea et Dropbox de la liste : révoquez-les sur ces sites et reconnectez-vous.',
+    'The new list is kept on {server}. Keep it on these servers too? Tick only servers you added yourself.': 'La nouvelle liste est conservée sur {server}. La garder aussi sur ces serveurs ? Ne cochez que des serveurs que vous avez ajoutés vous-même.',
+    'Another device, or someone else who has the sync link, added this server. Tick it only if you know it.': 'Un autre appareil, ou quelqu’un d’autre qui a le lien de synchronisation, a ajouté ce serveur. Ne le cochez que si vous le connaissez.',
+    'added elsewhere: not used here until you tick it': 'ajouté ailleurs : pas utilisé ici tant que vous ne le cochez pas',
+    'A web page asked TeXLoom to use this project list. Your folders, your creation codes and your name would be added to it, and whoever made the link could read them all. Use it only if the link is yours.': 'Une page web a demandé à TeXLoom d’utiliser cette liste de projets. Vos dossiers, vos codes de création et votre nom y seraient ajoutés, et la personne qui a créé le lien pourrait tout lire. Ne l’utilisez que si ce lien est le vôtre.',
+    'Your browser will open this list on {server}. There, confirm with Use this list, then choose Add a passkey under “Other ways to open it”. That browser keeps the list too.': 'Votre navigateur va ouvrir cette liste sur {server}. Là, confirmez avec « Utiliser cette liste », puis choisissez « Ajouter une clé d’accès » sous « Autres façons de l’ouvrir ». Ce navigateur garde aussi la liste.',
 }

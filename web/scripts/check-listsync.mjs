@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { load, report, web } from './lib.mjs'
 
-const [{ ListKey, canon, emptyTags, mergeLists, mergeRegistry, mergeSettings, mergeTags, passwordSecret, signPut, tagColour, tidyTags }] = await load('src/listcore.ts')
+const [{ COMMON_PASSWORDS, ListKey, canon, emptyTags, mergeLists, mergeRegistry, mergeSettings, mergeTags, normUsername, padded, passwordSecret, passwordStrength, signPut, slotHash, suggestPassphrase, tagColour, tidyTags }] = await load('src/listcore.ts')
 const v = JSON.parse(fs.readFileSync(path.join(web, '../scripts/listsync-vectors.json'), 'utf8'))
 const b64d = (s) => new Uint8Array(Buffer.from(s, 'base64url'))
 const b64e = (b) => Buffer.from(b).toString('base64url')
@@ -16,7 +16,7 @@ for (const k of v.keys) {
   check('signature', signPut(key.signingSeed, key.id, k.seq, b64d(k.data)), k.signature)
   check('decrypt', new TextDecoder().decode(await key.decrypt(b64d(k.ciphertext))), k.plain)
 }
-for (const p of v.passwords) check(`password ${p.username}`, b64e(await passwordSecret(p.username, p.password)), p.secret)
+for (const p of v.passwords) check(`password ${JSON.stringify(p.username)}`, b64e(await passwordSecret(p.username, p.password)), p.secret)
 for (const m of v.merges) {
   check(m.what, canon(mergeLists(m.a, m.b)), m.merged)
   check(`${m.what} (other way round)`, canon(mergeLists(m.b, m.a)), m.merged)
@@ -27,8 +27,8 @@ for (const m of v.tag_merges) {
   check(`${m.what} (other way round)`, canon(mergeTags(m.b, m.a)), m.merged)
 }
 for (const m of v.setting_merges) {
-  check(m.what, canon(mergeSettings(m.a, m.b)), m.merged)
-  check(`${m.what} (other way round)`, canon(mergeSettings(m.b, m.a)), m.merged)
+  check(m.what, canon(mergeSettings(m.a, m.b, m.now)), m.merged)
+  check(`${m.what} (other way round)`, canon(mergeSettings(m.b, m.a, m.now)), m.merged)
 }
 for (const m of v.registry_merges) {
   check(m.what, canon(mergeRegistry(m.a, m.b)), m.merged)
@@ -37,5 +37,17 @@ for (const m of v.registry_merges) {
 for (const m of v.tag_colours) check(`colour of ${m.id}`, tagColour(m.id, m.chosen ?? undefined), m.colour)
 for (const m of v.tag_tidies) check(m.what, canon(tidyTags(m.doc, new Set(m.listed), m.now)), m.tidied)
 check('no tags to merge', canon(mergeTags(emptyTags(), emptyTags())), canon(emptyTags()))
+for (const u of v.usernames ?? []) check(`username ${JSON.stringify(u.username)}`, normUsername(u.username), u.norm)
+for (const p of v.strengths ?? []) {
+  const got = passwordStrength(p.password, p.username)
+  check(`strength of ${JSON.stringify(p.password)}`, `${got.bits} ${got.problem}`, `${p.bits} ${p.problem}`)
+}
+check('common passwords', JSON.stringify(COMMON_PASSWORDS), JSON.stringify(v.common_passwords))
+for (const p of v.padded ?? []) check(`padded ${JSON.stringify(p.json.slice(0, 20))}`, padded(p.json).length, p.length)
+for (const h of v.slot_hashes ?? []) check('slot hash', slotHash(b64d(h.data)), h.h)
+for (let i = 0; i < 20; i++) {
+  const s = suggestPassphrase()
+  check(`suggested ${s}`, passwordStrength(s).problem, null)
+}
 
-report('listsync', bad, `listsync: ${v.keys.length} keys, ${v.passwords.length} passwords, ${v.merges.length} merges, ${v.tag_merges.length} tag merges, ${v.setting_merges.length} setting merges, ${v.registry_merges.length} ways-in merges and ${v.tag_tidies.length} tidies match`)
+report('listsync', bad, `listsync: ${v.keys.length} keys, ${v.passwords.length} passwords, ${v.merges.length} merges, ${v.tag_merges.length} tag merges, ${v.setting_merges.length} setting merges, ${v.registry_merges.length} ways-in merges, ${v.tag_tidies.length} tidies, ${v.usernames.length} usernames, ${v.strengths.length} password strengths and ${v.padded.length} paddings match`)

@@ -52,7 +52,6 @@ const fr: Catalog = {
   'Username or email': 'Nom d’utilisateur ou e-mail',
   'Password':
     'Mot de passe',
-  'That password is too easy to guess.': 'Ce mot de passe est trop facile à deviner.',
   'Password again':
     'Confirmer le mot de passe',
   'OK':
@@ -130,5 +129,39 @@ const fr: Catalog = {
   'Passkey': 'Clé d’accès',
   'The username and password you set for the list': 'Le nom d’utilisateur et le mot de passe que vous avez choisis pour la liste',
   'Open the list this sync link belongs to': 'Ouvrir la liste à laquelle appartient ce lien de synchronisation',
+  'That password is too easy to guess. Make it longer and less predictable, or use a suggested passphrase.':
+    'Ce mot de passe est trop facile à deviner. Allongez-le et rendez-le moins prévisible, ou utilisez une phrase de passe suggérée.',
+  'Keep this passphrase in your password manager, or write it down somewhere safe.':
+    'Gardez cette phrase de passe dans votre gestionnaire de mots de passe, ou notez-la en lieu sûr.',
+  'Fill in a random passphrase that is hard to guess':
+    'Remplir avec une phrase de passe aléatoire, difficile à deviner',
+  'Suggest a passphrase':
+    'Suggérer une phrase de passe',
+  'Replace the sync link':
+    'Remplacer le lien de synchronisation',
+  'Whoever had the old link could also read the Zotero, GitHub, GitLab, Gitea and Dropbox tokens on the list: revoke them on those sites and connect again.':
+    'Quiconque avait l’ancien lien pouvait aussi lire les jetons Zotero, GitHub, GitLab, Gitea et Dropbox de la liste : révoquez-les sur ces sites et reconnectez-vous.',
+  'The new list is kept on {{server}}. Keep it on these servers too? Tick only servers you added yourself.':
+    'La nouvelle liste est conservée sur {{server}}. La garder aussi sur ces serveurs ? Ne cochez que des serveurs que vous avez ajoutés vous-même.',
+  'Another device, or someone else who has the sync link, added this server. Tick it only if you know it.':
+    'Un autre appareil, ou quelqu’un d’autre qui a le lien de synchronisation, a ajouté ce serveur. Ne le cochez que si vous le connaissez.',
+  'added elsewhere: not used here until you tick it':
+    'ajouté ailleurs : pas utilisé ici tant que vous ne le cochez pas',
+  'Use this project list?':
+    'Utiliser cette liste de projets ?',
+  'This sync link came from a link you opened, not from this browser. If you use it, every project in this browser, your creation codes, your name and your Zotero, GitHub, GitLab, Gitea and Dropbox connections (with their access tokens) go on that list, and whoever made the link can read them all. Use it only if it is your own sync link.':
+    'Ce lien de synchronisation vient d’un lien que vous avez ouvert, pas de ce navigateur. Si vous l’utilisez, tous les projets de ce navigateur, vos codes de création, votre nom et vos connexions Zotero, GitHub, GitLab, Gitea et Dropbox (avec leurs jetons d’accès) vont sur cette liste, et la personne qui a créé le lien peut tout lire. Ne l’utilisez que si c’est votre propre lien de synchronisation.',
+  'This browser uses a different list now: this one would take its place.':
+    'Ce navigateur utilise actuellement une autre liste : celle-ci la remplacerait.',
+  'Its server: {{server}}':
+    'Son serveur : {{server}}',
+  'Use this list':
+    'Utiliser cette liste',
+  'Add this browser’s projects and accounts to the list this link opens':
+    'Ajouter les projets et les comptes de ce navigateur à la liste qu’ouvre ce lien',
+  'The list is open here now.':
+    'La liste est maintenant ouverte ici.',
+  'The list goes to the program your browser opens texloom:// links with: the TeXLoom app, if it is installed. Your browser may ask before opening it.':
+    'La liste va au programme avec lequel votre navigateur ouvre les liens texloom:// : l’application TeXLoom, si elle est installée. Votre navigateur peut demander avant de l’ouvrir.',
 }
 export default fr

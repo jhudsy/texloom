@@ -14,8 +14,10 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import re
+import secrets
 import time
 import unicodedata
 import urllib.error
@@ -252,14 +254,124 @@ def empty_settings() -> dict:
     return {"v": 1, "s": {}}
 
 
-def merge_settings(a: dict, b: dict) -> dict:
-    """Settings that travel with the list, such as the creation code, each with when it was set:
-    the latest wins, and a tie goes the same way on every device."""
+SETTING_SKEW = 10 * 60_000  # ms: a setting dated further ahead counts as dated now + this
+
+
+def merge_settings(a: dict, b: dict, now: int | None = None) -> dict:
+    """Settings that travel with the list: the creation codes (code:<server>), the servers keeping
+    copies (copy:<server>), your name (and, from the web app, its Zotero, git hosts' and Dropbox
+    accounts with their tokens), each with when it was set: the latest wins, and a tie goes the
+    same way on every device. A time more than SETTING_SKEW ahead counts as now + SETTING_SKEW, so
+    a setting dated far in the future (by someone who had the link, say) can't stay ahead of every
+    later change. As web/src/listcore.ts."""
+    limit = (int(time.time() * 1000) if now is None else now) + SETTING_SKEW
     out = empty_settings()
     for name in sorted({*a.get("s", {}), *b.get("s", {})}):
         x, y = a.get("s", {}).get(name), b.get("s", {}).get(name)
+        x = {**x, "at": limit} if x and x["at"] > limit else x
+        y = {**y, "at": limit} if y and y["at"] > limit else y
         out["s"][name] = y if not x else x if not y else x if (x["at"], _canon(x)) >= (y["at"], _canon(y)) else y
     return out
+
+
+# --- usernames, passwords, and what's stored (web/src/listcore.ts must match) ----------------------
+# What counts as space around a username: the same set the web app strips (JavaScript's trim() and
+# Python's strip() each miss some of the other's).
+_EDGES = "\t\n\v\f\r \x1c-\x1f\x85\xa0  -     　﻿"
+_AROUND = re.compile(f"^[{_EDGES}]+|[{_EDGES}]+\\Z")
+
+
+def norm_username(username: str) -> str:
+    """A username as it is salted: without space around it, in lower case, NFKC."""
+    return unicodedata.normalize("NFKC", _AROUND.sub("", username).lower())
+
+
+# Passwords people pick most, and keyboard runs: in a new password each counts as one guess of a few
+# hundred, not as its letters (the same list as the web app's: scripts/listsync-vectors.json).
+COMMON_PASSWORDS = (
+    "password", "passw0rd", "qwerty", "qwertyuiop", "asdfgh", "asdfghjkl", "zxcvbn", "zxcvbnm", "qazwsx", "1qaz2wsx", "azerty", "qwertz",
+    "letmein", "welcome", "iloveyou", "iloveu", "admin", "administrator", "login", "master", "monkey", "dragon", "football",
+    "baseball", "soccer", "hockey", "princess", "sunshine", "shadow", "superman", "batman", "trustno1", "starwars", "pokemon",
+    "charlie", "michael", "jennifer", "jordan", "hunter", "buster", "freedom", "whatever", "secret", "computer", "internet",
+    "samsung", "google", "apple", "cheese", "chocolate", "summer", "winter", "spring", "autumn", "flower", "butterfly",
+    "purple", "orange", "banana", "cookie", "pepper", "ginger", "liverpool", "chelsea", "arsenal", "killer", "mustang",
+    "harley", "ranger", "tigger", "love", "lovely", "loveme", "angel", "baby", "babygirl", "family", "friends", "hello",
+    "abc123", "test", "testing", "guest", "default", "changeme", "temp", "access", "passport", "matrix", "nothing", "thomas",
+    "daniel", "andrew", "robert", "jessica", "ashley", "nicole", "maggie", "texloom", "latex", "overleaf", "thesis", "project",
+    "sync", "mylist", "mypassword", "passwort", "motdepasse", "contrasena", "senha", "correcthorsebatterystaple", "qwer",
+    "asdf", "zxcv",
+)
+MIN_PASSWORD = 12  # characters
+MIN_PASSWORD_BITS = 60
+_LEET = {"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "!": "i"}
+_POOL = {"a": 26, "A": 26, "0": 10, "!": 33, "*": 100}
+
+
+def _fold(c: str) -> str:
+    return _LEET.get(c) or (c.lower() if "A" <= c <= "Z" else c)
+
+
+def _kind(c: int) -> str:
+    return "a" if 97 <= c <= 122 else "A" if 65 <= c <= 90 else "0" if 48 <= c <= 57 else "!" if 32 <= c <= 126 else "*"
+
+
+def password_strength(password: str, username: str = "") -> tuple[int, str | None]:
+    """How hard a new password is to guess, roughly (bits, rounded down), and what's wrong with it:
+    "short" (under MIN_PASSWORD characters), "weak" (under 6 different characters, or under
+    MIN_PASSWORD_BITS), or None. Repeats (aaaa, abab), runs (abcd, 4321), common passwords and the
+    username count for little. Only for setting one: a password set before still opens the list.
+    As web/src/listcore.ts passwordStrength."""
+    cs = list(unicodedata.normalize("NFKC", password))
+    n, cp, t = len(cs), [ord(c) for c in cs], [_fold(c) for c in cs]
+    words = {"".join(_fold(c) for c in w) for w in [*COMMON_PASSWORDS, *re.split(r"[^a-z0-9]+", norm_username(username))]}
+    covered, found = [False] * n, 0
+    for w in sorted((w for w in words if len(w) >= 3), key=lambda w: (-len(w), w)):
+        for i in range(n - len(w) + 1):
+            if "".join(t[i:i + len(w)]) != w or any(covered[i:i + len(w)]):
+                continue
+            covered[i:i + len(w)] = [True] * len(w)
+            found += 1
+    fresh = 0
+    for i in range(n):
+        if covered[i]:
+            continue
+        if i >= 1 and cp[i] == cp[i - 1]:  # aaaa
+            continue
+        if i >= 2 and abs(cp[i] - cp[i - 1]) == 1 and cp[i] - cp[i - 1] == cp[i - 1] - cp[i - 2]:  # abcd, 4321
+            continue
+        if any(cp[i] == cp[i - p] and cp[i - 1] == cp[i - 1 - p] for p in range(2, i)):  # abab, xyzxyz
+            continue
+        fresh += 1
+    pool = sum(_POOL[k] for k in {_kind(c) for c in cp})
+    bits = math.floor(fresh * math.log2(max(pool, 1)) + 8 * found)
+    problem = "short" if n < MIN_PASSWORD else "weak" if len(set(cs)) < 6 or bits < MIN_PASSWORD_BITS else None
+    return bits, problem
+
+
+def suggest_passphrase() -> str:
+    """A passphrase to suggest: four made-up words of three syllables each (80 syllables: about 75 bits)."""
+    cons, vowels = "bdfghjklmnprstvz", "aeiou"
+    while True:
+        syl = [secrets.choice(cons) + secrets.choice(vowels) for _ in range(12)]
+        out = "-".join("".join(syl[i:i + 3]) for i in (0, 3, 6, 9))
+        if password_strength(out)[1] is None:
+            return out
+
+
+PAD_TO = 512  # entries are stored padded with spaces (which JSON ignores) to a multiple of this
+
+
+def padded(text: str) -> bytes:
+    """An entry as stored before encryption: padded, so that a password's or passkey's small entry is
+    the same size as a small list, its tags or settings."""
+    data = text.encode()
+    return data + b" " * (max(PAD_TO, -(-len(data) // PAD_TO) * PAD_TO) - len(data))
+
+
+def slot_hash(data: bytes) -> str:
+    """A way in's entry as stored (encrypted), as the record of ways in keeps it ("h"), so that a copy
+    holding something else in its place can't have that copied to the other servers."""
+    return b64e(hashlib.sha256(data).digest())
 
 
 def _request(method: str, url: str, data: bytes | None = None, headers: dict | None = None):
@@ -301,7 +413,7 @@ def pull(key: ListKey, server: str) -> tuple[int, dict | None]:
 
 def _push(key: ListKey, server: str, seq: int, doc: dict, code: str | None) -> bool:
     """False if someone else got there first."""
-    return _put_raw(server, key.id, seq, key.encrypt(_canon(doc).encode()), key.signing_seed, code)
+    return _put_raw(server, key.id, seq, key.encrypt(padded(_canon(doc))), key.signing_seed, code)
 
 
 def _put_raw(server: str, entry_id: str, seq: int, data: bytes, seed: str, code: str | None) -> bool:
@@ -326,6 +438,8 @@ def _put_raw(server: str, entry_id: str, seq: int, data: bytes, seed: str, code:
 # link), and each sync reads every copy, merges, and writes back to those that lack something.
 # Every part of a list merges in any order, so a copy that was offline catches up the next time; a
 # list retired on any copy is retired. Same rules as web/src/listsync.ts.
+# A server the list's settings name but that wasn't chosen on this computer ("ask") is neither read
+# nor written until it is ticked here: whoever had the list's link could have added it.
 COPY = "copy:"
 copy_problems: dict[str, str] = {}  # server -> why it wasn't reached or written at the last sync
 
@@ -348,8 +462,13 @@ def _save_copies(c: dict[str, dict]) -> None:
 def copy_servers(home: str) -> list[str]:
     """The servers keeping copies of the list, the link's own first."""
     home = home.rstrip("/")
-    on = [s for s, v in copies(home).items() if isinstance(v, dict) and v.get("on") and _origin(s) == s]
+    on = [s for s, v in copies(home).items() if isinstance(v, dict) and v.get("on") and not v.get("ask") and _origin(s) == s]
     return sorted(on, key=lambda s: (s != home, s))
+
+
+def suggested_copies(home: str) -> list[str]:
+    """Servers the list's settings say keep a copy, not chosen on this computer: used once ticked here."""
+    return sorted(s for s, v in copies(home).items() if isinstance(v, dict) and v.get("on") and v.get("ask") and _origin(s) == s)
 
 
 def set_copy(home: str, server: str, on: bool) -> None:
@@ -370,7 +489,8 @@ def _take_copies(home: str, settings: dict) -> bool:
         mine = had.get(server)
         on = v.get("v") == "1"
         if not mine or v["at"] > mine.get("at", 0) or (v["at"] == mine.get("at") and on != mine.get("on")):
-            nxt[server] = {"on": on, "at": v["at"]}
+            confirmed = isinstance(mine, dict) and mine.get("on") and not mine.get("ask")
+            nxt[server] = {"on": True, "at": v["at"], "ask": True} if on and not confirmed else {"on": on, "at": v["at"]}
     if _canon(nxt) == _canon(had):
         return False
     _save_copies(nxt)
@@ -449,7 +569,6 @@ def sync_settings(key: ListKey, server: str, local: dict, code: str | None = Non
 # id, kind, when it was added and its signing seed, so that it can be removed; and the removed ones,
 # so that a copy that missed a removal can't bring one back. Same as web/src/listsync.ts.
 PASSKEY, PASSWORD = "passkey", "password"
-MIN_PASSWORD = 12  # as the web app
 
 
 def no_slots() -> dict:
@@ -493,24 +612,27 @@ def _code_on(server: str, home: str, code: str | None = None) -> str | None:
 
 def add_password(key: ListKey, home: str, username: str, password: str) -> str:
     """Make a username and password a way in, on every copy (one unreachable now gets it at a later
-    sync: copy_ways); returns its id. Refused if that pair already opens something."""
+    sync: copy_ways); returns its id. Refused if that pair already opens something. The same
+    encrypted entry goes to each, and its hash to the record of ways in (copy_ways checks it)."""
     way = ListKey(password_secret(username, password))
+    data = way.encrypt(padded(_canon({"v": 1, "wrap": b64e(key.secret)})))
     made, failure = 0, None
     for server in copy_servers(home):
-        def wrap(had: dict | None) -> dict:
-            if had is not None:
-                raise ListError("password-taken")
-            return {"v": 1, "wrap": b64e(key.secret)}
         try:
-            _update_on(way, server, wrap, None, _code_on(server, home))
+            had = _get_raw(server, way.id)
+            if had is not None:  # (retired: used before, then changed)
+                raise ListError("password-taken")
+            if not _put_raw(server, way.id, 1, data, way.signing_seed, _code_on(server, home)):
+                raise ListError("password-taken")
             made += 1
         except ListError as e:
-            if e.code in ("password-taken", "list-retired"):  # (retired: used before, then changed)
-                raise ListError("password-taken") from None
+            if e.code == "password-taken":
+                raise
             failure = e
     if not made:
         raise failure or ListError("server")
-    _registry(key, home, {"v": 1, "slots": {way.id: {"kind": PASSWORD, "at": int(time.time() * 1000), "seed": way.signing_seed}}})
+    _registry(key, home, {"v": 1, "slots": {way.id: {"kind": PASSWORD, "at": int(time.time() * 1000), "seed": way.signing_seed,
+                                                     "h": slot_hash(data)}}})
     return way.id
 
 
@@ -542,12 +664,14 @@ def _retire(server: str, entry_id: str, seed: str) -> None:
 
 def copy_ways(key: ListKey, home: str) -> None:
     """Passwords on every copy: each entry copied as it is, encrypted, signed with the seed the
-    record keeps (a passkey only works on the server it was made on, so it stays there)."""
+    record keeps, and only if it is what the record's hash says (a copy can't have something else
+    copied in its place). One retired anywhere isn't copied (a copy that missed the removal says it
+    has none). A passkey only works on the server it was made on, so it stays there. As the web app."""
     servers = copy_servers(home)
     for sid, slot in read_slots(key, home).items():
-        if slot.get("kind") != PASSWORD:
+        if slot.get("kind") != PASSWORD or not slot.get("h"):
             continue
-        blob, lacking = None, []
+        blob, lacking, retired = None, [], False
         for s in servers:
             try:
                 got = _get_raw(s, sid)
@@ -555,23 +679,25 @@ def copy_ways(key: ListKey, home: str) -> None:
                 continue  # unreachable: neither having nor lacking it
             if got is None:
                 lacking.append(s)
-            elif got != "retired":
+            elif got == "retired":
+                retired = True
+            elif slot_hash(got[1]) == slot["h"]:
                 blob = blob or got
-        for s in lacking if blob else []:
+        for s in lacking if blob and not retired else []:
             try:
                 _put_raw(s, sid, 1, blob[1], slot["seed"], _code_on(s, home))
             except ListError as e:
                 copy_problems[s] = e.code
 
 
-def _retire_list(key: ListKey, home: str) -> None:
+def _retire_list(key: ListKey, home: str, servers: list[str] | None = None) -> None:
     """Retire a list and every way into it on every copy, keeping their ids out of use. A copy that
     can't be reached now keeps them, but a device still using the list finds it retired on the
     others, and a list retired on any copy is retired."""
     slots = read_slots(key, home)
     entries = [_registry_key(key), ListKey(derive(key.secret, TAGS_LABEL)), ListKey(derive(key.secret, SETTINGS_LABEL)), key]
     done = 0
-    for server in copy_servers(home):
+    for server in copy_servers(home) if servers is None else servers:
         try:
             for sid, slot in slots.items():
                 _retire(server, sid, slot["seed"])
@@ -584,19 +710,30 @@ def _retire_list(key: ListKey, home: str) -> None:
         raise ListError("server")
 
 
-def replace_list() -> str:
+def replace_list(keep: list[str] | tuple[str, ...] = ()) -> str:
     """Move this computer's list to a new secret, for when the link has got out; returns the new
     link. Everything that opened the old one stops working, passkeys and passwords too (whoever
-    has the old link could read them). The same servers keep it."""
+    has the old link could read them). The new list is kept on the server the link points to and
+    on those of `keep` (other copies the person ticked: whoever had the old link could have added
+    one); the old one is retired on every copy."""
     found = sync_this_computer()
     if found is None:
         raise ListError("no list")
     home, doc = found
-    old = ListKey.from_link(saved_link() or "")[0]
-    kept = copies(home)
+    home = home.rstrip("/")
+    old_link = saved_link() or ""
+    old, before = ListKey.from_link(old_link)[0], copies(home)
+    old_servers = copy_servers(home)
+    now = int(time.time() * 1000)
+    kept = {home: {"on": True, "at": now}, **{s: {"on": True, "at": now} for s in keep if s in old_servers}}
     fresh, code = ListKey.generate(), _code_on(home, home)
-    sync(fresh, home, doc, code)  # on every copy
-    _retire_list(old, home)
+    _write_saved({"link": old_link, "copies": kept})
+    try:
+        sync(fresh, home, doc, code)  # on the copies kept
+        _retire_list(old, home, old_servers)
+    except ListError:
+        _write_saved({"link": old_link, "copies": before})
+        raise
     link = fresh.link(home)
     _write_saved({"link": link, "copies": kept})
     sync_this_computer(code)  # its tags and settings
@@ -616,7 +753,7 @@ def delete_list() -> None:
 def password_secret(username: str, password: str) -> bytes:
     """The secret a username and password stand for. Slow on purpose, and done on this computer:
     neither is ever sent anywhere."""
-    salt = "texloom list password v1:" + unicodedata.normalize("NFKC", username.strip().lower())
+    salt = "texloom list password v1:" + norm_username(username)
     return hashlib.scrypt(unicodedata.normalize("NFKC", password).encode(), salt=salt.encode(),
                           n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32, maxmem=256 * 1024 * 1024)
 

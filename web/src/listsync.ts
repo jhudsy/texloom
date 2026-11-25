@@ -9,7 +9,7 @@
 // records those entries' signing keys, so that they can be removed.
 import { ed25519 } from '@noble/curves/ed25519.js'
 import { b64d, b64e } from './crypto'
-import { canon, emptyList, emptySettings, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeRegistry, mergeSettings, mergeTags, noSlots, passwordSecret, signPut, tidyTags, type ListDoc, type Registry, type SettingsDoc, type Slot, type TagDoc } from './listcore'
+import { canon, emptyList, emptySettings, emptyTags, forgetOldRemovals, hmac, ListKey, mergeLists, mergeRegistry, mergeSettings, mergeTags, noSlots, padded, passwordSecret, signPut, slotHash, tidyTags, type ListDoc, type Registry, type SettingsDoc, type Slot, type TagDoc } from './listcore'
 import { projects } from './projects'
 import { creationCode } from './replica'
 import { myName, NAME_CHANGED } from './myname'
@@ -33,7 +33,7 @@ const enc = new TextEncoder(), dec = new TextDecoder()
 
 export const newSecret = () => crypto.getRandomValues(new Uint8Array(32))
 /** The sync link (it works on any server keeping a copy: change its address to use another). */
-export const linkFor = (secret: Uint8Array) => `${copyServers()[0] ?? location.origin}/#sync=${b64e(secret)}`
+export const linkFor = (secret: Uint8Array, server = homeServer()) => `${server}/#sync=${b64e(secret)}`
 
 // ---- the servers keeping copies --------------------------------------------------------------
 // A list can be kept on several servers, so it outlives any one of them. Its settings carry
@@ -41,8 +41,10 @@ export const linkFor = (secret: Uint8Array) => `${copyServers()[0] ?? location.o
 // reads every copy, merges, and writes back to those that lack something. Every part of a list
 // merges in any order, so a copy that was offline catches up the next time. A list retired on any
 // copy (replaced or deleted) is retired. Same rules as texloom/listsync.py.
+// A server the list's settings name but that wasn't chosen on this device (`ask`) is neither read
+// nor written until it is ticked here: whoever had the list's link could have added it.
 const COPIES = 'texloom.listCopies'
-type Copies = Record<string, { on: boolean; at: number }>
+type Copies = Record<string, { on: boolean; at: number; ask?: boolean }>
 const firstCopy = (server = location.origin): Copies => ({ [server]: { on: true, at: 1 } })
 function readCopies(): Copies {
   const c = readJson<Copies | null>(COPIES, null)
@@ -52,9 +54,16 @@ const writeCopies = (c: Copies) => writeJson(COPIES, c)
 /** The servers keeping copies of this browser's list, this app's own first. */
 export function copyServers(): string[] {
   const c = readCopies()
-  return Object.keys(c).filter((s) => c[s]?.on && normalServer(s) === s)
+  return Object.keys(c).filter((s) => c[s]?.on && !c[s].ask && normalServer(s) === s)
     .sort((a, b) => (a === location.origin ? -1 : b === location.origin ? 1 : a.localeCompare(b)))
 }
+/** Servers the list's settings say keep a copy, not chosen on this device: used once ticked here. */
+export function suggestedCopies(): string[] {
+  const c = readCopies()
+  return Object.keys(c).filter((s) => c[s]?.on && c[s].ask && normalServer(s) === s).sort()
+}
+/** The server this browser's sync link points to. */
+export const homeServer = () => copyServers()[0] ?? location.origin
 /** Keep a copy of the list on `server`, or stop (what's there is left, marked as no longer a copy). */
 export async function setCopy(server: string, on: boolean) {
   writeCopies({ ...readCopies(), [server]: { on, at: Date.now() } })
@@ -73,7 +82,7 @@ async function pull<T>(key: ListKey, server = location.origin): Promise<{ seq: n
 
 /** False if someone else got there first. */
 async function push(key: ListKey, seq: number, doc: unknown, server = location.origin): Promise<boolean> {
-  return putRaw(server, key.id, seq, await key.encrypt(enc.encode(canon(doc))), key.signingSeed)
+  return putRaw(server, key.id, seq, await key.encrypt(padded(canon(doc))), key.signingSeed)
 }
 
 /** An entry as stored (encrypted), by id: null if missing, 'retired' if retired. */
@@ -219,7 +228,7 @@ function takeCopies(doc: SettingsDoc): boolean {
     const server = name.startsWith(COPY) ? normalServer(name.slice(COPY.length)) : null
     if (!server || server !== name.slice(COPY.length)) continue
     const mine = had[server]
-    if (!mine || v.at > mine.at || (v.at === mine.at && (v.v === '1') !== mine.on)) next[server] = { on: v.v === '1', at: v.at }
+    if (!mine || v.at > mine.at || (v.at === mine.at && (v.v === '1') !== mine.on)) next[server] = v.v === '1' && !(mine?.on && !mine.ask) ? { on: true, at: v.at, ask: true } : { on: v.v === '1', at: v.at }
   }
   if (canon(next) === canon(had)) return false
   writeCopies(next)
@@ -403,21 +412,22 @@ export async function addSlot(secret: Uint8Array, unlocking: Uint8Array, kind: S
   const key = await ListKey.of(unlocking)
   // a passkey only works on the server it was made on (its address); a password works on every copy
   // (a copy that can't be reached now gets it at a later sync: copyWays)
+  // The same encrypted entry on each, its hash in the record of ways in (copyWays checks it).
+  const data = await key.encrypt(padded(canon({ v: 1, wrap: b64e(secret) })))
   let made = 0, failure: unknown = null
   for (const server of kind === 'password' ? copyServers() : [location.origin]) {
     try {
-      await updateOn<{ v: 1; wrap: string }>(server, key, (had) => {
-        if (had && kind === 'password') throw new ListError('password-taken')
-        return { v: 1, wrap: b64e(secret) }
-      })
+      const had = await getRaw(server, key.id)
+      if (had === 'retired' || (had && kind === 'password')) throw new ListError('password-taken') // (retired: used before, then changed)
+      if (!await putRaw(server, key.id, (had?.seq ?? 0) + 1, data, key.signingSeed)) throw new ListError(kind === 'password' ? 'password-taken' : 'busy')
       made++
     } catch (e) {
-      if (e instanceof ListError && (e.message === 'password-taken' || e.message === 'list-retired')) throw new ListError('password-taken') // (retired: used before, then changed)
+      if (e instanceof ListError && e.message === 'password-taken') throw e
       failure = e
     }
   }
   if (!made) throw failure ?? new ListError('server')
-  await changeSlots(secret, { v: 1, slots: { [key.id]: { kind, at: Date.now(), seed: key.signingSeed } } })
+  await changeSlots(secret, { v: 1, slots: { [key.id]: { kind, at: Date.now(), seed: key.signingSeed, h: slotHash(data) } } })
   return key.id
 }
 
@@ -426,21 +436,24 @@ export async function removeSlot(secret: Uint8Array, id: string, slot: Slot) {
   await changeSlots(secret, { v: 1, slots: {}, gone: { [id]: Date.now() } })
 }
 
-/** Passwords on every copy (each entry copied as it is, encrypted; it's signed with the seed the
- *  record of ways in keeps), and removed ways in gone from every copy. */
+/** Passwords on every copy: each entry copied as it is, encrypted, signed with the seed the record
+ *  of ways in keeps, and only if it is what the record's hash says (a copy can't have something
+ *  else copied in its place). One retired anywhere isn't copied (a copy that missed the removal
+ *  answers that it has none). */
 async function copyWays(secret: Uint8Array) {
   const reg = await registry(secret)
   const servers = copyServers()
   for (const [id, slot] of Object.entries(reg.slots)) {
-    if (slot.kind !== 'password') continue
-    let blob: { seq: number; data: Uint8Array } | null = null
+    if (slot.kind !== 'password' || !slot.h) continue
+    let blob: { seq: number; data: Uint8Array } | null = null, retired = false
     const lacking: string[] = []
     for (const s of servers) {
       const got = await getRaw(s, id).catch((e) => quiet('server unreachable: counted as neither having nor lacking it', e))
       if (got === null) lacking.push(s)
-      else if (got && got !== 'retired') blob ??= got
+      else if (got === 'retired') retired = true
+      else if (got && slotHash(got.data) === slot.h) blob ??= got
     }
-    if (blob) for (const s of lacking) await putRaw(s, id, 1, blob.data, slot.seed).catch((e) => copyProblems.set(s, e instanceof ListError ? e.message : 'network'))
+    if (blob && !retired) for (const s of lacking) await putRaw(s, id, 1, blob.data, slot.seed).catch((e) => copyProblems.set(s, e instanceof ListError ? e.message : 'network'))
   }
   // (A removed one is retired on the copies reachable then; one that wasn't keeps a stale entry,
   // but its seed went with the record, and the password it stood for has been replaced.)
@@ -467,8 +480,6 @@ export async function unlockWithPasskey(): Promise<Uint8Array | 'none' | null> {
   return unlocking ? (await openSlot(unlocking)) ?? 'none' : null
 }
 
-export const MIN_PASSWORD = 12
-
 /** Set the list's one password, replacing any earlier one. */
 export async function setPassword(secret: Uint8Array, username: string, password: string) {
   const fresh = await addSlot(secret, await passwordSecret(username, password), 'password')
@@ -484,11 +495,11 @@ export async function unlockWithPassword(username: string, password: string): Pr
 /** Delete a list and every way into it on every copy, keeping their ids out of use. A copy that
  *  can't be reached now keeps them, but a device still using the list finds it retired on the
  *  others, and a list retired on any copy is retired. */
-async function retireList(secret: Uint8Array) {
+async function retireList(secret: Uint8Array, servers = copyServers()) {
   const slots = await readSlots(secret)
   const keys = [await registryKey(secret), await tagsKey(secret), await settingsKey(secret), await ListKey.of(secret)]
   let done = 0
-  for (const server of copyServers()) {
+  for (const server of servers) {
     try {
       for (const [id, slot] of Object.entries(slots)) await retire(id, slot.seed, server)
       for (const key of keys) await retire(key.id, key.signingSeed, server)
@@ -499,14 +510,22 @@ async function retireList(secret: Uint8Array) {
 }
 
 /** Move the list to a new secret, for when the link has got out. Everything that opened the old
- *  one stops working, including passkeys and passwords: whoever has the old link could read them. */
-export async function replaceList(secret: Uint8Array) {
+ *  one stops working, including passkeys and passwords: whoever has the old link could read them.
+ *  The new list is kept on the server its link points to and on those of `keep` (the other copies
+ *  the person ticked: whoever had the old link could have added one); the old one is retired on
+ *  every copy. */
+export async function replaceList(secret: Uint8Array, keep: string[] = []) {
   await syncNow()
-  const fresh = newSecret(), copies = readCopies()
-  await exchange(await ListKey.of(fresh), projects.asList()) // on every copy
-  await retireList(secret)
-  saveSecret(fresh)
-  writeCopies(copies) // the same servers keep it
+  const before = readCopies(), old = copyServers(), home = homeServer(), fresh = newSecret()
+  const kept: Copies = { [home]: { on: true, at: Date.now() } }
+  for (const s of keep) if (old.includes(s)) kept[s] = { on: true, at: Date.now() }
+  writeCopies(kept)
+  try {
+    await exchange(await ListKey.of(fresh), projects.asList()) // on the copies kept
+    await retireList(secret, old)
+  } catch (e) { writeCopies(before); throw e }
+  saveSecret(fresh, home)
+  writeCopies(kept)
   await syncNow()
 }
 

@@ -101,6 +101,36 @@ def main() -> None:
         p.on("request", lambda r: "/api/list/" in r.url and r.method == "PUT" and puts.append(r.url))
         p.wait_for_timeout(10000)
         s.check("once in step, the list isn't sent again", not puts, f"{len(puts)} list update(s) in 10 s")
+
+        # a sync link in a link (a web page, an email) is never used by itself: the list dialog
+        # opens with a warning, Cancel focused, and only Use this list goes on
+        stranger = b64e(os.urandom(32))
+        r = s.page()
+        r.on("dialog", lambda d: d.accept())  # (a confirm() would say yes: none may be what decides)
+        r.goto(f"{url}/#sync={stranger}")
+        r.wait_for_selector("dialog[open] button:has-text('Use this list')", timeout=30000)
+        warned = r.locator("dialog[open]").inner_text()
+        s.check("a sync link in a link opens the list dialog with a warning", "whoever made the link can read them all" in warned, warned[:300])
+        s.check("which names the tokens that would be shared", all(w in warned for w in ("Zotero", "GitHub", "Dropbox", "creation codes")))
+        s.check("with Cancel focused", r.evaluate("document.activeElement?.textContent") == "Cancel", str(r.evaluate("document.activeElement?.textContent")))
+        r.wait_for_timeout(3000)
+        s.check("and the list isn't used meanwhile", r.evaluate("localStorage.getItem('texloom.listKey')") is None)
+        r.locator("dialog[open] button", has_text="Cancel").first.click()
+        r.wait_for_timeout(500)
+        s.check("Cancel leaves it unused", r.evaluate("localStorage.getItem('texloom.listKey')") is None
+                and r.locator("dialog[open] button:has-text('Use this list')").count() == 0)
+        r.goto("about:blank")
+        r.goto(f"{url}/#sync={stranger}")
+        r.locator("dialog[open] button", has_text="Use this list").click()
+        r.wait_for_function("(k) => localStorage.getItem('texloom.listKey') === k", arg=stranger, timeout=30000)
+        s.check("Use this list uses it", True)
+        s.check("and the address no longer holds the link", "#sync=" not in r.url, r.url)
+
+        # the desktop app asking for the list: the page says which program gets it
+        r.goto("about:blank")
+        r.goto(f"{url}/#unlock-for-app={'n' * 24}")
+        r.wait_for_selector("dialog[open]:has-text('texloom:// links')", timeout=30000)
+        s.check("the page the desktop app opens says which program gets the list", True)
         s.done()
 
 

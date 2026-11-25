@@ -25,8 +25,8 @@ SCHEME = "texloom"
 
 def parse_url(url: str) -> tuple[str, ...] | None:
     """What a texloom:// URL from the web app asks for: ("join", project link) from
-    texloom://join?link=…, ("sync", sync link) from texloom://sync?link=… (the web page that
-    unlocks a list), ("new", server or "", creation code) from texloom://new?server=…&code=…
+    texloom://join?link=…, ("sync", sync link, nonce) from texloom://sync?link=…&n=… (the web
+    page that unlocks a list: `n` is the nonce this app sent it, "" if none), ("new", server or "", creation code) from texloom://new?server=…&code=…
     (Create project ▸ From a folder on this computer, which only fills in the New project
     dialog: the person still chooses the folder, and the keys are made here). None for
     anything else."""
@@ -42,7 +42,7 @@ def parse_url(url: str) -> tuple[str, ...] | None:
     if not link.startswith(("https://", "http://")):
         return None
     if u.netloc == "sync" and "#sync=" in link:
-        return "sync", link
+        return "sync", link, (q.get("n") or [""])[0][:64]
     if u.netloc == "join" and "#" in link:
         return "join", link
     return None

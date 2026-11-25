@@ -3,9 +3,10 @@ import { b64d, b64e } from './crypto'
 import { dialog, h } from './dom'
 import { locale, t, tn } from './i18n'
 import {
-  addSlot, adopt, copyProblems, copyServers, createPasskey, deleteList, lastProblem, linkFor, ListError, MIN_PASSWORD, newSecret, passkeySupported, readSlots,
-  removeSlot, replaceList, savedSecret, saveSecret, setCopy, setPassword, syncNow, unlockWithPasskey, unlockWithPassword, type Slot,
+  addSlot, adopt, copyProblems, copyServers, createPasskey, deleteList, homeServer, lastProblem, linkFor, ListError, newSecret, passkeySupported, readSlots,
+  removeSlot, replaceList, savedSecret, saveSecret, setCopy, setPassword, suggestedCopies, syncNow, unlockWithPasskey, unlockWithPassword, type Slot,
 } from './listsync'
+import { MIN_PASSWORD, passwordStrength, suggestPassphrase } from './listcore'
 import { projects } from './projects'
 import { creationCode } from './replica'
 import { normalServer, serverName } from './servers'
@@ -73,11 +74,19 @@ function askPassword(setting: boolean): Promise<{ username: string; password: st
     let out: { username: string; password: string } | null = null
     const submit = () => {
       if (!username.value.trim() || !password.value) return
-      if (setting && password.value.length < MIN_PASSWORD) { msg.textContent = t('Use at least {{n}} characters.', { n: MIN_PASSWORD }); return }
-      if (setting && new Set(password.value).size < 6) { msg.textContent = t('That password is too easy to guess.'); return }
+      msg.className = 'err small'
+      const problem = setting ? passwordStrength(password.value, username.value).problem : null
+      if (problem === 'short') { msg.textContent = t('Use at least {{n}} characters.', { n: MIN_PASSWORD }); return }
+      if (problem) { msg.textContent = t('That password is too easy to guess. Make it longer and less predictable, or use a suggested passphrase.'); return }
       if (setting && password.value !== again.value) { msg.textContent = t('The two passwords don’t match.'); return }
       out = { username: username.value, password: password.value }
       dlg.close()
+    }
+    const suggest = () => {
+      password.value = again.value = suggestPassphrase()
+      password.type = again.type = 'text'
+      msg.className = 'ok small'
+      msg.textContent = t('Keep this passphrase in your password manager, or write it down somewhere safe.')
     }
     const form = h('form', { onsubmit: (e: Event) => { e.preventDefault(); submit() } },
       h('h3', {}, setting ? t('Set a password') : t('Unlock with a password')),
@@ -86,6 +95,7 @@ function askPassword(setting: boolean): Promise<{ username: string; password: st
       h('label', { class: 'field' }, t('Username or email'), username),
       h('label', { class: 'field' }, t('Password'), password),
       setting ? h('label', { class: 'field' }, t('Password again'), again) : '',
+      setting ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'small', title: t('Fill in a random passphrase that is hard to guess'), onclick: suggest }, t('Suggest a passphrase'))) : '',
       msg,
       h('div', { class: 'row end' }, h('button', { type: 'button', onclick: () => dlg.close() }, t('Cancel')), h('button', { class: 'primary', type: 'submit' }, t('OK'))),
     )
@@ -95,7 +105,28 @@ function askPassword(setting: boolean): Promise<{ username: string; password: st
   })
 }
 
-export function listDialog(onClose?: () => void) {
+/** Confirm replacing the sync link, choosing which other copies keep the new list (none ticked:
+ *  whoever had the old link could have added one). The servers to keep, or null if cancelled. */
+function askReplace(): Promise<string[] | null> {
+  return new Promise((resolve) => {
+    let out: string[] | null = null
+    const home = homeServer()
+    const boxes = copyServers().filter((s) => s !== home).map((s) => ({ s, box: h('input', { type: 'checkbox' }) as HTMLInputElement }))
+    const cancel = h('button', { type: 'button', onclick: () => dlg.close() }, t('Cancel')) as HTMLButtonElement
+    const dlg = dialog('settings',
+      h('h3', {}, t('Replace the sync link')),
+      h('p', {}, t('Replace the sync link? The old link, and every passkey and password, will stop working. Other devices will need the new link.')),
+      h('p', { class: 'recovery-warning', role: 'note' }, t('Whoever had the old link could also read the Zotero, GitHub, GitLab, Gitea and Dropbox tokens on the list: revoke them on those sites and connect again.')),
+      boxes.length ? h('p', { class: 'small' }, t('The new list is kept on {{server}}. Keep it on these servers too? Tick only servers you added yourself.', { server: serverName(home) })) : '',
+      ...boxes.map(({ s, box }) => h('label', { class: 'check' }, box, h('span', {}, serverName(s)))),
+      h('div', { class: 'row end' }, cancel,
+        h('button', { class: 'danger', onclick: () => { out = boxes.filter((b) => b.box.checked).map((b) => b.s); dlg.close() } }, t('Replace the sync link'))))
+    dlg.addEventListener('close', () => resolve(out))
+    cancel.focus()
+  })
+}
+
+export function listDialog(onClose?: () => void, fromLink?: { secret: Uint8Array; server: string }) {
   const title = h('h3', {})
   const body = h('div', { class: 'listsync' })
   const ways = h('div', {})
@@ -129,8 +160,8 @@ export function listDialog(onClose?: () => void) {
 
   /** The servers keeping a copy, and others this browser knows, to tick. */
   function showCopies() {
-    const on = new Set(copyServers())
-    const known = [...new Set([...on, location.origin, ...projects.list().map((r) => r.server ?? ''), ...creationCode.servers()].map((x) => normalServer(x)).filter((x): x is string => !!x))]
+    const on = new Set(copyServers()), suggested = new Set(suggestedCopies())
+    const known = [...new Set([...on, ...suggested, location.origin, ...projects.list().map((r) => r.server ?? ''), ...creationCode.servers()].map((x) => normalServer(x)).filter((x): x is string => !!x))]
     const toggle = (server: string, box: HTMLInputElement) => async () => {
       say('')
       if (!box.checked && on.size === 1) { box.checked = true; say(t('The list needs at least one copy.')); return }
@@ -146,7 +177,9 @@ export function listDialog(onClose?: () => void) {
       const trouble = on.has(server) ? copyProblems.get(server) : undefined
       return h('label', { class: 'check', title: t('Keep an encrypted copy of the list on {{server}}', { server: serverName(server) }) }, box, h('span', {}, serverName(server),
         server === location.origin ? h('small', { class: 'muted' }, ' · ' + t('this server')) : '',
-        trouble ? h('small', { class: 'err' }, ' · ' + (trouble === 'network' ? t('not reached at the last sync') : explain(trouble))) : ''))
+        suggested.has(server) ? h('small', { class: 'err', title: t('Another device, or someone else who has the sync link, added this server. Tick it only if you know it.') },
+          ' · ' + t('added elsewhere: not used here until you tick it')) : '',
+        trouble ?h('small', { class: 'err' }, ' · ' + (trouble === 'network' ? t('not reached at the last sync') : explain(trouble))) : ''))
     }
     const other = h('input', { placeholder: 'https://…', 'aria-label': t('Another server’s address') }) as HTMLInputElement
     copies.replaceChildren(
@@ -198,8 +231,10 @@ export function listDialog(onClose?: () => void) {
         h('div', { class: 'row' },
           h('button', { title: t('This browser keeps its projects but stops syncing the list. Other devices carry on.'), onclick: () => { say(''); saveSecret(null); render() } }, t('Stop on this browser')),
           btn(t('Replace the sync link…'), t('If the link has got out: a new link, and the old one stops working everywhere'), async () => {
-            if (!confirm(t('Replace the sync link? The old link, and every passkey and password, will stop working. Other devices will need the new link.'))) return
-            await withCode(() => replaceList(secret).then(() => done(t('Done. Copy the new sync link and keep it safe. Add any passkeys and password again.'))))
+            const keep = await askReplace()
+            if (!keep) return
+            await withCode(() => replaceList(secret, keep).then(() => done(t('Done. Copy the new sync link and keep it safe. Add any passkeys and password again.') + ' '
+              + t('Whoever had the old link could also read the Zotero, GitHub, GitLab, Gitea and Dropbox tokens on the list: revoke them on those sites and connect again.'))))
           }),
           btn(t('Delete this list…'), t('Delete the list from the server for every device. Projects aren’t deleted.'), async () => {
             if (confirm(t('Delete this list from the server, for every device? Your projects aren’t deleted, and this browser keeps its own list.'))) await deleteList(secret)
@@ -268,9 +303,31 @@ export function listDialog(onClose?: () => void) {
     )
   }
 
+  /** A sync link that came in a link (#sync=…), from anywhere: used only once confirmed, with
+   *  Cancel the default, as whoever made it would get every project here and the accounts' tokens. */
+  let pending = fromLink ?? null
+  function renderFromLink(link: { secret: Uint8Array; server: string }) {
+    title.textContent = t('Use this project list?')
+    ways.replaceChildren()
+    const cancel = h('button', { class: 'primary', onclick: () => { pending = null; say(''); render() } }, t('Cancel')) as HTMLButtonElement
+    body.replaceChildren(
+      h('p', { class: 'recovery-warning', role: 'alert' }, t('This sync link came from a link you opened, not from this browser. If you use it, every project in this browser, your creation codes, your name and your Zotero, GitHub, GitLab, Gitea and Dropbox connections (with their access tokens) go on that list, and whoever made the link can read them all. Use it only if it is your own sync link.')),
+      savedSecret() ? h('p', { class: 'small' }, t('This browser uses a different list now: this one would take its place.')) : '',
+      h('p', { class: 'muted small' }, t('Its server: {{server}}', { server: serverName(link.server) })),
+      h('div', { class: 'row end' }, cancel,
+        btn(t('Use this list'), t('Add this browser’s projects and accounts to the list this link opens'), async () => {
+          pending = null
+          await adopt(link.secret, link.server)
+          done(t('The list is open here now.'))
+        })),
+    )
+    cancel.focus()
+  }
+
   function render() {
     const secret = savedSecret()
-    if (secret) renderOpen(secret)
+    if (pending) renderFromLink(pending)
+    else if (secret) renderOpen(secret)
     else renderClosed()
   }
 
@@ -291,45 +348,54 @@ function secretFromLink(link: string): { secret: Uint8Array; server: string } | 
   } catch { return t('That isn’t a sync link.') }
 }
 
-type ListHash = { kind: 'sync'; link: string } | { kind: 'app' }
+type ListHash = { kind: 'sync'; link: string } | { kind: 'app'; nonce: string }
 
-/** A #sync=… or #unlock-for-app address, taken out of the address bar; null for any other. */
+/** A #sync=… or #unlock-for-app=<nonce> address, taken out of the address bar; null for any other. */
 export function takeListHash(): ListHash | null {
   const hash = location.hash
-  if (hash !== '#unlock-for-app' && !hash.startsWith('#sync=')) return null
+  const app = /^#unlock-for-app(?:=([A-Za-z0-9_-]{16,64}))?$/.exec(hash)
+  if (!app && !hash.startsWith('#sync=')) return null
   history.replaceState(null, '', location.pathname + location.search)
-  return hash === '#unlock-for-app' ? { kind: 'app' } : { kind: 'sync', link: location.href + hash }
+  return app ? { kind: 'app', nonce: app[1] ?? '' } : { kind: 'sync', link: location.href + hash }
 }
 
+/** A sync link that arrived in the address (a link in a page or an email, or the desktop app's
+ *  Add a passkey…) opens the list dialog, which asks before using it; the list this browser
+ *  already uses just opens it. */
 export function handleListHash(what: ListHash) {
-  if (what.kind === 'app') { sendToAppDialog(); return }
+  if (what.kind === 'app') { sendToAppDialog(what.nonce); return }
   const got = secretFromLink(what.link)
   if (typeof got === 'string') { alert(got); return }
   const mine = savedSecret()
-  if (mine && b64e(mine) === b64e(got.secret)) return
-  if (confirm(ADD_WARNING())) adopt(got.secret, got.server).catch((e) => alert(problem(e)))
+  const before = mine && b64e(mine)
+  if (before === b64e(got.secret)) { listDialog(); return }
+  listDialog(() => { if ((savedSecret() && b64e(savedSecret()!)) !== before) location.reload() }, got)
 }
 
 /** The desktop app can't use a passkey itself: unlock here (or use the list this browser already
- *  has), then hand it the link. */
-function sendToAppDialog() {
+ *  has), then hand it the link, with the app's `nonce`, which tells it this is the list it asked for. */
+function sendToAppDialog(nonce: string) {
   const mine = savedSecret()
   const msg = h('p', { class: 'err small', role: 'status' })
+  const send = (link: string) => { location.href = `texloom://sync?${new URLSearchParams({ link, ...(nonce ? { n: nonce } : {}) })}` }
+  const cancel = h('button', { onclick: () => dlg.close() }, t('Cancel')) as HTMLButtonElement
   const dlg = dialog('settings',
     h('h3', {}, t('Project list')),
     h('p', {}, t('The TeXLoom app on this computer asked for your project list. Continue only if you just asked for this in the app.')),
+    h('p', { class: 'small' }, t('The list goes to the program your browser opens texloom:// links with: the TeXLoom app, if it is installed. Your browser may ask before opening it.')),
     msg,
     h('div', { class: 'row end' },
-      h('button', { onclick: () => dlg.close() }, t('Cancel')),
-      mine ? h('button', { class: 'primary', onclick: () => { location.href = `texloom://sync?link=${encodeURIComponent(linkFor(mine))}`; dlg.close() } }, t('Send this browser’s list')) : '',
-      passkeySupported() ? h('button', { class: mine ? '' : 'primary', onclick: async () => {
+      cancel,
+      mine ? h('button', { onclick: () => { send(linkFor(mine)); dlg.close() } }, t('Send this browser’s list')) : '',
+      passkeySupported() ? h('button', { onclick: async () => {
         msg.textContent = ''
         try {
           const secret = await unlockWithPasskey()
           if (secret === 'none') msg.textContent = t('That passkey doesn’t open a list on this server.')
-          else if (secret) { location.href = `texloom://sync?link=${encodeURIComponent(linkFor(secret))}`; dlg.close() }
+          else if (secret) { send(linkFor(secret, location.origin)); dlg.close() }
         } catch (e) { msg.textContent = problem(e) }
       } }, t('Unlock with a passkey')) : '',
     ),
   )
+  cancel.focus()
 }
