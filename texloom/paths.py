@@ -193,13 +193,16 @@ ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualate
 # named relative to the document (\bibliography{../refs}) isn't found: it runs from the document's
 # folder instead (-bibfudge-), and then writes its .bbl and .blg through the path .texloom/build,
 # which paranoid openout refuses (a dot folder). BibTeX writes no other files, so it alone may.
+# It reads its .aux from there too, which paranoid openin refuses for the same reason, so it
+# also reads unrestricted: what it reads is in its .blg, which the read check covers like TeX's
+# .fls (a .bib from outside the project fails the check), and the sandbox still applies.
 # latexmk runs its other programs through the shell, the file names in double quotes, where ` and
 # $( ) still run commands: they too run as lists (texloom_exec), with no shell. kpsewhich, which
 # latexmk runs through the shell for the names a document gives (\bibliography{$(…)}), isn't
 # asked about a name the shell would act on: such a file is then only not watched for changes.
 RECORD = (
     "use Cwd; sub texloom_run { my ($ext, $base, @cmd) = @_; "
-    "local $ENV{openout_any} = q(a) if $cmd[0] eq q(bibtex); my $r = system(@cmd); "
+    "local @ENV{qw(openin_any openout_any)} = (q(a), q(a)) if $cmd[0] eq q(bibtex); my $r = system(@cmd); "
     "if (open(my $out, q(>>), qq($base.$ext-reads))) { print $out q(PWD ), getcwd(), qq(\\n); "
     "if (open(my $in, q(<), qq($base.$ext))) { my $c = do { local $/; <$in> } // q(); "
     "$c .= qq(\\n) if length($c) and substr($c, -1) ne qq(\\n); print $out $c } "

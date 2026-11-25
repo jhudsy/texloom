@@ -8,7 +8,8 @@ that the check fails, so that the secret never reaches a shared PDF:
 - XeLaTeX's \\special{pdf:fstream …} (and an octal-escaped name), which xdvipdfmx reads unrecorded;
 - \\openout of the document's own .fls, blanking TeX's record, then \\pdfobj stream file{…};
 - \\input of a file outside (what the check caught before);
-and that ordinary documents (pdflatex, xelatex, BibTeX) still compile and pass.
+- a .bib or .bst from outside, which BibTeX (reading unrestricted, for its .aux in .texloom/build) reads;
+and that ordinary documents (pdflatex, xelatex, BibTeX, its citations resolved) still compile and pass.
 
 Skips (successfully) what needs a TeX that isn't installed.
 
@@ -72,6 +73,18 @@ async def compile_doc(tmp: Path, name: str, engine: str, tex: str, sandbox: bool
 def build_marker(tmp: Path) -> Path:
     """A file the shell-escape document writes in the temporary folder (allowed, so the command ran)."""
     return tmp / "write-sandbox" / "ran"
+
+
+def uncompressed(pdf: bytes) -> bytes:
+    """A PDF's bytes with its FlateDecode'd streams inflated (to look for text in them)."""
+    import zlib
+    out = [pdf]
+    for chunk in pdf.split(b"stream")[1:]:
+        try:
+            out.append(zlib.decompressobj().decompress(chunk.lstrip(b"\r\n").split(b"endstream")[0]))
+        except zlib.error:
+            continue
+    return b"".join(out)
 
 
 def leaked(pdf: bytes | None) -> bool:
@@ -152,6 +165,21 @@ async def main() -> int:
                                                "\\documentclass{article}\\begin{document}\\cite{k}\\bibliographystyle{plain}\\bibliography{refs}\\end{document}\n",
                                                sandbox, {"refs.bib": "@book{k, title={T}, author={A}, year=2000, publisher={P}}\n"})
             check("pdflatex + BibTeX: an ordinary document passes the check", not found, found)
+            # BibTeX reads its .aux from .texloom/build, which paranoid reading refuses (a dot folder):
+            # citations came out as "?" in every desktop compile until 0.4.57
+            check("pdflatex + BibTeX: the citation is resolved (the PDF has the entry)", ok and pdf is not None and b"2000" in uncompressed(pdf), ok)
+            secret_bib = outside / "secret.bib"
+            secret_bib.write_text("@book{s, title={" + SECRET + "}, author={A}, year=2000, publisher={P}}\n")
+            ok, pdf, found = await compile_doc(tmp, "bibout", "pdflatex",
+                                               "\\documentclass{article}\\begin{document}\\nocite{*}\\bibliographystyle{plain}\\bibliography{"
+                                               + str(outside / "secret") + "}\\end{document}\n", sandbox)
+            check("pdflatex + BibTeX: a .bib from outside the project fails the check, and isn't shared", found and not leaked(pdf), found)
+            (outside / "other.bst").write_text(Path(os.popen("kpsewhich plain.bst").read().strip()).read_text())
+            ok, pdf, found = await compile_doc(tmp, "bstout", "pdflatex",
+                                               "\\documentclass{article}\\begin{document}\\cite{k}\\bibliographystyle{" + str(outside / "other")
+                                               + "}\\bibliography{refs}\\end{document}\n", sandbox,
+                                               {"refs.bib": "@book{k, title={T}, author={A}, year=2000, publisher={P}}\n"})
+            check("pdflatex + BibTeX: a .bst from outside the project fails the check", bool(found), found)
         if have["xelatex"] and have["xdvipdfmx"]:
             ok, pdf, found = await compile_doc(tmp, "xplain", "xelatex", "\\documentclass{article}\\begin{document}Hello\\end{document}\n", sandbox)
             check("xelatex: an ordinary document compiles and is shared", ok and pdf is not None and not found, found)
