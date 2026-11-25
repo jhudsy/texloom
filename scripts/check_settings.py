@@ -109,6 +109,21 @@ def main() -> int:
     check("a link changed to another project's finds none of them", cfg["compile"] is False and cfg["shell_escape"] is False
           and not allowed(late), cfg)
 
+    if os.name != "nt":
+        import stat
+        print("Files in the settings folder:")
+        mode = stat.S_IMODE((registry.config_dir() / "folders.json").stat().st_mode)
+        check("the folder list is readable by you only", mode == 0o600, oct(mode))
+        from texloom import autostart
+        private = getattr(autostart, "private_log", None)
+        if private is not None:
+            private()
+        log = autostart.log_file()
+        mode = stat.S_IMODE(log.stat().st_mode) if log.exists() else None
+        check("so is the app's log", mode == 0o600, oct(mode) if mode is not None else "not made")
+        mode = stat.S_IMODE(config.settings_path(mine).stat().st_mode) if sp else None
+        check("and the folders' settings", mode == 0o600, mode)
+
     print(f"\nfolder settings: {'FAILED' if failures else 'ok'}")
     return 1 if failures else 0
 

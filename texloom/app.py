@@ -596,7 +596,7 @@ def main(argv: list[str] | None = None) -> None:
     server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
     listening = bool(name) and server.listen(name)
 
-    autostart.log_file().parent.mkdir(parents=True, exist_ok=True)
+    autostart.private_log()  # (readable by you only: it names your folders)
     # TEXLOOM_DEBUG=1: the log file also keeps debug lines, among them errors deliberately ignored
     logging.basicConfig(level=logging.DEBUG if os.environ.get("TEXLOOM_DEBUG") == "1" else logging.INFO,
                         format="%(asctime)s %(folder)s%(message)s", datefmt="%H:%M:%S",
