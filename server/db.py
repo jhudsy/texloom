@@ -17,6 +17,11 @@ types, and the rule for how many servers may use one database.
   own; a transaction holds the database until it ends, so within one, use only its `c`.
 - **PostgreSQL** (asyncpg): for replicas, a standby, and later several servers at once.
 
+Three things that only matter with several servers sharing a PostgreSQL, and that SQLite (one
+server) does trivially: `lock(key)` (one holder at a time, for work that must run once),
+`notify(channel, payload)` and `listen(channel, callback)` (a signal to the other servers; a server
+doesn't need telling about itself, so callbacks should ignore their own sender).
+
 `copy_tables` moves everything from one to the other (`texloom-server --copy-database-from`).
 """
 
@@ -26,16 +31,23 @@ import abc
 import asyncio
 import contextlib
 import functools
+import logging
 import re
 import sqlite3
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 SQLITE_MIN = (3, 35)  # RETURNING
 POOL_MAX = 10  # PostgreSQL connections
 START_LOCK = 7316  # PostgreSQL advisory lock taken while creating the tables (several servers starting at once)
+MAINTENANCE_LOCK = 7317  # held while a server does the upkeep that must run on one server at a time
+NOTIFY_MAX = 7000  # bytes: PostgreSQL's limit on a notification is 8000
+
+
+log = logging.getLogger("texloom.db")
 
 
 class DatabaseError(Exception):
@@ -174,6 +186,22 @@ class Database(abc.ABC):
     @abc.abstractmethod
     async def close(self) -> None: ...
 
+    # What other servers sharing this database need: nothing, for one server (SQLite).
+
+    @contextlib.asynccontextmanager
+    async def lock(self, key: int):
+        """`async with db.lock(KEY) as got:` — `got` is True if this server holds the lock for the block (no
+        other server does meanwhile), False if another does: skip the work then, it is being done."""
+        yield True
+
+    async def notify(self, channel: str, payload: str) -> None:
+        """Tell the other servers on this database (their `listen` callbacks get `payload`)."""
+
+    async def listen(self, channel: str, callback: Callable[[str], None]) -> None:
+        """Call `callback(payload)` for what other servers `notify` on `channel`, in the event loop. After the
+        connection to the database was lost and is back, it is called with "" once: something may have been
+        missed, so look again at everything."""
+
 
 # --- PostgreSQL -------------------------------------------------------------------------
 
@@ -214,6 +242,10 @@ class PostgreSQL(_PgCalls, Database):
         Database.__init__(self, url)
         _PgCalls.__init__(self, pool)
         self.pool = pool
+        self._listeners: dict[str, list[Callable[[str], None]]] = {}
+        self._listen_task: asyncio.Task | None = None
+        self._listen_conn = None  # the connection that is listening now
+        self._listening = asyncio.Event()  # set once it is listening (and again after each reconnect)
 
     @classmethod
     async def open(cls, url: str) -> PostgreSQL:
@@ -243,7 +275,92 @@ class PostgreSQL(_PgCalls, Database):
             await c.execute(f"SELECT pg_advisory_xact_lock({START_LOCK})")
             await c.execute(schema)
 
+    @contextlib.asynccontextmanager
+    async def lock(self, key: int):
+        # a session lock on a connection of its own, for as long as the block runs (and gone if it dies)
+        import asyncpg
+        try:
+            c = await asyncpg.connect(self.url, timeout=10)
+        except (OSError, asyncpg.PostgresError, TimeoutError) as e:
+            raise DatabaseError(f"can't reach the database {redact(self.url)}: {e}") from None
+        got = False
+        try:
+            got = bool(await c.fetchval("SELECT pg_try_advisory_lock($1)", key))
+            yield got
+        finally:
+            try:
+                if got:
+                    await c.fetchval("SELECT pg_advisory_unlock($1)", key)
+            except (OSError, asyncpg.PostgresError):
+                pass  # (the connection is closed next, which drops the lock anyway)
+            await c.close()
+
+    async def notify(self, channel: str, payload: str) -> None:
+        if len(payload.encode()) > NOTIFY_MAX:
+            raise DatabaseError("a notification must be small: tell the others what to look at, not the data")
+        await self.pool.execute("SELECT pg_notify($1, $2)", channel, payload)
+
+    async def listen(self, channel: str, callback: Callable[[str], None]) -> None:
+        """Returns once this is listening: what is told after that is heard."""
+        self._listeners.setdefault(channel, []).append(callback)
+        if self._listen_task is None:
+            self._listen_task = asyncio.get_running_loop().create_task(self._listen_loop(), name="db-listen")
+        elif self._listen_conn is not None and not self._listen_conn.is_closed():
+            await self._listen_conn.add_listener(channel, lambda _c, _pid, _ch, payload, cb=callback: self._call(cb, payload))
+            return
+        try:
+            await asyncio.wait_for(self._listening.wait(), 20)
+        except TimeoutError:
+            log.warning("not listening to the database yet: still trying")
+
+    async def _listen_loop(self) -> None:
+        """One connection of its own listens on every channel asked for, and is made again, with the
+        callbacks told to look again at everything, if it is lost."""
+        import asyncpg
+        first = True
+        while True:
+            conn = None
+            try:
+                conn = await asyncpg.connect(self.url, timeout=10)
+                for channel, callbacks in list(self._listeners.items()):
+                    for cb in callbacks:
+                        await conn.add_listener(channel, lambda _c, _pid, _ch, payload, cb=cb: self._call(cb, payload))
+                self._listen_conn = conn
+                self._listening.set()
+                if not first:
+                    for callbacks in list(self._listeners.values()):
+                        for cb in callbacks:
+                            self._call(cb, "")
+                first = False
+                while not conn.is_closed():
+                    await asyncio.sleep(1)
+                self._listening.clear()
+                self._listen_conn = None
+                log.warning("the listening connection to the database closed: making it again")
+            except asyncio.CancelledError:
+                raise
+            except (OSError, asyncpg.PostgresError, TimeoutError) as e:
+                log.warning("can't listen to the database: %s", e)
+            finally:
+                if conn is not None and not conn.is_closed():
+                    try:
+                        await conn.close(timeout=5)
+                    except Exception:  # (closing a connection that is already failing)
+                        log.debug("closing the listening connection", exc_info=True)
+            await asyncio.sleep(2)
+
+    @staticmethod
+    def _call(cb: Callable[[str], None], payload: str) -> None:
+        try:
+            cb(payload)
+        except Exception:
+            log.exception("handling a notification")
+
     async def close(self) -> None:
+        if self._listen_task is not None:
+            self._listen_task.cancel()
+            await asyncio.gather(self._listen_task, return_exceptions=True)
+            self._listen_task = None
         await self.pool.close()
 
 

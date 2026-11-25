@@ -29,6 +29,33 @@ logs, project records and project lists (a relay can use an SQLite file instead:
 Who is connected to which project, and some counters (usage, owners), are kept in the relay's
 memory, which is how a change reaches the others connected to it.
 
+## Three ways to run it
+
+Each way adds to the one before and is chosen by settings; the code for a way is loaded only when it is
+asked for, so a small server carries none of the rest.
+
+1. **One server** (the default): SQLite or PostgreSQL, a folder or a bucket for files. Nothing else
+   to run. Its backups cover losing it (below).
+2. **Two servers, with failover** (`failover`, **built**): PostgreSQL on both (the second a streaming
+   standby), a bucket that does conditional writes, one server serving at a time. A lease in the bucket
+   decides which; the other takes over when it lapses. Cheap (two machines and a bucket) and enough for
+   most. It does not use both servers at once and does not scale.
+3. **Several relays** (**planned**): any number of relays serve at once, each project on one of them,
+   chosen by a front end that hashes the project id; stored files in a bucket; the database kept
+   available by **a standard tool** (Patroni, pg_auto_failover, or a hosted PostgreSQL) and not by
+   `failover`. The two are not combined: `failover` fences a *relay* that has lost its lease, which is
+   enough when the relay is the only client of its own database. With relays connected to a database over
+   the network, a partitioned old primary's database would go on accepting writes from the others, so it is
+   the database that must be fenced, and that is what those tools do (Patroni arms a watchdog before
+   promoting, and demotes the old primary, with `pg_rewind` or a new base backup to rejoin it).
+   Relays find the writable database with a list of hosts (`postgresql://h1,h2/db?target_session_attrs=primary`),
+   which the driver handles. This is from those tools' documentation: none has been run here yet.
+
+What way 3 needs of the relay is listed in "Several relays: route by project" below. Three pieces of
+it are small, safe with one relay, and are built first: maintenance that runs on one relay at a time
+(an advisory lock), a way for relays to tell each other that a project changed (LISTEN/NOTIFY), and
+storage totals kept in the database (a per-project ledger, checked against a recount).
+
 ## Why stored files go in a bucket
 
 Stored files are most of the bytes the server keeps, so they are the first thing to move off its
@@ -171,7 +198,8 @@ extra capacity.
 
 ### Growing, in order
 
-1. **Several identical relays** behind a load balancer, sharing one PostgreSQL primary, with every
+1. **Several identical relays** behind a load balancer, sharing one PostgreSQL primary (kept
+   available by a standard database tool: "Three ways to run it"), with every
    connection to a project sent to the same relay (below). Totals across projects move into the
    database, relays tell each other when one changes a project another holds, and maintenance (the
    reaper, eviction, purges) runs once, not once per relay.
@@ -197,17 +225,32 @@ Instead, every connection to a project goes to the same relay: the project is in
 addresses (`/ws/{project}`, `/blob/{project}/…`), and the front end picks the relay from it
 (nginx: `hash … consistent` on the project part of the address). A project's room, its lock and its counters then stay in that
 relay's memory, as now. When a relay stops, its projects move to the others and people reconnect,
-as after a restart today. What is left for several relays
-([#12](https://github.com/jhudsy/texloom/issues/12), about 3–4 days):
+as after a restart today. For several relays
+([#12](https://github.com/jhudsy/texloom/issues/12)):
 
-- **Totals across projects into the database**: an owner's usage, the server's total, project
-  lists' sizes. Kept as rows updated in the same transaction as each write, worked out once from
-  what is stored when moving to them.
-- **Telling the other relays**: maintenance, a purge, or another relay's admin command can change
-  a project another relay holds (its usage, owner, deletion, storage mode). A small LISTEN/NOTIFY
-  message ("drop what you know of project X") makes that relay read it again.
-- **Maintenance once**: the reaper, eviction and purges run on whichever relay holds a PostgreSQL
-  advisory lock.
+**Built** (`scripts/check_groundwork.py`, two stores on one PostgreSQL; safe and useful with one):
+
+- **Storage totals in the database**: a ledger, one row per project (`usage`), kept in step with every
+  change (set from a recount of the stored data, and added to inside the transaction that appends a
+  change). A server starting reads it instead of adding up the whole log; `Store.reconcile` checks it
+  against a recount, daily, and a database from before it gets one at the first start. A server's
+  owner and server totals are still held in memory, from the ledger: reading them from the database at
+  the moment of a quota check is for when several relays write at once.
+- **Telling the other relays**: a purge, an eviction, a deletion, a storage-mode change or a move to
+  another code on one relay is told to the others by LISTEN/NOTIFY (`{"p": project}`, small), and a relay
+  that hears it reads that project again (its registration, what it counts for, and drops what it kept
+  for speed). It ignores what it said itself, and what isn't one of ours. A relay whose listening
+  connection was lost looks again at everything when it is back.
+- **Maintenance once**: the upkeep (idle eviction, purges, the ledger's recount) runs on whichever relay
+  holds a PostgreSQL advisory lock for the round; with one relay (or SQLite) it always does, and a relay
+  with no database open yet (a standby) does nothing.
+
+**Left:**
+
+- **Reading an owner's total from the database at the moment of a quota check** (and the server's
+  total), instead of from memory, so that two relays writing at once can't together pass a limit.
+- **Routing by project** at the front end, with health checks.
+- **The ordering model** for the moments when routing changes (below).
 - **A check with two relays on one database**: routing, totals across both, a relay stopping, and a
   project changed by the other relay.
 - Each relay keeps its own rate limits (they add up across relays), and every relay needs the same
@@ -225,8 +268,9 @@ Until then, new code keeps to these rules, so that none of this gets harder:
   could be told to drop); a total across projects (to move into the database); or background work
   (to run once). `scripts/check_server_state.py` lists every piece and fails on a new one until
   it is put in one of these, which makes it a decision rather than an accident.
-- **Totals across projects are worked out from what is stored**, so that moving them into the
-  database later is a change of where they are kept, not of what they mean.
+- **Totals across projects are worked out from what is stored** (the ledger is a kept copy of
+  that, checked by recounting: `Store.reconcile`), so that where they are kept can change without
+  what they mean changing.
 - **Background work is safe to run on one relay only**, and safe to repeat (a purge or eviction
   that stops half-way is finished next time).
 - **Nothing a relay must know is only in its own files**: stored files go through the file store,
