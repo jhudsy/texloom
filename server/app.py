@@ -91,12 +91,14 @@ def make_app(s: Settings) -> web.Application:
         await store.start()
         opened.append(store)
 
+    panels: list = []  # sections added to the admin page by parts that are on (failover)
     if s.failover:  # only then is failover.py even imported
         from .failover import Failover
         fo = Failover(s.failover, s.files, relay, open_store)
         app.middlewares.append(fo.gate)
         app.router.add_get("/api/health", fo.health)
         app.cleanup_ctx.append(fo.context(app))
+        panels.append(fo.admin_panel)
 
         async def close_stores(_app: web.Application):
             for store in opened:
@@ -110,7 +112,7 @@ def make_app(s: Settings) -> web.Application:
         app.cleanup_ctx.append(database)
     if s.admin_token:
         from .admin import Admin
-        app.router.add_get("/admin", Admin(relay, s.admin_token, s.evict_days, s.purge_days).page)
+        app.router.add_get("/admin", Admin(relay, s.admin_token, s.evict_days, s.purge_days, panels).page)
     if s.evict_days > 0 or s.purge_days is not None:
         async def maintenance(_app: web.Application):
             task = asyncio.create_task(upkeep(policy, s.evict_days, s.purge_days))

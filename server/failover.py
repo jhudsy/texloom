@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import secrets
+import html
 import socket
 import time
 from collections.abc import Awaitable, Callable
@@ -44,7 +45,7 @@ from dataclasses import dataclass
 
 from aiohttp import web
 
-from .db import DatabaseError, is_standby, promote
+from .db import DatabaseError, is_standby, promote, replication_status
 from .files import LEASE, Files, FilesError
 
 log = logging.getLogger("texloom.failover")
@@ -151,6 +152,7 @@ class Failover:
         self.ready = False  # its store is open
         self.holder = ""  # the lease's holder, as last read
         self._ver = 0  # the version this server last wrote (as primary)
+        self._lease_ver = 0  # the lease's version as last read or written, for the admin page
         self._etag: str | None = None
         self._last_ok = 0.0  # when its last renewal was sent
         self._seen_ver = -1  # (standby) the version it last saw, and when
@@ -165,7 +167,8 @@ class Failover:
 
     @web.middleware
     async def gate(self, request: web.Request, handler):
-        if request.path == "/api/health" or self.can_serve():
+        # (the admin page is for the standby too: it asks for the token itself and shows what it can)
+        if request.path in ("/api/health", "/admin") or self.can_serve():
             return await handler(request)
         return web.json_response({"error": "not the primary", "role": self.role, "holder": self.holder},
                                  status=503, headers={"Retry-After": "5"})
@@ -174,6 +177,42 @@ class Failover:
         ok = self.can_serve()
         return web.json_response({"role": self.role, "name": self.name, "holder": self.holder, "ready": ok},
                                  status=200 if ok else 503)
+
+    async def admin_panel(self) -> str:
+        """The failover section of the admin page."""
+        e = html.escape
+        now = clock()
+        rows = [("This server", f"<b>{e(self.name)}</b>: {e(self.role)}" + ("" if self.role != 'primary' or self.can_serve() else
+                                                                              " <b>(its lease has run out: it is about to stop)</b>"))]
+        if self.role in ("primary", "promoting"):
+            rows.append(("Lease", f"held by this server, version {self._lease_ver}; renewed {now - self._last_ok:.0f} s ago "
+                                  f"(it stops itself at {self.ttl:g} s)"))
+        else:
+            seen = f", unchanged for {now - self._seen_at:.0f} s of the {self.wait:g} s it waits" if self._seen_ver >= 0 else ""
+            rows.append(("Lease", f"held by <b>{e(self.holder or 'nobody yet')}</b>, version {self._lease_ver}{seen}"))
+        try:
+            st = await replication_status(self.s.database)
+            if st["standby"]:
+                lag = st["replay_seconds"]
+                rows.append(("PostgreSQL here", f"standby, {e(str(st['receiver'] or 'not streaming'))}"
+                             + (f" from {e(st['from'])}" if st["from"] else "")
+                             + (f"; its replay is {lag:.0f} s behind the last change it has" if lag is not None else "")))
+            else:
+                f = st["followers"]
+                rows.append(("PostgreSQL here", "primary"))
+                hidden = any(x["state"] is None for x in f)  # (PostgreSQL hides other roles' details from one without pg_monitor)
+                rows.append(("Standbys following", "<br>".join(
+                    f"{e(x['name'] or '?')} {e(x['addr'] or '')}: {e(x['state'])}" + (f", {x['lag']:.1f} s behind" if x["lag"] is not None else "")
+                    if x["state"] is not None else f"{len(f)} standby connection(s), details hidden: "
+                    "<code>GRANT pg_monitor TO</code> this server's database role to see their state and delay"
+                    for x in (f if not hidden else f[:1]))
+                    or "<b>none</b>: a failure now has no standby"))
+        except DatabaseError as ex:
+            rows.append(("PostgreSQL here", f"<span class=muted>couldn't read: {e(str(ex)[:160])}</span>"))
+        grid = "".join(f"<span>{k}</span><span>{v}</span>" for k, v in rows)
+        return (f"<h2>Failover</h2><div class=grid>{grid}</div>"
+                f"<p class=muted>One server holds the lease and is the primary; the other waits and takes over after {self.wait:g} s "
+                "without a renewal (INSTALL.md, “Letting the two servers switch over by themselves”).</p>")
 
     def context(self, app: web.Application):
         """The server's start and stop, in place of the plain database opening (cleanup_ctx)."""
@@ -213,7 +252,7 @@ class Failover:
                 else:
                     ver, holder = decode(got[0])
                     etag = got[1]
-                    self.holder = holder
+                    self.holder, self._lease_ver = holder, ver
                     if holder == self.name:
                         # this server's own name: it is starting again (a restart, a deployment). If it
                         # is alone it may claim the lease at once. If a version moves under its name, there
@@ -253,6 +292,11 @@ class Failover:
                                 self._seen_ver = -1  # somebody renewed or claimed first: look again
             except FilesError as e:
                 log.warning("failover: the bucket: %s", e)
+                # It couldn't look, so it doesn't know whether the lease was renewed meanwhile: when it can
+                # look again it counts the wait afresh, rather than taking over at once because the version
+                # "hasn't changed" for as long as the outage lasted (a bucket that was away from both servers
+                # would otherwise end in a needless switch, found by scripts/rehearse_failover.py outage).
+                self._seen_ver = -1
             except DatabaseError as e:  # (while deciding whether it may take over)
                 log.warning("failover: %s", e)
             await asyncio.sleep(self.poll)
@@ -260,6 +304,7 @@ class Failover:
     def _took(self, ver: int, etag: str, sent: float) -> None:
         """This server holds the lease at `ver`; its time starts when the request was sent."""
         self._ver, self._etag, self._last_ok = ver, etag, sent
+        self._lease_ver = ver
         self.holder = self.name
 
     async def _become_primary(self) -> None:
@@ -288,6 +333,7 @@ class Failover:
                 await self.fence("the lease was taken: another server holds it now")
                 return
             self._ver, self._etag, self._last_ok = self._ver + 1, new, sent
+            self._lease_ver = self._ver
 
     async def _watchdog(self) -> None:
         while True:

@@ -14,6 +14,8 @@ The cases:
   everything, including what the standby never had;
 - the primary is cut off from the bucket (it can't renew): it stops serving, closes its connections
   and exits BEFORE the standby serves (never two at once), and the standby takes over;
+- the bucket goes away from both servers for longer than the standby's wait and comes back: the primary
+  stops itself, and the standby doesn't take over at once on the strength of a version it couldn't look at;
 - a former primary (its database a primary, the lease held by the other) is not allowed to take over by
   waiting.
 
@@ -22,6 +24,7 @@ The cases:
 
 import asyncio
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -39,6 +42,22 @@ from fakes3 import FakeS3  # noqa: E402
 from texloom.crypto import Keys  # noqa: E402
 
 TTL = 3  # seconds: so the standby waits 2 x (3 + 2) = 10
+ADMIN = "an-admin-token-of-16+"
+
+
+def admin(url: str, token: str | None = ADMIN) -> tuple[int, str]:
+    """The admin page, with the token (None: without)."""
+    import base64
+    req = urllib.request.Request(url + "/admin")
+    if token is not None:
+        req.add_header("Authorization", "Basic " + base64.b64encode(f"x:{token}".encode()).decode())
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+    except OSError:
+        return 0, ""
 
 
 def get(url: str, timeout: float = 3) -> tuple[int, dict]:
@@ -64,7 +83,7 @@ class Relay:
         (tmp / name).mkdir(parents=True, exist_ok=True)
         self.args = ["--port", str(self.port), "--database", database, "--data", str(tmp / name),
                      "--files", "s3://bucket", "--s3-endpoint", s3_url, "--s3-key-id", f"relay-{name}", "--s3-secret", "x",
-                     "--failover", "--failover-name", name, "--failover-ttl", str(TTL), *extra]
+                     "--failover", "--failover-name", name, "--failover-ttl", str(TTL), "--admin-token", ADMIN, *extra]
         self.proc: subprocess.Popen | None = None
         self._log = None
 
@@ -190,6 +209,16 @@ async def scenario(kind: str, tmp: Path) -> None:
         check("the second server waits as the standby, and says who holds the lease", ok is not None and b.health()[1].get("role") == "standby", b.health())
         check("the standby answers every address but /api/health with 503", b.info() == 503 and b.health()[0] == 503)
         check("the primary serves them", a.info() == 200)
+        code, page = await asyncio.to_thread(admin, b.url)
+        check("the standby's admin page shows failover (who holds the lease, that it waits) and no storage",
+              code == 200 and "Failover" in page and "standby" in page and "held by <b>a</b>" in page and "no database open" in page
+              and "Creation codes" not in page, (code, page[:300]))
+        code, page = await asyncio.to_thread(admin, a.url)
+        check("the primary's page shows failover and the storage, with its standby following",
+              code == 200 and "Failover" in page and "held by this server" in page and "renewed" in page and "Creation codes" in page
+              and "Standbys following" in page and "streaming" in page, (code, re.sub(r"<[^>]+>", " ", page)[:500]))
+        check("the admin page still wants the token", (await asyncio.to_thread(admin, b.url, None))[0] == 401
+              and (await asyncio.to_thread(admin, a.url, "wrong-token-of-16+++"))[0] == 401)
 
         alice = App(tmp / "alice", keys, a.url)
         bob = App(tmp / "bob", keys.personal("Bob")[2], a.url)
@@ -226,6 +255,23 @@ async def scenario(kind: str, tmp: Path) -> None:
                 check(f"... not sooner than its wait ({waited:.0f} s)", waited >= 2 * (TTL + 2) - 2.5, waited)
             check("it is the primary, and its database was promoted",
                   b.health()[1].get("role") == "primary" and await scalar(url_b, "SELECT pg_is_in_recovery()") is False, b.health())
+        elif kind == "outage":
+            # the bucket goes away from BOTH servers for longer than the standby's wait, then comes back
+            s3.fail_for.update({"relay-a", "relay-b"})
+            await wait_for(lambda: not a.alive(), 30)
+            check("with the bucket gone the primary stops itself", not a.alive() and a.proc is not None and a.proc.returncode == 75,
+                  a.proc.returncode if a.proc else None)
+            await asyncio.sleep(2 * (TTL + 2) + 4)
+            check("the standby didn't take over while it couldn't look", b.health()[0] != 200, b.health())
+            s3.fail_for.clear()
+            back = time.monotonic()
+            took = await wait_for(lambda: b.health()[0] == 200, 90)
+            since_back = time.monotonic() - back
+            check(f"when the bucket is back the standby counts its wait afresh, not taking over at once ({since_back:.0f} s; wait {2 * (TTL + 2)} s)",
+                  took is not None and since_back >= 2 * (TTL + 2) - 3, since_back)
+            await alice.stop()
+            await bob.stop()
+            apps = []
         else:
             s3.fail_for.add("relay-a")  # the primary can't reach the bucket
             cut_at = time.monotonic()
@@ -294,16 +340,26 @@ async def former_primary(tmp: Path) -> None:
         await s3.stop()
 
 
+def plain_admin(tmp: Path) -> None:
+    """A server with failover off: its admin page is the page it always was, with nothing about failover."""
+    from checklib import server
+    with server("plain-admin", "--admin-token", ADMIN, tmp=tmp / "plain", kind="sqlite") as srv:
+        code, page = admin(srv.url)
+        check("failover off: the admin page works and says nothing of failover",
+              code == 200 and "Creation codes" in page and "Failover" not in page and "lease" not in page.lower(), (code, page[:200]))
+
+
 async def main() -> int:
     with tempfile.TemporaryDirectory(prefix="texloom-failover-") as t:
         tmp = Path(t)
+        await asyncio.to_thread(plain_admin, tmp)
         s3 = FakeS3()
         await s3.start()
         try:
             await refusals(tmp, s3)
         finally:
             await s3.stop()
-        for kind in ("crash", "cutoff"):
+        for kind in (sys.argv[1:] or ("crash", "cutoff", "outage")):
             (tmp / kind).mkdir()
             await scenario(kind, tmp / kind)
         (tmp / "former").mkdir()

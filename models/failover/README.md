@@ -35,6 +35,12 @@ expected to hold or to be violated (a violated one shows the model notices a wro
 4. A clock that counts suspended time (`CLOCK_BOOTTIME` on Linux) removes most such overlaps and is
    worth using where there is one.
 
+A rehearsal with real parts (`scripts/rehearse_failover.py`, in Docker) added one rule the model
+only allows: **a standby that couldn't read the lease counts its wait afresh once it can** (its timer is
+only ever lengthened, so the model's results stand). Without it, a bucket that was away from both
+servers for longer than the wait was followed by a needless switch, because the version "hadn't
+changed" for as long as the outage lasted.
+
 ## What it assumes (check these on the real thing)
 
 - The store's conditional write is atomic and strongly consistent. Most S3-compatible stores have
