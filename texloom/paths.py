@@ -243,6 +243,24 @@ def use_tex_on_path() -> None:
         os.environ["PATH"] = os.pathsep.join([*have, *add])
 
 
+_restricted: tuple[str, ...] | None = None
+
+
+def restricted_programs() -> tuple[str, ...]:
+    """The programs TeX's restricted shell escape lets a document run (TeX Live's
+    shell_escape_commands): those shell_escape true adds approved lines' programs to."""
+    global _restricted
+    if _restricted is None:
+        import subprocess
+        try:
+            out = subprocess.run(["kpsewhich", "-var-value=shell_escape_commands"], capture_output=True, text=True,
+                                 env=tex_env(), timeout=20).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        _restricted = tuple(p for p in (x.strip() for x in out.split(",")) if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", p))
+    return _restricted
+
+
 def tex_env(**more: str) -> dict[str, str]:
     """TeX may only write inside the project (paranoid openout). Paranoid openin only refuses
     dot files: reading elsewhere is stopped by texloom/confine.py."""

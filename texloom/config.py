@@ -41,8 +41,9 @@ LOCAL_SETTINGS = {
     "engine": None,            # override the project's engine on this machine
     "latexmk_args": [],        # extra arguments, e.g. ["-pdfxe"]
     "git": False,              # true, or {"interval": 60, "quiet": 120, "push": true}: see `run --git`
-    "shell_escape": False,     # false, "restricted" (TeX Live's safe programs only) or true (minted etc.;
-                               # lines that run programs must be approved with `texloom allow`)
+    "shell_escape": False,     # false, "restricted" (TeX Live's safe programs only), true (restricted, plus
+                               # the programs of lines approved with `texloom allow`: minted etc.) or
+                               # "unrestricted" (approved lines with full shell escape)
     "confine": True,           # compiles may read only the project, TeX's files and fonts (false: anything
                                # you can read, for projects whose collaborators you trust)
     "label": "",               # how your compiles are labelled for others

@@ -562,13 +562,25 @@ much with the `shell_escape` setting (in the app, or `texloom settings`), or on 
 - `false` (default): nothing runs. Browser compiles are always like this.
 - `"restricted"` / `--shell-restricted`: only TeX Live's list of safe programs (enough for
   e.g. `epstopdf`, not for minted).
-- `true` / `--shell-escape`: anything the document asks for, e.g. minted. Because anyone
-  with an edit link writes the document, lines that run programs must be approved first:
+- `true` / `--shell-escape`: the programs that lines you approve run, e.g. minted's. Because
+  anyone with an edit link writes the document, lines that run programs must be approved first:
   `texloom allow <dir>` lists them (`\write18`, minted, pythontex, Lua `os.execute`, …) in
   every file, whatever its name, pictures and other binary files included (TeX can read any
   of them), and allows exactly those. When a line is new or changed, that compile runs in restricted
-  mode instead, and the log says which line is waiting. The check sees commands written
-  out plainly; macros can hide one, so use `true` only for projects whose editors you trust.
+  mode instead, and the log says which line is waiting. Once they are approved, the compile
+  runs in TeX's *restricted* shell escape, with the programs those lines name added to TeX
+  Live's safe list (`pygmentize` and `latexminted` for minted, the first word of a
+  `\write18{…}`, …). The approval check only sees commands written out plainly; TeX can build
+  one from macros (`\csname write\endcsname18`) or from a file it writes while compiling, but
+  such a command can then only run those same programs. What can't be prevented: an approved
+  program that can itself run anything (a shell, Python, a TeX engine given `-shell-escape`,
+  `pygmentize -x` with a lexer file in the project) can be made to by a hidden command too;
+  Lua's `os.execute` and programs that aren't named plainly (`\write18{\mycmd}`) don't work
+  in this mode; and MiKTeX doesn't take the added programs. So use `true` only for projects
+  whose editors you trust.
+- `"unrestricted"` (only through `texloom settings`): approved lines with full shell escape,
+  for packages that need a shell, such as minted before version 3 (TeX Live 2024 and
+  earlier). Macros can hide a command from the approval check, and then run anything.
 
 When a collaborator's change writes such a line into your folder, or an `% arara:`
 directive or `% !TeX program` comment (which your own LaTeX editor may follow), the helper

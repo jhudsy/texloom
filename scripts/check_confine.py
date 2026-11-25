@@ -46,17 +46,18 @@ def octal(path: str) -> str:
 
 
 async def compile_doc(tmp: Path, name: str, engine: str, tex: str, sandbox: bool,
-                      extra: dict[str, str] | None = None, shell: str = "-no-shell-escape") -> tuple[bool, bytes | None, list[str]]:
+                      extra: dict[str, str] | None = None, shell: tuple[str, ...] = ("-no-shell-escape",),
+                      project: Path | None = None) -> tuple[bool, bytes | None, list[str]]:
     """(compiled, the PDF a synced folder would share, what the check found)."""
-    project = tmp / f"{name}-{'sandbox' if sandbox else 'nosandbox'}"
-    project.mkdir()
+    project = project or tmp / f"{name}-{'sandbox' if sandbox else 'nosandbox'}"
+    project.mkdir(exist_ok=True)
     (project / "main.tex").write_text(tex)
     for p, t in (extra or {}).items():
         (project / p).write_text(t)
     build = project / STATE / "build"
     build.mkdir(parents=True)
     forget_reads(build)
-    cmd = latexmk_command(engine, None, "main.tex", f"-outdir={build}", shell)
+    cmd = latexmk_command(engine, None, "main.tex", f"-outdir={build}", *shell)
     code, out = await latexmk(cmd, project, build, project, confine=sandbox, timeout=300, capture=True)
     pdf = build / "main.pdf"
     outside = outside_reads(project, build)
@@ -87,6 +88,34 @@ def leaked(pdf: bytes | None) -> bool:
         except zlib.error:
             continue
     return False
+
+
+async def shell_escape(tmp: Path) -> None:
+    """An approved line runs its program; a command built from \\csname, which the scan for lines
+    to approve doesn't see, can't run another (the security review of 2026-11-24)."""
+    from types import SimpleNamespace
+    os.environ["TEXLOOM_HOME"] = str(tmp / "home")
+    from texloom import config
+    from texloom.crypto import Keys
+    from texloom.folder import FolderSync
+    from texloom.scan import allow, shell_lines
+    project = tmp / "shell"
+    project.mkdir()
+    config.save(project, Keys.generate().link("https://texloom.invalid"))
+    tex = ("\\documentclass{article}\\begin{document}hi\n"
+           "\\immediate\\write18{touch ran-approved}\n"
+           "\\csname immediate\\endcsname\\csname write\\endcsname18{mkdir pwned-hidden}\n\\end{document}\n")
+    files = {"main.tex": tex}
+    allow(project, {f.key for f in shell_lines(files)})
+    fs = SimpleNamespace(opts={"shell_escape": True}, r=SimpleNamespace(files=files, bin={}), root=project,
+                         _warned_shell=frozenset())
+    shell, _note = FolderSync.shell_mode(fs)  # type: ignore[arg-type]
+    shell = [shell] if isinstance(shell, str) else shell  # (as before: one flag)
+    await compile_doc(tmp, "shell", "pdflatex", tex, False, shell=tuple(shell), project=project)
+    check("the approved line's program runs", (project / "ran-approved").exists() or (project / STATE / "build" / "ran-approved").exists(),
+          shell)
+    check("a command built from \\csname doesn't run another program",
+          not (project / "pwned-hidden").exists() and not (project / STATE / "build" / "pwned-hidden").exists(), shell)
 
 
 async def main() -> int:
@@ -142,12 +171,15 @@ async def main() -> int:
             try:
                 tex = ("\\documentclass{article}\\begin{document}hi\n"
                        f"\\immediate\\write18{{touch {victim}/written; touch {build_marker(tmp)}}}\n\\end{{document}}\n")
-                ok, pdf, found = await compile_doc(tmp, "write", "pdflatex", tex, sandbox, shell="-shell-escape")
+                ok, pdf, found = await compile_doc(tmp, "write", "pdflatex", tex, sandbox, shell=("-shell-escape",))
                 check("macOS sandbox: a compile can't write outside the project, its build folder, TeX's caches "
                       "and the temporary folders", ok and not (victim / "written").exists() and build_marker(tmp).exists(),
                       (ok, sorted(p.name for p in victim.iterdir())))
             finally:
                 shutil.rmtree(victim, ignore_errors=True)
+    if have["pdflatex"]:
+        print("\nshell_escape true (approved lines only):")
+        await shell_escape(tmp)
     print(f"\ncompile confinement: {'FAILED' if failures else 'ok'}")
     if not failures:
         shutil.rmtree(tmp, ignore_errors=True)
