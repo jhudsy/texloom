@@ -40,6 +40,8 @@ UPDATE_BATCH = 6 * 1024 * 1024  # pending changes are merged up to this much per
 REF = b"\x00texloom-ref\x00"
 SIGNED_P2P = ("upd", "cack", "cerr")  # peer-to-peer messages that carry the sender's signature
 ANSWER_EVERY = 30.0  # seconds: how often one connection's request for what it lacks is answered (_on_p2p)
+CREQ_FOR = 5 * 60_000  # ms: how old a compile request may be (it is signed with when it was made), and how
+CREQ_AHEAD = 60_000  # far ahead of this computer's clock; within that, each nonce is taken once
 P2P_BLOB = 50 * 1024 * 1024  # files sent peer to peer (relay-only projects): as big as any synced file
 # A peer-to-peer message bigger than this (a whole project for a computer catching up, a file)
 # goes in pieces: the server takes frames of at most 16 MiB. Pieces are put together again
@@ -69,6 +71,7 @@ class Replica:
         self._warned: set[str] = set()
         self._parts: dict[tuple, dict] = {}
         self._answered: dict[str, float] = {}  # what (connection, or connection:file) -> when it was answered
+        self._creqs: dict[str, int] = {}  # compile requests' nonces taken, -> when made (_fresh_request)
         self._state_wanted: dict = {}  # connection -> its latest state vector, to answer
         self._answering = asyncio.Lock()
         self._uploading = asyncio.Lock()
@@ -127,6 +130,8 @@ class Replica:
         self._log_pending: tuple[int, int, bool] | None = None  # a catch-up whose later pages are still coming: (head, count, lost)
         self._caught_up = False  # this connection's log (and revocation list) has been applied
         self._revocations: list[dict] = []  # owner-signed, kept in state.json
+        self.storage_top: tuple[int, str] | None = None  # (at, mode): the latest owner-signed storage value seen (kept)
+        self.meta.observe(lambda _e: self._note_storage())  # every value that comes, even one replaced in the same catch-up
         self.load()
 
     @property
@@ -146,16 +151,29 @@ class Replica:
         owner, so an editor can't change it for everyone. Without a valid one (a project from
         before 0.4.35, or an editor overwrote it), what the server last said it does decides, as
         it is the one that knows whether it keeps a copy; failing that, the plain value. As in
-        web/src/replica.ts."""
+        web/src/replica.ts. The latest signed value seen here wins (storage_top, kept): an editor can
+        put back an older one the owner signed, but not make it count."""
+        self._note_storage()
+        if self.storage_top is not None:
+            return self.storage_top[1]
         v = self.meta.get("storage")
-        if isinstance(v, dict) and v.get("m") in ("relay", "server") and isinstance(v.get("at"), (int, float)):
-            try:
-                if self.keys.owner_signed(f"owner:storage:{v['m']}:{int(v['at'])}".encode(), b64d(str(v.get("s", "")))):
-                    return v["m"]
-            except (ValueError, TypeError):
-                pass
         # compat(data 0.4.35): the plain, unsigned storage value (v == 'relay'); converted on read: its owner signs it
         return self.heard_mode or ("relay" if v == "relay" else "server")
+
+    def _note_storage(self) -> None:
+        """Take in the document's storage value, if it is signed by the owner and later than any
+        seen (kept with the next save)."""
+        v = self.meta.get("storage")
+        if not isinstance(v, dict) or v.get("m") not in ("relay", "server") or not isinstance(v.get("at"), (int, float)) or isinstance(v.get("at"), bool):
+            return
+        try:
+            at = int(v["at"])
+            if at != v["at"] or (self.storage_top is not None and at <= self.storage_top[0]):
+                return
+            if self.keys.owner_signed(f"owner:storage:{v['m']}:{at}".encode(), b64d(str(v.get("s", "")))):
+                self.storage_top = (at, str(v["m"]))
+        except (ValueError, TypeError, OverflowError):
+            pass
 
     def _heard(self, mode: object) -> None:
         """What the server says it does with this project (kept, for when it can't be asked)."""
@@ -184,6 +202,10 @@ class Replica:
                 self.last = (last[0], last[1])
             self.pending_mode = s.get("pending_mode")
             self.heard_mode = s.get("heard_mode") if s.get("heard_mode") in ("relay", "server") else None
+            top = s.get("storage_top")
+            if isinstance(top, list) and len(top) == 2 and isinstance(top[0], int) and top[1] in ("relay", "server") \
+                    and (self.storage_top is None or top[0] > self.storage_top[0]):
+                self.storage_top = (top[0], top[1])
             self.outbox = {k: b64d(v) for k, v in s.get("outbox", {}).items()}
             self.deleted_at = s.get("deleted")
             self.refs = {int(q): b for q, b in s.get("refs", {}).items() if isinstance(b, str) and BLOB_RE.match(b)}
@@ -196,6 +218,7 @@ class Replica:
         replace_file(self.dir / "doc.bin", self.doc.get_update(), 0o600)  # the project, readable
         state = {"since": self.since, **({"last": list(self.last)} if self.last else {}),
                  "pending_mode": self.pending_mode, "heard_mode": self.heard_mode,
+                 **({"storage_top": list(self.storage_top)} if self.storage_top else {}),
                  "outbox": {k: b64e(v) for k, v in self.outbox.items()}, "revoked": self._revocations,
                  **({"refs": self.refs} if self.refs else {}),
                  **({"deleted": self.deleted_at} if self.deleted_at is not None else {})}
@@ -739,8 +762,25 @@ class Replica:
             # only writers may ask (signed): a read-only member compiles on their own computer
             if "s" not in m or not self.keys.verify(b"p2p:" + data, b64d(m["s"]), fresh=True):
                 return
-            nonce = p.get("n") if isinstance(p.get("n"), str) and len(p["n"]) <= 64 else ""
-            await self.on_compile_request(frm, p.get("clean") is True, nonce)
+            if not self._fresh_request(p):
+                return
+            await self.on_compile_request(frm, p.get("clean") is True, p["n"])
+
+    def _fresh_request(self, p: dict) -> bool:
+        """A compile request made in the last few minutes (its signed `at`) and not seen before (its
+        nonce `n`): one recorded and sent again later isn't taken. One from an app too old to say
+        when it was made is ignored."""
+        n, at, now = p.get("n"), p.get("at"), int(time.time() * 1000)
+        if not isinstance(n, str) or not 8 <= len(n) <= 64 or not isinstance(at, int) or isinstance(at, bool) \
+                or not now - CREQ_FOR <= at <= now + CREQ_AHEAD:
+            log.debug("ignoring a compile request without a recent time and nonce")
+            return False
+        self._creqs = {k: v for k, v in self._creqs.items() if v >= now - CREQ_FOR - CREQ_AHEAD}
+        if n in self._creqs:
+            log.debug("ignoring a compile request seen before")
+            return False
+        self._creqs[n] = at
+        return True
 
     async def send_mode(self, mode: str) -> None:
         if self.ws is None or not self.keys.writable:

@@ -122,6 +122,26 @@ def ref(bid: str) -> bytes:
     return REF + json.dumps({"b": bid}).encode()
 
 
+def storage_value(mode: str, at: int, by: Keys = owner) -> dict:
+    """meta "storage" as the owner sets it: the mode, when, and the owner's signature of both."""
+    return {"m": mode, "at": at, "s": b64e(by.sign(f"owner:storage:{mode}:{at}".encode()))}
+
+
+def storage_changes(*values: dict) -> list[bytes]:
+    """One change per value, each made on top of the one before (so the last is what the document shows)."""
+    d, out = Doc(), []
+    meta = d.get("meta", type=Map)
+    for v in values:
+        before = d.get_state()
+        meta["storage"] = v
+        out.append(d.get_update(before))
+    return out
+
+
+RELAY_NEW, SERVER_OLD = storage_changes(storage_value("relay", 1_700_000_002_000), storage_value("server", 1_700_000_001_000))
+SERVER_FIRST, RELAY_LATER = storage_changes(storage_value("server", 1_700_000_001_000), storage_value("relay", 1_700_000_002_000))
+(FORGED,) = storage_changes(storage_value("relay", 1_700_000_003_000, by=member))
+
 bid_missing = owner.blob_id(b"an upload the server can't give just now")
 HELLO = {"main.tex": "Hello\n"}
 BOTH = {"main.tex": "Hello\nWorld\n"}
@@ -286,6 +306,23 @@ case("the server saying it only relays the project clears a storage problem",
 case("a project that's only relayed needs no creation code",
      [{**log(0, []), "mode": "relay"}, {"t": "err", "code": "needs-code", "id": "x", "m": "needs a code"}],
      {"storeProblem": None, "serverMode": "relay"})
+
+# -- where the project lives: meta "storage", signed by the owner; the latest one seen counts
+case("the owner's signed storage setting is followed",
+     [log(1, [entry(1, RELAY_NEW, by=member)])],
+     {"storage": "relay"}, as_="member")
+case("a storage setting not signed by the owner is ignored",
+     [log(1, [entry(1, FORGED, by=member)])],
+     {"storage": "server"}, as_="member")
+case("an older signed storage setting put back by an editor doesn't count",
+     [{"msg": log(1, [entry(1, RELAY_NEW, by=member)]), "expect": {"storage": "relay"}}, up(entry(2, SERVER_OLD, by=member))],
+     {"storage": "relay", "since": 2}, as_="member")
+case("an older signed storage setting doesn't count even when both come in one catch-up",
+     [log(2, [entry(1, RELAY_NEW, by=member), entry(2, SERVER_OLD, by=member)])],
+     {"storage": "relay"}, as_="member")
+case("a newer signed storage setting is followed",
+     [log(2, [entry(1, SERVER_FIRST, by=member), entry(2, RELAY_LATER, by=member)])],
+     {"storage": "relay"}, as_="member")
 
 # -- peer to peer
 case("a signed change from a peer is applied once caught up",

@@ -98,6 +98,7 @@ async function state(r, socks, server, got) {
     denied: r.denied,
     min: r.minVersion,
     serverMode: r.serverMode,
+    storage: r.storage,
     storeProblem: r.storeProblem,
     closed: socks.some((w) => w.closed),
     sent: sent.sort(),
@@ -177,4 +178,22 @@ for (const c of cases) {
   if (bad.length) { failed++; say(`FAIL ${c.what}\n     ${bad.join('\n     ')}`) }
 }
 say(`replica (web): ${cases.length - failed} of ${cases.length} cases agree${failed ? `, ${failed} don't` : ''}`)
+
+// What only the web app does: ask a helper to compile, signed, with when and a fresh nonce (a helper
+// takes each request once, and only for a few minutes: scripts/check_replica.py)
+if (!words.length) {
+  const keys = Keys.fromFragment('#' + v.links.member)
+  const r = new Replica(keys, SERVER)
+  const ws = fakeWs()
+  Object.assign(r, { db: fakeDb(), persistence: {}, ws, since: 0, status: 'online', synced: true })
+  await r.requestCompile()
+  await r.requestCompile(true)
+  const asks = []
+  for (const m of ws.sent) if (m.t === 'p2p') asks.push({ ...JSON.parse(new TextDecoder().decode(await keys.decrypt(b64d(m.d)))), signed: !!m.s && keys.verify('p2p:', b64d(m.d), b64d(m.s), true) })
+  const now = Date.now()
+  const ok = asks.length === 2 && asks.every((a) => a.k === 'creq' && a.signed && typeof a.n === 'string' && a.n.length >= 16 && Math.abs(now - a.at) < 10_000)
+    && asks[0].n !== asks[1].n && asks[1].clean === true
+  say(ok ? 'replica (web only): compile requests go signed, with when and a fresh nonce' : `FAIL compile requests: ${JSON.stringify(asks)}`)
+  if (!ok) failed++
+}
 process.exit(failed ? 1 : 0)

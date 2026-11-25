@@ -191,7 +191,9 @@ export class Replica {
   private logPending: { head: number; count: number; lost: boolean } | null = null
   private pages: Promise<void> = Promise.resolve()
 
-  constructor(readonly keys: Keys, readonly server: string, public syncMode: SyncMode = 'live') {}
+  constructor(readonly keys: Keys, readonly server: string, public syncMode: SyncMode = 'live') {
+    this.meta.observe(() => this.noteStorage()) // every value that comes, even one replaced in the same catch-up
+  }
 
   /** A transaction applied changes received from others. */
   isRemote(origin: unknown): boolean { return origin === REMOTE }
@@ -211,12 +213,25 @@ export class Replica {
   /** Where the project lives, as its owner set it: `meta.storage` is {m, at, s}, signed by the
    *  owner, so an editor can't change it for everyone. Without a valid one (a project from
    *  before 0.4.35, or an editor overwrote it), what the server last said it does decides, as
-   *  the server is the one that knows whether it keeps a copy; failing that, the plain value. */
+   *  the server is the one that knows whether it keeps a copy; failing that, the plain value.
+   *  The latest signed value seen here wins (storageTop, kept): an editor can put back an older
+   *  one the owner signed, but not make it count. As texloom/replica.py. */
   get storage(): StorageMode {
+    this.noteStorage()
+    if (this.storageTop) return this.storageTop.m
     const v = this.meta.get('storage')
-    if (v && typeof v === 'object' && (v.m === 'relay' || v.m === 'server') && this.keys.ownerSigned(`storage:${v.m}:${v.at}`, v.s)) return v.m
     // compat(data 0.4.35): the plain, unsigned storage value (v == 'relay'); converted on read: its owner signs it
     return this.heardMode ?? (v === 'relay' ? 'relay' : 'server')
+  }
+  private storageTop: { m: StorageMode; at: number } | null = null // the latest owner-signed storage value seen (kept)
+  /** Take in the document's storage value, if it is signed by the owner and later than any seen. */
+  private noteStorage() {
+    const v = this.meta.get('storage')
+    if (!v || typeof v !== 'object' || (v.m !== 'relay' && v.m !== 'server') || typeof v.at !== 'number' || !Number.isSafeInteger(v.at)) return
+    if (this.storageTop && v.at <= this.storageTop.at) return
+    if (!this.keys.ownerSigned(`storage:${v.m}:${v.at}`, v.s)) return
+    this.storageTop = { m: v.m, at: v.at }
+    if (this.db) idbPut(this.db, 'kv', 'storageTop', this.storageTop).catch((e) => quiet('kept in memory: saved with the next one', e))
   }
   private heardMode: StorageMode | null = null // what the server last said it does with this project (kept)
   private heard(mode: unknown) {
@@ -227,6 +242,7 @@ export class Replica {
 
   async open(): Promise<void> {
     this.db = await openDb(`texloom-${this.keys.project}`)
+    this.storageTop = (await idbGet<{ m: StorageMode; at: number }>(this.db, 'kv', 'storageTop')) ?? null // before the document loads
     this.persistence = new IndexeddbPersistence(`texloom-doc-${this.keys.project}`, this.doc)
     await this.persistence.whenSynced
     this.since = (await idbGet<number>(this.db, 'kv', 'since')) ?? 0
@@ -869,7 +885,8 @@ export class Replica {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
     const n = b64e(crypto.getRandomValues(new Uint8Array(12)))
     this.compileNonces = [...this.compileNonces.slice(-9), n] // a helper may answer a recent one later
-    await this.p2p(fromScratch ? { k: 'creq', clean: true, n } : { k: 'creq', n })
+    // signed, with when and a fresh nonce: a helper takes each once, and only for a few minutes
+    await this.p2p({ k: 'creq', n, at: Date.now(), ...(fromScratch ? { clean: true } : {}) })
     return true
   }
 
