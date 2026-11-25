@@ -1005,6 +1005,9 @@ uv run python scripts/check_compat.py                              # code kept f
 uv run python scripts/check_server_state.py                        # what each server keeps in memory, and its addresses, each listed for several servers (SCALING.md)
 uv run --with hypothesis python scripts/check_folder_model.py      # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
 uv run python scripts/check_folder_regressions.py                  # folder sync's old bugs: a deleted file brought back, a half-saved file shared, a renamed folder's files left behind
+uv run python scripts/check_settings.py                            # settings that run programs live in your own settings folder, never in the synced folder
+uv run python scripts/check_confine.py                             # a compile can't carry a file from outside the project into the PDF (needs TeX)
+uv run python scripts/check_comment_names.py                       # a comment author can't fake the verified ✓
 uv run --extra server python scripts/check_shared_folder.py        # two computers on one folder shared through a stand-in Dropbox: they take turns, nothing arrives twice
 uv run --extra server python scripts/check_store.py                # the server's database: SQLite and PostgreSQL give the same answers, and copy into each other
 uv run --extra server python scripts/check_files.py                # the server's file store: a folder, and Garage (S3) if installed

@@ -34,6 +34,12 @@ jobs:
       - name: folder-rules.json is what make_folder_rules.py writes
         run: uv run python scripts/make_folder_rules.py --check
       - run: uv run python scripts/check_folder_regressions.py
+      - name: A folder's settings that run programs live in this user's settings, never in the folder (security review)
+        run: uv run python scripts/check_settings.py
+      - name: Comment authors can't fake the verified mark (security review)
+        run: uv run python scripts/check_comment_names.py
+      - name: Compiles can't carry files from outside the project into the PDF (skips without TeX; security review)
+        run: uv run python scripts/check_confine.py
       - name: Positions can't be mixed up (textpos, mypy)
         run: uv run --with mypy python scripts/check_textpos.py
 
