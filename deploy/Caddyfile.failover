@@ -5,11 +5,16 @@
 # servers switch over, and no script runs; people wait only for the switch itself (about a minute).
 #
 # 1. Replace the name below, and PEER with the other machine's relay address.
-# 2. The relay must be reachable from the other machine, and ONLY from it: it speaks plain HTTP, so use
-#    a private network (WireGuard, Tailscale), set the relay's `--host` (`host =` in texloom.toml) to this
-#    machine's private address as well as keeping 127.0.0.1 reachable for Caddy (or listen on 0.0.0.0 and
-#    firewall port 8787 to the other machine), and never open 8787 to the internet.
-# 3. sudo caddy run --config /etc/caddy/Caddyfile
+# 2. The relay must be reachable from the other machine, and ONLY from it: it speaks plain HTTP. Use a
+#    private network (WireGuard, Tailscale). The relay listens on one address (`host =` in texloom.toml):
+#    either bind it to this machine's private address and use that address instead of 127.0.0.1 below, or
+#    bind it to 0.0.0.0 and firewall port 8787 so that only the other machine can reach it. Never open
+#    8787 to the internet.
+# 3. Certificates: both machines answer for the same name, so a certificate request from one can be
+#    validated against the other and fail. Use the DNS challenge on both (a Caddy build with your DNS
+#    provider's module), or share Caddy's storage between them (Caddy's documentation on clustering).
+#    Not tried here.
+# 4. sudo caddy run --config /etc/caddy/Caddyfile
 #
 # Each Caddy sets X-Real-IP to the visitor's address before forwarding, so the relay's per-address limits
 # see the real visitor whichever machine they reached.

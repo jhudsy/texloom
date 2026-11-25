@@ -94,6 +94,32 @@ async def is_standby(url: str) -> bool:
         await c.close()
 
 
+async def replication_status(url: str) -> dict:
+    """What this PostgreSQL says about replication, for the admin page: whether it is a standby (and, if so,
+    what its WAL receiver says and how far behind its replay is), or a primary (and which standbys follow
+    it). Values the role may not see (pg_stat_replication needs pg_monitor, or superuser) come back None."""
+    import asyncpg
+    try:
+        c = await asyncpg.connect(url, timeout=5)
+    except (OSError, asyncpg.PostgresError, TimeoutError) as e:
+        raise DatabaseError(f"can't reach the database {redact(url)}: {e}") from None
+    try:
+        recovery = bool(await c.fetchval("SELECT pg_is_in_recovery()"))
+        if recovery:
+            r = await c.fetchrow("SELECT status, sender_host FROM pg_stat_wal_receiver")
+            lag = await c.fetchval("SELECT EXTRACT(EPOCH FROM now() - pg_last_xact_replay_timestamp())")
+            return {"standby": True, "receiver": r["status"] if r else None, "from": r["sender_host"] if r else None,
+                    "replay_seconds": float(lag) if lag is not None else None}
+        rows = await c.fetch("SELECT application_name, client_addr::text AS addr, state, EXTRACT(EPOCH FROM replay_lag) AS lag "
+                             "FROM pg_stat_replication")
+        return {"standby": False, "followers": [{"name": x["application_name"], "addr": x["addr"], "state": x["state"],
+                                                 "lag": float(x["lag"]) if x["lag"] is not None else None} for x in rows]}
+    except asyncpg.PostgresError as e:
+        raise DatabaseError(f"can't read replication status: {e}") from None
+    finally:
+        await c.close()
+
+
 async def promote(url: str) -> None:
     """Make the PostgreSQL at `url` a primary if it is a standby (pg_promote, waiting for it); one
     that is a primary already is left alone. The role the server connects as needs EXECUTE on
@@ -107,9 +133,9 @@ async def promote(url: str) -> None:
         try:
             promoted = await c.fetchval("SELECT pg_promote(true, 60)")
         except asyncpg.InsufficientPrivilegeError:
-            raise DatabaseError("this server's database role may not promote its standby PostgreSQL: on the primary, "
-                                "GRANT EXECUTE ON FUNCTION pg_promote(boolean, integer) TO <that role> "
-                                "(INSTALL.md, \"A standby server\")") from None
+            raise DatabaseError("this server's database role may not promote its standby PostgreSQL: on the primary, in "
+                                "the server's own database (psql DATABASE), GRANT EXECUTE ON FUNCTION "
+                                "pg_promote(boolean, integer) TO <that role> (INSTALL.md, \"A standby server\")") from None
         if not promoted or await c.fetchval("SELECT pg_is_in_recovery()"):
             raise DatabaseError(f"{redact(url)} didn't become a primary within 60 seconds")
     finally:

@@ -363,15 +363,17 @@ PostgreSQL (14 or later, the same major version on both machines) copies the pri
 the standby as they happen (streaming replication). The standby is read-only until promoted, and
 the server refuses to start on it, saying why.
 
-1. **On the primary**, allow the standby in. Create a role, and let it in over TLS from the
-   standby's address only (in `pg_hba.conf`; PostgreSQL's `listen_addresses` must include an
-   address the standby can reach: keep it off the public internet, with a firewall or a private
-   network):
+1. **Allow each machine in on the other.** Either may be the standby, and after a switch the old primary
+   is rebuilt from the new one, so both need to let the other replicate. Create the role once, on the
+   primary (it is copied to the standby), and on **each** machine let the other's address in over TLS
+   (in `pg_hba.conf`, which is not copied; PostgreSQL's `listen_addresses` must include an address the
+   other can reach: keep it off the public internet, with a firewall or a private network):
 
    ```bash
    sudo -u postgres psql -c "CREATE ROLE replicator REPLICATION LOGIN PASSWORD 'a long random password'"
    sudo -u postgres psql -c "SELECT pg_create_physical_replication_slot('standby')"
-   # pg_hba.conf:  hostssl  replication  replicator  STANDBY-ADDRESS/32  scram-sha-256
+   # pg_hba.conf, on each machine, with the OTHER machine's address:
+   #   hostssl  replication  replicator  OTHER-ADDRESS/32  scram-sha-256
    systemctl reload postgresql
    ```
 
@@ -420,9 +422,20 @@ the server refuses to start on it, saying why.
    nobody has to do anything.
 
 **Afterwards** you have one server and no standby. The old primary must not come back as a primary:
-make it a standby of the new one, by emptying its PostgreSQL data and repeating step 2 with the
-new primary's address (and swap the DNS name's roles if you like, or keep the new arrangement).
-Until then, a failure of the new primary has no standby. To switch on purpose (maintenance), stop
+rebuild it as a standby of the new one, with the helper, on the old primary's machine (as root):
+
+```bash
+sudo env PGPASSWORD='the replicator password' /var/www/texloom/deploy/rebuild-standby.py NEW-PRIMARY-ADDRESS
+```
+
+It stops the TeXLoom server and PostgreSQL there, **keeps the old data directory aside** (as
+`….old-DATE`; delete it when you are sure: it holds the changes the new primary never got, which the
+apps send again), takes a streaming base backup of the new primary, starts PostgreSQL as its standby,
+waits until it is streaming, and starts the server again, which waits as the standby. It refuses,
+changing nothing, if this machine's server is the primary (it answers 200 on `/api/health`), if the
+address is another cluster, or if you don't confirm; if the backup fails it puts the old data back.
+`--cluster VERSION/NAME` picks one if there are several, and `--help` lists the rest. Until it has
+run, a failure of the new primary has no standby. To switch on purpose (maintenance), stop
 the server on the primary first and wait until the standby has everything (`SELECT
 pg_current_wal_lsn()` on the primary, and `pg_last_wal_replay_lsn()` on the standby, are equal),
 then promote and move the name: nothing is missing, so there is no catch-up.
@@ -441,7 +454,8 @@ every few seconds. The other waits, and when the lease hasn't been renewed for l
 it, promotes its own PostgreSQL and serves. A primary that can't renew (the bucket is unreachable) stops
 itself, closing its connections, before the other can take over, so there are never two serving.
 The design and the checks behind it are in `models/failover/README.md`; `scripts/check_failover.py`
-runs two real servers through a lost primary and one cut off from the bucket.
+runs two real servers through a lost primary, one cut off from the bucket and the bucket going away;
+`scripts/rehearse_failover.py` does it again with real parts in Docker (see its first lines).
 
 You need the pair from the section above (a primary and a streaming standby, each with its server
 installed) and a bucket for the stored files that does **conditional writes** properly, because the
@@ -474,6 +488,13 @@ copied to the standby with everything else):
 sudo -u postgres psql texloom -c "GRANT EXECUTE ON FUNCTION pg_promote(boolean, integer) TO texloom"
 ```
 
+Optionally, so that the admin page can show the standby's state and how far behind it is (otherwise it
+says the details are hidden), let that role read PostgreSQL's replication statistics:
+
+```bash
+sudo -u postgres psql -c "GRANT pg_monitor TO texloom"
+```
+
 And in `texloom.toml` on **each** server (each needs its own `failover_name`), then restart both,
 the primary first:
 
@@ -483,6 +504,11 @@ failover_name = "server-a"   # "server-b" on the other
 # failover_ttl = 15          # seconds
 ```
 
+- **The admin page** (`/admin`, with the admin token) gets a Failover section: this server's role, who
+  holds the lease and how recently it was renewed (or, on the standby, how long it has been unchanged
+  against the wait), and PostgreSQL's side: whether it is a primary and its standbys' state and delay, or
+  a standby and how far its replay is behind. The standby serves the admin page too, with just that
+  section, since it has no database open. Without `failover` the page is as it always was.
 - **Time.** A primary stops itself after `failover_ttl` seconds without a successful renewal, and the
   standby waits twice that, plus a margin, before it takes over: with the default 15 seconds, about
   35, plus a few for PostgreSQL to promote, so people see "connecting…" for under a minute. A lower
@@ -493,13 +519,21 @@ failover_name = "server-a"   # "server-b" on the other
   [Moving traffic to the primary](#moving-traffic-to-the-primary).
 - **After a switch.** The server that stopped (or was lost) restarts as a standby, but its PostgreSQL
   is still a primary with a history the new one doesn't have, so it **won't take over** (it says so in
-  its log) until you rebuild it as a standby of the new primary, as in "Afterwards" above. Until then
+  its log) until you rebuild it as a standby of the new primary with `deploy/rebuild-standby.py`, as in "Afterwards" above. Until then
   you have one server and no standby, as after a manual switch.
 - **Starting a server again** (an update, a restart) while it holds the lease takes it back within a
   couple of renewal intervals (about ten seconds by default). The other server sees renewals missing
   for that long, which is well short of the wait before it takes over.
 - It runs under the install script's systemd unit as it is (`Restart=on-failure`: a server that stops
   itself exits with status 75).
+- **The bucket becomes something everything waits on.** The lease lives in it, so a primary that can't
+  reach it for `failover_ttl` seconds stops serving, even though it and its database are fine. While the
+  bucket is away from both servers nothing is served; when it is back the service resumes by itself, in
+  about the time a restart takes, and the standby does not take over on the strength of the time it
+  couldn't look. (Stored files already depend on the bucket; editing and syncing did not until now.)
+- **A server that hangs, rather than stopping, is noticed by the apps after their pings go unanswered**
+  (they ping every 30 seconds), so people connected through it wait up to about a minute longer than for
+  a server that dies, whose connections are reset. The standby still takes over after the wait.
 - **What it can't do** (see `models/failover/README.md`): a machine suspended and woken (a virtual
   machine) after the other took over can accept changes for a moment until its first renewal fails.
   Nobody loses anything, because an app that was told "stored" by it checks, when it reconnects, that
