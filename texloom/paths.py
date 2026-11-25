@@ -114,11 +114,19 @@ WIN_RESERVED = {"con", "prn", "aux", "nul", "conin$", "conout$",
                 *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 
 
+# Unicode's Default_Ignorable_Code_Point characters (invisible: zero-width spaces and joiners,
+# direction marks, variation selectors, tags…). Keep in sync with IGNORABLE in web/src/projectfiles.ts.
+IGNORABLE = re.compile("[­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮"
+                       "⁠-⁯ㅤ︀-️﻿ﾠ￰-￸\U0001bca0-\U0001bca3"
+                       "\U0001d173-\U0001d17a\U000e0000-\U000e0fff]")
+
+
 def safe_rel(rel: object) -> str | None:
     """Validate a project path received from collaborators. None if it must not touch disk.
 
     Rejects absolute paths, drive letters, backslashes, '.'/'..'/empty segments, control
-    characters, reserved names (compared case-insensitively, Unicode-normalised), and
+    characters, reserved names (compared case-insensitively, Unicode-normalised, without
+    invisible characters), and
     files that TeX tools would execute or treat as configuration.
     """
     if not isinstance(rel, str) or not rel or len(rel) > 300:
@@ -128,10 +136,13 @@ def safe_rel(rel: object) -> str | None:
     for seg in rel.split("/"):
         if seg in ("", ".", "..") or any(ord(c) < 32 or c in '<>:"|?*' for c in seg):
             return None
+        # (compared without invisible characters, which some file systems drop: macOS's HFS+
+        # stores ".l​atexmkrc" as ".latexmkrc")
+        bare = IGNORABLE.sub("", seg)
         # Windows drops trailing dots and spaces (".git." is ".git") and has 8.3 aliases ("GIT~1")
-        if seg[-1] in ". " or re.search(r"~\d", seg):
+        if bare in ("", ".", "..") or seg[-1] in ". " or bare[-1] in ". " or re.search(r"~\d", bare):
             return None
-        n = unicodedata.normalize("NFKC", seg).casefold()
+        n = unicodedata.normalize("NFKC", bare).casefold()
         if n in PROTECTED_DIRS or n in UNSAFE_NAMES or n.endswith(".latexmkrc"):
             return None
         if os.name == "nt" and n.split(".")[0] in WIN_RESERVED:
@@ -175,7 +186,9 @@ ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualate
 
 # Each TeX, BibTeX and biber run appends what it read (its .fls or .blg, after a PWD line) to
 # <name>.fls-reads / <name>.blg-reads: TeX rewrites its .fls on every pass, so a document could read
-# a file on one pass and not the last. confine.outside_reads() checks them after the compile.
+# a file on one pass and not the last. confine.outside_reads() checks them after the compile (a TeX
+# run whose .fls is missing gets a MISSING line, which fails the check), and the .xdv or .dvi that
+# xdvipdfmx, dvipdfmx or dvips read (they record nothing).
 # With an output folder, latexmk runs BibTeX from inside it ("bibtex fudge"), where a bibliography
 # named relative to the document (\bibliography{../refs}) isn't found: it runs from the document's
 # folder instead (-bibfudge-), and then writes its .bbl and .blg through the path .texloom/build,
@@ -187,8 +200,10 @@ ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualate
 RECORD = (
     "use Cwd; sub texloom_run { my ($ext, $base, @cmd) = @_; "
     "local $ENV{openout_any} = q(a) if $cmd[0] eq q(bibtex); my $r = system(@cmd); "
-    "if (open(my $in, q(<), qq($base.$ext)) and open(my $out, q(>>), qq($base.$ext-reads))) "
-    "{ print $out q(PWD ), getcwd(), qq(\\n), <$in>; close $out } return $r } "
+    "if (open(my $out, q(>>), qq($base.$ext-reads))) { print $out q(PWD ), getcwd(), qq(\\n); "
+    "if (open(my $in, q(<), qq($base.$ext))) { my $c = do { local $/; <$in> } // q(); "
+    "$c .= qq(\\n) if length($c) and substr($c, -1) ne qq(\\n); print $out $c } "
+    "elsif ($ext eq q(fls)) { print $out qq(MISSING\\n) } close $out } return $r } "
     # (biber: --noconf, never a biber.conf in the project, which can name where its output goes)
     + " ".join(f"${p} = q(internal texloom_run {ext} %Y%R {p}{extra} %O %S);"
                for p, ext, extra in (("pdflatex", "fls", ""), ("xelatex", "fls", ""), ("lualatex", "fls", ""),
@@ -237,6 +252,24 @@ def use_tex_on_path() -> None:
     add = [d for d in dict.fromkeys(extra) if d not in have and os.path.isdir(d)]
     if add:
         os.environ["PATH"] = os.pathsep.join([*have, *add])
+
+
+_restricted: tuple[str, ...] | None = None
+
+
+def restricted_programs() -> tuple[str, ...]:
+    """The programs TeX's restricted shell escape lets a document run (TeX Live's
+    shell_escape_commands): those shell_escape true adds approved lines' programs to."""
+    global _restricted
+    if _restricted is None:
+        import subprocess
+        try:
+            out = subprocess.run(["kpsewhich", "-var-value=shell_escape_commands"], capture_output=True, text=True,
+                                 env=tex_env(), timeout=20).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        _restricted = tuple(p for p in (x.strip() for x in out.split(",")) if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", p))
+    return _restricted
 
 
 def tex_env(**more: str) -> dict[str, str]:

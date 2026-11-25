@@ -357,8 +357,13 @@ The resolved path must stay inside the project folder (no writing through symlin
   hidden but for the build folder) and, everywhere, a check: latexmk's `$pdflatex`,
   `$bibtex`, … go through a Perl hook that appends each run's `.fls`/`.blg` to
   `<name>.fls-reads`/`.blg-reads` (TeX rewrites its `.fls` every pass, so a document could
-  read a file on the first pass only). A compile that read outside those places publishes
-  only a note, and its build folder is deleted. Local `"confine": false` turns both off.
+  read a file on the first pass only). A run's part of the record must be whole (both PWD
+  lines, then only INPUT/OUTPUT, no NULs, no OUTPUT naming a record: a document can
+  `\openout` its own `.fls`); xdvipdfmx/dvips record nothing, so the `.xdv`/`.dvi` is parsed
+  and every name in its specials and fonts that is a file outside fails the check too. On
+  macOS the sandbox also denies writes but for the project, the build folder, TeX's caches
+  and the temporary folders. A compile that read outside those places publishes
+  only a note, and its build folder is deleted. The local setting `"confine": false` turns both off.
   BibTeX runs from the
   document's folder (`-bibfudge-`, so `\bibliography{../refs}` is found) with `openout_any=a`
   for it alone, since paranoid mode refuses its .bbl/.blg in `.texloom/build` (a dot folder)
@@ -451,9 +456,15 @@ relay) as the fallback for symmetric NATs.
   are signed like `upd` and carry the request's random `n`: the browser takes only a writer's
   answer to one of its own recent requests, so a read-only member can't fake one, nor the
   server replay one.
-- Local options in `.texloom/config.json`: `engine`, `latexmk_args`, `shell_escape`,
-  `label`. They are never shared. Shell-escape runs code from collaborators, so it is
-  strictly a local opt-in.
+- Local options (`compile`, `engine`, `latexmk_args`, `shell_escape` and the lines
+  allowed to use it, `confine`, `git`, `label`) live in the user's own settings folder
+  (`config.settings_path`: `folder-settings/<hash of the folder's path>.json`, which also
+  notes the project id), never in the folder: anyone sharing the folder through Dropbox or
+  the like can write any file in it, `.texloom/computers/<id>/config.json` included. A
+  moved folder, or a link changed to another project, starts over with the defaults. The
+  first run of 0.4.56 brought each listed folder's old settings over, only `compile`,
+  `engine` and `label` from a folder that may be shared (`config.looks_shared`).
+  `.texloom/computers/<id>/config.json` keeps the link, creation code and name.
 - Blobs referenced by remote updates are fetched in the background. In relay mode
   they arrive from a peer over the same connection, so fetching inline would deadlock.
 
@@ -472,7 +483,7 @@ service would also copy each computer's records to the others. So:
 - **Records per computer:** `paths.state_dir(folder)` = `.texloom/computers/<computer id>/`
   (the id: `computer-id` in the app's settings folder, random). Everything but the folder's
   `folder-id`, the `lock` and `.gitignore` lives there: the replica, `known.json`, the merge bases,
-  `config.json`, approvals, the git bridge's lease id, build output. A folder from before 0.4.40
+  `config.json` (the link), the git bridge's lease id, build output. A folder from before 0.4.40
   has them in `.texloom` itself; `state_dir` moves them (config.json last, so an interrupted move
   finishes next time). FolderSync keeps its files in `replica.dir`.
 - **Finding each other:** `.texloom/folder-id` (random, made by the first computer; the service

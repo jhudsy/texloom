@@ -46,6 +46,17 @@ def log_file() -> Path:
     return config_dir() / "texloom.log"
 
 
+def private_log() -> Path:
+    """The log file, made (or kept) readable by you only: it names your folders and projects.
+    Made before anything writes to it (launchd, the app), so it's never made readable by others."""
+    p = log_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        os.close(os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600))
+        os.chmod(p, 0o600)
+    return p
+
+
 def _mac_plist() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 
@@ -107,8 +118,7 @@ def vbs(cmd: list[str], log: Path) -> str:
 
 def enable(app: bool = False) -> str:
     """Start `texloom start` (or, with app=True, the TeXLoom app in the tray) at login."""
-    (cmd, keep), log = command(app), log_file()
-    log.parent.mkdir(parents=True, exist_ok=True)
+    (cmd, keep), log = command(app), private_log()
     if sys.platform == "darwin":
         p = _mac_plist()
         p.parent.mkdir(parents=True, exist_ok=True)

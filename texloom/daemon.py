@@ -1,7 +1,6 @@
 """One process that keeps every registered folder in sync (`texloom start`).
 
-Each folder runs as its own task with its own connection, watcher and settings (from its
-`.texloom/config.json`). The folder list is re-read every few seconds, so folders added
+Each folder runs as its own task with its own connection, watcher and settings (config.py). The folder list is re-read every few seconds, so folders added
 or left while it runs are picked up. A folder that fails is retried on its own; the
 others carry on. Log lines are prefixed with the folder's name.
 """

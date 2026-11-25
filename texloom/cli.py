@@ -9,6 +9,7 @@
   texloom list | add <dir> | leave <dir>          the folder list (clone and new add to it)
   texloom run   <dir> --git                       also keep the folder's git repository in step (any host)
   texloom allow <dir>                             review lines that run programs; allow them with --shell-escape
+  texloom settings <dir> [KEY=VALUE ...]          this computer's settings for a folder (compile, engine, …)
   texloom mcp   <dir|link> [--name NAME] [--suggest-only]  MCP server: an agent edits/comments as a collaborator
   texloom lsp [dir]                               language server: the Review tab's comments in your editor
   texloom comments <dir> [--mine] [--all]         the Review tab's comments; also: reply <dir> ID TEXT, resolve <dir> ID
@@ -29,7 +30,8 @@ from .crypto import Keys
 from .folder import FolderSync
 from . import registry, tls
 # the folder's settings, from config.py (still imported from here by scripts)
-from .config import DEFAULT_CONFIG, adopt, browser_link, config_path, load, load_config, save, side_replica, update_config  # noqa: F401
+from .config import (DEFAULT_CONFIG, LOCAL_SETTINGS, adopt, browser_link, config_path, load, load_config, save,  # noqa: F401
+                     settings_path, side_replica, update_config)
 from .daemon import CURRENT, FolderProblem, FolderTag, lock_folder
 from .paths import state_dir
 from .replica import Replica
@@ -151,7 +153,7 @@ def comments_command(a: argparse.Namespace) -> None:
     """`texloom comments DIR` lists from this computer's copy of the project (as up to date as its
     last sync); `reply` and `resolve` connect with a copy of their own, as `texloom mcp` does, so
     they work while the app or `texloom run` is syncing the folder."""
-    from .comments import read, reply, resolve
+    from .comments import author, read, reply, resolve
     from .listsync import name_in
     act = a.args[0] if a.args[0] in ("reply", "resolve") else "list"
     rest = a.args[1:] if act != "list" else a.args
@@ -168,11 +170,11 @@ def comments_command(a: argparse.Namespace) -> None:
         for c in items:
             where = f"{c.file}:{c.line}" if c.line else f"{c.file} (text changed)"
             state = " [resolved]" if c.resolved else ""
-            print(f"{where}: {c.kind} by {c.by}{' ✓' if c.verified else ''}{state}  (id {c.id})")
+            print(f"{where}: {c.kind} by {author(c.by, c.verified)}{state}  (id {c.id})")
             body = c.text if c.kind == "comment" else (f"replace {c.quote!r} with {c.text!r}" if c.quote else f"insert {c.text!r}")
             print("    " + body.replace("\n", "\n    "))
             for rp in c.replies:
-                print(f"    ↳ {rp.by}{' ✓' if rp.verified else ''}: {rp.text}")
+                print(f"    ↳ {author(rp.by, rp.verified)}: {rp.text}")
         return
     if not keys.writable:
         sys.exit("this folder has a read-only link: it can't reply or resolve")
@@ -337,6 +339,32 @@ def allow_programs(d: Path, yes: bool) -> None:
     print(f"Allowed {len(found)} line(s). A running `texloom run` uses them from its next compile.")
 
 
+def settings_command(d: Path, changes: list[str]) -> None:
+    """Show this computer's settings for a folder, or change them (KEY=VALUE, the value as JSON:
+    compile=true, engine="xelatex", latexmk_args=["-pdfxe"]; a bare word is taken as a string)."""
+    import json
+    if not config_path(d).exists():
+        sys.exit(f"{d} isn't a texloom folder")
+    if changes:
+        new = {}
+        for c in changes:
+            k, eq, v = c.partition("=")
+            if not eq or k not in LOCAL_SETTINGS or k == "allowed":
+                sys.exit(f"not a setting: {c!r} (settings: {', '.join(k for k in LOCAL_SETTINGS if k != 'allowed')}; "
+                         "use `texloom allow` for the lines that may run programs)")
+            try:
+                new[k] = json.loads(v)
+            except ValueError:
+                new[k] = v
+        update_config(d, **new)
+        print("Changed. A running texloom picks them up when the folder restarts (the app restarts it).")
+    cfg = load_config(d)
+    for k in LOCAL_SETTINGS:
+        if k != "allowed":
+            print(f"{k} = {json.dumps(cfg[k])}")
+    print(f"({len(cfg['allowed'])} line(s) allowed to run programs; kept in {settings_path(d)})")
+
+
 def projects_command(a) -> None:
     from .listsync import ListError, ListKey, explain, local_folders, not_here, save_link, sync, sync_this_computer, unlock_with_password
     code = a.code or (os.environ.get("TEXLOOM_CODE") if a.action == "new" else None) or None
@@ -433,6 +461,9 @@ def main() -> None:
     p = sub.add_parser("allow", help="review the lines that run programs, and let them run in shell-escape compiles")
     p.add_argument("dir", type=Path, nargs="?", default=Path("."))
     p.add_argument("-y", "--yes", action="store_true", help="don't ask")
+    p = sub.add_parser("settings", help="this computer's settings for a folder: show, or change with KEY=VALUE")
+    p.add_argument("dir", type=Path)
+    p.add_argument("changes", nargs="*", metavar="KEY=VALUE")
     p = sub.add_parser("sync", help="sync once and exit")
     p.add_argument("dir", type=Path, nargs="?", default=Path("."))
     p.add_argument("--git", action="store_true", help="also commit, merge upstream commits and push, once")
@@ -510,6 +541,8 @@ def main() -> None:
               else "That folder isn't on the list.")
     elif a.cmd == "allow":
         allow_programs(a.dir, a.yes)
+    elif a.cmd == "settings":
+        settings_command(a.dir, a.changes)
     elif a.cmd == "sync":
         try:
             asyncio.run(run(a.dir, False, once=True, git=a.git))

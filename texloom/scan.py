@@ -8,7 +8,9 @@ these lines only matter
 
 This catches what is written out plainly. TeX can assemble any command from macros, so
 with full shell escape a careful author can still hide one: the guarantee is shell
-escape off (or restricted, which only allows TeX Live's list of safe programs).
+escape off (or restricted, which only allows TeX Live's list of safe programs). So
+shell_escape true runs approved lines in restricted mode, with the programs they name
+(programs_of) added to that list: a hidden command can run only those.
 
 Keep the patterns in sync with programRequests() in web/src/texscan.ts.
 """
@@ -16,14 +18,13 @@ Keep the patterns in sync with programRequests() in web/src/texscan.ts.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .paths import safe_rel, state_dir
+from .paths import safe_rel
 
 if TYPE_CHECKING:
     from pycrdt import Map
@@ -150,18 +151,42 @@ def added(path: str, old: str | None, new: str) -> list[Finding]:
     return [f for f in scan_text(path, new) if f.text not in before]
 
 
+# --- which programs approved lines run (shell_escape: true) ----------------------
+# Packages that run programs, and the programs they run.
+PACKAGE_PROGRAMS = {
+    "minted": ("latexminted", "pygmentize"), "pythontex": ("pythontex", "pythontex.py", "pythontex3"),
+    "sagetex": ("sage",), "gnuplottex": ("gnuplot",), "svg": ("inkscape",),
+    "auto-pst-pdf": ("latex", "dvips", "ps2pdf", "pdfcrop"), "bashful": ("bash",), "pyluatex": ("python3", "python"),
+}
+_COMMAND = re.compile(r"(?:\\write\s*18\s*\{|\\(?:Delayed)?ShellEscape\s*\{|\\input\s*\{?\s*\"?\s*\|\s*\"?)\s*([A-Za-z0-9._+-]+)")
+_PROGRAM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
+
+
+def programs_of(findings: list[Finding]) -> set[str]:
+    """The programs the lines run, as far as they say: the first word of a command written out
+    (\\write18{pygmentize …}), and those of the packages known to run programs (minted…). What a
+    line builds from macros, or Lua's os.execute, names none."""
+    out: set[str] = set()
+    for f in findings:
+        out |= {m.group(1) for m in _COMMAND.finditer(f.text)}
+        if m := re.search(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}", f.text):
+            for pkg in m.group(1).split(","):
+                out |= set(PACKAGE_PROGRAMS.get(pkg.strip(), ()))
+    return {p for p in out if _PROGRAM.fullmatch(p)}
+
+
 # --- approvals for shell-escape compiles (per folder, never shared) -------------
-def _allowed_file(root: Path) -> Path:
-    return state_dir(root) / "allowed.json"
-
-
+# Kept with the folder's other settings in your own configuration folder (config.py), never in the
+# folder, where someone sharing it through Dropbox or the like could write them.
 def allowed(root: Path) -> set[str]:
+    from .config import load_config
     try:
-        return set(json.loads(_allowed_file(root).read_text()))
-    except (OSError, ValueError):
+        keys = load_config(root).get("allowed")
+    except (OSError, ValueError, KeyError):
         return set()
+    return {k for k in keys if isinstance(k, str)} if isinstance(keys, list) else set()
 
 
 def allow(root: Path, keys: set[str]) -> None:
-    p = _allowed_file(root)
-    p.write_text(json.dumps(sorted(keys)))
+    from .config import update_config
+    update_config(root, allowed=sorted(keys))

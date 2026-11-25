@@ -483,7 +483,7 @@ the commands with `uv run`.)
 
 **Several folders, and starting at login.** `clone` and `new` add the folder to this
 computer's folder list. One `texloom start` then keeps every folder on the list in sync:
-each with its own settings (`.texloom/config.json`: compile, git, …), log lines labelled
+each with its own settings (compile, git, …: `texloom settings <dir>`), log lines labelled
 with the folder's name, and folders added or left while it runs picked up within seconds.
 `texloom autostart on` starts it at login (a launchd agent on macOS, a systemd user
 service on Linux, a hidden script in the Startup folder on Windows) and writes a log
@@ -509,27 +509,47 @@ collaborators type in their browsers. With `--compile`:
 | `texloom storage <dir> server\|relay` | keep an encrypted copy on the server, or nothing |
 | `texloom links <dir>` | print the project code and the edit / read-only links |
 | `texloom allow <dir>` | review lines that run programs; allow them for `--shell-escape` compiles |
+| `texloom settings <dir> [KEY=VALUE …]` | this computer's settings for the folder (compile, engine, latexmk_args, …) |
 
-Per-folder options are in `<dir>/.texloom/config.json`, which only you can read. They are
-never shared:
+Per-folder options are kept in TeXLoom's own settings folder on this computer, never in the
+synced folder (someone sharing the folder through Dropbox or the like could write them there),
+and never shared. `texloom settings <dir>` shows them; `texloom settings <dir> KEY=VALUE …`
+changes them (values as JSON):
 
-```json
-{ "compile": false, "engine": null, "latexmk_args": [], "shell_escape": false, "confine": true, "label": "", "create_code": "" }
 ```
+compile = false   engine = null   latexmk_args = []   shell_escape = false   confine = true   git = false   label = ""
+```
+
+They belong to the folder where it is, and its project: a folder that is moved or renamed
+starts over with these defaults. (Up to 0.4.55 they were in `<dir>/.texloom/config.json`: the
+first run of a later version brings them over, but from a folder that may be shared, such as
+one in Dropbox, only `compile`, `engine` and `label`; the log says which must be set again.)
+The project link and `create_code` stay in `<dir>/.texloom/config.json`, which only you can read.
 
 Collaborators write the document, so compiling is locked down by default:
 - **No running programs:** TeX may not run programs (`-no-shell-escape`).
-- **No writing outside the project:** TeX's "paranoid" file access.
+- **No writing outside the project:** TeX's "paranoid" file access; on macOS the sandbox
+  (below) also lets a compile write only in the project (not its `.texloom` or `.git`),
+  its build folder, TeX's caches and the temporary folders.
 - **No reading outside the project:** a compile may read only the project, TeX's own files
-  and fonts, and not the project's `.texloom` folder (which holds its keys). TeX's paranoid
-  mode doesn't ensure this (TeX Live 2026 reads `\input{../../notes}`, absolute paths and
-  dot files; LuaLaTeX can read anything), so two more layers do:
+  and fonts (installed fonts; in home folders, only the font folders such as
+  `~/Library/Fonts`), and not the project's `.texloom` folder (which holds its keys). TeX's
+  paranoid mode doesn't ensure this (TeX Live 2026 reads `\input{../../notes}`, absolute
+  paths and dot files; LuaLaTeX can read anything), so two more layers do:
   - **A sandbox** hides home folders and mounted volumes, except those places: macOS's
     `sandbox-exec`, or on Linux `bwrap` (bubblewrap) when it is installed and allowed to
     run. Windows has none.
-  - **A check, everywhere:** each TeX, BibTeX and biber run records what it read. If a
-    compile read anything else, its PDF and log aren't shared with collaborators (they
-    could contain what was read) and its working files are deleted.
+  - **A check, everywhere:** each TeX, BibTeX and biber run records what it read, and the
+    `.xdv`/`.dvi` that xdvipdfmx (XeLaTeX) or dvips turn into the PDF is read for specials
+    and fonts that name files (`pdf:fstream`, `pdf:image`, `PSfile=`, …). If a compile read
+    anything else, or a record was rewritten while it ran (a document can `\openout` its own
+    `.fls`), its PDF and log aren't shared with collaborators (they could contain what was
+    read) and its working files are deleted.
+
+  What the check can't see: Lua code in LuaLaTeX reading through `loadfile`, `dofile` and
+  the like, which TeX doesn't record. The sandbox stops those reads; on Windows, and on Linux
+  without bubblewrap, nothing does, so compile LuaLaTeX documents there only for projects
+  whose editors you trust.
 
   `"confine": false` turns both off, for projects whose collaborators you trust.
 - **No rc files:** latexmk ignores rc files (`-norc`), because a `latexmkrc` is Perl.
@@ -538,17 +558,29 @@ Collaborators write the document, so compiling is locked down by default:
   `.idea` (however it's capitalised), nor any path outside the folder.
 
 **Running programs.** Some packages need TeX to run programs (shell escape). Choose how
-much with `"shell_escape"` in `.texloom/config.json`, or on the command line:
+much with the `shell_escape` setting (in the app, or `texloom settings`), or on the command line:
 - `false` (default): nothing runs. Browser compiles are always like this.
 - `"restricted"` / `--shell-restricted`: only TeX Live's list of safe programs (enough for
   e.g. `epstopdf`, not for minted).
-- `true` / `--shell-escape`: anything the document asks for, e.g. minted. Because anyone
-  with an edit link writes the document, lines that run programs must be approved first:
+- `true` / `--shell-escape`: the programs that lines you approve run, e.g. minted's. Because
+  anyone with an edit link writes the document, lines that run programs must be approved first:
   `texloom allow <dir>` lists them (`\write18`, minted, pythontex, Lua `os.execute`, …) in
   every file, whatever its name, pictures and other binary files included (TeX can read any
   of them), and allows exactly those. When a line is new or changed, that compile runs in restricted
-  mode instead, and the log says which line is waiting. The check sees commands written
-  out plainly; macros can hide one, so use `true` only for projects whose editors you trust.
+  mode instead, and the log says which line is waiting. Once they are approved, the compile
+  runs in TeX's *restricted* shell escape, with the programs those lines name added to TeX
+  Live's safe list (`pygmentize` and `latexminted` for minted, the first word of a
+  `\write18{…}`, …). The approval check only sees commands written out plainly; TeX can build
+  one from macros (`\csname write\endcsname18`) or from a file it writes while compiling, but
+  such a command can then only run those same programs. What can't be prevented: an approved
+  program that can itself run anything (a shell, Python, a TeX engine given `-shell-escape`,
+  `pygmentize -x` with a lexer file in the project) can be made to by a hidden command too;
+  Lua's `os.execute` and programs that aren't named plainly (`\write18{\mycmd}`) don't work
+  in this mode; and MiKTeX doesn't take the added programs. So use `true` only for projects
+  whose editors you trust.
+- `"unrestricted"` (only through `texloom settings`): approved lines with full shell escape,
+  for packages that need a shell, such as minted before version 3 (TeX Live 2024 and
+  earlier). Macros can hide a command from the approval check, and then run anything.
 
 When a collaborator's change writes such a line into your folder, or an `% arara:`
 directive or `% !TeX program` comment (which your own LaTeX editor may follow), the helper
@@ -659,7 +691,7 @@ texloom run ~/papers/demo --git
   never reach collaborators.
 - **Credentials:** git uses your own setup (SSH key or credential helper). The TeXLoom
   server isn't involved, so the project stays end-to-end encrypted.
-- **Options** in `.texloom/config.json`: `"git": {"interval": 60, "quiet": 120, "push": true}`.
+- **Options:** `texloom settings <dir> 'git={"interval": 60, "quiet": 120, "push": true}'`.
   `texloom sync <dir> --git` does one round and exits (e.g. from cron).
 
 To set it up from an existing repository: `git clone <repo> ~/papers/demo`, then

@@ -30,9 +30,9 @@ from .textpos import U16, Char, length_u16, u16_of
 from .invariants import broken, checking, first_difference, well_formed
 from .replica import BLOB_RE, Replica
 from .confine import OUTSIDE_NOTE, forget_reads, outside_reads, sandboxed
-from .scan import SCANNED, added, allowed, binaries_on_disk, shell_lines
+from .scan import SCANNED, added, allowed, binaries_on_disk, programs_of, shell_lines
 from .xr import compile_order, external_documents
-from .paths import STATE, latexmk_command, main_file, replace_file, safe_rel, tex_env, tex_names_refused
+from .paths import STATE, latexmk_command, main_file, replace_file, restricted_programs, safe_rel, tex_env, tex_names_refused
 from .folderrules import (
     Bases,
     conflict_copy,
@@ -1106,7 +1106,7 @@ class FolderSync:
         # (-no-shell-escape), may not write outside the project (openout "paranoid") or read
         # outside it (texloom/confine.py), and latexmk ignores rc files (-norc; latexmkrc is Perl).
         shell, note = self.shell_mode()
-        extra.append(shell)
+        extra += shell
         build = self.r.dir / "build"
         if self._clean_build:  # compile from scratch: drop the last run's .aux, .bbl, …
             self._clean_build = False
@@ -1172,19 +1172,32 @@ class FolderSync:
                 if old and old not in new and old not in stored:
                     await self.r.drop_output(old)
 
-    def shell_mode(self) -> tuple[str, str]:
-        """The latexmk shell-escape flag for this compile, and a note for the log.
+    def shell_mode(self) -> tuple[list[str], str]:
+        """latexmk's shell-escape arguments for this compile, and a note for the log.
 
-        Full shell escape runs only lines you have approved (`texloom allow`): when a line
-        that asks to run programs is new, this compile uses restricted mode instead."""
+        shell_escape true runs only lines you have approved (`texloom allow`), and in TeX's
+        restricted mode, with the programs those lines name (minted's pygmentize…) added to the
+        programs it may run: a command a line builds from macros, or one a file written during
+        the compile asks for, can then only run those. When a line that asks to run programs is
+        new, this compile uses plain restricted mode. "unrestricted" (only through `texloom
+        settings`, for packages that need a shell, such as minted before version 3) runs approved
+        lines with full shell escape, which macros can get around."""
         mode = self.opts["shell_escape"]
         if mode == "restricted":
-            return "-shell-restricted", ""
+            return ["-shell-restricted"], ""
         if not mode:
-            return "-no-shell-escape", ""
-        new = [f for f in shell_lines(self.r.files, binaries_on_disk(self.root, self.r.bin)) if f.key not in allowed(self.root)]
+            return ["-no-shell-escape"], ""
+        found = shell_lines(self.r.files, binaries_on_disk(self.root, self.r.bin))
+        ok = allowed(self.root)
+        new = [f for f in found if f.key not in ok]
         if not new:
-            return "-shell-escape", ""
+            if mode == "unrestricted":
+                return ["-shell-escape"], ""
+            programs = sorted(programs_of(found) - set(restricted_programs()))
+            if not programs:
+                return ["-shell-restricted"], ""
+            listed = ",".join([*restricted_programs(), *programs])
+            return ["-shell-restricted", "-e", f"$ENV{{shell_escape_commands}} = q({listed});"], ""
         keys = frozenset(f.key for f in new)
         if keys != self._warned_shell:
             self._warned_shell = keys
@@ -1192,7 +1205,7 @@ class FolderSync:
                         "Check them, then run `texloom allow %s` to let them run.",
                         len(new), "\n  ".join(f.describe() for f in new[:10]), self.root)
         where = ", ".join(f"{f.path}:{f.line}" for f in new[:5]) + (" …" if len(new) > 5 else "")
-        return "-shell-restricted", (f"compiled without shell escape: new lines ask to run programs ({where}). "
+        return ["-shell-restricted"], (f"compiled without shell escape: new lines ask to run programs ({where}). "
                                      f"The person running texloom there can allow them with `texloom allow`.")
 
     # --- main loop -------------------------------------------------------------

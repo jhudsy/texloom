@@ -64,7 +64,7 @@ def folders() -> list[Path]:
 
 def _write(paths: list[Path]) -> None:
     _cache.forget()
-    write_json(_file(), {"folders": [str(p) for p in paths]}, indent=2)
+    write_json(_file(), {"folders": [str(p) for p in paths]}, private=True, indent=2)  # (where your projects are: yours only)
 
 
 def add(d: Path) -> bool:

@@ -28,19 +28,30 @@ let timer, name = ''
 
 function style() { return vscode.workspace.getConfiguration('texloom').get('comments') }
 
+// Marks that look like the ✓ after a verified author's name (collaborators choose their own names),
+// and invisible characters that could hide where one is: taken out of names (as texloom/comments.py does)
+const CHECKS = /[✓✔✅☑√⍻\u{1f5f8}\u{1f5f9}☐☒✗✘­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮⁠-⁯ㅤ︀-️﻿ﾠ\u{1d173}-\u{1d17a}\u{e0000}-\u{e0fff}]/gu
+const who = (n, v) => {
+  const name = String(n).replace(CHECKS, '').trim() || '?'
+  return v ? `${name} ✓` : name
+}
+// Collaborators write the comments: shown as plain text, never as Markdown (which could load pictures)
+const plain = (text) => new vscode.MarkdownString().appendText(String(text))
+
 function body(c) {
-  const who = (n, v) => (v ? `${n} ✓` : n)
   if (c.kind === 'suggestion') {
-    const md = new vscode.MarkdownString(c.quote ? `Suggested change: replace\n\n\`\`\`\n${c.quote}\n\`\`\`\nwith\n\n\`\`\`\n${c.text}\n\`\`\`` : `Suggested insertion:\n\n\`\`\`\n${c.text}\n\`\`\``)
+    const md = new vscode.MarkdownString()
+    if (c.quote) md.appendText('Suggested change: replace').appendCodeblock(String(c.quote)).appendText('with').appendCodeblock(String(c.text))
+    else md.appendText('Suggested insertion:').appendCodeblock(String(c.text))
     md.appendMarkdown('\n\n_Accept or reject it in the Review tab, where you can see the change._')
     return { body: md, mode: vscode.CommentMode.Preview, author: { name: who(c.by, c.verified) } }
   }
-  return { body: new vscode.MarkdownString(c.text), mode: vscode.CommentMode.Preview, author: { name: who(c.by, c.verified) } }
+  return { body: plain(c.text), mode: vscode.CommentMode.Preview, author: { name: who(c.by, c.verified) } }
 }
 
 function comments(c) {
   const first = body(c)
-  return [first, ...c.replies.map((rp) => ({ body: new vscode.MarkdownString(rp.text), mode: vscode.CommentMode.Preview, author: { name: rp.verified ? `${rp.by} ✓` : rp.by } }))]
+  return [first, ...c.replies.map((rp) => ({ body: plain(rp.text), mode: vscode.CommentMode.Preview, author: { name: who(rp.by, rp.verified) } }))]
 }
 
 async function show(editor) {
