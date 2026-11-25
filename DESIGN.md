@@ -111,11 +111,11 @@ without compiling.
 
 | client → server | meaning |
 |---|---|
-| `{t:"hello", since, app, v, pages?, last?}` | send me everything after sequence number `since`; `pages: 1` = a long log may come in pages (below); `last` = `[q, sha256]`, the newest change (not a snapshot) this copy has from the server, received or acknowledged, with the SHA-256 of its `d` (base64url): the server answers `lost` if its log ends before `q` or holds another change there; `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes (one without `v` can't understand that, so it is first held for 10 minutes, hearing nothing, rather than letting it reconnect at once). Project lists check `X-TeXLoom: app/version` the same way (426). |
+| `{t:"hello", since, app, v, pages?, last?}` | send me everything after sequence number `since` (a connection's first message, within 10 s, or it is closed); a long log comes in pages (below; `pages: 1` is what apps since 0.4.33 send); `last` = `[q, sha256]`, the newest change (not a snapshot) this copy has from the server, received or acknowledged, with the SHA-256 of its `d` (base64url): the server answers `lost` if its log ends before `q` or holds another change there; `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes (one without `v` can't understand that, so it is first held for 10 minutes, hearing nothing, rather than letting it reconnect at once). Project lists check `X-TeXLoom: app/version` the same way (426). |
 | `{t:"up", d, s}` | encrypted Yjs update `d` with signature `s`; stored and broadcast |
 | `{t:"snap", upto, d, s}` | compaction: encrypted full state replacing log entries ≤ `upto`; `s` signs `"snap:<upto>:" ‖ d` |
-| `{t:"aw", d}` | ephemeral, encrypted awareness (cursors, names); relayed, never stored |
-| `{t:"p2p", d, s?, to?}` | encrypted peer-to-peer payload (below); relayed to one peer or all, never stored |
+| `{t:"aw", d}` | ephemeral, encrypted awareness (cursors, names); relayed, never stored; past 32 KiB/s a connection's are dropped |
+| `{t:"p2p", d, s?, to?}` | encrypted peer-to-peer payload (below); relayed to one peer or all, never stored; `s` must be a valid writer's signature (else dropped), and one without is paced (Per-connection limits, below) |
 | `{t:"mode", m, ts, s}` | set storage mode `"server"` or `"relay"`; `s` signs `"mode:<m>:<ts>"`, valid for 10 min; only from the owner |
 | `{t:"revoke", p, s}` | owner only: revoke personal key `p`; `s` signs `"revoke:" ‖ p` |
 | `{t:"move", c, ts, s}` | owner only: move the stored project to creation code `c` (issue #32); `s` signs `"move:<c>:<ts>"`, valid for 10 min. The server checks the code is valid and not lapsed, has room for the project and that the project is within the size limit for it, then makes it the project's owner code and recounts both codes. Answered with `moved`, or an `err` whose code is `move-bad-code`, `move-no-room` (with `need`, `free`), `move-too-big` (`need`, `max`), `move-not-stored`, `move-rejected` or `move-busy` (after five wrong codes on one connection). On a private server, someone holding a valid code may connect to a project whose code lapsed, so that it can be moved |
@@ -124,7 +124,7 @@ without compiling.
 | server → client | meaning |
 |---|---|
 | `{t:"log", entries:[{q,d,s}], head, floor, mode, you, peers, store, rv, more?}` | catch-up reply to `hello` (a snapshot, if any, comes first); `you` = this connection's peer id; `floor` = entries up to here were evicted; `rv` = revocations; `lost` = this log isn't the one the hello's `last` came from (the app catches up from the start, as after eviction); `more` = the rest follows as `logmore` |
-| `{t:"logmore", entries, more?}` | the next page of a catch-up, to an app whose `hello` had `pages: 1`; the last has no `more` |
+| `{t:"logmore", entries, more?}` | the next page of a catch-up; the last has no `more` |
 | `{t:"up", q, d, s}` | someone else's update |
 | `{t:"ack", q}` | your update was stored at sequence `q` |
 | `{t:"aw", d, from}` | someone's awareness |
@@ -141,7 +141,7 @@ Ciphertext = `iv(12 bytes) ‖ AES-256-GCM(plaintext)`.
 **Offline:** each replica keeps an outbox of local updates (merged with
 `Y.mergeUpdates`) that the server hasn't acknowledged yet, plus the last sequence
 number it has seen. On reconnect it sends `hello`, applies what it missed, then
-flushes the outbox. A log over 8 MiB goes to apps that take pages a page at a time (about
+flushes the outbox. A log over 8 MiB goes a page at a time (about
 8 MiB of stored entries each, at least one entry), so a catch-up needs a page's memory on the
 server whatever the log's size; the app applies each page as it comes and does what follows a
 catch-up (moving `since`, flushing the outbox, compacting) only after the last. Yjs updates are idempotent and commutative, so order and
@@ -211,9 +211,11 @@ command only when its user *changes* the setting, queuing it if offline; it neve
 "corrects" the server on connect, so a stale replica can't undo someone else's
 switch. Switching back to `server` re-uploads a full snapshot and all blobs.
 
-**Private servers** (`--private`). A connection does nothing until its `hello` is accepted (a silent
-one is dropped after 15 s). A project is admitted if its owner is a current creation code. One with no
-code yet (unregistered, or `default`) gets the first valid code offered; one whose code has
+**Private servers** (`--private`). A connection does nothing until its `hello` is accepted (on any
+server, one that says nothing is dropped after 10 s). A project is admitted if its owner is a current
+creation code. One with no code yet (unregistered, or `default`) is admitted with a valid code, and
+bound to it by its first signed write (a stored change or an upload): anyone can make up a project
+id, so connecting with a code binds nothing. One whose code has
 lapsed is refused until it's renewed, and can't be taken over by another code. A refusal is
 `{t:"err", code, denied:true}` followed by a close. Open connections are checked again about once a
 minute. File uploads and downloads and new project lists follow the same rule.
@@ -250,10 +252,13 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   size change.
 - **Replays:** an identical `up` (same ciphertext hash) is acked with its existing sequence
   number and not stored again; hashes of updates a snapshot replaced are kept (`gone`),
-  so those can't be stored again either. Only the last 10,000 sequence numbers per project
-  are remembered, each counting 100 bytes against the allowance, and eviction, purging or
-  going relay-only forgets them. An older replay is harmless: updates are idempotent, and
-  it counts against the allowance only until the next snapshot.
+  so those can't be stored again either (anyone in a project's room hears its signed updates).
+  Only the last 10,000 sequence numbers per project are remembered, each counting 100 bytes
+  against the allowance; eviction, purging and going relay-only remember the dropped log's too
+  (else a project's whole history could be replayed into it once emptied), and updates of 64 KiB
+  or more are remembered for good (`kept`). An older small replay is harmless: updates are
+  idempotent, it counts against the allowance only until the next snapshot, and clients compact
+  every few hundred entries.
 - **Where files are:** the content of stored files is kept outside the database, in a folder
   (`<files>/<project>/<id>`) or an S3-compatible bucket (`server/files.py`); the table `stored`
   records each one's size and kind. An upload is written to the store first and recorded
@@ -288,7 +293,9 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   again, as its writers may have uploaded since.
 - **Memory:** big work shares one budget, 512 MiB unless set (`memory`, `Budget`): catch-up replies (about 4×
   their stored size, or a page's), large frames being handled (4× their size), uploads being
-  checked and stored, and arXiv imports. Work that doesn't fit waits its turn, except a large
+  checked and stored, and arXiv imports (24 MiB each, two at a time: the download and the zip go
+  through temporary files). One address (an IPv6 /64) may hold at most two catch-ups' worth of it,
+  and a reader taking a large reply slower than 64 KiB/s is cut off. Work that doesn't fit waits its turn, except a large
   frame, which is answered "server busy" (the client tries again). With frames still arriving
   (128 MiB), replies waiting to go out (128 MiB) and the arXiv cache (32 MiB), this keeps the
   service under its `MemoryMax` (1G in `deploy/install.sh`). WebSocket frames are read whole
@@ -314,11 +321,19 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   with `snapped`, and its sender then deletes the uploads of the entries it replaced. In a
   relay-only project a big change goes to the peers online as a `p2p` update instead.
 - **Per-connection limits:** frame-size caps per message type, a message/byte rate limit,
-  at most 5 `hello`s per 10 s, one creation-code check, and a global connection cap.
-  Peers that stop reading are disconnected after 20 s rather than stalling broadcasts.
-  Rows for projects that store nothing (relay mode, revocations) come out of a
-  server-wide budget; at most 1000 revocations per project. nginx adds per-IP limits on
-  code checks, uploads and connections.
+  at most 5 `hello`s per 10 s, one creation-code check, a global connection cap, 32
+  connections per address (an IPv4 address, or an IPv6 /64, as the reverse proxy's `X-Real-IP`
+  says) and 256 per project. Peers that stop reading are disconnected after 20 s rather than
+  stalling broadcasts. What's relayed unsigned (`aw`, and `p2p` without `s`) needs only the
+  project's id, so it can't get anyone cut off: a recipient already holding 2 MiB unsent, or
+  slow to take the last one, is skipped. It is paced as bytes delivered (size × recipients):
+  12 MiB/s per connection (32 MiB at once; the apps pace a file's pieces at 96 MiB per 10 s) and
+  32 MiB/s per project; past that its sender isn't read from for a while, and small messages are
+  dropped rather than waited for. Rows for projects that store nothing (relay mode, revocations)
+  come out of a server-wide budget; at most 1000 revocations per project. Ids must be in the one
+  base64url spelling clients use (each id has four), so nothing kept by id can be sidestepped.
+  Request bodies other than uploads are read whole only up to 260 KiB. nginx adds per-client
+  limits (an IPv4 address, or an IPv6 /64) on code checks, uploads and connections.
 
 **Folder hardening.** Every path from the project goes through `safe_rel`
 (`texloom/paths.py`) in the helper and `cleanPath` (`web/src/projectfiles.ts`) in the
@@ -501,7 +516,9 @@ them (and a third as a plain collaborator); with `TEXLOOM_NO_TURNS=1` it shows t
    checks it against the index's SHA-512 as it streams to disk, and unpacks only that
    package's run files under `/var/lib/texloom/texlive`. The cache stays under `--texlive-max`:
    to make room, the packages used least recently go first (last use is recorded hourly). A
-   package that couldn't be fetched isn't tried again for 10 minutes, and nginx limits each
+   package that couldn't be fetched isn't tried again for 10 minutes; one address (an IPv6 /64)
+   may have at most 400 packages or 1 GiB fetched an hour, and everyone together the cache's size
+   an hour, so the cache can't be made to thrash; and nginx limits each
    address: past 400 requests in quick succession (a first compile asks for many, one at a
    time) it slows them to 20 a second rather than refusing them, as the engine takes only a
    404 as a miss. Files are served with a one-year immutable cache (the URL names the
@@ -806,7 +823,9 @@ one to the projects it names.
   names its project's server (`s`), and every creation code its server (`code:<origin>`), since
   "the server keeping the list" is no longer one server.
 - `DELETE` retires an entry: its contents go, but its id answers 410 until it is purged, so a
-  device with a replaced (perhaps leaked) link can't start the list again under that link. Replacing
+  device with a replaced (perhaps leaked) link can't start the list again under that link. A retired
+  id is kept a year and counted: an owner with 256 (100,000 in all on a server where anyone may make
+  lists) can make no new list until old ones go. Replacing
   a link retires every way in, because anyone holding the old link can read what it records. The
   desktop app can't use a passkey, so it opens `/#unlock-for-app`, and the page returns the sync
   link through `texloom://sync?link=…` (at once if the browser already has the list; **Use in the
@@ -1104,7 +1123,7 @@ Every place that handles something older carries a marker just above it, saying 
 before it can go (issue 27):
 
 ```
-# compat(app 0.4.33): apps that don't take pages get a long log whole
+# compat(refused 0.4.30): apps too old to say their version ("unknown" on the admin page): remove _hold and HOLD_UNVERSIONED
 // compat(data 0.4.35): the plain, unsigned storage value; converted on read: its owner signs it
 ```
 

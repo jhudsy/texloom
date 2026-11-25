@@ -31,10 +31,13 @@ import sqlite3
 import tarfile
 import tempfile
 import time
+from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 from aiohttp import ClientError, ClientResponse, ClientSession, ClientTimeout, web
+
+from .wire import client_address
 
 log = logging.getLogger("texloom.texlive")
 
@@ -49,6 +52,12 @@ MAX_PACKAGE = 300 * 1024 * 1024  # bigger containers (a few font collections) ar
 WAIT = 25  # seconds a request waits for an install (the engine gives up after 30)
 FAILED_WAIT = 600  # seconds a package that couldn't be fetched isn't tried again (each try asks every mirror)
 TOUCH_EVERY = 3600  # seconds between recordings of a package's last use (for eviction)
+# Anyone can ask for any file, and each first ask fetches its package, perhaps pushing others out
+# of the cache: per address (an IPv6 /64), at most this many fetches and bytes of packages an
+# hour; and for everyone, the cache's size an hour (it can't be turned over faster than that).
+INSTALL_WINDOW = 3600
+INSTALLS_PER_ADDRESS = 400
+INSTALL_BYTES_PER_ADDRESS = 1024**3
 
 # kpathsea format number -> (default suffixes, folders under texmf-dist in search order).
 # Numbers follow kpse_file_format_type in kpathsea/types.h.
@@ -139,6 +148,8 @@ class TexLive:
         self.used = 0  # bytes of installed packages' files on disk (what max_bytes caps)
         self.last_used: dict[str, float] = {}  # package -> when a file of it was last served
         self.failed: dict[str, float] = {}  # package -> when fetching it last failed
+        self.fetched: dict[str, deque[tuple[float, int]]] = defaultdict(deque)  # address -> (when, bytes) of fetches asked for
+        self.turnover: deque[tuple[float, int]] = deque()  # (when, bytes) of every fetch asked for
         self._forget_other_release()
         self._open()
 
@@ -438,6 +449,27 @@ class TexLive:
                     shutil.copyfileobj(src, out)
                 tmp.replace(dest)
 
+    def _may_fetch(self, address: str | None, pkg: str) -> bool:
+        """Whether a request from `address` may start fetching `pkg` (see INSTALL_WINDOW); counted if so."""
+        row = self.db.execute("SELECT size FROM pkgs WHERE name=?", (pkg,)).fetchone()
+        size = row[0] if row else 0
+        now = time.monotonic()
+        for q in (self.turnover, *([self.fetched[address]] if address else [])):
+            while q and now - q[0][0] > INSTALL_WINDOW:
+                q.popleft()
+        if len(self.fetched) > 10000:  # forget addresses with nothing recent (bounded memory)
+            for k in [k for k, q in self.fetched.items() if not q]:
+                del self.fetched[k]
+        if sum(n for _, n in self.turnover) + size > max(self.max_bytes, MAX_PACKAGE):
+            return False
+        if address:
+            mine = self.fetched[address]
+            if len(mine) >= INSTALLS_PER_ADDRESS or sum(n for _, n in mine) + size > INSTALL_BYTES_PER_ADDRESS:
+                return False
+            mine.append((now, size))
+        self.turnover.append((now, size))
+        return True
+
     # --- HTTP ------------------------------------------------------------------------
     async def handle(self, request: web.Request) -> web.StreamResponse:
         year, fmt, name = request.match_info["year"], request.match_info["fmt"], request.match_info["name"]
@@ -453,6 +485,9 @@ class TexLive:
         if not f.is_file():
             job = self.jobs.get(pkg)
             if job is None or job.done():
+                if not self._may_fetch(client_address(request), pkg):
+                    return web.Response(status=503, text="too many TeX Live packages fetched: try again later",
+                                        headers={"Retry-After": "600", "Cache-Control": "no-store"})
                 job = self.jobs[pkg] = asyncio.create_task(self.install(pkg))
             try:
                 await asyncio.wait_for(asyncio.shield(job), WAIT)
