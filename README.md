@@ -528,17 +528,28 @@ The project link and `create_code` stay in `<dir>/.texloom/config.json`, which o
 
 Collaborators write the document, so compiling is locked down by default:
 - **No running programs:** TeX may not run programs (`-no-shell-escape`).
-- **No writing outside the project:** TeX's "paranoid" file access.
+- **No writing outside the project:** TeX's "paranoid" file access; on macOS the sandbox
+  (below) also lets a compile write only in the project (not its `.texloom` or `.git`),
+  its build folder, TeX's caches and the temporary folders.
 - **No reading outside the project:** a compile may read only the project, TeX's own files
-  and fonts, and not the project's `.texloom` folder (which holds its keys). TeX's paranoid
-  mode doesn't ensure this (TeX Live 2026 reads `\input{../../notes}`, absolute paths and
-  dot files; LuaLaTeX can read anything), so two more layers do:
+  and fonts (installed fonts; in home folders, only the font folders such as
+  `~/Library/Fonts`), and not the project's `.texloom` folder (which holds its keys). TeX's
+  paranoid mode doesn't ensure this (TeX Live 2026 reads `\input{../../notes}`, absolute
+  paths and dot files; LuaLaTeX can read anything), so two more layers do:
   - **A sandbox** hides home folders and mounted volumes, except those places: macOS's
     `sandbox-exec`, or on Linux `bwrap` (bubblewrap) when it is installed and allowed to
     run. Windows has none.
-  - **A check, everywhere:** each TeX, BibTeX and biber run records what it read. If a
-    compile read anything else, its PDF and log aren't shared with collaborators (they
-    could contain what was read) and its working files are deleted.
+  - **A check, everywhere:** each TeX, BibTeX and biber run records what it read, and the
+    `.xdv`/`.dvi` that xdvipdfmx (XeLaTeX) or dvips turn into the PDF is read for specials
+    and fonts that name files (`pdf:fstream`, `pdf:image`, `PSfile=`, …). If a compile read
+    anything else, or a record was rewritten while it ran (a document can `\openout` its own
+    `.fls`), its PDF and log aren't shared with collaborators (they could contain what was
+    read) and its working files are deleted.
+
+  What the check can't see: Lua code in LuaLaTeX reading through `loadfile`, `dofile` and
+  the like, which TeX doesn't record. The sandbox stops those reads; on Windows, and on Linux
+  without bubblewrap, nothing does, so compile LuaLaTeX documents there only for projects
+  whose editors you trust.
 
   `"confine": false` turns both off, for projects whose collaborators you trust.
 - **No rc files:** latexmk ignores rc files (`-norc`), because a `latexmkrc` is Perl.

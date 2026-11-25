@@ -175,7 +175,9 @@ ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualate
 
 # Each TeX, BibTeX and biber run appends what it read (its .fls or .blg, after a PWD line) to
 # <name>.fls-reads / <name>.blg-reads: TeX rewrites its .fls on every pass, so a document could read
-# a file on one pass and not the last. confine.outside_reads() checks them after the compile.
+# a file on one pass and not the last. confine.outside_reads() checks them after the compile (a TeX
+# run whose .fls is missing gets a MISSING line, which fails the check), and the .xdv or .dvi that
+# xdvipdfmx, dvipdfmx or dvips read (they record nothing).
 # With an output folder, latexmk runs BibTeX from inside it ("bibtex fudge"), where a bibliography
 # named relative to the document (\bibliography{../refs}) isn't found: it runs from the document's
 # folder instead (-bibfudge-), and then writes its .bbl and .blg through the path .texloom/build,
@@ -187,8 +189,10 @@ ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualate
 RECORD = (
     "use Cwd; sub texloom_run { my ($ext, $base, @cmd) = @_; "
     "local $ENV{openout_any} = q(a) if $cmd[0] eq q(bibtex); my $r = system(@cmd); "
-    "if (open(my $in, q(<), qq($base.$ext)) and open(my $out, q(>>), qq($base.$ext-reads))) "
-    "{ print $out q(PWD ), getcwd(), qq(\\n), <$in>; close $out } return $r } "
+    "if (open(my $out, q(>>), qq($base.$ext-reads))) { print $out q(PWD ), getcwd(), qq(\\n); "
+    "if (open(my $in, q(<), qq($base.$ext))) { my $c = do { local $/; <$in> } // q(); "
+    "$c .= qq(\\n) if length($c) and substr($c, -1) ne qq(\\n); print $out $c } "
+    "elsif ($ext eq q(fls)) { print $out qq(MISSING\\n) } close $out } return $r } "
     # (biber: --noconf, never a biber.conf in the project, which can name where its output goes)
     + " ".join(f"${p} = q(internal texloom_run {ext} %Y%R {p}{extra} %O %S);"
                for p, ext, extra in (("pdflatex", "fls", ""), ("xelatex", "fls", ""), ("lualatex", "fls", ""),
