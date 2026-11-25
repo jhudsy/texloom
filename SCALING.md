@@ -117,10 +117,23 @@ The plan uses the bucket as the tie-breaker, so no third machine is needed:
 5. A primary that comes back reads the lease first and rejoins as a standby.
 
 This needs a store with conditional writes (most S3-compatible ones have them; check yours) and
-clocks that are roughly right, and it is **not yet modelled**: [issue #8](https://github.com/jhudsy/texloom/issues/8)
-is where the ordering and the lease get a model before several servers run at once. A third
-machine (a small voter) is the alternative if you would rather use a standard tool such as
-Patroni, which expects three.
+clocks that run at roughly the same speed (nothing compares one machine's clock with another's). The
+design is **modelled** (`models/failover`, `scripts/check_model.py`, issue
+[#8](https://github.com/jhudsy/texloom/issues/8)), and the model settled these points before any
+code:
+
+- The standby waits at least *the most one clock may run faster than another* times the primary's
+  lease, on its own clock, after it last saw the lease change; and it claims the lease with a
+  conditional write on the version it saw, so a renewal in between makes the claim fail.
+- A suspended machine whose clock stops can wake and write for a moment after the standby has taken
+  over. Timers can't prevent that. It is harmless to the data, because an app that was told "stored"
+  by it checks, when it connects to the new primary, that the log there has the last change it knows
+  of, and sends everything again if not. So the apps' hello check is what failover depends on, and it
+  must not be weakened (the model finds a way to lose a change if the check can be fooled, and one if
+  it is removed). Using a clock that counts suspended time (`CLOCK_BOOTTIME` on Linux) shortens the
+  window.
+- A store whose conditional write isn't atomic and consistent would break all of it, so the failover
+  code has to test its store when it starts and refuse to run on one that fails.
 
 Promoting the database is half of it: traffic must follow, by changing DNS (with a short TTL) or
 through a front end that checks health. Clients already reconnect with backoff and resume from
@@ -221,6 +234,6 @@ compile service (compiling is the client's job).
 
 ## Open questions
 
-- The ordering model for several writers, and the lease above ([#8](https://github.com/jhudsy/texloom/issues/8)).
+- The ordering model for several writers (the lease above is modelled; several writers aren't: [#8](https://github.com/jhudsy/texloom/issues/8)).
 - Whether to run the database ourselves or use a managed one: it removes most of the work of
   replication, failover and backups, at a cost, and the data is encrypted either way.
