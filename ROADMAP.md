@@ -18,7 +18,9 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
 2. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:
    most of the traffic, off the relay. About 2 days.
 3. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
-   (TLA+, with the GitHub lease), before several servers run at once. 2–3 days.
+   (TLA+), before several servers run at once. The model of failover (the lease, the standby, the
+   apps' hello check) is done (`models/failover`); it fixed the timers and showed that failover
+   depends on the apps' hello check. Left: the several-servers ordering, and the client-side GitHub lease.
 4. **[Several servers at once](https://github.com/jhudsy/texloom/issues/12)** (on PostgreSQL), each
    project's connections all sent to one server (SCALING.md, "Several relays: route by project"):
    totals across projects (an owner's usage, the server's total) into the database, servers telling
