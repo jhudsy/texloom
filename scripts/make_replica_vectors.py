@@ -439,6 +439,50 @@ case("a peer asking for a file not kept here gets nothing",
      [log(0, []), p2p({"k": "breq", "id": OID})],
      {"sent": ["p2p:sv1"]}, as_="member")
 
+# A file wanted from peers is asked of one at a time (issue 16). The checks make the wait for an answer short and the order of
+# asking fixed (the lowest connection first): web/scripts/check-replica.mjs, scripts/check_replica.py. "wait" is in ms.
+def hello_from(*peers: int) -> list:
+    return [p2p({"k": "sv2", "sv": b64e(HAS_U1)}, frm=n) for n in peers]
+
+
+case("a file wanted from peers is asked of one of them, not everyone",
+     [log(0, [])] + hello_from(8, 7) + [{"getFile": FID, "expect": {"got": "waiting", "sent": ["p2p:sv1", "p2p:breq->7"]}},
+      p2p({"k": "blob", "id": FID, "b": b64e(FILE)}, frm=7)],
+     {"got": FILE.hex(), "sent": ["p2p:sv1", "p2p:breq->7"]})
+case("a peer that says it hasn't the file is followed at once by the next",
+     [log(0, [])] + hello_from(7, 8) + [{"getFile": FID, "expect": {"sent": ["p2p:sv1", "p2p:breq->7"]}},
+      p2p({"k": "bno", "id": FID}, frm=7), {"wait": 250, "expect": {"sent": ["p2p:sv1", "p2p:breq->7", "p2p:breq->8"]}},
+      p2p({"k": "blob", "id": FID, "b": b64e(FILE)}, frm=8)],
+     {"got": FILE.hex()})
+case("a peer that stays silent is followed by the next after a while, and not before",
+     [log(0, [])] + hello_from(7, 8) + [{"getFile": FID},
+      {"wait": 150, "expect": {"got": "waiting", "sent": ["p2p:sv1", "p2p:breq->7"]}},
+      {"wait": 300, "expect": {"sent": ["p2p:sv1", "p2p:breq->7", "p2p:breq->8"]}}],
+     {"got": "waiting"})
+case("a peer that sends other content than asked for counts as not having it",
+     [log(0, [])] + hello_from(7, 8) + [{"getFile": FID},
+      p2p({"k": "blob", "id": FID, "b": b64e(OTHER)}, frm=7), {"wait": 250, "expect": {"sent": ["p2p:sv1", "p2p:breq->7", "p2p:breq->8"]}}],
+     {"got": "waiting"})
+case("a peer that is sending the file in pieces is waited for, not skipped",
+     [log(0, [])] + hello_from(7, 8) + [{"getFile": FID}, {"wait": 200}]
+     + p2p_parts({"k": "blob", "id": FID, "b": b64e(FILE)}, owner, 2, frm=7)[:1]
+     + [{"wait": 200, "expect": {"got": "waiting", "sent": ["p2p:sv1", "p2p:breq->7"]}}],
+     {"got": "waiting"})
+case("when the peers asked haven't it, everyone is asked",
+     [log(0, [])] + hello_from(7) + [{"getFile": FID}, p2p({"k": "bno", "id": FID}, frm=7),
+      {"wait": 250, "expect": {"sent": ["p2p:sv1", "p2p:breq->7", "p2p:breq"]}},
+      p2p({"k": "blob", "id": FID, "b": b64e(FILE)}, frm=9)],
+     {"got": FILE.hex()})
+case("a peer that has left isn't asked",
+     [log(0, [])] + hello_from(7, 8) + [{"msg": {"t": "left", "from": 7}}, {"getFile": FID}],
+     {"got": "waiting", "sent": ["p2p:sv1", "p2p:breq->8"]})
+case("a request meant for this peer alone, for a file it hasn't got, is answered no",
+     [log(0, []), p2p({"k": "breq", "id": OID, "one": 1})],
+     {"sent": ["p2p:sv1", "p2p:bno->7"]}, as_="member")
+case("a request meant for this peer alone, for a file it has, is answered with the file",
+     [log(0, []), {"putFile": {"hex": FILE.hex()}}, p2p({"k": "breq", "id": FID, "one": 1})],
+     {"sent": ["p2p:sv1", "p2p:blob"]}, as_="member", put={"status": 503})
+
 out = {
     "about": "Made by scripts/make_replica_vectors.py; checked by scripts/check_replica.py and web/scripts/check-replica.mjs.",
     "links": {"owner": owner.fragment(), "member": member.fragment(), "reader": reader.fragment(False)},

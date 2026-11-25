@@ -16,7 +16,8 @@ import { browser, load, web } from './lib.mjs'
 
 const SERVER = 'http://test'
 browser({ location: { origin: SERVER, href: SERVER + '/', hash: '' }, WebSocket: { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 } })
-const [{ Replica }, { Keys, b64d }, { unpack }] = await load('src/replica.ts', 'src/crypto.ts', 'src/packing.ts')
+const [{ Replica, setAsking }, { Keys, b64d }, { unpack }] = await load('src/replica.ts', 'src/crypto.ts', 'src/packing.ts')
+setAsking({ one: 400, order: (peers) => [...peers].sort((a, b) => a - b) }) // how long a peer asked for a file has to answer, and in what order peers are asked: short, and fixed
 for (const k of ['log', 'info', 'warn', 'debug']) console[k] = () => {} // the cases are full of things a replica warns about
 const say = (s) => process.stdout.write(s + '\n')
 
@@ -73,7 +74,11 @@ async function sentTags(r, ws) {
   const tags = []
   for (const m of ws.sent) {
     if (m.t !== 'p2p') { tags.push(String(m.t)); continue }
-    try { tags.push('p2p:' + JSON.parse(new TextDecoder().decode(await r.keys.decrypt(b64d(m.d)))).k) } catch { tags.push('p2p:?') }
+    try {
+      const k = JSON.parse(new TextDecoder().decode(await r.keys.decrypt(b64d(m.d)))).k
+      // who a file was asked of (or refused to), the new part of asking one peer at a time
+      tags.push('p2p:' + k + (['breq', 'bno'].includes(k) && m.to !== undefined ? `->${m.to}` : ''))
+    } catch { tags.push('p2p:?') }
   }
   return tags.sort()
 }
@@ -154,6 +159,7 @@ async function runCase(c, links) {
       } else if ('ackLast' in step) await r.handle({ t: 'ack', id: lastUp(socks), q: step.ackLast })
       else if (step.refuseLast) await r.handle({ t: 'err', code: step.refuseLast, id: lastUp(socks), m: 'refused' })
       else if (step.reconnect) { r.dropped(); socks.push(fakeWs()); r.opened(socks[socks.length - 1]) }
+      else if (step.wait) await new Promise((res) => setTimeout(res, step.wait))
       else if (step.putFile) await r.putBlob(new Uint8Array(Buffer.from(step.putFile.hex, 'hex')), step.putFile.kind ?? 'file')
       else if (step.getFile) {
         delete got.v

@@ -28,9 +28,12 @@ from pycrdt import Doc, Map, Text
 
 from texloom.crypto import Keys, b64d
 from texloom.packing import unpack
+from texloom import replica as replica_module
 from texloom.replica import Replica
 
 logging.disable(logging.WARNING)  # the cases are full of things a replica warns about
+replica_module.ASK_ONE = 0.4  # how long a peer asked for a file has to answer, and in what order peers are asked: short, and fixed
+replica_module.ask_order = sorted
 SERVER = "http://test"
 
 
@@ -103,7 +106,9 @@ def sent_tags(r: Replica, ws: FakeWS) -> list[str]:
     for m in ws.sent:
         if m.get("t") == "p2p":
             try:
-                out.append("p2p:" + str(json.loads(r.keys.decrypt(b64d(m["d"]))).get("k")))
+                k = str(json.loads(r.keys.decrypt(b64d(m["d"]))).get("k"))
+                # who a file was asked of (or refused to), the new part of asking one peer at a time
+                out.append("p2p:" + k + (f"->{m['to']}" if k in ("breq", "bno") and m.get("to") is not None else ""))
             except Exception:  # noqa: BLE001
                 out.append("p2p:?")
         else:
@@ -210,6 +215,8 @@ async def run_case(c: dict, links: dict) -> list[str]:
                     r._dropped()
                     socks.append(FakeWS())
                     await r._opened(socks[-1])
+                elif "wait" in step:
+                    await asyncio.sleep(step["wait"] / 1000)
                 elif "putFile" in step:
                     await r.put_blob(bytes.fromhex(step["putFile"]["hex"]), step["putFile"].get("kind", "file"))
                 elif "getFile" in step:

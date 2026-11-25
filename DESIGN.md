@@ -192,7 +192,16 @@ clears outputs stored before they were marked. The helper erases the output it r
 asking for output only (`X-Only-Output: 1`).
 
 Blobs move the same way: `{k:"breq", id}` → `{k:"blob", id, b}`. The receiver checks
-`HMAC(key, b) == id`, so any peer may serve them.
+`HMAC(key, b) == id`, so any peer may serve them, and a file that changes meanwhile is a different
+blob with a different id: nothing served is ever half of one thing and half of another (a copy that
+is cut off fails the check and counts as not having it; the desktop writes its copies in one step,
+`replace_file`). Asked of everyone, every peer that has the file sends it and all but one copy is thrown
+away, so a client asks one connection at a time: `{k:"breq", id, one:1}` sent to a peer it has heard
+from (`to`), which answers with the file, or `{k:"bno", id}` if it hasn't it. The next peer is asked
+at once on a `bno` or a wrong answer, and after 4 s of silence (a peer sending the file in pieces
+counts as answering), up to three; then everyone is asked, as before. Apps before 0.4.61 ask everyone
+and never say `bno`: asked alone, they answer as always, or stay silent until the timeout (`ASK_ONE`,
+`ASK_PEERS`; `web/src/replica.ts`, `texloom/replica.py`; cases in `scripts/replica-vectors.json`).
 
 **Storage modes:**
 - `server` (default): the server keeps the encrypted log and blobs, so

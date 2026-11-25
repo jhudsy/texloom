@@ -35,6 +35,12 @@ const isRef = (u: Uint8Array) => u.length > REF.length && REF.every((b, i) => u[
 const refTo = (id: string) => { const j = enc.encode(JSON.stringify({ b: id })), u = new Uint8Array(REF.length + j.length); u.set(REF); u.set(j, REF.length); return u }
 const SIGNED_P2P = new Set(['upd', 'creq']) // peer-to-peer messages that carry the sender's signature (the desktop signs cack, cerr)
 const ANSWER_EVERY = 30_000 // ms: how often one connection's request for what it lacks is answered (onP2p)
+// A file wanted from peers is asked of one at a time (issue 16): with many online, asking everyone makes each send it, and
+// all but one copy is thrown away. A peer that has it answers; one that hasn't says so ("bno", from newer apps) or stays silent;
+// the next is asked after ASK_ONE ms (while pieces from it keep coming, it is still answering). After ASK_PEERS, everyone is asked.
+// (setAsking: check-replica.mjs makes these short and the order fixed.)
+const asking = { one: 4000, peers: 3, order: (peers: number[]) => peers.map((p) => [Math.random(), p] as const).sort((a, b) => a[0] - b[0]).map(([, p]) => p) }
+export const setAsking = (a: Partial<typeof asking>) => Object.assign(asking, a)
 const P2P_BLOB = 50 * 1024 * 1024 // files sent peer to peer (relay-only projects): as big as any synced file
 // A peer-to-peer message bigger than this (a whole project for a peer catching up, a file) goes
 // in pieces: the server takes frames of at most 16 MiB. As in texloom/replica.py.
@@ -124,6 +130,7 @@ export class Replica {
   readonly meta = this.doc.getMap<any>('meta')
   readonly out = this.doc.getMap<any>('out')
   readonly awareness = new awarenessProtocol.Awareness(this.doc)
+  private peerConns = new Set<number>() // the other connections to this project that have been heard from (and not left), for asking one for a file
   private presenceConn = new Map<number, number | undefined>() // which server connection each person's presence came through
   private presenceSender: number | undefined
   private presenceQueue: Promise<void> = Promise.resolve()
@@ -184,6 +191,7 @@ export class Replica {
   private missing = new Set<number>()
   private missingTries = 0
   private blobWaiters = new Map<string, ((b: Uint8Array) => void)[]>()
+  private noFile = new Map<string, Set<number>>() // file -> the peers that said they haven't got it
   private backoff = 1000
   private closed = false
   private manualDone: (() => void) | null = null
@@ -352,6 +360,7 @@ export class Replica {
     this.backoff = 1000
     const code = this.creationCode()
     this.logPending = null
+    this.peerConns.clear() // (connection numbers are per connection to the server)
     this.missing.clear() // (this catch-up finds them again if they're still missing)
     ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ...(this.last ? { last: this.last } : {}),
       ...(code ? { code } : {}) }))
@@ -453,9 +462,11 @@ export class Replica {
         this.presenceQueue = this.presenceQueue.then(() => this.applyPresence(m)).catch((e) => console.error(e))
         break
       case 'left':
+        this.peerConns.delete(m.from)
         this.presenceQueue = this.presenceQueue.then(() => this.forgetConnection(m.from)).catch((e) => console.error(e))
         break
       case 'p2p':
+        if (Number.isInteger(m.from)) this.peerConns.add(m.from)
         await this.onP2p(m)
         break
       case 'rv':
@@ -736,6 +747,7 @@ export class Replica {
 
   private p2pWindow = { start: 0, bytes: 0 } // see P2P_RATE
   private partAt = 0 // when a piece last came in
+  private partFrom = new Map<number, number>() // ... from each connection
 
   private async sendP2p(d: string, s: string | undefined, to?: number) {
     const now = Date.now()
@@ -781,6 +793,7 @@ export class Replica {
     whole.got.set(i, c)
     whole.size += c.length
     whole.at = this.partAt = now
+    this.partFrom.set(from, now)
     if (typeof p.s === 'string') whole.s = p.s
     if (whole.got.size === n) {
       this.parts.delete(key)
@@ -849,11 +862,19 @@ export class Replica {
         break
       case 'breq': {
         if (typeof p.id !== 'string' || !BLOB_ID.test(p.id) || !this.mayAnswer(`${m.from}:${p.id}`)) return
-        const id = p.id, to = m.from
+        const id = p.id, to = m.from, one = p.one === 1 // asked of this peer alone: say so if it isn't here (else silence: the request went to everyone)
         this.answer(async () => {
           const blob = await idbGet<Uint8Array>(this.db, 'blobs', id)
           if (blob && blob.length <= P2P_BLOB) await this.p2p({ k: 'blob', id, b: b64e(blob) }, to)
+          else if (one) await this.p2p({ k: 'bno', id }, to)
         })
+        break
+      }
+      case 'bno': { // a peer asked for a file hasn't got it: the next can be asked at once
+        if (typeof p.id !== 'string' || !this.blobWaiters.has(p.id)) return
+        let no = this.noFile.get(p.id)
+        if (!no) this.noFile.set(p.id, no = new Set())
+        no.add(m.from)
         break
       }
       case 'cack': // a texloom helper accepted our compile request
@@ -871,7 +892,10 @@ export class Replica {
         // only files we asked for (anyone with the link can send these)
         if (typeof p.id !== 'string' || !this.blobWaiters.has(p.id) || typeof p.b !== 'string') return
         const blob = b64d(p.b)
-        if ((await this.keys.blobId(blob)) !== p.id) return // integrity check
+        if ((await this.keys.blobId(blob)) !== p.id) { // integrity check: not what was asked for (cut off, say), so that peer can't help
+          this.noFile.get(p.id)?.add(m.from) ?? this.noFile.set(p.id, new Set([m.from]))
+          return
+        }
         await idbPut(this.db, 'blobs', p.id, blob)
         for (const w of this.blobWaiters.get(p.id) ?? []) w(blob)
         this.blobWaiters.delete(p.id)
@@ -1126,15 +1150,27 @@ export class Replica {
         console.warn('server returned the wrong content for', id)
       }
     }
-    // Ask connected peers for it.
+    // Ask connected peers for it: one at a time first (see `asking`), then everyone.
     const got = new Promise<Uint8Array>((res) => this.blobWaiters.set(id, [...(this.blobWaiters.get(id) ?? []), res]))
-    await this.p2p({ k: 'breq', id })
-    const asked = Date.now()
     let r: Uint8Array | null = null
-    while (!r) { // a big file comes in pieces: wait while they keep coming
-      r = await Promise.race([got, sleep(5000).then(() => null)])
-      if (!r && Date.now() - Math.max(asked, this.partAt) > 20000) break
-    }
+    try {
+      for (const peer of asking.order([...this.peerConns]).slice(0, asking.peers)) {
+        await this.p2p({ k: 'breq', id, one: 1 }, peer)
+        const asked = Date.now()
+        while (!r) { // until it answers, says no, or has been quiet for a while (a big file comes in pieces: it is answering while they keep coming)
+          r = await Promise.race([got, sleep(Math.min(100, asking.one)).then(() => null)])
+          if (r || this.noFile.get(id)?.has(peer)) break
+          if (Date.now() - Math.max(asked, this.partFrom.get(peer) ?? 0) > asking.one) break
+        }
+        if (r) return r
+      }
+      await this.p2p({ k: 'breq', id })
+      const asked = Date.now()
+      while (!r) { // a big file comes in pieces: wait while they keep coming
+        r = await Promise.race([got, sleep(5000).then(() => null)])
+        if (!r && Date.now() - Math.max(asked, this.partAt) > 20000) break
+      }
+    } finally { this.noFile.delete(id) }
     if (!r) throw new Error(t('file content not available yet ({{id}}): no online peer has it', { id: id.slice(0, 8) }))
     return r
   }

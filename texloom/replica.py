@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import secrets
 import time
@@ -42,6 +43,18 @@ SIGNED_P2P = ("upd", "cack", "cerr")  # peer-to-peer messages that carry the sen
 ANSWER_EVERY = 30.0  # seconds: how often one connection's request for what it lacks is answered (_on_p2p)
 CREQ_FOR = 5 * 60_000  # ms: how old a compile request may be (it is signed with when it was made), and how
 CREQ_AHEAD = 60_000  # far ahead of this computer's clock; within that, each nonce is taken once
+# A file wanted from peers is asked of one at a time (issue 16): with many online, asking everyone makes each send it, and
+# all but one copy is thrown away. A peer that has it answers; one that hasn't says so ("bno", from newer apps) or stays silent;
+# the next is asked after ASK_ONE seconds (while pieces from it keep coming, it is still answering). After ASK_PEERS, everyone
+# is asked. (scripts/check_replica.py makes these short and the order fixed.) As in web/src/replica.ts.
+ASK_ONE = 4.0
+ASK_PEERS = 3
+
+
+def ask_order(peers: list[int]) -> list[int]:
+    return random.sample(peers, len(peers))
+
+
 P2P_BLOB = 50 * 1024 * 1024  # files sent peer to peer (relay-only projects): as big as any synced file
 # A peer-to-peer message bigger than this (a whole project for a computer catching up, a file)
 # goes in pieces: the server takes frames of at most 16 MiB. Pieces are put together again
@@ -77,6 +90,9 @@ class Replica:
         self._uploading = asyncio.Lock()
         self._answer_tasks: set[asyncio.Task] = set()  # big peer-to-peer messages coming in pieces
         self._part_at = 0.0  # when a piece last came in
+        self._part_from: dict[int, float] = {}  # ... from each connection
+        self._peers: set[int] = set()  # the other connections to this project heard from (and not left): for asking one for a file
+        self._no_file: dict[str, set[int]] = {}  # file -> the peers that said they haven't got it
         self._p2p_window: list = [0.0, 0]  # [start, bytes sent] (see P2P_RATE)
         self.doc = Doc(skip_gc=True)  # keep deleted text so past versions can be reconstructed
         self.files: Map = self.doc.get("files", type=Map)
@@ -489,7 +505,7 @@ class Replica:
         cached = cache.exists()
         if not cached:
             cache.parent.mkdir(exist_ok=True)
-            cache.write_bytes(plaintext)
+            replace_file(cache, plaintext, 0o600)  # in one step: a peer asked for it meanwhile never reads half of it
         if not cached or kind == "file":  # a file is re-sent in case the server dropped it as output
             pending = self.dir / "blobs-pending"
             pending.mkdir(exist_ok=True)
@@ -567,21 +583,40 @@ class Replica:
                     if self.keys.blob_id(plaintext) != bid:  # the server mustn't swap contents
                         log.warning("server returned the wrong content for blob %s", bid)
                         plaintext = None
-        if plaintext is None:  # ask connected peers
+        if plaintext is None:  # ask connected peers: one at a time first (see ASK_ONE), then everyone
             fut = asyncio.get_running_loop().create_future()
             self._blob_waiters.setdefault(bid, []).append(fut)
-            await self.p2p({"k": "breq", "id": bid})
-            asked = time.monotonic()
-            while True:  # a big file comes in pieces: wait while they keep coming
-                try:
-                    plaintext = await asyncio.wait_for(asyncio.shield(fut), 5)
-                    break
-                except asyncio.TimeoutError:
-                    if time.monotonic() - max(asked, self._part_at) > 20:
-                        fut.cancel()
-                        raise
+            try:
+                for peer in ask_order(list(self._peers))[:ASK_PEERS]:
+                    await self.p2p({"k": "breq", "id": bid, "one": 1}, peer)
+                    asked = time.monotonic()
+                    while not fut.done():  # until it answers, says no, or has been quiet for a while (pieces: it is answering)
+                        try:
+                            await asyncio.wait_for(asyncio.shield(fut), min(0.1, ASK_ONE))
+                        except TimeoutError:
+                            pass
+                        if fut.done() or peer in self._no_file.get(bid, ()):
+                            break
+                        if time.monotonic() - max(asked, self._part_from.get(peer, 0.0)) > ASK_ONE:
+                            break
+                    if fut.done():
+                        plaintext = fut.result()
+                        break
+                if plaintext is None:
+                    await self.p2p({"k": "breq", "id": bid})
+                    asked = time.monotonic()
+                    while True:  # a big file comes in pieces: wait while they keep coming
+                        try:
+                            plaintext = await asyncio.wait_for(asyncio.shield(fut), 5)
+                            break
+                        except TimeoutError:
+                            if time.monotonic() - max(asked, self._part_at) > 20:
+                                fut.cancel()
+                                raise
+            finally:
+                self._no_file.pop(bid, None)
         cache.parent.mkdir(exist_ok=True)
-        cache.write_bytes(plaintext)
+        replace_file(cache, plaintext, 0o600)  # in one step: a peer asked for it meanwhile never reads half of it
         return plaintext
 
     # --- peer to peer (relayed by the server, never stored) -------------------------
@@ -649,6 +684,8 @@ class Replica:
         whole["got"][i] = c
         whole["size"] += len(c)
         whole["at"] = self._part_at = now
+        if isinstance(frm, int):
+            self._part_from[frm] = now
         if isinstance(p.get("s"), str):
             whole["s"] = p["s"]
         if len(whole["got"]) == n:
@@ -745,15 +782,24 @@ class Replica:
                 return
             cache = self.dir / "blobs" / bid
 
+            one = p.get("one") == 1  # asked of this peer alone: say so if it isn't here (else silence: the request went to everyone)
+
             async def send_blob() -> None:
                 if cache.exists() and cache.stat().st_size <= P2P_BLOB:
                     await self.p2p({"k": "blob", "id": bid, "b": b64e(cache.read_bytes())}, frm)
+                elif one:
+                    await self.p2p({"k": "bno", "id": bid}, frm)
             self._answer(send_blob)
+        elif k == "bno":  # a peer asked for a file hasn't got it: the next can be asked at once
+            if isinstance(p.get("id"), str) and p["id"] in self._blob_waiters and isinstance(frm, int):
+                self._no_file.setdefault(p["id"], set()).add(frm)
         elif k == "blob":
             if p.get("id") not in self._blob_waiters:
                 return  # only files we asked for
             blob = b64d(p["b"])
-            if self.keys.blob_id(blob) != p["id"]:
+            if self.keys.blob_id(blob) != p["id"]:  # not what was asked for (cut off, say): that peer can't help
+                if isinstance(frm, int):
+                    self._no_file.setdefault(p["id"], set()).add(frm)
                 return
             for fut in self._blob_waiters.pop(p["id"], []):
                 if not fut.done():
@@ -798,7 +844,8 @@ class Replica:
             pending = self.dir / "blobs-pending"
             pending.mkdir(exist_ok=True)
             for b in (self.dir / "blobs").glob("*") if (self.dir / "blobs").exists() else []:
-                (pending / b.name).touch()
+                if BLOB_RE.match(b.name):  # (not a file being written: replace_file's temporary names)
+                    (pending / b.name).touch()
             await self.upload_pending()
 
     async def move_to_code(self, code: str, timeout: float = 20) -> dict | None:
@@ -897,6 +944,7 @@ class Replica:
         self._caught_up = False
         self._log_pending = None
         self._missing.clear()  # (this catch-up finds them again if they're still missing)
+        self._peers.clear()  # (connection numbers are per connection to the server)
         self._resync = 0 if self._resync == 1 else self._resync
         self.connected.set()
         hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__, "pages": 1}  # (--min-version)
@@ -1011,7 +1059,11 @@ class Replica:
                 if ref:
                     self.refs[upto] = ref
                 await self._drop_refs(upto, ref)
+        elif t == "left":
+            self._peers.discard(m.get("from"))
         elif t == "p2p":
+            if isinstance(m.get("from"), int):
+                self._peers.add(m["from"])
             await self._on_p2p(m)
         elif t == "mode":
             self._heard(m["m"])

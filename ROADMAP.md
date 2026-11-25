@@ -68,8 +68,6 @@ Decided to wait; each says when to revisit it.
   third party, so opt-in only; if people ask.
 - **[Mendeley](https://github.com/jhudsy/texloom/issues/6)**: needs a server-side secret; exporting a
   `.bib` into a synced folder works today; if people ask.
-- **[Sync-only projects ask one peer for a file](https://github.com/jhudsy/texloom/issues/16)**, not
-  every peer; when relay traffic is high with few people connected.
 - **[Keep documents from outgrowing snapshots](https://github.com/jhudsy/texloom/issues/18)**:
   compressed snapshots are written today, about a third the size. Next,
   if needed, a true checkpoint: when real projects' snapshots near 50 MB.
