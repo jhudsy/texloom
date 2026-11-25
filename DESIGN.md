@@ -81,10 +81,10 @@ without compiling.
   `grant = sign(owner seed, "grant:" ‖ personal public key ‖ ":" ‖ name)`. A personal
   signature is `'M' ‖ personal pub (32) ‖ grant (64) ‖ len(name) ‖ name ‖ sig (64)`, so
   anyone can verify it against the project id alone. A plain 64-byte signature is the
-  owner's. Signatures go to the server with every change, so a link's grant is of an empty
-  name (`n=` empty, `len(name)` 0): the server can't learn who people are. The name is granted
+  owner's. Signatures go to the server with every change, so since 0.4.35 a link's grant is of an
+  empty name (`n=` empty, `len(name)` 0): the server can't learn who people are. The name is granted
   separately, in the encrypted `members` entry (`g` signs that name), which is where apps show
-  it from.
+  it from. Links issued before keep their name, and keep working.
 - **Revocation:** the owner sends `sign(owner seed, "revoke:" ‖ personal pub)`. Keys are
   always compared in their canonical base64url spelling (decoders accept variants of the
   same 32 bytes). The relay stores it, refuses that key's updates, snapshots, blobs, mode
@@ -202,9 +202,9 @@ Blobs move the same way: `{k:"breq", id}` → `{k:"blob", id, b}`. The receiver 
 Only the owner chooses the mode, both ways: the server accepts a `mode` command only with
 the owner's signature, and the shared project setting `meta.storage` is `{m, at, s}` with
 `s` the owner's signature of `"owner:storage:<m>:<at>"`, so an editor can't make everyone
-believe the server keeps a copy it doesn't (or stop them uploading). Without a valid one (an
-editor overwrote it), apps go by what the server last said it does, kept for when they're
-offline. Each app keeps the highest `at` it has seen signed (with its mode) and ignores a lower
+believe the server keeps a copy it doesn't (or stop them uploading). Without a valid one (a
+project from before 0.4.35, or one an editor overwrote), apps go by what the server last said it does, kept
+for when they're offline; the owner's app signs an old plain value on connecting. Each app keeps the highest `at` it has seen signed (with its mode) and ignores a lower
 one, so an editor can't roll the setting back by writing an older value the owner once signed. A replica sends a signed `mode`
 command only when its user *changes* the setting, queuing it if offline; it never
 "corrects" the server on connect, so a stale replica can't undo someone else's
@@ -466,7 +466,9 @@ relay) as the fallback for symmetric NATs.
   (`config.settings_path`: `folder-settings/<hash of the folder's path>.json`, which also
   notes the project id), never in the folder: anyone sharing the folder through Dropbox or
   the like can write any file in it, `.texloom/computers/<id>/config.json` included. A
-  moved folder, or a link changed to another project, starts over with the defaults.
+  moved folder, or a link changed to another project, starts over with the defaults. The first run of
+  0.4.56 brought each listed folder's old settings over, only `compile`, `engine` and `label` from a
+  folder that may be shared (`config.looks_shared`).
   `.texloom/computers/<id>/config.json` keeps the link, creation code and name.
 - Blobs referenced by remote updates are fetched in the background. In relay mode
   they arrive from a peer over the same connection, so fetching inline would deadlock.
@@ -486,7 +488,8 @@ service would also copy each computer's records to the others. So:
 - **Records per computer:** `paths.state_dir(folder)` = `.texloom/computers/<computer id>/`
   (the id: `computer-id` in the app's settings folder, random). Everything but the folder's
   `folder-id`, the `lock` and `.gitignore` lives there: the replica, `known.json`, the merge bases,
-  `config.json` (the link), the git bridge's lease id, build output. FolderSync keeps its files in `replica.dir`.
+  `config.json` (the link), the git bridge's lease id, build output. A folder from before 0.4.40 has them in `.texloom` itself; `state_dir` moves them
+  (config.json last, so an interrupted move finishes next time). FolderSync keeps its files in `replica.dir`.
 - **Finding each other:** `.texloom/folder-id` (random, made by the first computer; the service
   copies it). Each computer sends `{"k": "fold", "f": folder id, "m": computer id, "h": holds the
   turn, "by": name}` to the project's peers every ANNOUNCE (20 s): peer-to-peer through the relay,
@@ -885,8 +888,8 @@ one to the projects it names.
   device's clock counts as now + ten minutes, so a setting dated far ahead can't outlast every
   later change. So a code entered in the web app reaches the desktop app's New project dialog and
   the other way round. The web app records when its code was entered (`texloom.codeAt`); the desktop
-  app keeps one code per server in `creation-codes.json` (mode 600) in its config folder.
-  Anyone with the sync link can read the codes
+  app keeps one code per server in `creation-codes.json` (mode 600) in its config folder. A code
+  entered before dates were kept counts as the oldest. Anyone with the sync link can read the codes
   and tokens, as they can every project on the list.
 
 - Tags are a person's own and never enter a project. They live in `texloom.tags` in the browser and,
@@ -1245,7 +1248,7 @@ isn't built yet.
   has (`last`: number and content hash); when the server's log ends before it or holds another
   change there, it says `lost`, and the app catches up from the start and re-uploads, as after
   eviction (`scripts/check_restore.py`). It can't tell once that change has been compacted away
-  and forgotten (`GONE_KEEP` changes later).
+  and forgotten (`GONE_KEEP` changes later), nor for apps from before 0.4.52, which don't send it.
 - Browser storage can be evicted: request persistent storage; the server copy and
   daemon copies are the backup.
 

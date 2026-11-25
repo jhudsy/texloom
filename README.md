@@ -115,7 +115,7 @@ password manager works well.
 **Send links from Share, not the address bar.** In the web app the address bar shows only the
 project's id. The keys stay in the browser, so a copied address opens nothing for anyone else (it
 says to ask for a link), and only works in the browser that opened the project. Links from Share
-open as usual.
+open as usual, and old links and bookmarks that contain keys still open.
 
 **Email…** next to a personal or read-only link opens your own email app with an
 invitation and the link filled in. The link travels in that email, never through the
@@ -470,7 +470,8 @@ has **Tags…**, **Make a copy…** (a new project, in a new folder, from this o
 The downloads aren't signed with paid certificates yet, so the first time:
 - **macOS:** unzip the download and move TeXLoom to Applications. Open it once and close the
   warning, then go to System Settings → Privacy & Security, scroll down to the message about
-  TeXLoom, click **Open Anyway** and confirm.
+  TeXLoom, click **Open Anyway** and confirm. (On older versions of macOS, right-click the app →
+  **Open** also works.)
 - **Windows:** extract the `.zip` first (right-click → **Extract All**), then run `TeXLoom.exe`
   in the extracted folder. If Windows says it protected your PC, click **More info** →
   **Run anyway**.
@@ -535,7 +536,9 @@ compile = false   engine = null   latexmk_args = []   shell_escape = false   con
 ```
 
 They belong to the folder where it is, and its project: a folder that is moved or renamed
-starts over with these defaults. The project link and `create_code` stay in `<dir>/.texloom/config.json`, which only you can read.
+starts over with these defaults. (Upgrading from before 0.4.56: the first run brings each listed
+folder's old settings over from `<dir>/.texloom/config.json`, but from a folder that may be shared, such as
+one in Dropbox, only `compile`, `engine` and `label`; the log says which must be set again.) The project link and `create_code` stay in `<dir>/.texloom/config.json`, which only you can read.
 
 Collaborators write the document, so compiling is locked down by default:
 - **No running programs:** TeX may not run programs (`-no-shell-escape`).
@@ -638,7 +641,7 @@ with other people and computers there, some of them running TeXLoom on it too:
 - **On another computer**, once the service has brought the folder: in the app, **Add folder**
   (or `texloom add <folder>`). It takes the project link from the first computer's records in the
   folder, and waits until it has the project from the server before it does anything.
-- **Each computer keeps its own records** in `.texloom/computers/<its id>/`. The service copies everyone's, but each computer only
+- **Each computer keeps its own records** in `.texloom/computers/<its id>/` (older folders are moved there the first time). The service copies everyone's, but each computer only
   uses its own. Like the folder's files, they include the project's edit link: anyone the service
   folder is shared with can open the project.
 - **Saved on two computers at once:** where the service has kept one version and set the other

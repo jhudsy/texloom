@@ -144,6 +144,7 @@ def update_config(d: Path, **changes) -> None:
 
 
 # --- settings kept in the folder before 0.4.56 ---------------------------------
+# compat(data 0.4.56): a folder's settings in its own .texloom/config.json; converted on read: moved to the settings folder the first time (from a folder that may be shared, only compile, engine and label)
 _MOVED = "moved-from-folders"  # in _settings_dir(): settings were brought over, once for all
 _moved: set[Path] = set()  # (per configuration folder: the checks change it)
 
