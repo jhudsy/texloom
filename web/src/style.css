@@ -742,3 +742,10 @@ dialog.settings.tabbed[open] { display: flex; flex-direction: column; }
 .mention-choice.on, .mention-choice:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 .mention-badge { margin-left: 5px; padding: 0 5px; border-radius: 8px; font-size: 11px; background: var(--accent); color: var(--bg); cursor: pointer; }
 .rcard.mentions-me { box-shadow: inset 3px 0 0 var(--accent); }
+
+/* a new version of the app is ready (updatenotice.ts) */
+.update-notice { position: fixed; z-index: 50; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: calc(100vw - 32px);
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, .18); }
+.update-notice button.plain { border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 2px 6px; }
+.update-notice button.plain:hover, .update-notice button.plain:focus-visible { color: var(--fg); }

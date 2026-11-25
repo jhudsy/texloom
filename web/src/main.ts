@@ -2,6 +2,7 @@
 import { missingKeysDialog, projectFromAddress } from './addressbar'
 import { handleListHash, takeListHash } from './listdialog'
 import { startListSync } from './listsync'
+import { watchForNewVersion } from './updatenotice'
 import { openPdfWindow, pdfWindowProject } from './pdfwindow'
 import { refreshProjects } from './appinfo'
 import { landing } from './startpage'
@@ -12,7 +13,8 @@ import { getString } from './store'
 // Offline app: a service worker caches the app itself (projects already live in IndexedDB).
 const noSW = getString('texloom.nosw') === '1' // debugging switch
 if ('serviceWorker' in navigator && !noSW && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-  navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('service worker:', e))
+  const hadController = !!navigator.serviceWorker.controller
+  navigator.serviceWorker.register('/sw.js').then((reg) => { if (!pdfWindowProject()) watchForNewVersion(reg, hadController) }, (e) => console.warn('service worker:', e))
 }
 
 window.addEventListener('hashchange', () => location.reload())

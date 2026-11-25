@@ -256,6 +256,8 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   text, headers, captions and maths (the desktop app's **Word count…** uses your own TeX installation's copy).
 - **Offline:** after the first visit the app (and, after one compile, the TeX engine) works
   offline; browsers offer to install it as an app.
+  A tab left open picks up a new version of the app in the background; a notice offers **Reload**
+  (it never reloads by itself, and changes not yet sent are kept in the browser).
 - **Keyboard shortcuts:** press **?** (outside a text field), or **Keyboard shortcuts** in ⚙ Settings, for the list.
 
 **Phones and tablets.** In small windows the editor and the PDF take turns on screen, the file list
@@ -1130,6 +1132,7 @@ starts its own throwaway server; `scripts/webcheck.py` is what they share, for w
 uv run --extra server --with playwright python scripts/check_web_git.py     # keeping a project in step with GitHub, GitLab and Gitea (stand-ins: scripts/fakeforge.py)
 uv run --extra server --with playwright python scripts/check_web_review.py  # the Review tab: comments in reading order, several drafts at once, acting on several
 uv run --extra server --with playwright python scripts/check_web_pdf.py     # a compiled PDF is downloaded only while the PDF is on screen (or popped out), and only the newest
+uv run --extra server --with playwright python scripts/check_web_update.py  # a new version of the app is offered (Reload) to a tab that is already open
 uv run --extra server --with playwright python scripts/check_web_listsync.py  # the project list: a project opened while the list syncs keeps the time it was opened
 uv run --extra server --with playwright python scripts/check_web_listways.py  # the project list's passwords, replacing and deleting it, across the desktop app and the web app
 uv run --extra server --with playwright python scripts/check_web_dropbox.py # keeping a project in step with a Dropbox folder (stand-in: scripts/fakedropbox.py)
