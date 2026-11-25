@@ -32,9 +32,9 @@ export function pdfWindowProject(): string | null {
   return /^[\w-]+$/.test(project) ? project : null
 }
 
-/** The editor's end. `onPick`: the window asked for the source of a point. */
+/** The editor's end. `onPick`: the window asked for the source of a point; `onOpen`: a window opened and wants the PDF. */
 export function pdfWindowLink(project: string, name: () => string, onPick: (at: Point) => void,
-  onComment: ((sel: PdfSelection) => Promise<CommentTarget | string>) | null) {
+  onComment: ((sel: PdfSelection) => Promise<CommentTarget | string>) | null, onOpen: () => void = () => {}) {
   const ch = channel(project)
   let latest: Uint8Array | null = null
   let connected = false // PDFs can be large: copy them only when a window wants them
@@ -43,7 +43,7 @@ export function pdfWindowLink(project: string, name: () => string, onPick: (at: 
   const targets = new Map<string, CommentTarget>() // comments being written in the window
   ch.onmessage = (e: MessageEvent<Message>) => {
     const m = e.data
-    if (m.t === 'ask') { connected = true; send() }
+    if (m.t === 'ask') { connected = true; send(); onOpen() }
     else if (m.t === 'gone') connected = false
     else if (m.t === 'pick') onPick(m)
     else if (m.t === 'locate' && onComment) {
@@ -69,6 +69,8 @@ export function pdfWindowLink(project: string, name: () => string, onPick: (at: 
       return !!win
     },
     pdf(data: Uint8Array) { latest = data; send() },
+    /** A window is open and wants each new PDF. */
+    connected: () => connected,
     mark(page: number, x: number, y: number, w: number, boxH: number) { if (connected) say({ t: 'mark', page, x, y, w, h: boxH }) },
   }
 }

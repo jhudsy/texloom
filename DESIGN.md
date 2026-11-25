@@ -62,7 +62,9 @@ server cannot confirm guesses about the content), encrypted with the project key
 uploaded once. (The same 32-byte key is the AES-GCM key and this HMAC key. No attack on that
 is known, but keys derived for each use would be cleaner; changing it would need versioned
 links, since every stored ciphertext and file id depends on it, so it stays as it is.) Compiled PDFs are blobs too, so collaborators can view the latest PDF
-without compiling.
+without compiling. Only the small `out` note reaches everyone; a browser fetches the PDF (and its SyncTeX) only
+while it shows the PDF tab or a popped-out window, and only the newest, and reads the log always (`createOutput`,
+`web/src/output.ts`). The desktop app never fetches them.
 
 ## Links, keys and access
 

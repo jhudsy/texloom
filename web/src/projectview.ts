@@ -181,6 +181,13 @@ export async function openProject(keys: Keys, server: string) {
   type Tab = 'pdf' | 'ai' | 'review' | 'history'
   const preview = new FilePreview(r)
   let currentTab: Tab = 'pdf'
+  let layoutReady = false // the layout below is set up (what the PDF being on screen depends on)
+  /** The output downloads new PDFs only while the compiled PDF is on screen: the PDF tab (not a file preview) in an open
+   *  panel, in a window that someone can see. */
+  function updateLooking() {
+    if (layoutReady) output.looking(layout.isOpen('right') && currentTab === 'pdf' && !showingFile && !document.hidden)
+  }
+  document.addEventListener('visibilitychange', updateLooking)
   let pageTitle = APP, titleDot = false
   /** The browser tab's title; with a dot when the assistant has news (see markAssistant). */
   const setTitle = (dot = titleDot) => { titleDot = dot; document.title = (dot ? '● ' : '') + pageTitle }
@@ -194,6 +201,7 @@ export async function openProject(keys: Keys, server: string) {
     tabBtns.pdf.textContent = file ? t('Preview') : t('PDF')
     syncArrows.hidden = currentTab !== 'pdf' || file
     if (seen) preview.visible()
+    updateLooking()
   }
   preview.onBack = () => showInPanel(false)
   /** Where a file chosen in the list appears: text in the editor, and anything previewable in the PDF tab. */
@@ -477,7 +485,10 @@ export async function openProject(keys: Keys, server: string) {
     rightBtn.classList.toggle('off', !right)
     leftBtn.setAttribute('aria-pressed', String(left))
     rightBtn.setAttribute('aria-pressed', String(right))
+    updateLooking()
   }
+  layoutReady = true
+  updateLooking()
   const savedLeft = getString('texloom.ltab') as LeftTab | null
   if (savedLeft === 'outline' || (savedLeft === 'symbols' && writable)) showLeft(savedLeft)
   const savedTab = getString('texloom.tab') as Tab | null

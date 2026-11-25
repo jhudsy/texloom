@@ -337,6 +337,9 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   there (you're asked first if files would be replaced, or if it's a very large amount).
 - **Panes:** drag the dividers between the file list, the editor and the PDF/assistant
   panel; ☰ and ▥ hide the side panes.
+- **PDFs are fetched when you look at them:** a collaborator's (or your folder's) new PDF is downloaded only while this
+  browser shows the PDF tab (or has it popped out), and only the newest one. Elsewhere it waits until you open the tab. The
+  log is always read, so problems still show in the editor. The desktop app never downloads PDFs: it compiles with your own TeX.
 - **PDF in its own window:** **Pop out** above the PDF (or right-click the PDF) opens it in a separate window, for example
   on another screen. It updates when you compile, double-clicking it jumps to the source, and it
   stays in step if you reload the editor.
@@ -1090,6 +1093,7 @@ starts its own throwaway server; `scripts/webcheck.py` is what they share, for w
 (cd web && npm run build)
 uv run --extra server --with playwright python scripts/check_web_git.py     # keeping a project in step with GitHub, GitLab and Gitea (stand-ins: scripts/fakeforge.py)
 uv run --extra server --with playwright python scripts/check_web_review.py  # the Review tab: comments in reading order, several drafts at once, acting on several
+uv run --extra server --with playwright python scripts/check_web_pdf.py     # a compiled PDF is downloaded only while the PDF is on screen (or popped out), and only the newest
 uv run --extra server --with playwright python scripts/check_web_listsync.py  # the project list: a project opened while the list syncs keeps the time it was opened
 uv run --extra server --with playwright python scripts/check_web_listways.py  # the project list's passwords, replacing and deleting it, across the desktop app and the web app
 uv run --extra server --with playwright python scripts/check_web_dropbox.py # keeping a project in step with a Dropbox folder (stand-in: scripts/fakedropbox.py)

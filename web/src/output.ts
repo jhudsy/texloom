@@ -4,6 +4,7 @@ import type { Replica } from './replica'
 import type { Device } from './settings'
 import { h, saveFile, sleep, verticalResizer } from './dom'
 import { icon } from './icons'
+import { quiet } from './quiet'
 import { PdfView, type CommentTarget, type PdfSelection } from './pdfview'
 import { anchorInSource, findAnywhere } from './pdfanchor'
 import { addItem } from './review'
@@ -34,13 +35,15 @@ export interface Output {
   showInSource(): boolean
   /** Set by the host: called by the ⇥ button to show the editor's current line. */
   syncRequest: (() => void) | null
+  /** The host says whether the compiled PDF is on screen. New PDFs are downloaded only while it is (or a pop-out window is open). */
+  looking(on: boolean): void
 }
 
 export function createOutput(r: Replica, writable: boolean, device: () => Device, userName: () => string,
   goto: (file: string, line: number, flash?: boolean) => void, selected: () => string | null): Output {
   const pdfView = new PdfView()
   const pdfWindow = pdfWindowLink(r.keys.project, () => String(r.meta.get('name') ?? ''), (at) => pdfView.onPick?.(at.page, at.x, at.y),
-    writable ? (sel) => commentTarget(sel) : null)
+    writable ? (sel) => commentTarget(sel) : null, () => renderLatest().catch(console.error))
   const info = h('div', { class: 'pdfinfo muted' }, t('No PDF yet.'))
   // While this browser shows another document's PDF (main_short.tex, say), a collaborator's new PDF of
   // the main document doesn't replace it: this offers it instead.
@@ -199,8 +202,13 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     if (!ok) { setLogOpen(true); showLogView(unexplained) }
   }
 
-  // collaborators' (or the folder helper's) latest published output
-  const renderLatest = async () => {
+  // Collaborators' (or the folder helper's) latest published output. The log is small and always read (the
+  // editor marks its problems); the PDF and its SyncTeX are the big files, so they come only while someone is
+  // looking at them (the PDF panel is showing, or the PDF is popped out), and only the newest one.
+  let looking = false
+  let loadedPdf: string | null = null // the id of the PDF on show, so one that is already here isn't fetched again
+  const wanted = () => looking || pdfWindow.connected()
+  const renderOnce = async () => {
     const o = r.out.get('latest')
     if (!o) return
     if (showingOther) { // keep the document this browser is looking at; say there's a newer main PDF
@@ -211,12 +219,24 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     newer.hidden = true
     pdfName = null
     const dec = new TextDecoder()
+    const fetchPdf = !!o.pdf && o.pdf !== loadedPdf && wanted()
     const [pdf, log, stx] = await Promise.all([
-      o.pdf ? r.getBlob(o.pdf) : null,
+      fetchPdf ? r.getBlob(o.pdf) : null,
       o.log ? r.getBlob(o.log).then((b) => dec.decode(b)) : '',
-      o.synctex ? r.getBlob(o.synctex).catch(() => null) : null,
+      fetchPdf ? (o.synctex ? r.getBlob(o.synctex).catch(() => null) : null) : o.pdf ? undefined : null, // a compile with no PDF has no SyncTeX; otherwise what is on show keeps its own
     ])
+    if (pdf) loadedPdf = o.pdf
     show(pdf, log, `${o.ok ? '✓' : t('✗ errors')} · ${o.by} · ${new Date(o.at * 1000).toLocaleTimeString(locale)}`, !!o.ok, stx)
+  }
+  // One at a time: a compile that comes while a PDF is being fetched waits for it, and then only the newest is fetched.
+  let rendering: Promise<void> | null = null
+  let renderAgain = false
+  const renderLatest = (): Promise<void> => {
+    if (rendering) { renderAgain = true; return rendering }
+    rendering = (async () => {
+      try { do { renderAgain = false; await renderOnce() } while (renderAgain) } finally { rendering = null }
+    })()
+    return rendering
   }
   r.out.observe(() => renderLatest().catch(console.error))
   renderLatest().catch(console.error)
@@ -284,6 +304,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       if (writable && res.pdf && !another) { // publish so collaborators see it without compiling
         const [pdfId, logId, stxId] = await Promise.all([r.putBlob(res.pdf, 'output'), r.putBlob(new TextEncoder().encode(res.log), 'output'),
           res.synctex ? r.putBlob(res.synctex, 'output') : null])
+        loadedPdf = pdfId // it is on show already
         r.out.set('latest', { pdf: pdfId, log: logId, ...(stxId ? { synctex: stxId } : {}), ok: true, by: t('{{name}} (browser)', { name: userName() }), at: Date.now() / 1000, main })
       }
       return { ok: !!res.pdf, log: res.log }
@@ -348,7 +369,7 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
 
   function showInPdf(file: string, line: number): boolean {
     if (!synctexBytes) return false
-    syncTex().then((st) => {
+    ;(rendering ?? Promise.resolve()).catch((e) => quiet('the PDF could not be fetched; the highlight uses what is on show', e)).then(syncTex).then((st) => { // after the PDF that is being fetched, if one is
       const at = st?.toPdf(file, line)
       if (at) { pdfView.highlight(at.page, at.x, at.y, at.w, at.h); pdfWindow.mark(at.page, at.x, at.y, at.w, at.h) }
       else info.textContent = t('That line isn’t in the PDF (yet): compile first?')
@@ -363,6 +384,12 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
   }
   const out: Output = {
     pane, compileBtn, compile, lastLog: () => lastLog, pdfView, problems: () => problems, onProblems, showInPdf, showInSource, syncRequest: null,
+    looking(on: boolean) {
+      if (on === looking) return
+      looking = on
+      const o = r.out.get('latest')
+      if (on && o?.pdf && o.pdf !== loadedPdf) renderLatest().catch(console.error) // compiled while nobody was looking
+    },
   }
   const backBtn = h('button', { class: 'narrow-only', title: t('Go to the source of the spot you last clicked in the PDF, or the middle of the view (⌘⌥← / Ctrl+Alt+←). Or double-click / right-click the PDF.'), 'aria-label': t('Go to source'), onclick: () => { if (!showInSource()) info.textContent = t('Compile first: the PDF has no SyncTeX data yet.') } }, '⇤')
   const syncBtn = h('button', { class: 'narrow-only', title: t('Show the editor’s line in the PDF (⌘⌥→ / Ctrl+Alt+→)'), 'aria-label': t('Show in PDF'), onclick: () => out.syncRequest?.() }, '⇥')
