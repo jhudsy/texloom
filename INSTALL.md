@@ -20,7 +20,7 @@ Settings live in one file, `/etc/texloom/texloom.toml` ([Settings](#settings)).
 - [The database](#the-database) · [Stored files](#stored-files)
 - [Creation codes](#creation-codes) · [Private servers](#private-servers) ·
   [Retiring old app versions](#retiring-old-app-versions) · [Idle projects, admin page, arXiv import](#idle-projects-admin-page-arxiv-import)
-- [Backups](#backups) · [Updating](#updating)
+- [Backups](#backups) · [A standby server](#a-standby-server) · [Updating](#updating)
 
 ## On an Ubuntu or Debian server
 
@@ -342,6 +342,122 @@ PostgreSQL: `sudo -u postgres pg_restore -d texloom --clean --if-exists texloom.
 `texloom-server --files-restore <the restored copy>` puts back whatever the bucket lacks), and
 start it. Everyone's devices hold full copies
 of their projects, so edits made since the backup come back as people reconnect.
+
+## A standby server
+
+A second machine holding a nearly current copy of the database, so that if the server is lost you
+can be running again in minutes rather than restoring from last night's backup. Nobody loses
+work either way (everyone's devices hold full copies and send what the server lacks when they
+reconnect: `scripts/check_standby.py` and `scripts/check_restore.py` run both cases), so this buys
+less waiting, not safety. It is optional: a server with a nightly backup and a machine you could
+restore it on is a perfectly good setup. It needs PostgreSQL, and stored files in a bucket, so that
+the standby sees them too ([Stored files](#stored-files)). With SQLite, [Backups](#backups) is the
+way.
+
+There are two ways to get the standby; the server is told the same thing either way (`database`),
+and everything else in this file stays as it is.
+
+### Your own PostgreSQL, primary and standby
+
+PostgreSQL (14 or later, the same major version on both machines) copies the primary's changes to
+the standby as they happen (streaming replication). The standby is read-only until promoted, and
+the server refuses to start on it, saying why.
+
+1. **On the primary**, allow the standby in. Create a role, and let it in over TLS from the
+   standby's address only (in `pg_hba.conf`; PostgreSQL's `listen_addresses` must include an
+   address the standby can reach: keep it off the public internet, with a firewall or a private
+   network):
+
+   ```bash
+   sudo -u postgres psql -c "CREATE ROLE replicator REPLICATION LOGIN PASSWORD 'a long random password'"
+   sudo -u postgres psql -c "SELECT pg_create_physical_replication_slot('standby')"
+   # pg_hba.conf:  hostssl  replication  replicator  STANDBY-ADDRESS/32  scram-sha-256
+   systemctl reload postgresql
+   ```
+
+   The slot makes the primary keep the changes the standby hasn't received yet, so a standby that
+   is offline for a while still catches up; but one that is gone for good makes the primary's disk
+   fill with them, so drop the slot (`SELECT pg_drop_replication_slot('standby')`) if you give the
+   standby up.
+
+2. **On the standby**, install the server as for the primary, with the same settings
+   (`/etc/texloom`, including the creation codes file and the bucket), and stop it: `systemctl
+   disable --now texloom`. Then replace its PostgreSQL's data with a copy of the primary's (the
+   paths are Debian's: change `17` to your version):
+
+   ```bash
+   systemctl stop postgresql
+   sudo -u postgres rm -rf /var/lib/postgresql/17/main
+   sudo -u postgres pg_basebackup -h PRIMARY-ADDRESS -U replicator -D /var/lib/postgresql/17/main \
+     -R -X stream -S standby --checkpoint=fast       # asks for the role's password
+   systemctl start postgresql
+   ```
+
+   `-R` writes the settings that make it a standby. Settings the primary keeps in its
+   `postgresql.conf` (memory, `listen_addresses`) are not copied on Debian: set them here too.
+
+3. **Check it is following.** On the primary, `sudo -u postgres psql -c "SELECT client_addr,
+   state, replay_lag FROM pg_stat_replication"` shows the standby as `streaming`; on the standby,
+   `sudo -u postgres psql -c "SELECT pg_is_in_recovery(), now() - pg_last_xact_replay_timestamp()"`
+   says `t` and how far behind it is (a quiet server shows the time since its last change).
+
+4. **Make the name movable.** The apps reach the server by its name, so a switch is moving the
+   name to the standby: give the DNS record a short lifetime (60 seconds) beforehand, and have a
+   certificate for the name ready on the standby (Caddy gets its own; with nginx and certbot, get
+   one for the name there with the DNS challenge, which works before the name points to it).
+
+**When the primary is lost**, on the standby:
+
+1. Make sure the old primary is really down, and will stay down. Two primaries would number
+   changes differently, and the apps would have to untangle it. If you can't be sure (it may only be
+   cut off), power it off or disconnect it.
+2. Promote the standby: `sudo -u postgres psql -c "SELECT pg_promote()"`. It is now a primary and
+   takes writes.
+3. Start the server there: `systemctl enable --now texloom`.
+4. Move the name to the standby's address. Apps reconnect on their own. Changes made in the last
+   moments before the loss may not have reached the standby: the apps hold them, notice that the
+   server's log isn't the one they last saw, and send everything again, so nothing is lost, and
+   nobody has to do anything.
+
+**Afterwards** you have one server and no standby. The old primary must not come back as a primary:
+make it a standby of the new one, by emptying its PostgreSQL data and repeating step 2 with the
+new primary's address (and swap the DNS name's roles if you like, or keep the new arrangement).
+Until then, a failure of the new primary has no standby. To switch on purpose (maintenance), stop
+the server on the primary first and wait until the standby has everything (`SELECT
+pg_current_wal_lsn()` on the primary, and `pg_last_wal_replay_lsn()` on the standby, are equal),
+then promote and move the name: nothing is missing, so there is no catch-up.
+
+A standby copies mistakes as well as data (a project deleted, a table dropped), so it doesn't
+replace [Backups](#backups). Try the switch once on your own pair before you need it:
+`scripts/check_standby.py` does it on one machine with throwaway databases, which shows the steps
+and what the apps do, but not your network or your DNS.
+
+### A hosted PostgreSQL
+
+A provider's PostgreSQL service keeps its own standby, switches over by itself and takes its own
+backups, which is most of the work above. Use its address as `database`:
+
+```toml
+database = "postgresql://texloom:PASSWORD@HOST:5432/texloom?sslmode=require"
+```
+
+The only differences from a PostgreSQL of your own:
+
+- **The address.** The password goes in the settings file or `TEXLOOM_DATABASE` in the
+  environment, as for any secret ([Settings](#settings)). Install the server as usual and then
+  set `database`; `deploy/install.sh` leaves a PostgreSQL on another machine alone, and installs none
+  here.
+- **The connection.** Use the provider's direct address, not a connection pooler's in
+  "transaction" mode (PgBouncer's usual one): the server relies on connections that last through a
+  transaction and, later, on notifications.
+- **What switches over.** The provider moves its database to its standby, and the server keeps
+  using the same address. What to do when the server's machine is lost is as for the rest: install
+  it on another, with the same settings and bucket, and move the name.
+- **Cost and where it is.** Providers differ in price, in which regions they have, and in what
+  their standbys and backups are (some give a standby only on dearer plans, some only backups).
+  Look for one in your region: the data is encrypted either way, so a provider needs no trust, but
+  the server and its database should be close, since the server makes a few queries for every
+  change.
 
 ## Updating
 

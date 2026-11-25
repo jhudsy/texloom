@@ -56,6 +56,8 @@ jobs:
         run: uv run --extra server python scripts/check_files.py folder
       - name: A server restored from a backup, and an app that saw later changes (a real server)
         run: uv run --extra server python scripts/check_restore.py
+      - name: A warm standby promoted after the primary is lost, one that missed the last changes (a real server, throwaway PostgreSQL)
+        run: uv run --extra server python scripts/check_standby.py
       - name: What an outsider could do to the server (revocations off the budget, TeX Live paths; security review)
         run: uv run --extra server python scripts/check_server_abuse.py
       - name: Moving a project to another creation code (a real server)
