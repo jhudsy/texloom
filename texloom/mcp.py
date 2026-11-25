@@ -29,7 +29,7 @@ from pycrdt import Array, Map, Text
 
 from . import __version__
 from .anchors import index_in, varuint
-from .confine import outside_reads
+from .confine import LUA_REFUSED, lua_refused, outside_reads
 from .comments import add, mentions, sticky
 from .config import side_replica
 from .crypto import Keys, b64e, signed_name
@@ -338,6 +338,8 @@ class Project:
         refused = tex_names_refused(texts, main)
         if refused:
             return f"Not compiled: {refused}"
+        if lua_refused(self.r.meta.get("engine"), [], True):
+            return f"Not compiled: {LUA_REFUSED}"
         with tempfile.TemporaryDirectory(prefix="texloom-mcp-") as tmp:
             root = Path(tmp).resolve()
             for p in self.r.files.keys():

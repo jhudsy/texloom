@@ -21,13 +21,16 @@ publishes would carry what was read. So:
 Fonts are read where they are installed (LuaLaTeX scans the system's fonts): anywhere but home
 folders and mounted volumes, and there only in the user's font folders (~/Library/Fonts, ~/.fonts…).
 
-What the check can't see: Lua code in LuaLaTeX reading through loadfile, dofile, pdfe, img or
-fontloader (TeX doesn't record those), or rewriting the records through Lua's io. Where there's a
-sandbox it stops those reads; where there's none (Windows; Linux without bubblewrap), nothing
-does (paranoid reading doesn't cover them either). What io.open reads is recorded.
+What the check can't see: Lua code in LuaLaTeX reading a file with io.lines, looking at folders
+and files with lfs.dir and lfs.attributes (TeX doesn't record those), or rewriting the records
+through Lua's io.
+Where there's a sandbox it stops those reads. Where there's none (Windows; Linux without
+bubblewrap), LuaLaTeX isn't run at all (lua_refused; RECORD in paths.py refuses it too): pdfLaTeX
+and XeLaTeX read files only in ways TeX records or the check reads back from the .xdv.
 
-A folder's "confine": false (a local setting, config.py) turns both off, for projects whose
-collaborators you trust.
+A folder's "confine": false (a local setting, config.py; in the app, "Let compiles read any file
+on this computer") turns both off, for projects whose collaborators you trust. A compile stopped by
+either is recorded (FolderSync.stopped), and the app asks about it at once, offering that setting.
 """
 
 from __future__ import annotations
@@ -395,6 +398,23 @@ def _sandbox() -> str | None:
     if not ok:
         log.warning("%s doesn't work here: compiles aren't sandboxed (their output is still checked)", probe[0])
     return kind if ok else None
+
+
+LUA_REFUSED = ("LuaLaTeX documents aren't compiled here: this computer has no sandbox to keep a document's Lua "
+               "code from reading its other files (Windows has none; on Linux, bubblewrap provides one). Compile in "
+               "the browser instead, or, if everyone who can edit the project is trusted, let this folder's compiles "
+               "read any file (in TeXLoom's Compiling settings, or `texloom settings <folder> confine=false`).")
+
+
+def unsandboxed() -> bool:
+    """Compiles here run without a sandbox (Windows; Linux without a working bubblewrap)."""
+    return _sandbox() is None
+
+
+def lua_refused(engine: object, extra: list[str], confine: bool) -> bool:
+    """A confined compile with LuaLaTeX where there's no sandbox, which isn't run (see above)."""
+    lua = str(engine) == "lualatex" or any(a in ("-lualatex", "-pdflua") for a in extra)
+    return confine and lua and unsandboxed()
 
 
 def _hidden() -> list[Path]:

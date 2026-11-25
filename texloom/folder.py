@@ -29,7 +29,7 @@ from .anchors import assoc_of, fresh_anchor, index_in
 from .textpos import U16, Char, length_u16, u16_of
 from .invariants import broken, checking, first_difference, well_formed
 from .replica import BLOB_RE, Replica
-from .confine import OUTSIDE_NOTE, forget_reads, outside_reads, sandboxed
+from .confine import LUA_REFUSED, OUTSIDE_NOTE, forget_reads, lua_refused, outside_reads, sandboxed, unsandboxed
 from .scan import SCANNED, added, allowed, binaries_on_disk, programs_of, shell_lines
 from .xr import compile_order, external_documents
 from .paths import STATE, latexmk_command, main_file, replace_file, restricted_programs, safe_rel, tex_env, tex_names_refused
@@ -217,8 +217,10 @@ async def latexmk(cmd: list[str], project: Path, out: Path, cwd: Path, confine: 
     """Run a latexmk command (latexmk_command) that writes into `out`: confined to `project`
     (confine.py) unless `confine` is off. Its exit code and, with `capture`, what it printed.
     Stopped if cancelled, or after `timeout` seconds (TimeoutError)."""
+    # no sandbox: LuaLaTeX's Lua code could read files unrecorded, so it isn't run (RECORD in paths.py)
+    no_lua = {"TEXLOOM_NO_LUA": "1"} if confine and unsandboxed() else {}
     proc = await asyncio.create_subprocess_exec(
-        *(sandboxed(cmd, project, out) if confine else cmd), cwd=cwd, env=tex_env(TEXMFOUTPUT=str(out)),
+        *(sandboxed(cmd, project, out) if confine else cmd), cwd=cwd, env=tex_env(TEXMFOUTPUT=str(out), **no_lua),
         stdout=asyncio.subprocess.PIPE if capture else asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.STDOUT if capture else asyncio.subprocess.DEVNULL,
     )
@@ -313,6 +315,10 @@ class FolderSync:
         replica.on_remote = self.on_remote
         replica.on_compile_request = self.on_compile_request
         self._warned_shell: frozenset[str] = frozenset()
+        # the last compile stopped for reading outside the project (its files; none: LuaLaTeX without a
+        # sandbox), numbered so the app asks about each stop once: None while compiles go through
+        self.stopped: dict | None = None
+        self._stops = 0
         self._last_request = 0.0
         self._asked: dict = {}  # browsers whose compile requests the next compile answers -> their nonce
         self._compiled_at = 0.0  # when the last compile finished (monotonic)
@@ -1122,6 +1128,9 @@ class FolderSync:
             raise CompileRefused(refused)
         notes = [note] if note else []
         confine = self.opts.get("confine", True)
+        if lua_refused(engine, extra, confine):
+            self._stop([])
+            raise CompileRefused(LUA_REFUSED)
         forget_reads(build)
         bib = self.r.meta.get("bib")
         for doc in await compile_externals(self.root, files, main, self.target, build, engine, bib, extra, confine):
@@ -1142,6 +1151,9 @@ class FolderSync:
             shutil.rmtree(build, ignore_errors=True)
             build.mkdir(parents=True, exist_ok=True)
             ok, log_text = False, OUTSIDE_NOTE.encode()
+            self._stop(outside[:20])
+        else:
+            self.stopped = None
         log.info("compiled %s in %.1fs: %s", main, time.time() - t0, "ok" if ok else "errors")
         out_pdf = self.target(main[:-4] + ".pdf")
         if pdf.exists() and out_pdf is not None:
@@ -1171,6 +1183,12 @@ class FolderSync:
                 old = prev.get(k)
                 if old and old not in new and old not in stored:
                     await self.r.drop_output(old)
+
+    def _stop(self, files: list[str]) -> None:
+        """A compile was stopped for reading `files` outside the project (none: LuaLaTeX can't run
+        here), which the app asks about: compiles may read any file, if the user trusts the project."""
+        self._stops += 1
+        self.stopped = {"n": self._stops, "files": files}
 
     def shell_mode(self) -> tuple[list[str], str]:
         """latexmk's shell-escape arguments for this compile, and a note for the log.

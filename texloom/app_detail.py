@@ -16,15 +16,21 @@ from PySide6.QtCore import Qt
 from . import listsync
 from .cli import code_ok
 from .comments import OVERVIEW, counts
+from .confine import unsandboxed
 from .config import DEFAULT_CONFIG, browser_link, load_config, update_config
 from .dialogs import CopyFolderDialog, ProgramsDialog
 from .dialogs_share import ask_code
 from .i18n import _, ngettext
 from .paths import state_dir, write_json
-from .ui import GREY, ICON, Disclosure, ask, describe, heading, inform, move_refusal_text, note, open_path, project_name, red, shade, short_path, usage_text, warn
+from .ui import GREY, ICON, Disclosure, ask, choose, describe, heading, inform, move_refusal_text, note, open_path, project_name, red, shade, short_path, usage_text, warn
 from .wordcount import find_texcount, texcount_report
 
 log = logging.getLogger("texloom")
+
+
+def _any_file_risk() -> str:
+    return _("Compiles of this folder may then read any file you can, and what they read can end up in the PDF and "
+             "log shared with everyone in the project. Anyone with an edit link writes the document.")
 
 
 class ProjectDetailPart:
@@ -117,7 +123,7 @@ class ProjectDetailPart:
             except OSError as e:
                 log.debug("mentions seen not saved: %s", e)
         if new and self.tray is not None:
-            self.mention_folder = d
+            self.tray_click = lambda d=d: self.open_review(d, mentions=True)
             name = project_name(d, self.engine)
             self.tray.showMessage("TeXLoom", ngettext(len(new), "A new comment in {project} mentions you.",
                                                       "{n} new comments in {project} mention you.", n=len(new), project=name)
@@ -149,9 +155,61 @@ class ProjectDetailPart:
         else:
             self.open_review(d, mentions=bool(self.comment_counts.get(d, (0, 0))[1]))
 
-    def mention_clicked(self) -> None:
-        if self.mention_folder is not None:
-            self.open_review(self.mention_folder, mentions=True)
+    def notice_clicked(self) -> None:
+        if self.tray_click is not None:
+            self.tray_click()
+
+    def check_stopped(self) -> None:
+        """Ask, once per folder, about a compile stopped for reading outside the project (or
+        LuaLaTeX with no sandbox here): right away in the window, or with a notice when it's hidden."""
+        if QtWidgets.QApplication.activeModalWidget() is not None:
+            return  # after the dialog that's open
+        for d, st in list(self.engine.daemon.states.items()):
+            stop = getattr(st.fs, "stopped", None)
+            if not stop or d in self.stop_asked:
+                continue
+            self.stop_asked.add(d)
+            if self.isVisible() and not self.isMinimized():
+                QtCore.QTimer.singleShot(0, lambda d=d, stop=stop: self.ask_stopped(d, stop))
+            elif self.tray is not None:
+                self.tray_click = lambda d=d, stop=stop: self.ask_stopped(d, stop)
+                self.tray.showMessage("TeXLoom", _("A compile of {project} was stopped. Click to see why.",
+                                                   project=project_name(d, self.engine)), QtGui.QIcon(str(ICON)), 10000)
+            return  # one at a time
+
+    def ask_stopped(self, d: Path, stop: dict) -> None:
+        if load_config(d).get("confine") is False:
+            return  # allowed meanwhile
+        self.show_window()
+        self.select_folder(d)
+        name = project_name(d, self.engine)
+        files = stop["files"]
+        if files:
+            listed = "\n".join(short_path(Path(f)) for f in files[:5]) + ("\n…" if len(files) > 5 else "")
+            text = _("TeXLoom stopped a compile of {project}: the document read files outside the project, so its PDF "
+                     "wasn’t shared:\n\n{files}\n\nIf you expected that (a bibliography or style file you keep "
+                     "elsewhere, say) and trust everyone who can edit the project, let its compiles read any file on "
+                     "this computer. If not, ask whoever added those lines why.", project=name, files=listed)
+        else:
+            text = _("TeXLoom can’t compile {project} here: it uses LuaLaTeX, and this computer has no sandbox to keep "
+                     "a LuaLaTeX document’s code from reading your other files (on Linux, installing bubblewrap adds "
+                     "one).\n\nIf you trust everyone who can edit the project, let its compiles read any file on this "
+                     "computer. If not, it still compiles in the browser.", project=name)
+        text += "\n\n" + _any_file_risk()
+        if choose(self, QtWidgets.QMessageBox.Warning, _("Compile stopped"), text, _("Let it read any file"), _("Not now")):
+            update_config(d, confine=False)
+            self.engine.call(self.engine.daemon.restart, d)
+            self.show_detail()
+
+    def set_any_file(self, on: bool) -> None:
+        d = self.current()
+        if not d:
+            return
+        if on and not ask(self, _("Reading any file"), _any_file_risk() + "\n\n" + _("Turn this on only for projects "
+                          "whose editors you trust."), safe=True):
+            self.c_anyfile.setChecked(False)
+            return
+        self.set_option("confine", not on)
 
     def open_review(self, d: Path, mentions: bool = False) -> None:
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(browser_link(d, "tab=review" + ("&mentions=1" if mentions else ""))))
@@ -266,6 +324,14 @@ class ProjectDetailPart:
         prow.addWidget(self.p_mode, 1)
         prow.addWidget(self.p_review)
         c.addLayout(prow)
+        self.stop_lbl = QtWidgets.QLabel()  # why the last compile was stopped
+        self.stop_lbl.setWordWrap(True)
+        c.addWidget(self.stop_lbl)
+        self.c_anyfile = QtWidgets.QCheckBox(_("Let compiles read any file on this computer (trusted projects only)"))
+        self.c_anyfile.clicked.connect(self.set_any_file)
+        c.addWidget(self.c_anyfile)
+        if unsandboxed():  # Windows; Linux without bubblewrap (confine.py)
+            c.addWidget(note(_("This computer has no sandbox for compiles, so LuaLaTeX documents aren’t compiled here. Compile them in the browser. On Linux, installing bubblewrap adds one.")))
         srow = QtWidgets.QHBoxLayout()
         scratch = QtWidgets.QPushButton(self.a_scratch.text())
         scratch.setToolTip(self.a_scratch.toolTip())
@@ -389,6 +455,15 @@ class ProjectDetailPart:
         self.compile_more.setVisible(compiles)
         self.no_tex.setVisible(compiles and shutil.which("latexmk") is None)
         self.a_scratch.setEnabled(compiles)
+        self.c_anyfile.setChecked(cfg.get("confine") is False)
+        stop = getattr(st.fs, "stopped", None) if st else None
+        self.stop_lbl.setVisible(bool(stop) and cfg.get("confine") is not False)
+        if stop:
+            files = stop["files"]
+            self.stop_lbl.setText(red(html.escape(
+                _("The last compile was stopped: it read files outside the project ({files}), so its PDF wasn’t shared.",
+                  files=", ".join(short_path(Path(f)) for f in files[:3]) + (" …" if len(files) > 3 else ""))
+                if files else _("The last compile was stopped: LuaLaTeX can’t run on this computer without a sandbox."))))
         mode = cfg.get("shell_escape")
         self.p_mode.setCurrentIndex(2 if mode in (True, "unrestricted") else 1 if mode == "restricted" else 0)
         self.p_review.setEnabled(mode in (True, "unrestricted"))

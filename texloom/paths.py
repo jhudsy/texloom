@@ -199,13 +199,16 @@ ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-xelatex", "lualatex": "-lualate
 # LuaLaTeX reads with openin_any=r (dot files refused): paranoid reading refuses Lua's io.open of
 # any absolute path, TeX's own files included, so its font loader (luaotfload) couldn't start and
 # no LuaLaTeX document compiled. Under r, LuaTeX records what io.open reads in its .fls, which the
-# read check covers; what paranoid didn't refuse either (loadfile, dofile, pdfe, img) is as before.
+# read check covers; what it doesn't record (io.lines, lfs.dir, lfs.attributes) is stopped by the
+# sandbox, and where there's none, folder.latexmk sets TEXLOOM_NO_LUA and LuaLaTeX isn't run.
 # latexmk runs its other programs through the shell, the file names in double quotes, where ` and
 # $( ) still run commands: they too run as lists (texloom_exec), with no shell. kpsewhich, which
 # latexmk runs through the shell for the names a document gives (\bibliography{$(…)}), isn't
 # asked about a name the shell would act on: such a file is then only not watched for changes.
 RECORD = (
     "use Cwd; sub texloom_run { my ($ext, $base, @cmd) = @_; "
+    "if ($cmd[0] eq q(lualatex) and $ENV{TEXLOOM_NO_LUA}) { "
+    "print qq(texloom: LuaLaTeX isn't run on this computer: it has no sandbox for compiles\\n); return 256 } "
     "local @ENV{qw(openin_any openout_any)} = (q(a), q(a)) if $cmd[0] eq q(bibtex); "
     "local $ENV{openin_any} = q(r) if $cmd[0] eq q(lualatex); my $r = system(@cmd); "
     "if (open(my $out, q(>>), qq($base.$ext-reads))) { print $out q(PWD ), getcwd(), qq(\\n); "

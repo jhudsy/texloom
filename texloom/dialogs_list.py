@@ -342,7 +342,10 @@ class ProjectListDialog(QtWidgets.QDialog):
         n = len(doc["projects"])
         self.count.setText("✓ " + (ngettext(n, "Your {n} project is synced, encrypted.", "Your {n} projects are synced, encrypted.", n=n) if n
                                    else _("Your list is synced, encrypted.")) + " " + synced_ago(listsync.last_synced))
-        key = listsync.ListKey.from_link(listsync.saved_link() or "")[0]
+        link = listsync.saved_link()
+        if not link:
+            return  # stopped using the list while it synced
+        key = listsync.ListKey.from_link(link)[0]
         self.in_background(lambda: listsync.read_slots(key, server), lambda slots: slots is not None and self.show_ways(slots), quiet=True)
 
     def show_ways(self, slots: dict) -> None:

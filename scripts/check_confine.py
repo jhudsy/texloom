@@ -10,8 +10,10 @@ that the check fails, so that the secret never reaches a shared PDF:
 - \\input of a file outside (what the check caught before);
 - a .bib or .bst from outside, which BibTeX (reading unrestricted, for its .aux in .texloom/build) reads;
 - Lua's io.open of a file outside (LuaLaTeX reads with openin_any=r, which LuaTeX records);
-and that ordinary documents (pdflatex, xelatex, lualatex with fontspec, BibTeX, its citations
-resolved) still compile and pass.
+- Lua's io.lines of a file in a home folder, which nothing records: the sandbox hides it, and
+  where there's no sandbox LuaLaTeX isn't run at all;
+and that ordinary documents (pdflatex, xelatex, lualatex with fontspec where there's a sandbox,
+BibTeX, its citations resolved) still compile and pass.
 
 Skips (successfully) what needs a TeX that isn't installed.
 
@@ -31,11 +33,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from texloom.confine import outside_reads, forget_reads  # noqa: E402
+from texloom import confine  # noqa: E402
 from texloom.folder import latexmk  # noqa: E402
 from texloom.paths import STATE, latexmk_command, use_tex_on_path  # noqa: E402
 
 failures: list[str] = []
 SECRET = "TEXLOOM-CONFINE-SECRET-7f3a"
+REAL_SANDBOX = confine._sandbox
 
 
 def check(what: str, cond: object, detail: object = "") -> None:
@@ -61,7 +65,11 @@ async def compile_doc(tmp: Path, name: str, engine: str, tex: str, sandbox: bool
     build.mkdir(parents=True)
     forget_reads(build)
     cmd = latexmk_command(engine, None, "main.tex", f"-outdir={build}", *shell)
-    code, out = await latexmk(cmd, project, build, project, confine=sandbox, timeout=300, capture=True)
+    confine._sandbox = REAL_SANDBOX if sandbox else (lambda: None)  # as on Windows, or Linux without bubblewrap
+    try:
+        code, out = await latexmk(cmd, project, build, project, timeout=300, capture=True)
+    finally:
+        confine._sandbox = REAL_SANDBOX
     pdf = build / "main.pdf"
     outside = outside_reads(project, build)
     shared = pdf.read_bytes() if pdf.exists() and not outside else None  # as folder.py decides
@@ -133,6 +141,46 @@ async def shell_escape(tmp: Path) -> None:
           not (project / "pwned-hidden").exists() and not (project / STATE / "build" / "pwned-hidden").exists(), shell)
 
 
+async def stop_recorded(tmp: Path, outside: Path) -> None:
+    """A synced folder's compile stopped for reading outside the project, or for LuaLaTeX with no
+    sandbox, records it (FolderSync.stopped), which the app asks about at once (scripts/check_app.py)."""
+    from types import SimpleNamespace
+    from texloom.folder import CompileRefused, FolderSync
+    (outside / "stop.bib").write_text("@book{s, title={T}, author={A}, year=2000, publisher={P}}\n")
+    bib = ("\\documentclass{article}\\begin{document}\\nocite{*}\\bibliographystyle{plain}\\bibliography{"
+           + str(outside / "stop") + "}\\end{document}\n")
+    plain = "\\documentclass{article}\\begin{document}Hello\\end{document}\n"
+    cases = [("plain", "pdflatex", plain, True, None)]
+    if shutil.which("bibtex"):
+        cases.append(("outside", "pdflatex", bib, True, "stop.bib"))
+    cases.append(("lua", "lualatex", plain, False, ""))
+    for name, engine, tex, sandbox, want in cases:
+        project = tmp / f"stop-{name}"
+        project.mkdir()
+        (project / "main.tex").write_text(tex)
+        fs = SimpleNamespace(
+            main_file=lambda: "main.tex", root=project, _clean_build=False, stopped=None, _stops=0, _warned_shell=frozenset(),
+            opts={"engine": None, "latexmk_args": [], "shell_escape": False, "confine": True, "label": "check"},
+            r=SimpleNamespace(meta={"engine": engine}, files={"main.tex": tex}, dir=project / STATE, can_write=False),
+            target=lambda p, project=project: project / p)
+        fs.shell_mode = lambda fs=fs: FolderSync.shell_mode(fs)  # type: ignore[arg-type]
+        fs._stop = lambda files, fs=fs: FolderSync._stop(fs, files)  # type: ignore[arg-type]
+        confine._sandbox = REAL_SANDBOX if sandbox else (lambda: None)
+        try:
+            await FolderSync._run_compile(fs)  # type: ignore[arg-type]
+        except CompileRefused:
+            pass
+        finally:
+            confine._sandbox = REAL_SANDBOX
+        got = fs.stopped
+        if want is None:
+            check("an ordinary compile records no stop", got is None, got)
+        elif want:
+            check("a compile that read a file outside records the stop, naming it", bool(got) and any(want in f for f in got["files"]), got)
+        else:
+            check("LuaLaTeX with no sandbox records the stop (no files: it didn't run)", got == {"n": 1, "files": []}, got)
+
+
 async def main() -> int:
     use_tex_on_path()
     if not shutil.which("latexmk"):
@@ -197,11 +245,25 @@ async def main() -> int:
             # paranoid reading refused luaotfload TeX's own files: no LuaLaTeX document compiled until 0.4.58
             ok, pdf, found = await compile_doc(tmp, "lplain", "lualatex",
                                                "\\documentclass{article}\\usepackage{fontspec}\\begin{document}Hello\\end{document}\n", sandbox)
-            check("lualatex: an ordinary document (fontspec) compiles and is shared", ok and pdf is not None and not found, found)
+            if sandbox:
+                check("lualatex: an ordinary document (fontspec) compiles and is shared", ok and pdf is not None and not found, found)
+            else:  # its Lua code could read files unrecorded (loadfile, dofile, lfs.dir): the security audit of 2026-11-25
+                check("lualatex: isn't run where there's no sandbox", not ok and pdf is None, ok)
+            # Lua's io.lines isn't recorded: only the sandbox (which hides home folders) stops it, so the secret is in one
+            home_secret = ROOT / f".check-confine-read-{os.getpid()}"
+            home_secret.write_text(SECRET + "\n")
+            try:
+                tex = ("\\documentclass{article}\\begin{document}hi\\directlua{local r = \"\" "
+                       "for l in io.lines(\"" + str(home_secret) + "\") do r = r .. l end pdf.immediateobj(\"(\" .. r .. \")\")}"
+                       "\\end{document}\n")
+                ok, pdf, found = await compile_doc(tmp, "lualines", "lualatex", tex, sandbox)
+                check("lualatex: Lua's io.lines of a file in a home folder (unrecorded) can't reach the shared PDF", not leaked(pdf), found)
+            finally:
+                home_secret.unlink(missing_ok=True)
             tex = ("\\documentclass{article}\\begin{document}\\directlua{local f = io.open(\"" + s + "\", \"rb\") "
                    "if f then tex.print(f:read(\"*a\")) f:close() end}\\end{document}\n")
             ok, pdf, found = await compile_doc(tmp, "luaopen", "lualatex", tex, sandbox)
-            check("lualatex: Lua's io.open of a file outside fails the check, and isn't shared", found and not leaked(pdf), found)
+            check("lualatex: Lua's io.open of a file outside fails the check, and isn't shared", (found or not sandbox) and not leaked(pdf), found)
         else:
             print("(lualatex isn't installed: skipped)")
         if sandbox and sys.platform == "darwin" and have["pdflatex"]:
@@ -221,6 +283,9 @@ async def main() -> int:
     if have["pdflatex"]:
         print("\nshell_escape true (approved lines only):")
         await shell_escape(tmp)
+    if have["pdflatex"]:
+        print("\nwhat the app is told:")
+        await stop_recorded(tmp, outside)
     print(f"\ncompile confinement: {'FAILED' if failures else 'ok'}")
     if not failures:
         shutil.rmtree(tmp, ignore_errors=True)

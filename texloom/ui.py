@@ -79,6 +79,17 @@ def ask(parent, title: str, text: str, safe: bool = False) -> bool:
     return message(parent, QtWidgets.QMessageBox.Question, title, text, yes | no, no if safe else yes) == yes
 
 
+def choose(parent, icon: QtWidgets.QMessageBox.Icon, title: str, text: str, act: str, cancel: str) -> bool:
+    """A question answered with `act` or `cancel` (the default, and Escape): whether `act` was chosen."""
+    box = QtWidgets.QMessageBox(icon, title, text, QtWidgets.QMessageBox.NoButton, over(parent))
+    yes = box.addButton(act, QtWidgets.QMessageBox.AcceptRole)
+    no = box.addButton(cancel, QtWidgets.QMessageBox.RejectRole)
+    box.setDefaultButton(no)
+    box.setEscapeButton(no)
+    attach(box).exec()
+    return box.clickedButton() is yes
+
+
 def warn(parent, title: str, text: str) -> None:
     message(parent, QtWidgets.QMessageBox.Warning, title, text)
 

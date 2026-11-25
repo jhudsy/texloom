@@ -109,7 +109,8 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         # the Review tab's comments, for people who work here rather than in the browser: counts in the
         # details, and a notice when a new one mentions you (the app runs on; the web app can't do that)
         self.comment_counts: dict[Path, tuple[int, int]] = {}
-        self.mention_folder: Path | None = None  # what the last mention notice was about, for its click
+        self.tray_click = None  # what clicking the last notice does (a mention: the Review tab)
+        self.stop_asked: set[Path] = set()  # folders asked about a stopped compile (check_stopped)
         self.comments_timer = QtCore.QTimer(self)
         self.comments_timer.timeout.connect(self.check_comments)
         self.comments_timer.start(COMMENTS_EVERY * 1000)
@@ -342,6 +343,7 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.a_pause.setText(_("Resume syncing") if paused else _("Pause syncing"))
         self.a_pause.setIcon(theme_icon("MediaPlaybackStart" if paused else "MediaPlaybackPause"))
         self.show_detail()
+        self.check_stopped()
 
     # -- actions
     def join(self, link: str = "", from_web: bool = False) -> None:
@@ -656,7 +658,7 @@ def main(argv: list[str] | None = None) -> None:
         # as in other menu-bar apps. Bringing the window forward as well closed that menu at once
         # when the click was on another screen's menu bar.
         tray.activated.connect(lambda reason: win.show_window() if reason == QtWidgets.QSystemTrayIcon.Trigger and not MAC else None)
-        tray.messageClicked.connect(win.mention_clicked)
+        tray.messageClicked.connect(win.notice_clicked)
         tray.show()
         win.tray = tray
         if MAC:

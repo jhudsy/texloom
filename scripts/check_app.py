@@ -128,6 +128,42 @@ def windows(win: appmod.Window) -> None:
     check(not win.isVisible(), "the main window closes (hides: the app keeps syncing)")
 
 
+def stopped_compile(win: appmod.Window) -> None:
+    """A compile stopped for reading outside the project (the security audit of 2026-11-25) is
+    asked about at once, naming what was read, and the answer turns on reading any file."""
+    from types import SimpleNamespace
+    from texloom import app_detail, config
+    from texloom.crypto import Keys
+    from texloom.daemon import FolderState
+    print("a stopped compile:")
+    d = Path(tempfile.mkdtemp(dir=os.environ["TEXLOOM_HOME"])).resolve()
+    config.save(d, Keys.generate().link("https://texloom.invalid"))
+    st = FolderState(d)
+    st.fs = SimpleNamespace(stopped={"n": 1, "files": [str(Path.home() / "bib" / "refs.bib")]})
+    win.engine.daemon.states[d] = st
+    asked: list[str] = []
+    keep = app_detail.choose
+    try:
+        app_detail.choose = lambda *a, **k: asked.append(a[3]) or False
+        win.show_window()
+        win.refresh()
+        settle()
+        check(len(asked) == 1 and "refs.bib" in asked[0], "it’s asked about straight away, naming the file read")
+        check(config.load_config(d).get("confine") is not False, "Not now changes nothing")
+        win.refresh()
+        settle()
+        check(len(asked) == 1, "and isn't asked about again")
+        app_detail.choose = lambda *a, **k: asked.append(a[3]) or True
+        win.ask_stopped(d, {"n": 2, "files": []})
+        check("LuaLaTeX" in asked[-1], "LuaLaTeX without a sandbox says so")
+        check(config.load_config(d).get("confine") is False, "Let it read any file turns the setting on")
+    finally:
+        app_detail.choose = keep
+        del win.engine.daemon.states[d]
+        win.hide()
+        settle()
+
+
 def first_run(win: appmod.Window) -> None:
     """The welcome while there are no folders, a creation code entered in Settings, and the Help menu."""
     from texloom import listsync
@@ -444,6 +480,7 @@ def main() -> int:
     engine = Engine()  # not started: nothing here syncs or goes online
     win = appmod.Window(engine, appmod.Activity())
     windows(win)
+    stopped_compile(win)
     first_run(win)
     away(win)
     list_window()
