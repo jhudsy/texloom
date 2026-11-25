@@ -1,311 +1,302 @@
 # Scaling and availability
 
-How the TeXLoom server is meant to grow from one small relay to something that stays up when a
-machine fails and copes with many people, and why it is built from the parts it is. What exists
-today is marked **today**; the rest is **planned** (see [ROADMAP.md](ROADMAP.md), and
-[issue #12](https://github.com/jhudsy/texloom/issues/12) for the work itself). Nothing here is
-needed to run a relay: a small one stays one process on one machine.
+How the TeXLoom server is meant to grow, from one small relay to something that stays up when a machine
+fails and copes with many people, and why it is built from the parts it is. (The server is called a relay
+because it mostly passes encrypted changes between the apps of the people editing a project, and keeps a
+copy.) Each part is marked **built** or **planned**; the work is tracked in [ROADMAP.md](ROADMAP.md) and
+[issue #12](https://github.com/jhudsy/texloom/issues/12). Nothing here is needed to run a relay: a small one
+stays one process on one machine.
 
 ## What makes this easier than most systems
 
-- **Everyone keeps a full copy.** The desktop app and the browser hold the whole project, so the
-  server is a way to meet and to keep a backup, not the only copy. If the relay is down, nobody
-  loses anything and edits made meanwhile sync when it returns. Availability is about convenience
-  and about the backup, not about avoiding data loss.
-- **The server only sees encrypted data.** A second, third or someone else's server needs no more
-  trust than the first.
-- **Projects are independent.** Each project's changes are one ordered stream and nothing crosses
-  between projects. So a project can live on any server, and a database can later be split by
-  project without redesigning anything. (A project may already live on any server: see "Projects on
-  several servers" in [DESIGN.md](DESIGN.md).)
-- **Compiling is not the server's job.** It happens on the user's machine (WebAssembly TeX Live in
-  the browser, or TeX on the desktop). The server hands out TeX Live package files on demand, which
-  is disk and bandwidth, not CPU.
+- **Everyone keeps a full copy.** The desktop app and the browser hold the whole project, so the server is a
+  way to meet and to keep a backup, not the only copy. If it is down, nobody loses anything, and edits made
+  meanwhile sync when it returns. Availability is about convenience, not about avoiding data loss.
+- **The server only sees encrypted data.** A second, third or someone else's server needs no more trust than
+  the first.
+- **Projects are independent.** Each project's changes are one ordered stream and nothing crosses between
+  projects, so a project can live on any server (see "Projects on several servers" in
+  [DESIGN.md](DESIGN.md)), and a database can later be split by project.
+- **Compiling is not the server's job.** It happens on the user's machine (WebAssembly TeX Live in the
+  browser, or TeX on the desktop). The server hands out the engine and TeX Live package files, which is disk
+  and bandwidth, not CPU.
 
-## What runs today
+## The three kinds of state
 
-One relay process (aiohttp behind nginx, a systemd service), a PostgreSQL database for the edit
-logs, project records and project lists (a relay can use an SQLite file instead: below), and stored files in a folder or an S3-compatible bucket.
-Who is connected to which project, and some counters (usage, owners), are kept in the relay's
-memory (the usage read from a ledger in the database at the start), which is how a change reaches the others connected to it.
+Everything the server remembers is one of three kinds, and where each lives decides how the server can grow.
+
+- **Durable records**: each project's edit log (one stream per project, numbered by the database), its
+  registration (its owner, which is a creation code, and its storage mode) and the project lists. They live in the **database**.
+- **Stored files**: pictures, PDFs and other uploads. They live in a folder or an **S3-compatible bucket**.
+- **Live state**: what passes between the people connected to a project right now. The connections to one
+  project are its **room**. A room carries cursors and presence, every change of a sync-only project (one the
+  server only passes along and never stores), and a stored project's new changes passed on to the others as they arrive. It lives only in the
+  relay's memory and is rebuilt when people reconnect: apps send each other what they lack (peer catch-up,
+  [DESIGN.md](DESIGN.md)) and catch up from the database.
+
+The relay also keeps counters and caches in memory (an owner's usage, who has what open);
+`scripts/check_server_state.py` lists every one and what it would mean for several relays.
+
+Durable records and files can be moved to systems built for availability and growth. Live state cannot be
+put in a database, and sharing it between relays is the one new problem several relays bring (way 3).
+
+**Why files go in a bucket.** They are most of the bytes, and an object store suits them: a file's key is
+`<project>/<id>` and the id names the content, so a key holds one content for ever and nothing is updated in
+place; the store makes the copies, so a second or replacement server attaches to the same bucket and has
+every file; only four S3 requests are used (PUT, GET, DELETE, HEAD), so any S3-compatible store works (Garage,
+RustFS, Cloudflare R2, Backblaze B2, AWS S3, …) and nobody is tied to a provider. A folder stays the default
+for one small relay: one setting (`files`), one small interface (`server/files.py`). The failover lease also
+lives in the bucket (way 2).
 
 ## Three ways to run it
 
-Each way adds to the one before and is chosen by settings; the code for a way is loaded only when it is
-asked for, so a small server carries none of the rest.
+Each way adds to the one before and is chosen by settings; the code for a way is loaded only when it is asked
+for, so a small server carries none of the rest.
 
-1. **One server** (the default): SQLite or PostgreSQL, a folder or a bucket for files. Nothing else
-   to run. Its backups cover losing it (below).
-2. **Two servers, with failover** (`failover`, **built**): PostgreSQL on both (the second a streaming
-   standby), a bucket that does conditional writes, one server serving at a time. A lease in the bucket
-   decides which; the other takes over when it lapses. Cheap (two machines and a bucket) and enough for
-   most. It does not use both servers at once and does not scale.
-3. **Several relays** (**planned**): any number of relays serve at once, each project on one of them,
-   chosen by a front end that hashes the project id; stored files in a bucket; the database kept
-   available by **a standard tool** (Patroni, pg_auto_failover, or a hosted PostgreSQL) and not by
-   `failover`. The two are not combined: `failover` fences a *relay* that has lost its lease, which is
-   enough when the relay is the only client of its own database. With relays connected to a database over
-   the network, a partitioned old primary's database would go on accepting writes from the others, so it is
-   the database that must be fenced, and that is what those tools do (Patroni arms a watchdog before
-   promoting, and demotes the old primary, with `pg_rewind` or a new base backup to rejoin it).
-   Relays find the writable database with a list of hosts (`postgresql://h1,h2/db?target_session_attrs=primary`),
-   which the driver handles. This is from those tools' documentation: none has been run here yet.
+1. **One server** (the default, **built**).
+2. **Two servers, with failover** (`failover`, **built**): one serves, the other takes over when it stops.
+3. **Several relays** (**planned**): any number serve at once, sharing a database, a bucket and a message bus.
 
-What way 3 needs of the relay is listed in "Several relays: route by project" below. Three pieces of
-it are small, safe with one relay, and are built first: maintenance that runs on one relay at a time
-(an advisory lock), a way for relays to tell each other that a project changed (LISTEN/NOTIFY), and
-storage totals kept in the database (a per-project ledger, checked against a recount).
+## Way 1: one server
 
-## Why stored files go in a bucket
-
-Stored files are most of the bytes the server keeps, so they are the first thing to move off its
-disk. An object store fits them unusually well:
-
-- **They never change.** A file's key is `<project>/<id>` and the id names the content, so a key
-  holds one content for ever. Writing it twice is harmless and nothing is updated in place, which
-  is all an object store offers and all this needs.
-- **The store makes the copies.** Durability, replication and growth are its job, not ours. A
-  second server, or a replacement, attaches to the same bucket and has every file at once, with
-  nothing to copy.
-- **It is cheap and standard.** Only four S3 requests are used (PUT, GET, DELETE, HEAD), signed
-  with the ordinary S3 scheme. Any S3-compatible store works: Garage or RustFS on your own
-  machines, or a hosted one. Nobody is tied to a provider, and the store sees only encrypted data.
-- **A folder stays the default.** For one small relay a folder is simpler and needs nothing. The
-  choice is one setting (`files`), behind one small interface in `server/files.py`.
-
-The same reasoning is behind the next piece: a bucket is also something every server can reach, so
-it can hold the small amount of shared state that two servers must agree on (below).
-
-## The database
-
-A relay uses one of two, behind the same few calls (`server/db.py`, [issue
+A relay uses one of two databases, behind the same few calls (`server/db.py`, [issue
 #30](https://github.com/jhudsy/texloom/issues/30)):
 
-- **SQLite**: one file, one process, nothing to install. The default, for anyone running their
-  own relay. It is the single-relay option: a second relay on the same file is refused.
-- **PostgreSQL**: replicas, a standby, several relays and, later, splitting projects across
-  databases. For servers that need availability or scale.
+- **SQLite**: one file, one process, nothing to install. The default for anyone running their own relay. A
+  second relay on the same file is refused.
+- **PostgreSQL**: for a standby, replicas and several relays.
 
-Both run the same SQL, and one check (`scripts/check_store.py`) holds them to the same answers,
-so growing means changing a setting, not rewriting. A relay moves from one to the other by copying
-everything across while it is stopped (`texloom-server --copy-database-from`, INSTALL.md).
+Both run the same SQL, and `scripts/check_store.py` holds them to the same answers, so growing means changing a
+setting, not rewriting; `texloom-server --copy-database-from` moves a relay from one to the other. Quotas and
+eviction are ordinary code on top.
 
-Accounting and policy (quotas, eviction) are ordinary code on top, kept in the relay's memory. For
-several relays at once two more pieces are needed, with PostgreSQL: a **notifier** ("project X has
-a new change", LISTEN/NOTIFY) and a **lock or lease** for the single-writer rules; and what each
-relay keeps in memory moves into shared state ([#12](https://github.com/jhudsy/texloom/issues/12)).
+**Losing the server.** Backups (INSTALL.md) cover it. A cold standby needs nothing more: a second machine
+restores the latest backup every night (the database, the settings and codes, and the stored files or a copy
+of the bucket), checks it, and stays stopped; if the main server is lost, it starts with that copy and the
+name moves to it. Changes made since the backup aren't lost: the apps hold them, notice that the server's log
+isn't the one they last saw (they send the last change they have in their hello, and the server says when it
+doesn't match), and send everything again (`scripts/check_restore.py`). The nightly restore is also the proof
+that the backups work.
 
-## Availability
+## Way 2: two servers, with failover
 
-### Today: a cold standby from the backups
-
-The simplest standby needs nothing beyond the backups INSTALL.md describes: a second machine
-restores the latest one every night (the database, the settings and codes, and the stored files
-or a copy of the bucket), checks it, and stays stopped. If the main server is lost, it starts
-with that copy and the names move to it. Changes made since the backup aren't lost: the apps hold
-them, notice that the server's log isn't the one they last saw (they send the last change they
-have in their hello, and the server says when it doesn't match), and send everything again. So a
-restore costs a catch-up, not data (`scripts/check_restore.py`). The nightly restore is also the
-proof that the backups work.
-
-### Today: a warm standby, switched by hand
-
-With PostgreSQL, a second machine can follow the primary by streaming replication and take over
-in minutes, either one you run or a hosted PostgreSQL that keeps its own standby (INSTALL.md, "A
-standby server"; the relay is told the same thing either way, its `database`). A person decides
-that the primary is gone, promotes the standby, starts the relay on it and moves the name. The
-relay refuses to start on a database that is still a standby, and says why. The last moments
-before the loss may be missing on the standby; the apps send them again, as after a restore.
-`scripts/check_standby.py` runs exactly that, with a standby that never got the last changes.
-What is left is making the decision and the switch automatic (below).
-
-### Today: automatic failover, off unless asked for
-
-The lease below is built (`server/failover.py`; INSTALL.md, "Letting the two servers switch over by
-themselves"), modelled first (`models/failover`) and run end to end with two real servers
-(`scripts/check_failover.py`). It is one module that is loaded only when `failover` is set, so a
-single server, or a pair switched by hand, carries none of it. The servers say which is the primary
-(`/api/health`); getting traffic to it is left to you (INSTALL.md, "Moving traffic to the primary" lists
-ways, with one example, `deploy/Caddyfile.failover`). Rebuilding the old primary as a standby
-afterwards is manual too.
-
-### Two machines are enough
-
-Nothing needs a vote, because the database is the one place changes are numbered and the relays
-defer to it. With one primary (the main server) and one standby, the standby holds a nearly
-current copy, kept up by PostgreSQL's streaming replication, and the files are in the bucket.
+**A warm standby, switched by hand** (**built**). With PostgreSQL, a second machine follows the primary by
+streaming replication and can take over in minutes: one you run, or a hosted PostgreSQL that keeps its own
+standby (INSTALL.md, "A standby server"; the relay is told the same thing either way, its `database`). A
+person decides the primary is gone, promotes the standby, starts the relay on it and moves the name. The relay
+refuses to start on a database that is still a standby, and says why. The last moments before the loss may be
+missing on the standby; the apps send them again, as after a restore (`scripts/check_standby.py`).
 
 ### Switching over
 
-Detecting that the primary has failed and promoting the standby can be automatic. The danger with
-two machines is that the standby cannot tell a dead primary from a broken link between them. If it
-promotes while the primary is alive, two primaries number changes differently ("split brain"). A
-client's content would survive, since clients keep everything and merge, but the order of changes
-on the server would have to be repaired. So the switch must be safe, not just fast.
+**Automatic failover** (**built**, off unless `failover` is set: `server/failover.py`, INSTALL.md, "Letting the
+two servers switch over by themselves"). No third machine is needed, because the bucket is the tie-breaker:
 
-The design uses the bucket as the tie-breaker, so no third machine is needed:
+1. The primary renews a small lease object in the bucket every few seconds.
+2. The standby promotes itself only once the lease has not been renewed for long enough.
+3. A primary that is alive but cut off from the standby can still renew, so the standby stays put.
+4. A primary that cannot reach the bucket cannot renew, so it stops itself (it closes its connections and
+   exits). Then the standby can promote safely.
+5. A primary that comes back reads the lease first and, its database being a former primary's, waits to be
+   rebuilt as a standby (`deploy/rebuild-standby.py`).
 
-1. The primary renews a small "I am primary" lease object in the bucket every few seconds.
-2. The standby promotes itself only once the lease has expired.
-3. A primary that is alive but cut off from the standby can still renew the lease, so the standby
-   stays put.
-4. A primary that cannot reach the bucket cannot renew, so it stops itself. Then the standby can
-   promote safely.
-5. A primary that comes back reads the lease first and rejoins as a standby.
+This needs a bucket that does conditional writes (not all do: INSTALL.md lists what is known, and a server
+asked to fail over tests its store at start and refuses one that fails) and clocks that run at roughly the same
+speed: nothing compares one machine's clock with another's. It is **modelled** (`models/failover`,
+`scripts/check_model.py`, issue [#8](https://github.com/jhudsy/texloom/issues/8)) and run end to end, first
+with two real servers (`scripts/check_failover.py`, in CI) and then with real parts in Docker (relays,
+PostgreSQL primary and standby, an S3 store, Caddy; `scripts/rehearse_failover.py`, by hand). They settled
+these points:
 
-This needs a store with conditional writes (most S3-compatible ones have them; check yours) and
-clocks that run at roughly the same speed (nothing compares one machine's clock with another's). The
-design is **modelled** (`models/failover`, `scripts/check_model.py`, issue
-[#8](https://github.com/jhudsy/texloom/issues/8)), and the model settled these points before any
-code:
+- **The timers.** The standby waits at least *the most one clock may run faster than another* times the
+  primary's lease, on its own clock, after it last saw the lease change, and claims it with a conditional
+  write on the version it saw, so a renewal in between makes the claim fail. A standby that could not read the
+  lease counts its wait afresh once it can; otherwise a bucket that was away from both servers ends in a
+  needless switch.
+- **A suspended machine can overlap for a moment.** One whose clock stops while suspended can wake and write
+  after the standby has taken over; timers cannot prevent that. It is harmless to the data, because an app
+  that was told "stored" by it checks, when it connects to the new primary, that the log there has the last
+  change it knows of, and sends everything again if not. So **the apps' hello check is what failover depends
+  on**, and it must not be weakened (the model finds a way to lose a change if it can be fooled, and one if it
+  is removed). A clock that counts suspended time (`CLOCK_BOOTTIME` on Linux) shortens the window.
+- **The bucket becomes something everything waits on.** A primary that cannot reach it stops serving even
+  though it and its database are fine; when it is back, service resumes by itself.
+- **A server that hangs, rather than stops,** is noticed by the apps only when their keep-alive pings go
+  unanswered (every 30 seconds), so people connected through it wait up to about a minute longer than for one
+  that dies.
 
-- The standby waits at least *the most one clock may run faster than another* times the primary's
-  lease, on its own clock, after it last saw the lease change; and it claims the lease with a
-  conditional write on the version it saw, so a renewal in between makes the claim fail.
-- A suspended machine whose clock stops can wake and write for a moment after the standby has taken
-  over. Timers can't prevent that. It is harmless to the data, because an app that was told "stored"
-  by it checks, when it connects to the new primary, that the log there has the last change it knows
-  of, and sends everything again if not. So the apps' hello check is what failover depends on, and it
-  must not be weakened (the model finds a way to lose a change if the check can be fooled, and one if
-  it is removed). Using a clock that counts suspended time (`CLOCK_BOOTTIME` on Linux) shortens the
-  window.
-- A store whose conditional write isn't atomic and consistent would break all of it, so the failover
-  code has to test its store when it starts and refuse to run on one that fails.
+**What it leaves to you:** how traffic reaches whichever server is primary (`/api/health` says which; INSTALL.md,
+"Moving traffic to the primary", lists ways), and rebuilding the old primary as a standby. It does not use both
+servers at once and does not scale.
 
-Promoting the database is half of it: traffic must follow, by changing DNS (with a short TTL) or
-through a front end that checks health. Clients already reconnect with backoff and resume from
-their last acknowledged change, so a switch looks like a short "connecting…".
+## Way 3: several relays
 
-### A standby that is not public
+Planned. The idea: decouple state from the relays so that **any relay can serve any connection**, and let each
+tier be kept available and scaled by the usual means for what it is.
 
-A standby on a home network (a small computer on a private network) works for replication, which
-is asynchronous and tolerant of a slow link: at worst the last few seconds of server-side changes
-are missing, and clients resend them. To take over, though, it must be reachable by the public, and
-its connection and disk then set everyone's speed. Use an SSD, not an SD card. It adds little as
-extra capacity.
+```
+  apps ──► DNS ──► relays (any number; each serves any connection)
+                     │        │              │
+         live messages│        │durable records│files
+                     ▼        ▼              ▼
+                bus (Redis)  database tier   bucket
+```
 
-## Scaling
+Each tier grows and is kept available on its own: relays by adding relays (connections and CPU), the bus by
+the means Redis offers, the database by a standard database tool (below), the bucket by the store. Changing one
+leaves the others alone, apart from three coupling points to watch: the number of database connections
+(relays times pool size), the bus traffic (it grows as a room's people are spread over more relays), and what a
+database failover does to writes in flight (the apps resend them).
 
-### The limits, in the order you would hit them
+### Live messages: three designs
 
-The order is reasoned, not measured: nobody has taken a deployment to its limits. `scripts/loadtest.py`
-measures one relay on the machine it runs on (latency, CPU, memory per scenario); run it on a machine
-like yours before relying on a number. What to watch meanwhile: the admin page (stored bytes, who is
-connected now, each project's size), the relay process's CPU (`top`) and memory (`systemctl show texloom
--p MemoryCurrent`), the number of database connections (`SELECT count(*) FROM pg_stat_activity`), and
-the host's outbound traffic.
+Live state (rooms, above) is the one thing that cannot be moved into a database. If the people in one project
+may be connected to different relays, their live messages must reach each other across relays. Three ways:
 
-| # | The limit | What you would notice | What to do |
-|---|---|---|---|
-| 1 | **Bandwidth for the in-browser TeX engine.** The web editor compiles in the browser, so a first-time visitor downloads the engine from this server (`busytex.wasm` is 32 MB; the full TeX Live bundles are 93, 201 and 342 MB, but with "TeX Live files on demand" a document pulls only the package files it needs) and the browser keeps them afterwards. This is most of the bytes the server sends, and none of it needs the relay's CPU. | the host's outbound traffic or its provider's allowance; a slow first compile for new visitors | serve `/core` and `/texlive` from a CDN or a caching proxy in front (they are static files that change only with a release), and compile PDFs only when someone is looking ([#15](https://github.com/jhudsy/texloom/issues/15)). Cheaper than any more servers, so first. |
-| 2 | **The relay's memory.** The systemd unit caps it (`MemoryMax=1G`), and `--memory` (512 MB by default) is what big work at once may use: catch-ups, large messages, uploads, arXiv imports. | big operations are refused or slow; the process is killed at the cap | raise `--memory` and `MemoryMax` together (the cap stays about 500 MB above it), or a bigger machine |
-| 3 | **One relay's CPU.** It is one Python process, so one core. Live editing is passed between connections in its memory, so the work grows with connections times edits per second. | the process near 100% of one core; edits arriving late | a faster core helps more than more cores; then several relays, each project on one of them (way 3, "Several relays: route by project") |
-| 4 | **Database connections.** Each server uses up to 10 for queries plus one that listens, against PostgreSQL's `max_connections` (100 by default): about 8 servers. | `pg_stat_activity` near the limit; connection errors | a connection pooler (PgBouncer) between servers and database: the listening and lock connections must bypass it, and the pooler needs prepared-statement settings that suit the driver. Not tried here. |
-| 5 | **Writes to the one primary database.** One small write per batch of edits for each active project (and the usage ledger's update, in the same transaction), and reads when someone connects and catches up. | the database's CPU or disk, queries waiting | in order: batch edits for a few hundred milliseconds so a burst of typing is one write; read replicas for catch-ups; and only then, projects split across databases by project id (they never talk to each other), each with its own standby |
-| 6 | **Storage.** Stored files live in the bucket (a cost, not a limit). The database holds each project's edit log, replaced by a snapshot as it grows (over 12 MB the snapshot is stored as an upload, and above 50 MB snapshots stop and the log grows: [#18](https://github.com/jhudsy/texloom/issues/18)). | the database's disk, the bucket's bill | idle projects are dropped from the server (`--evict-idle-days`; their writers upload them again), a project may use `--project-max-bytes` (200 MB by default), and a creation code has an allowance |
-| 7 | **Availability** (these are not about capacity): the relay, the database, the bucket, and what sits in front. | people can't connect | way 2 for the relay (and, with `failover` on, everything waits on the bucket); a database tool for the database (way 3); the bucket's own redundancy; and how traffic reaches the servers, which is yours to arrange |
+- **A. Route by project** (the simplest; a stepping stone, and later an efficiency). A front end that hashes the project id in each address
+  (`/ws/{project}`, `/blob/{project}/…`) sends every connection of a project to the same relay, so a room is in
+  one relay's memory and nothing crosses between relays. A relay stopping moves its projects to the others and
+  people reconnect. Plain DNS cannot do it: it needs a load balancer that hashes (nginx: `hash … consistent`).
+  One very crowded project cannot outgrow its relay.
+- **B. Any relay, with a bus** (**planned**, the target). Each relay publishes a room's live messages to a
+  publish/subscribe bus, such as **Redis** (or a compatible one, such as Valkey), and subscribes to the rooms
+  it has connections in. Relays are interchangeable, so DNS can simply list them all. Costs: one more
+  component, and a message crosses the bus once for each relay holding part of the room, so a room spread over
+  many relays costs more (hashing by project, design A, can be added later as an efficiency, not a
+  requirement).
+- **C. Gateways in front of room owners** (not planned). Many connection-holding gateways in front of
+  room-owning servers placed by consistent hashing, so each room has one owner: what [Slack's real-time
+  messaging](https://slack.engineering/real-time-messaging/) (gateway and channel servers) and [Figma's
+  multiplayer](https://www.figma.com/blog/making-multiplayer-more-reliable/) (one in-memory process per open
+  file) are described as doing. It pays only when connections far outnumber rooms. A TeXLoom relay holds no
+  authoritative copy of a document (it cannot read one), so its rooms are light, which is why B is viable here
+  and A is a stepping stone.
 
-**A project's size** on the admin page is mostly its stored files (figures, PDFs and the like), counted
-as they are stored. Its edit log is small by comparison and is compacted, so a project of tens of
-megabytes is ordinary, and the Snapshot column (the compressed editing history alone) is what the
-12 MB and 50 MB thresholds above are about. A project is a concern when it approaches the per-project
-limit, or when many of them together approach what the bucket and the database are sized for.
+**Why a bus of this kind is enough.** Live messages may be lost without harm: after a reconnect the apps send
+each other what they lack and catch up from the database, so delivery can be at most once. **Redis can be made
+available** (Sentinel, or a managed service; a failover takes seconds, subscribers must subscribe again and
+messages in flight then are lost). A relay treats any reconnection to the bus as "I may have missed
+something, look again", as it already does for its database listener. While the bus is away, stored projects
+keep syncing through the database and only live cursors, presence and sync-only projects pause. (How quickly
+an app notices a gap in a stored project's changes during that is still to be checked.)
 
-### Growing, in order
+### The database tier
 
-The table above says what each limit needs. In the order to do things: the CDN first (limit 1), and the
-rest only as a limit comes near.
+A separate problem with known solutions, which is why it is kept apart.
 
-1. **Several identical relays** behind a load balancer, sharing one PostgreSQL primary (kept
-   available by a standard database tool: "Three ways to run it"), with every
-   connection to a project sent to the same relay (below). Totals across projects move into the
-   database, relays tell each other when one changes a project another holds, and maintenance (the
-   reaper, eviction, purges) runs once, not once per relay.
-2. **When the database starts to feel it**, in this order: batch edits for a few hundred
-   milliseconds so a burst of typing is one write; put read replicas (the standbys) to work on
-   catch-ups; add a connection pooler (PgBouncer, transaction pooling) if the number of relays
-   multiplied by the pool size (10 each) approaches PostgreSQL's limit, keeping the notifier on
-   its own direct connection. None of this is needed early: the relay's pool is small and the admin
-   page and PostgreSQL's statistics show trouble long before users do.
-3. **Only if one primary is not enough**, split projects across several databases by project id,
-   each with its own standby. Projects don't talk to each other, so this needs no redesign.
+- **Kept available by a standard tool, not by `failover`.** `failover` fences a *relay* that has lost its
+  lease, which is enough when the relay is the only client of its own database. With relays connected to a
+  database over a network, a partitioned old primary's database would go on accepting writes from the others,
+  so the database itself must be fenced, and that is what Patroni, pg_auto_failover and hosted PostgreSQL
+  services do (Patroni arms a watchdog before promoting and demotes the old primary, using `pg_rewind` or a new
+  base backup to rejoin it). That is from their documentation; none has been run here yet. The two ways are
+  not combined.
+- **Relays find the writable database from a list of hosts** (`postgresql://h1,h2/db?target_session_attrs=primary`),
+  which the driver handles (tried with asyncpg: it picks the primary whichever order they are listed in, and
+  finds the new one after a promotion). It does not protect against an old primary that is still alive: that is
+  the tool's fencing.
+- **Connections follow the number of relays, not of people.** Each relay uses up to 10 for queries (a maximum,
+  mostly idle) plus one that listens, against PostgreSQL's 100 by default. A connection pooler (PgBouncer, or
+  a managed one) multiplexes more; the listening and lock connections must bypass it, and the pool needs the
+  pooler's prepared-statement settings (not tried here).
+- **To grow further, split projects across databases by project id,** each with its own standby; projects never
+  talk to each other. One thing does span projects: an **owner** is a creation code, and a server adds up the
+  stored bytes of all of an owner's projects to enforce its allowance. With several databases an owner's
+  projects may sit on different ones, so its total would be a sum across them or kept in one small shared
+  place. That is left undecided.
+- **A distributed SQL database** (horizontal writes in one) is not planned: the single primary has plenty of
+  headroom (limit 5 below), and CockroachDB's [documentation](https://docs.cockroachlabs.com/docs/stable/postgresql-compatibility)
+  says it lacks session advisory locks and LISTEN/NOTIFY, which the server uses (in the PostgreSQL class of
+  `server/db.py`, so another class could replace them).
 
-### Several relays: route by project
+### The front door
 
-A relay passes more than stored edits between a project's connections: cursors and presence, and
-every change of a sync-only project, go from one connection to the others and are never stored.
-So "project X has a new change, read it from the database" can't carry them, and forwarding them
-between relays would mean every message crossing (LISTEN/NOTIFY carries at most 8 KB), plus a lock
-per project held in the database across several steps, and the ordering questions of
-[#8](https://github.com/jhudsy/texloom/issues/8).
+With design B any relay serves any connection, so the name in DNS can list every relay's address; apps and
+browsers try another address when one does not answer (the desktop app's connector does; not tried against a
+dead one). Each relay needs a certificate for the name, and DNS does not itself know which relay is alive: a
+dead one stays listed until removed or until a DNS service that health-checks does it. How traffic reaches the
+machines (addresses, ports, certificates) is the operator's to arrange.
 
-Instead, every connection to a project goes to the same relay: the project is in each of its
-addresses (`/ws/{project}`, `/blob/{project}/…`), and the front end picks the relay from it
-(nginx: `hash … consistent` on the project part of the address). A project's room, its lock and its counters then stay in that
-relay's memory, as now. When a relay stops, its projects move to the others and people reconnect,
-as after a restart today. For several relays
-([#12](https://github.com/jhudsy/texloom/issues/12)):
+### What is built, and what is left
 
-**Built** (`scripts/check_groundwork.py`, two stores on one PostgreSQL; safe and useful with one):
+Built (`scripts/check_groundwork.py`, two servers on one PostgreSQL; each is safe and useful with one):
 
-- **Storage totals in the database**: a ledger, one row per project (`usage`), kept in step with every
-  change (set from a recount of the stored data, and added to inside the transaction that appends a
-  change). A server starting reads it instead of adding up the whole log; `Store.reconcile` checks it
-  against a recount, daily, and a database from before it gets one at the first start. A server's
-  owner and server totals are still held in memory, from the ledger: reading them from the database at
-  the moment of a quota check is for when several relays write at once.
-- **Telling the other relays**: a purge, an eviction, a deletion, a storage-mode change or a move to
-  another code on one relay is told to the others by LISTEN/NOTIFY (`{"p": project}`, small), and a relay
-  that hears it reads that project again (its registration, what it counts for, and drops what it kept
-  for speed). It ignores what it said itself, and what isn't one of ours. A relay whose listening
-  connection was lost looks again at everything when it is back.
-- **Maintenance once**: the upkeep (idle eviction, purges, the ledger's recount) runs on whichever relay
-  holds a PostgreSQL advisory lock for the round; with one relay (or SQLite) it always does, and a relay
-  with no database open yet (a standby) does nothing.
+- **Storage totals in the database**: the `usage` ledger, kept in step with every change (set from a recount,
+  and added to inside the transaction that appends a change), checked against a recount daily. A server's
+  owner and server totals are still held in memory, started from the ledger.
+- **Telling the other relays**: a purge, eviction, deletion, storage-mode change or move to another code is
+  told to the others (LISTEN/NOTIFY, a small `{"p": project}`); a relay that hears it reads that project
+  again, ignores what it said itself and what is not one of ours, and looks again at everything when its
+  listening connection comes back.
+- **Upkeep on one server at a time** (idle eviction, purges, the ledger's recount), under a PostgreSQL
+  advisory lock; with one server, or SQLite, it always runs; a server with no database open does nothing.
 
-**Left:**
+Left:
 
-- **Reading an owner's total from the database at the moment of a quota check** (and the server's
-  total), instead of from memory, so that two relays writing at once can't together pass a limit.
-- **Routing by project** at the front end, with health checks.
-- **The ordering model** for the moments when routing changes (below).
-- **A check with two relays on one database**: routing, totals across both, a relay stopping, and a
-  project changed by the other relay.
-- Each relay keeps its own rate limits (they add up across relays), and every relay needs the same
-  codes file.
+- The bus: publishing and subscribing to rooms, the resync after a reconnect, and its availability.
+- Reading an owner's total from the database at the moment of a quota check, so that two relays writing at
+  once cannot together pass a limit.
+- Per-project and per-address limits across relays (each relay keeps its own today, so they add up), and the
+  same codes file on every relay.
+- Whether a project is open anywhere, not only on this relay (eviction asks today).
+- A rehearsal with two relays, as for way 2 (`scripts/rehearse_failover.py`).
 
 ### Keeping several servers possible
 
 Until then, new code keeps to these rules, so that none of this gets harder:
 
-- **Anything about a project is reached through its address.** A new address that reads or writes
-  a project's data has `{project}` in its path. One that doesn't (project lists, `/api/info`)
-  keeps its state in the database, with changes that check what they replace (as project lists do).
-- **State in a relay's memory is one of:** a setting; about its own connections; deliberately its
-  own (memory budget, caches of public files, rate limits); about one project (a copy another relay
-  could be told to drop); a total across projects (to move into the database); or background work
-  (to run once). `scripts/check_server_state.py` lists every piece and fails on a new one until
-  it is put in one of these, which makes it a decision rather than an accident.
-- **Totals across projects are worked out from what is stored** (the ledger is a kept copy of
-  that, checked by recounting: `Store.reconcile`), so that where they are kept can change without
-  what they mean changing.
-- **Background work is safe to run on one relay only**, and safe to repeat (a purge or eviction
-  that stops half-way is finished next time).
-- **Nothing a relay must know is only in its own files**: stored files go through the file store,
-  and the database holds the rest. Its own folder is for spooling uploads and caches.
-- **Edits are numbered by the database**, never in a relay's memory.
-- **SQL works on both databases** (`scripts/check_store.py`); what only PostgreSQL can do for
-  several relays (LISTEN/NOTIFY, advisory locks) stays in its class in `server/db.py`.
+- **Anything about a project is reached through its address.** A new address that reads or writes a project's
+  data has `{project}` in its path (which also keeps design A open). One that doesn't (project lists,
+  `/api/info`) keeps its state in the database, with changes that check what they replace (as project lists do).
+- **State in a relay's memory is one of:** a setting; about its own connections; deliberately its own (memory
+  budget, caches of public files, rate limits); about one project (a copy another relay could be told to drop);
+  a total across projects (to be read from the database); or background work (to run once).
+  `scripts/check_server_state.py` lists every piece and fails on a new one until it is put in one of these,
+  which makes it a decision rather than an accident.
+- **Totals across projects are worked out from what is stored** (the ledger is a kept copy, checked by
+  recounting), so where they are kept can change without what they mean changing.
+- **Background work is safe to run on one relay only,** and safe to repeat (a purge or eviction that stops
+  half-way is finished next time).
+- **Nothing a relay must know is only in its own files:** stored files go through the file store and the
+  database holds the rest. Its own folder is for spooling uploads and caches.
+- **Edits are numbered by the database,** never in a relay's memory.
+- **SQL works on both databases** (`scripts/check_store.py`); what only PostgreSQL can do for several relays
+  (LISTEN/NOTIFY, advisory locks) stays in its class in `server/db.py`.
 
-### What we are deliberately not doing
+### Open questions
 
-Several regions (TeXLoom is local-first, so latency matters little), a distributed database (the
-single primary has plenty of headroom and is far simpler to reason about), a separate message
-system such as Redis or NATS (LISTEN/NOTIFY is enough for a signal that carries no data), and a
+- Detecting a gap in a stored project's live changes when the bus drops messages, and how fast apps notice.
+- Securing the bus: it carries encrypted changes and unsigned live messages inside the trust boundary, so it
+  needs a private network and authentication.
+- Where owners' totals live once there are several databases.
+- Whether to run the database ourselves or use a managed one: a managed one removes most of the work of
+  replication, failover and backups, at a cost (the data is encrypted either way).
+
+## The limits, in the order you would hit them
+
+The order is reasoned, not measured: nobody has taken a deployment to its limits. `scripts/loadtest.py`
+measures one relay on the machine it runs on (latency, CPU, memory per scenario); run it on a machine like
+yours before relying on a number. What to watch meanwhile: the admin page (stored bytes, who is connected now,
+each project's size), the relay process's CPU (`top`) and memory (`systemctl show texloom -p MemoryCurrent`),
+the number of database connections (`SELECT count(*) FROM pg_stat_activity`), and the host's outbound traffic.
+
+| # | The limit | What you would notice | What to do |
+|---|---|---|---|
+| 1 | **Bandwidth for the in-browser TeX engine.** The web editor compiles in the browser, so a first-time visitor downloads the engine from this server (`busytex.wasm` is 32 MB; the full TeX Live bundles are 93, 201 and 342 MB, but with "TeX Live files on demand" a document pulls only the package files it needs) and the browser keeps them afterwards. This is most of the bytes the server sends, and none of it needs the relay's CPU. | the host's outbound traffic or its provider's allowance; a slow first compile for new visitors | serve `/core` and `/texlive` from a CDN or a caching proxy in front (static files that change only with a release), and compile PDFs only when someone is looking ([#15](https://github.com/jhudsy/texloom/issues/15)). Cheaper than any more servers, so first. |
+| 2 | **The relay's memory.** The systemd unit caps it (`MemoryMax=1G`), and `--memory` (512 MB by default) is what big work at once may use: catch-ups, large messages, uploads, arXiv imports. | big operations are refused or slow; the process is killed at the cap | raise `--memory` and `MemoryMax` together (the cap stays about 500 MB above it), or a bigger machine |
+| 3 | **One relay's CPU.** It is one Python process, so one core. Live messages are passed between connections in its memory, so the work grows with connections times edits per second. | the process near 100% of one core; edits arriving late | a faster core helps more than more cores; then several relays (way 3) |
+| 4 | **Database connections.** Each server uses up to 10 for queries plus one that listens, against PostgreSQL's `max_connections` (100 by default): about 8 servers. | `pg_stat_activity` near the limit; connection errors | a connection pooler (see "The database tier") |
+| 5 | **Writes to the one primary database.** One small write per batch of edits for each active project (and the ledger's update, in the same transaction), and reads when someone connects and catches up. | the database's CPU or disk, queries waiting | in order: batch edits for a few hundred milliseconds so a burst of typing is one write; read replicas for catch-ups; and only then, projects split across databases by project id |
+| 6 | **Storage.** Stored files live in the bucket (a cost, not a limit). The database holds each project's edit log, replaced by a snapshot as it grows (over 12 MB the snapshot is stored as an upload, and above 50 MB snapshots stop and the log grows: [#18](https://github.com/jhudsy/texloom/issues/18)). | the database's disk, the bucket's bill | idle projects are dropped from the server (`--evict-idle-days`; their writers upload them again), a project may use `--project-max-bytes` (200 MB by default), and a creation code has an allowance |
+| 7 | **Availability** (not capacity): the relay, the database, the bucket, what sits in front. | people can't connect | way 2 for the relay (and, with `failover` on, everything waits on the bucket); a database tool for the database (way 3); the bucket's own redundancy; how traffic reaches the servers is yours to arrange |
+
+**A project's size** on the admin page is mostly its stored files (figures, PDFs and the like), counted as
+they are stored. Its edit log is small by comparison and is compacted, so a project of tens of megabytes is
+ordinary, and the Snapshot column (the compressed editing history alone) is what the 12 MB and 50 MB thresholds
+are about. A project is a concern when it approaches the per-project limit, or when many together approach what
+the bucket and the database are sized for.
+
+## What we are deliberately not doing
+
+Several regions (TeXLoom is local-first, so latency matters little), a distributed database (above), and a
 compile service (compiling is the client's job).
-
-## Open questions
-
-- The ordering model for several writers (the lease above is modelled; several writers aren't: [#8](https://github.com/jhudsy/texloom/issues/8)).
-- Whether to run the database ourselves or use a managed one: it removes most of the work of
-  replication, failover and backups, at a cost, and the data is encrypted either way.

@@ -6,26 +6,29 @@ that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitat
 
 ## Next: the server, towards redundancy and scale
 
-How the pieces fit, and why (a bucket for files, one primary database, a lease as the tie-breaker),
-is in [SCALING.md](SCALING.md). In this order, each building on the one before:
+How the pieces fit, and why (three ways to run it: one server; two with failover; several relays), is in
+[SCALING.md](SCALING.md). In this order, each building on the one before:
 
 1. **[A warm standby](https://github.com/jhudsy/texloom/issues/12)**: done, by hand
    (INSTALL.md, "A standby server"; `scripts/check_standby.py`), and **automatic failover** with a lease
    in the bucket: built, off unless `failover` is set (`server/failover.py`;
    `scripts/check_failover.py`), after the model (step 3). Its bucket is checked (`texloom-server --failover-check` passes on the production store). Left: trying
    it on a real pair. A cold standby restored nightly from the backups still covers
-   losing both (SCALING.md, "Today: a cold standby from the backups").
+   losing both (SCALING.md, "Way 1: one server").
 2. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:
    most of the traffic, off the relay. About 2 days.
 3. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
    (TLA+), before several servers run at once. The model of failover (the lease, the standby, the
    apps' hello check) is done (`models/failover`); it fixed the timers and showed that failover
    depends on the apps' hello check. Left: the several-servers ordering, and the client-side GitHub lease.
-4. **[Several servers at once](https://github.com/jhudsy/texloom/issues/12)** (on PostgreSQL), each
-   project's connections all sent to one server (SCALING.md, "Several relays: route by project"):
-   totals across projects (an owner's usage, the server's total) into the database, servers telling
-   each other when one changes a project another holds, and maintenance run once. About 3–4 days.
-   Until then, new code keeps to "Keeping several servers possible" there.
+4. **[Several relays at once](https://github.com/jhudsy/texloom/issues/12)** (SCALING.md, "Way 3: several
+   relays"): any relay serves any connection; live messages (cursors, presence, sync-only projects) pass
+   between relays through a bus (Redis); the database is kept available by a standard tool, not by
+   `failover`. Built so far, safe with one server: storage totals in a ledger in the database, upkeep on one
+   server at a time, and servers telling each other when a project changed (`scripts/check_groundwork.py`).
+   Left: the bus and its open questions (SCALING.md), reading quota totals from the database, limits across
+   relays, and a rehearsal with two relays. No estimate until the bus is designed. Until then, new code keeps
+   to "Keeping several servers possible" there.
 
 ## Later
 
