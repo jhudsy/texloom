@@ -32,7 +32,7 @@ from .replica import BLOB_RE, Replica
 from .confine import LUA_REFUSED, OUTSIDE_NOTE, forget_reads, lua_refused, outside_reads, sandboxed, unsandboxed
 from .scan import SCANNED, added, allowed, binaries_on_disk, programs_of, shell_lines
 from .xr import compile_order, external_documents
-from .paths import STATE, latexmk_command, main_file, replace_file, restricted_programs, safe_rel, tex_env, tex_names_refused
+from .paths import STATE, latexmk_command, main_file, remove_stale_temp, replace_file, restricted_programs, safe_rel, tex_env, tex_names_refused
 from .folderrules import (
     Bases,
     conflict_copy,
@@ -329,6 +329,7 @@ class FolderSync:
         self._clean_build = False  # the next compile starts from scratch (requested from a browser)
         self._rewrite = False  # write the project's text to disk after this ingest
         self._lf_done = False  # "\r" taken out of the project's texts (once, at the start)
+        self._swept = False  # the temporary files a crash mid-write left in the folder removed (once, at the start)
         self._unsettled: dict[str, int] = {}  # files found still being written, and how many times in a row
         self._settled: dict[str, tuple[int, int] | None] = {}  # each file's (size, date) once it stopped changing, until read
         self._later_paths: set[str] = set()  # those, to look at again shortly
@@ -541,6 +542,11 @@ class FolderSync:
             self.r.local_change(strip_all)
 
     async def ingest_all(self) -> None:
+        if not self._swept:
+            self._swept = True
+            for rel, is_dir in walk(self.root):  # (replace_file's temporary files: never the project's, so never shared, but nothing else removes them)
+                if not is_dir and rel.endswith(".texloom-tmp"):
+                    remove_stale_temp(self.root / rel)
         if not self._lf_done:
             # compat(data 0.4.21): a "\r" left in projects by apps before 0.4.21; converted on read: a writer opening the project takes it out
             self._lf_done = True  # "\r" a copy of the app from before 0.4.21 put into the project

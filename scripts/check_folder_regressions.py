@@ -248,11 +248,42 @@ async def settings() -> None:
                   stat.S_IMODE((d / "main.tex").stat().st_mode) & 0o044 and st.st_size == (d / "main.tex").stat().st_size, (oct(stat.S_IMODE((d / "main.tex").stat().st_mode)), st.st_size))
 
 
+# ---- what a crash mid-write left behind ---------------------------------------------------------
+
+async def leftovers() -> None:
+    """The temporary file replace_file writes before it renames (.<name>.<random>.texloom-tmp) is left
+    behind by a crash or a power cut. Before 0.4.63 the start-up scan took it for a project file and
+    shared it, half-written, with everyone; it was never deleted either. Now it is never the project's,
+    and one untouched for an hour is deleted at the start (a recent one may be a write in progress)."""
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        (root / ".texloom").mkdir()
+        (root / "sub").mkdir()
+        (root / "main.tex").write_text(TEXT)
+        old, fresh, deep = root / ".main.tex.q1w2e3r4.texloom-tmp", root / ".chapter.tex.t5y6u7i8.texloom-tmp", root / "sub" / ".fig.png.o9p0a1s2.texloom-tmp"
+        for f in (old, fresh, deep):
+            f.write_bytes(b"half of a file")
+        for f in (old, deep):
+            os.utime(f, (os.path.getmtime(f) - 7200,) * 2)
+        link = root / ".linked.x1y2z3.texloom-tmp"
+        link.symlink_to(root / "main.tex")
+        os.utime(link, (os.path.getmtime(old),) * 2, follow_symlinks=False)
+        r = Replica(root / ".texloom", Keys.generate(), "http://127.0.0.1:1")
+        fs = FolderSync(root, r)
+        async with r.lock:
+            await fs.ingest_all()
+        check("the project has its file and none of the temporary ones", sorted(r.files.keys()) == ["main.tex"], sorted(r.files.keys()))
+        check("leftovers untouched for an hour are deleted, at any depth", not old.exists() and not deep.exists())
+        check("a recent one (a write that may be in progress) stays", fresh.exists())
+        check("a link is never followed or deleted, and the file it points to stays", link.is_symlink() and (root / "main.tex").exists())
+
+
 async def main() -> int:
     for name, part in (("A file deleted or renamed while a change arrives", deletions),
                        ("A file read while it's being saved", reads),
                        ("A folder renamed or deleted", renames),
-                       ("Files written in one step (settings, project files)", settings)):
+                       ("Files written in one step (settings, project files)", settings),
+                       ("What a crash mid-write left behind", leftovers)):
         print(f"{name}:", flush=True)
         await part()
     return summary("folder regressions")

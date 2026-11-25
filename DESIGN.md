@@ -469,6 +469,10 @@ related-work section"`. Edits appear live in collaborators' browsers.
   same file name is preferred (a renamed folder). The browser's folder sync does the same.
 - Ignores build products (`*.aux`, `*.log`, `*.synctex.gz`, the main PDF, …) and
   `.texloom/`, `.git/`.
+  Also the temporary file `replace_file` writes before it renames (`.<name>.<random>.texloom-tmp`):
+  a crash or a power cut between the two leaves it behind. Never the project's (before 0.4.63 the
+  start-up scan shared them), and deleted at the start when untouched for an hour, in the folder and
+  in the replica's state and blobs folders (`sweep_temp`, `remove_stale_temp`).
 - Blobs referenced by remote updates are fetched in the background. In relay mode
   they arrive from a peer over the same connection, so fetching inline would deadlock.
 

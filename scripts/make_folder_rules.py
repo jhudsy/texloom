@@ -43,6 +43,8 @@ synced = [
     ("main.tex~", "main.tex", False), (".#main.tex", "main.tex", False), (".DS_Store", "main.tex", False),
     ("fig/.DS_Store", "main.tex", False), ("Thumbs.db", "main.tex", False), (".main.tex.swp", "main.tex", False),
     ("x.tmp", "main.tex", False),
+    # what a crash mid-write left behind (replace_file's temporary file): never the project's
+    (".main.tex.k3j2h1x9.texloom-tmp", "main.tex", False), ("sub/.fig.png.q8w7e6r5.texloom-tmp", "main.tex", False),
     # file-sync services' copies of a file changed on two computers at once
     ("main (Ann's conflicted copy 2026-11-20).tex", "main.tex", False),
     ("ch/intro (Bob's conflicted copy).tex", "main.tex", False),

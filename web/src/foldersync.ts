@@ -17,7 +17,7 @@ const SKIP_DIRS = new Set(['.texloom', '.git', '.svn', 'node_modules', '__pycach
 // for a person to merge (as CONFLICT_COPY in texloom/folderrules.py)
 export const CONFLICT_COPY = / \([^()/]*conflicted copy[^()/]*\)|\.sync-conflict-\d{8}-\d{6}/i
 // Build output and editor droppings: never synced. Same list as IGNORE_* in texloom/folderrules.py.
-export const BUILD = latexOutput('|bbl|idx|ilg|ind|swp|swx|tmp', String.raw`|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$`)
+export const BUILD = latexOutput('|bbl|idx|ilg|ind|swp|swx|tmp|texloom-tmp', String.raw`|~$|(^|\/)\.#|(^|\/)\.DS_Store$|(^|\/)Thumbs\.db$`)
 const MAX = 50 * 1024 * 1024
 const SETTLE = 200, SETTLE_DOUBT = 2000, SETTLE_BIG = 1000, BIG = 1_000_000 // ms a changed file must stay unchanged before it's read; for one that became empty or went missing; for a big one (settleFor below)
 /** How long (ms) a file must stay unchanged before it's read, given its size and how many times in a

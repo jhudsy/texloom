@@ -167,6 +167,16 @@
    "want": false
   },
   {
+   "path": ".main.tex.k3j2h1x9.texloom-tmp",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "sub/.fig.png.q8w7e6r5.texloom-tmp",
+   "main": "main.tex",
+   "want": false
+  },
+  {
    "path": "main (Ann's conflicted copy 2026-11-20).tex",
    "main": "main.tex",
    "want": false

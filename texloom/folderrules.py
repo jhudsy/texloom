@@ -20,6 +20,7 @@ IGNORE_SUFFIXES = (
     ".aux", ".log", ".out", ".toc", ".lof", ".lot", ".fls", ".fdb_latexmk", ".synctex.gz",
     ".synctex", ".bbl", ".blg", ".bcf", ".run.xml", ".nav", ".snm", ".vrb", ".idx", ".ilg",
     ".ind", ".xdv", ".dvi", ".swp", ".swx", ".tmp", "~",
+    ".texloom-tmp",  # what replace_file writes before it renames, left behind by a crash (paths.sweep_temp)
 )
 
 

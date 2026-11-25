@@ -48,23 +48,27 @@ def replace_file(path: Path, data: bytes, mode: int | None = None) -> os.stat_re
         raise
 
 
-def sweep_temp(folder: Path, older_than: float = 3600.0) -> int:
-    """Delete the temporary files replace_file left in `folder` (and not deeper) when the program or the computer
-    stopped mid-write: named .<name>.<random>.texloom-tmp, and not touched for `older_than` seconds, so that a write
-    in progress (another program's) is left alone. Returns how many went."""
-    gone = 0
+def remove_stale_temp(f: Path, older_than: float = 3600.0) -> bool:
+    """Delete `f` if it is a temporary file replace_file left when the program or the computer stopped mid-write
+    (named .<name>.<random>.texloom-tmp, a plain file) and was not touched for `older_than` seconds, so that a write
+    in progress (another program's) is left alone."""
+    if not (f.name.startswith(".") and f.name.endswith(".texloom-tmp")) or f.is_symlink() or not f.is_file():
+        return False
     try:
-        for f in folder.iterdir():
-            if f.name.startswith(".") and f.name.endswith(".texloom-tmp") and f.is_file() and not f.is_symlink():
-                try:
-                    if time.time() - f.stat().st_mtime > older_than:
-                        f.unlink()
-                        gone += 1
-                except OSError:
-                    pass  # another program has it, or it just went: next time
+        if time.time() - f.stat().st_mtime <= older_than:
+            return False
+        f.unlink()
     except OSError:
-        pass  # no such folder yet
-    return gone
+        return False  # another program has it, or it just went: next time
+    return True
+
+
+def sweep_temp(folder: Path, older_than: float = 3600.0) -> int:
+    """remove_stale_temp for every file in `folder` (and not deeper). Returns how many went."""
+    try:
+        return sum(remove_stale_temp(f, older_than) for f in folder.iterdir())
+    except OSError:
+        return 0  # no such folder yet
 
 
 def write_json(path: Path, data, private: bool = False, **dump) -> None:
