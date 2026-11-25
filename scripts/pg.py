@@ -88,10 +88,30 @@ def start(folder: Path) -> tuple[str, int]:
     return f"postgresql://{USER}@127.0.0.1:{port}/postgres", port
 
 
-def stop(folder: Path) -> None:
+def stop(folder: Path, mode: str = "fast") -> None:
+    """Stop it; `mode` "immediate" is a crash (nothing flushed, as when the machine is lost)."""
     folder = folder.resolve()
     with contextlib.suppress(subprocess.CalledProcessError):
-        _run(bindir() / "pg_ctl", "-D", folder, "-m", "fast", "-w", "stop", output=folder.parent / f"{folder.name}-pg_ctl.txt")
+        _run(bindir() / "pg_ctl", "-D", folder, "-m", mode, "-w", "stop", output=folder.parent / f"{folder.name}-pg_ctl.txt")
+
+
+def standby_of(folder: Path, primary_port: int) -> None:
+    """Make `folder` a standby of the (running) database on `primary_port`, as INSTALL.md's "A
+    standby server" does: a base backup streamed from it, with the connection settings written
+    (-R) and standby.signal. Start it with start(folder) afterwards."""
+    folder = folder.resolve()
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _run(bindir() / "pg_basebackup", "-h", "127.0.0.1", "-p", primary_port, "-U", USER, "-D", folder,
+             "-R", "-X", "stream", "--checkpoint=fast")
+    except subprocess.CalledProcessError as e:
+        sys.exit(f"pg_basebackup failed: {e.stderr}")
+
+
+def promote(folder: Path) -> None:
+    """Promote the standby in `folder` to a primary (it must be running), and wait for it."""
+    _run(bindir() / "pg_ctl", "-D", folder.resolve(), "-w", "-t", "60", "promote",
+         output=folder.resolve().parent / f"{folder.name}-pg_ctl.txt")
 
 
 @contextlib.contextmanager

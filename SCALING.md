@@ -81,6 +81,17 @@ have in their hello, and the server says when it doesn't match), and send everyt
 restore costs a catch-up, not data (`scripts/check_restore.py`). The nightly restore is also the
 proof that the backups work.
 
+### Today: a warm standby, switched by hand
+
+With PostgreSQL, a second machine can follow the primary by streaming replication and take over
+in minutes, either one you run or a hosted PostgreSQL that keeps its own standby (INSTALL.md, "A
+standby server"; the relay is told the same thing either way, its `database`). A person decides
+that the primary is gone, promotes the standby, starts the relay on it and moves the name. The
+relay refuses to start on a database that is still a standby, and says why. The last moments
+before the loss may be missing on the standby; the apps send them again, as after a restore.
+`scripts/check_standby.py` runs exactly that, with a standby that never got the last changes.
+What is left is making the decision and the switch automatic (below).
+
 ### Two machines are enough
 
 Nothing needs a vote, because the database is the one place changes are numbered and the relays

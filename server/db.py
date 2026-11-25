@@ -159,6 +159,15 @@ class PostgreSQL(_PgCalls, Database):
             pool = await asyncpg.create_pool(url, min_size=1, max_size=POOL_MAX, command_timeout=120)
         except (OSError, asyncpg.PostgresError) as e:
             raise DatabaseError(f"can't reach the database {redact(url)}: {e}") from None
+        try:
+            standby = await pool.fetchval("SELECT pg_is_in_recovery()")
+        except (OSError, asyncpg.PostgresError) as e:
+            await pool.close()
+            raise DatabaseError(f"can't use the database {redact(url)}: {e}") from None
+        if standby:
+            await pool.close()
+            raise DatabaseError(f"{redact(url)} is a standby, which can't be written to. Promote it first "
+                                "(INSTALL.md, \"A standby server\"), or point `database` at the primary")
         return cls(url, pool)
 
     @contextlib.asynccontextmanager

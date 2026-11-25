@@ -10,7 +10,8 @@
 # and an nginx site for the domain, plus a Let's Encrypt certificate via certbot. Other sites are
 # left alone. It keeps no backups: see INSTALL.md. Extra ssh options can be passed in SSH_OPTS;
 # set SKIP_CERT=1 to skip certbot. DATABASE=postgresql on the first install uses PostgreSQL (with a
-# `texloom` database) instead of SQLite; afterwards, the settings file says which it is.
+# `texloom` database) instead of SQLite; afterwards, the settings file says which it is, and a
+# `database` naming another machine (a hosted PostgreSQL) installs no PostgreSQL here.
 set -euo pipefail
 
 TARGET=${1:?usage: deploy/install.sh user@host domain}
@@ -57,7 +58,10 @@ export PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1  # leave no caches beh
 # the database: what the settings say, once there are settings (TEXLOOM_DATABASE in env overrides them)
 CONF=/etc/texloom/texloom.toml
 if [ -f "$CONF" ]; then
-  if grep -qsE '^\s*(database\s*=\s*"postgres|TEXLOOM_DATABASE=postgres)' "$CONF" /etc/texloom/env; then
+  if grep -qsE '^\s*(database\s*=\s*"|TEXLOOM_DATABASE=)postgres(ql)?://([^/@"]*@)?[^/@"?][^/@"]*([/?"]|$)' "$CONF" /etc/texloom/env; then
+    # a PostgreSQL on another machine (a host in the address): someone else's to run, so none is installed here
+    DATABASE=external
+  elif grep -qsE '^\s*(database\s*=\s*"postgres|TEXLOOM_DATABASE=postgres)' "$CONF" /etc/texloom/env; then
     DATABASE=postgresql
   elif ! grep -qsE '^\s*(database\s*=|TEXLOOM_DATABASE=)' "$CONF" /etc/texloom/env \
        && [ -n "$(runuser -u postgres -- psql -qtAX -c "SELECT 1 FROM pg_database WHERE datname='texloom'" 2>/dev/null)" ]; then
