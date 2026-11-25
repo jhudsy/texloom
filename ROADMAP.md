@@ -12,9 +12,9 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
 1. **[A warm standby](https://github.com/jhudsy/texloom/issues/12)**: done, by hand
    (INSTALL.md, "A standby server"; `scripts/check_standby.py`), and **automatic failover** with a lease
    in the bucket: built, off unless `failover` is set (`server/failover.py`;
-   `scripts/check_failover.py`), after the model (step 3). Left: trying it with a real bucket (`texloom-server
-   --failover-check` tests a store), on the real pair, and the traffic following the primary (DNS health
-   check or a front end: a decision). A cold standby restored nightly from the backups still covers
+   `scripts/check_failover.py`), after the model (step 3). Its bucket is checked (`texloom-server --failover-check` passes on the production store). Left: trying
+   it on the real pair, with the traffic following the primary (INSTALL.md, "Moving traffic to the
+   primary": a script for a home standby, or Caddy for two public machines). A cold standby restored nightly from the backups still covers
    losing both (SCALING.md, "Today: a cold standby from the backups").
 2. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:
    most of the traffic, off the relay. About 2 days.

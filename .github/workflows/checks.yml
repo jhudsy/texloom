@@ -60,6 +60,8 @@ jobs:
         run: uv run --extra server python scripts/check_standby.py
       - name: Automatic failover between two real servers: a lost primary, one cut off from the bucket (throwaway PostgreSQL, a stand-in bucket)
         run: uv run --extra server python scripts/check_failover.py
+      - name: The script that runs a command while this server is the primary (a stand-in health endpoint)
+        run: uv run python scripts/check_follow_primary.py
       - name: What an outsider could do to the server (revocations off the budget, TeX Live paths; security review)
         run: uv run --extra server python scripts/check_server_abuse.py
       - name: Moving a project to another creation code (a real server)

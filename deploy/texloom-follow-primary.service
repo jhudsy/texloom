@@ -1,0 +1,33 @@
+# systemd unit for deploy/follow-primary.sh: runs your command while this machine's TeXLoom server is
+# the primary (INSTALL.md, "Moving traffic to the primary"). On each of the two servers:
+#   sudo cp deploy/texloom-follow-primary.service /etc/systemd/system/
+#   sudo install -m 600 /dev/null /etc/texloom/follow-primary.env   # then put ON_PRIMARY=… and any keys in it
+#   sudo systemctl enable --now texloom-follow-primary
+# The file is read by systemd as root and the script runs as an unprivileged throwaway user, so keys
+# in it (a DNS provider's, say) are not readable by it except through its own environment.
+[Unit]
+Description=Run a command while this TeXLoom server is the primary
+After=network-online.target texloom.service
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+EnvironmentFile=/etc/texloom/follow-primary.env
+ExecStart=/var/www/texloom/deploy/follow-primary.sh
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target
