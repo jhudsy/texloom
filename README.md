@@ -1016,6 +1016,7 @@ uv run --extra server python scripts/check_restore.py              # a server re
 uv run --extra server python scripts/check_standby.py              # a warm standby promoted (needs PostgreSQL's programs): apps miss none of the changes it never got
 uv run --extra server python scripts/check_failover.py             # automatic failover with two real servers: a lost primary, one cut off from the bucket, the refusals (needs PostgreSQL's programs)
 uv run python scripts/check_follow_primary.py                          # deploy/follow-primary.sh runs a command only while this server's /api/health says it is the primary
+uv run --with pyyaml python scripts/check_workflows.py                   # every GitHub Actions file parses (one that doesn't is not a failing test: its workflow just stops running)
 uv run python scripts/check_model.py                                 # the failover design in TLA+ (needs Java): timers, the lease, the apps' hello check; some cases must fail
 uv run --extra server python scripts/check_server_abuse.py        # what an outsider could do: revocations come out of the row budget, TeX Live paths stay in the cache
 uv run --extra server python scripts/check_comments.py             # a folder's comments overview, texloom comments list/reply/resolve, and texloom lsp with a stdio client
