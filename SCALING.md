@@ -92,6 +92,15 @@ before the loss may be missing on the standby; the apps send them again, as afte
 `scripts/check_standby.py` runs exactly that, with a standby that never got the last changes.
 What is left is making the decision and the switch automatic (below).
 
+### Today: automatic failover, off unless asked for
+
+The lease below is built (`server/failover.py`; INSTALL.md, "Letting the two servers switch over by
+themselves"), modelled first (`models/failover`) and run end to end with two real servers
+(`scripts/check_failover.py`). It is one module that is loaded only when `failover` is set, so a
+single server, or a pair switched by hand, carries none of it. What it leaves to you is moving the
+name to whichever server says it is the primary (a DNS health check, a floating address or a front
+end), and rebuilding the old primary as a standby afterwards.
+
 ### Two machines are enough
 
 Nothing needs a vote, because the database is the one place changes are numbered and the relays
@@ -106,7 +115,7 @@ promotes while the primary is alive, two primaries number changes differently ("
 client's content would survive, since clients keep everything and merge, but the order of changes
 on the server would have to be repaired. So the switch must be safe, not just fast.
 
-The plan uses the bucket as the tie-breaker, so no third machine is needed:
+The design uses the bucket as the tie-breaker, so no third machine is needed:
 
 1. The primary renews a small "I am primary" lease object in the bucket every few seconds.
 2. The standby promotes itself only once the lease has expired.

@@ -34,6 +34,8 @@ PIECE = 256 * 1024  # a download goes out this much at a time
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 TRIES = 4  # an S3 request is tried this often before an error is passed on
 TIMEOUT = aiohttp.ClientTimeout(total=None, connect=10, sock_read=60)
+LEASE_TIMEOUT = aiohttp.ClientTimeout(total=8, connect=4)  # a lease request is tried once, and quickly
+LEASE = "_failover/lease"  # (not a stored file's key, which is <project>/<id>)
 
 
 class FilesError(Exception):
@@ -67,6 +69,21 @@ class Files:
 
     async def check(self) -> None:
         """Fail early, with a clear message, if the store can't be used."""
+
+    # One small object that can be changed only if it is still as it was read ("conditional writes"),
+    # for the failover lease (failover.py). Only a bucket has them.
+
+    async def lease_read(self, name: str = LEASE) -> tuple[bytes, str] | None:
+        """The object's content and its version (an ETag), or None if there is none."""
+        raise FilesError(f"{self.name or 'this file store'} has no conditional writes (a bucket is needed)")
+
+    async def lease_write(self, data: bytes, if_match: str | None, name: str = LEASE) -> str | None:
+        """Write it only if it is still at version `if_match` (None: only if there is none). Returns
+        the new version, or None if the condition failed (somebody else changed it first)."""
+        raise FilesError(f"{self.name or 'this file store'} has no conditional writes (a bucket is needed)")
+
+    async def lease_delete(self, name: str = LEASE) -> None:
+        raise FilesError(f"{self.name or 'this file store'} has no conditional writes (a bucket is needed)")
 
     async def close(self) -> None:
         pass
@@ -250,6 +267,55 @@ class S3Files(Files):
             await self._request("HEAD", None)
         except FilesError as e:
             raise FilesError(f"can't use the bucket {self.bucket} at {self.base} (region {self.region}): {e}") from None
+
+    def _lease_path(self, name: str) -> str:
+        if not re.fullmatch(r"_failover/[a-z0-9-]{1,64}", name):
+            raise ValueError(f"not a lease object's name: {name!r}")
+        return f"/{self.bucket}/{self.prefix}{name}"
+
+    async def lease_read(self, name: str = LEASE) -> tuple[bytes, str] | None:
+        path = self._lease_path(name)
+        try:
+            async with self._sess().get(self.base + path, headers=self._headers("GET", path, EMPTY_SHA256),
+                                        timeout=LEASE_TIMEOUT) as r:
+                if r.status == 404:
+                    return None
+                if r.status != 200:
+                    raise FilesError(f"GET {path}: HTTP {r.status} {(await r.text())[:300]}")
+                etag = r.headers.get("ETag", "")
+                if not etag:
+                    raise FilesError(f"GET {path}: the store gave no ETag, so it can't be used for a lease")
+                return await r.read(), etag
+        except (aiohttp.ClientError, TimeoutError) as e:
+            raise FilesError(f"GET {path}: {e!r}") from None
+
+    async def lease_write(self, data: bytes, if_match: str | None, name: str = LEASE) -> str | None:
+        path = self._lease_path(name)
+        cond = {"if-match": if_match} if if_match else {"if-none-match": "*"}
+        payload_hash = hashlib.sha256(data).hexdigest()
+        try:
+            async with self._sess().put(self.base + path, data=data, timeout=LEASE_TIMEOUT,
+                                        headers=self._headers("PUT", path, payload_hash, cond)) as r:
+                if r.status in (412, 409):  # the condition failed (409: another conditional write was in flight)
+                    return None
+                if r.status != 200:
+                    raise FilesError(f"PUT {path}: HTTP {r.status} {(await r.text())[:300]}")
+                etag = r.headers.get("ETag", "")
+                if not etag:
+                    raise FilesError(f"PUT {path}: the store gave no ETag, so it can't be used for a lease")
+                return etag
+        except (aiohttp.ClientError, TimeoutError) as e:
+            raise FilesError(f"PUT {path}: {e!r}") from None
+
+    async def lease_delete(self, name: str = LEASE) -> None:
+        path = self._lease_path(name)
+        try:
+            async with self._sess().delete(self.base + path, headers=self._headers("DELETE", path, EMPTY_SHA256),
+                                           timeout=LEASE_TIMEOUT) as r:
+                if r.status not in (200, 204, 404):
+                    raise FilesError(f"DELETE {path}: HTTP {r.status}")
+        except (aiohttp.ClientError, TimeoutError) as e:
+            raise FilesError(f"DELETE {path}: {e!r}") from None
 
     async def close(self) -> None:
         if self._session is not None and not self._session.closed:

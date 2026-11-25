@@ -79,6 +79,43 @@ async def connect(url: str, schema: str = "", postgresql_schema: str = "", servi
     return db
 
 
+async def is_standby(url: str) -> bool:
+    """Is the PostgreSQL at `url` a standby (in recovery, read-only until promoted)? Never, for SQLite."""
+    if not url.startswith(("postgresql://", "postgres://")):
+        return False
+    import asyncpg
+    try:
+        c = await asyncpg.connect(url, timeout=10)
+    except (OSError, asyncpg.PostgresError, TimeoutError) as e:
+        raise DatabaseError(f"can't reach the database {redact(url)}: {e}") from None
+    try:
+        return bool(await c.fetchval("SELECT pg_is_in_recovery()"))
+    finally:
+        await c.close()
+
+
+async def promote(url: str) -> None:
+    """Make the PostgreSQL at `url` a primary if it is a standby (pg_promote, waiting for it); one
+    that is a primary already is left alone. The role the server connects as needs EXECUTE on
+    pg_promote, granted once on the primary (INSTALL.md, "A standby server"): the grant is
+    replicated, so the standby has it."""
+    if not await is_standby(url):
+        return
+    import asyncpg
+    c = await asyncpg.connect(url, timeout=10)
+    try:
+        try:
+            promoted = await c.fetchval("SELECT pg_promote(true, 60)")
+        except asyncpg.InsufficientPrivilegeError:
+            raise DatabaseError("this server's database role may not promote its standby PostgreSQL: on the primary, "
+                                "GRANT EXECUTE ON FUNCTION pg_promote(boolean, integer) TO <that role> "
+                                "(INSTALL.md, \"A standby server\")") from None
+        if not promoted or await c.fetchval("SELECT pg_is_in_recovery()"):
+            raise DatabaseError(f"{redact(url)} didn't become a primary within 60 seconds")
+    finally:
+        await c.close()
+
+
 class Database(abc.ABC):
     """What the store uses. Rows read back by name (`r["seq"]`), by position, or as a tuple."""
 

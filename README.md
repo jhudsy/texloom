@@ -1014,6 +1014,7 @@ uv run --extra server python scripts/check_files.py                # the server'
 uv run --extra server python scripts/check_move_code.py            # moving a project to another creation code, against a real server
 uv run --extra server python scripts/check_restore.py              # a server restored from a backup: an app that had seen later changes misses none
 uv run --extra server python scripts/check_standby.py              # a warm standby promoted (needs PostgreSQL's programs): apps miss none of the changes it never got
+uv run --extra server python scripts/check_failover.py             # automatic failover with two real servers: a lost primary, one cut off from the bucket, the refusals (needs PostgreSQL's programs)
 uv run python scripts/check_model.py                                 # the failover design in TLA+ (needs Java): timers, the lease, the apps' hello check; some cases must fail
 uv run --extra server python scripts/check_server_abuse.py        # what an outsider could do: revocations come out of the row budget, TeX Live paths stay in the cache
 uv run --extra server python scripts/check_comments.py             # a folder's comments overview, texloom comments list/reply/resolve, and texloom lsp with a stdio client

@@ -20,7 +20,7 @@ Settings live in one file, `/etc/texloom/texloom.toml` ([Settings](#settings)).
 - [The database](#the-database) · [Stored files](#stored-files)
 - [Creation codes](#creation-codes) · [Private servers](#private-servers) ·
   [Retiring old app versions](#retiring-old-app-versions) · [Idle projects, admin page, arXiv import](#idle-projects-admin-page-arxiv-import)
-- [Backups](#backups) · [A standby server](#a-standby-server) · [Updating](#updating)
+- [Backups](#backups) · [A standby server](#a-standby-server), by hand or [by themselves](#letting-the-two-servers-switch-over-by-themselves) · [Updating](#updating)
 
 ## On an Ubuntu or Debian server
 
@@ -431,6 +431,65 @@ A standby copies mistakes as well as data (a project deleted, a table dropped), 
 replace [Backups](#backups). Try the switch once on your own pair before you need it:
 `scripts/check_standby.py` does it on one machine with throwaway databases, which shows the steps
 and what the apps do, but not your network or your DNS.
+
+### Letting the two servers switch over by themselves
+
+Optional, and off by default: a server on its own, and a pair you switch by hand, need none of
+this, and with it off the server doesn't even load the code for it. When on, the two servers share
+a small "lease" in the bucket. The one that holds it is the primary and serves; it renews the lease
+every few seconds. The other waits, and when the lease hasn't been renewed for long enough it takes
+it, promotes its own PostgreSQL and serves. A primary that can't renew (the bucket is unreachable) stops
+itself, closing its connections, before the other can take over, so there are never two serving.
+The design and the checks behind it are in `models/failover/README.md`; `scripts/check_failover.py`
+runs two real servers through a lost primary and one cut off from the bucket.
+
+You need the pair from the section above (a primary and a streaming standby, each with its server
+installed), a bucket for the stored files, and a store that does conditional writes properly. Test
+yours first, from either server (it writes and removes a test object in the bucket):
+
+```bash
+sudo -u texloom /var/www/texloom/.venv/bin/texloom-server --config /etc/texloom/texloom.toml --failover-check
+```
+
+Then, once, on the **primary**, let the server's PostgreSQL role promote a standby (the grant is
+copied to the standby with everything else):
+
+```bash
+sudo -u postgres psql texloom -c "GRANT EXECUTE ON FUNCTION pg_promote(boolean, integer) TO texloom"
+```
+
+And in `texloom.toml` on **each** server (each needs its own `failover_name`), then restart both,
+the primary first:
+
+```toml
+failover = true
+failover_name = "server-a"   # "server-b" on the other
+# failover_ttl = 15          # seconds
+```
+
+- **Time.** A primary stops itself after `failover_ttl` seconds without a successful renewal, and the
+  standby waits twice that, plus a margin, before it takes over: with the default 15 seconds, about
+  35, plus a few for PostgreSQL to promote, so people see "connecting…" for under a minute. A lower
+  value is quicker and more easily upset by a slow bucket. Servers' clocks need not agree, only run
+  at about the same speed: nothing compares one machine's clock with the other's.
+- **Who gets the traffic.** The standby answers every address but `/api/health` with 503, and
+  `/api/health` is 200 only on the primary, so something in front must send people to whichever
+  server says 200: a DNS service that checks `/api/health` and answers with the healthy one's address
+  (give the name a short lifetime), a floating address, or a small front end. The servers don't move
+  the name themselves.
+- **After a switch.** The server that stopped (or was lost) restarts as a standby, but its PostgreSQL
+  is still a primary with a history the new one doesn't have, so it **won't take over** (it says so in
+  its log) until you rebuild it as a standby of the new primary, as in "Afterwards" above. Until then
+  you have one server and no standby, as after a manual switch.
+- **Starting a server again** (an update, a restart) while it holds the lease takes it back within a
+  couple of renewal intervals (about ten seconds by default). The other server sees renewals missing
+  for that long, which is well short of the wait before it takes over.
+- It runs under the install script's systemd unit as it is (`Restart=on-failure`: a server that stops
+  itself exits with status 75).
+- **What it can't do** (see `models/failover/README.md`): a machine suspended and woken (a virtual
+  machine) after the other took over can accept changes for a moment until its first renewal fails.
+  Nobody loses anything, because an app that was told "stored" by it checks, when it reconnects, that
+  the new primary has its last change, and sends everything again if not.
 
 ### A hosted PostgreSQL
 

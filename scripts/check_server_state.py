@@ -54,6 +54,7 @@ STATE = {
     "Relay.memory": "per-server", "Relay.address_memory": "per-server", "Relay.held": "per-server", "Relay.stopping": "per-server", "Budget.*": "per-server",
     "Store.meta_tokens": "per-server", "Store.meta_at": "per-server",  # the budget for rows that store nothing
     "ArxivFetcher.*": "per-server",  # arXiv's rate limits, per relay
+    "Failover.*": "per-server",  # which of the two servers this is, and its lease (one lease, in the bucket, for both)
     "TexLive.*": "per-server",  # a cache of public TeX Live files
     # per project
     "Store.usage": "project", "Store.owners": "project", "Store.seen": "project", "Store.evicted": "project", "Store.pending": "project",
@@ -70,7 +71,7 @@ STATE = {
 ROUTES = {
     "GET /ws/{project}": "project", "PUT /blob/{project}/{id}": "project", "GET /blob/{project}/{id}": "project",
     "DELETE /blob/{project}/{id}": "project",
-    "GET /api/info": "any", "POST /api/code": "any", "GET /api/arxiv/{id}": "any", "GET /admin": "any",
+    "GET /api/info": "any", "GET /api/health": "any", "POST /api/code": "any", "GET /api/arxiv/{id}": "any", "GET /admin": "any",
     "GET /api/list/{id}": "any", "PUT /api/list/{id}": "any", "DELETE /api/list/{id}": "any",  # compare-and-swap in the database
     "GET /texlive/{year}/{fmt}/{name}": "any", "STATIC /core": "any", "GET /": "any", "STATIC /": "any",
 }
