@@ -507,92 +507,24 @@ failover_name = "server-a"   # "server-b" on the other
 
 ### Moving traffic to the primary
 
-Failover makes one server the primary; people must also reach it. That needs an entry point that
-survives the primary's loss, and there are two ways to arrange one. The servers behave the same in
-both (`/api/health` is how each tells the primary), and you can move from one to the other later.
+Failover makes one server the primary; it does not move traffic. Each server's `/api/health` answers
+**200 only on the primary**, and 503 on a standby and on a server that has stopped itself (the body
+says which it is and who holds the lease). Whatever people reach the servers through must send them to
+the one that answers 200. How the servers are reached at all (their addresses, DNS, ports,
+certificates) depends on your network and is yours to arrange; it isn't something TeXLoom does.
 
-| | **A. both machines in DNS** | **B. the standby's address added when it takes over** |
-|---|---|---|
-| for | two machines the public can reach well (two VPSes) | a standby on a home connection (a Raspberry Pi) |
-| DNS | both addresses, always | the primary's address; a script moves it |
-| a visitor | reaches either machine, whose Caddy forwards to the primary | reaches the primary; after a switch, the standby |
-| a switch takes | the lease time, about a minute | the lease time plus the DNS lifetime (set it to 60 s), about two minutes |
-| needs | the relays to reach each other over a private network | the standby reachable from outside (ports 80 and 443 forwarded), and a DNS provider with an API |
-| costs | half of everyone's visits come through the other machine's connection | a script, and a key for your DNS provider on each machine |
+Some ways to follow the primary:
 
-**B is the one to use with a home standby:** a home line is a poor address to keep in DNS, since half
-of everyone would come through its upload, and a home address changes. What follows is B, then A.
+- **A proxy on each machine that checks both servers.** `deploy/Caddyfile.failover` is an example for
+  two machines that the public can reach: both addresses are in DNS, and each machine's Caddy forwards
+  to whichever relay answers 200, so nothing changes at a switch. Its first lines say what the relays
+  need (to reach each other over a private network, and never port 8787 open to the internet).
+- **A load balancer, or a DNS service, with health checks** on `/api/health`.
+- **A floating address** that your own tooling moves to the primary.
+- **A command of your own** that looks at `/api/health` and updates whatever you use.
 
-#### B. A standby that is added to DNS when it takes over
-
-On **each** of the two servers (the script does nothing on the one that isn't the primary, and on the
-VPS it sets the record back to the VPS's address after you have rebuilt it as a standby and a
-switch has been made the other way):
-
-1. **A command that points the name at this machine.** `deploy/follow-primary.sh` runs a command
-   of yours while this server is the primary: when it becomes the primary, again every ten minutes
-   while it stays so, and again every 30 seconds if the command fails. So the command must be safe to
-   repeat. It is yours, and stays in your own settings, because it depends on your DNS provider.
-   Make it a short script that finds this machine's public address and sets the name's A record to it
-   with the provider's API, for example `/etc/texloom/set-dns.sh` (mode 755, with no key in it):
-
-   ```sh
-   #!/bin/sh
-   set -eu
-   ip=$(curl -fsS https://ifconfig.me)   # this machine's public address (any such service will do)
-   # the call your DNS provider documents for setting one A record to "$ip", TTL 60,
-   # authenticated with "$DNS_API_KEY":
-   curl -fsS … 
-   ```
-
-2. **Its settings.** The unit reads `/etc/texloom/follow-primary.env`, as root, and runs the script as
-   an unprivileged throwaway user, so the key is in the file and not in the script:
-
-   ```bash
-   sudo cp /var/www/texloom/deploy/texloom-follow-primary.service /etc/systemd/system/
-   sudo install -m 600 /dev/null /etc/texloom/follow-primary.env
-   sudoedit /etc/texloom/follow-primary.env      # ON_PRIMARY=/etc/texloom/set-dns.sh  and  DNS_API_KEY=…
-   sudo systemctl enable --now texloom-follow-primary
-   journalctl -u texloom-follow-primary -f       # "this server is the primary", "ran the command: ok"
-   ```
-
-   (`INTERVAL`, `CONFIRM`, `REFRESH` and `RETRY` can go in the same file; the script's first lines
-   say what they are.)
-
-3. **A short DNS lifetime, a day ahead.** Lower the name's TTL to 60 seconds well before you rely
-   on this: resolvers keep the old answer for the old lifetime. After a switch some visitors still
-   reach the old address until theirs expires.
-4. **The standby reachable from outside.** Forward ports 80 and 443 on the router to the Pi, and run
-   Caddy there with `deploy/Caddyfile` for the same name. The Pi's SSD matters more than its CPU.
-5. **A certificate ready on the standby before it is needed.** Caddy gets certificates when DNS
-   points at it, which on the standby is only after a switch, so the first visitors would wait, or
-   fail, while it asks. Either use Caddy's DNS challenge (a Caddy build with your DNS provider's
-   module: Caddy's documentation explains), which needs no traffic, or copy Caddy's certificate
-   storage (`/var/lib/caddy/.local/share/caddy`) from the primary's machine to the Pi on a schedule.
-   Neither has been tried here: **try a switch** before you rely on it.
-6. **Try a switch.** Stop the server on the primary (`systemctl stop texloom`) and watch the standby
-   take over (its journal, `curl https://…/api/health` on it), the record move (the second script's
-   journal), and the app reconnect. Then rebuild the old primary as a standby, as in "Afterwards".
-
-#### A. Both machines in DNS
-
-For two machines that are both public. Put both addresses in DNS for the name, and on each machine
-run Caddy with `deploy/Caddyfile.failover` instead of `deploy/Caddyfile`: it forwards each request to
-whichever of the two servers answers 200 on `/api/health`, so a visitor who reaches the standby's
-machine is passed on to the primary, and nothing in DNS changes at a switch. The file's first lines say
-how: the two relays must reach each other over a private network (WireGuard, Tailscale), and port 8787
-must never be open to the internet. No script runs, so skip `texloom-follow-primary`.
-
-#### Changing from one to the other
-
-- **B to A** (the Pi's place is taken by a public machine): put the second machine's address in DNS
-  next to the first (and raise the TTL again if you like), install `Caddyfile.failover` on both, set up
-  the private network, and `systemctl disable --now texloom-follow-primary` on both.
-- **A to B**: take the standby's address out of DNS (so only the primary's is there), lower the TTL to
-  60 seconds a day ahead, install `deploy/Caddyfile` on the standby again, and set up the script as
-  above.
-
-Neither change touches the servers or their settings.
+Apps reconnect with backoff, so a switch looks like a short "connecting…": about the time the standby
+waits (see above), plus whatever your arrangement adds (a DNS record's lifetime, say).
 
 ### A hosted PostgreSQL
 

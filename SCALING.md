@@ -97,12 +97,10 @@ What is left is making the decision and the switch automatic (below).
 The lease below is built (`server/failover.py`; INSTALL.md, "Letting the two servers switch over by
 themselves"), modelled first (`models/failover`) and run end to end with two real servers
 (`scripts/check_failover.py`). It is one module that is loaded only when `failover` is set, so a
-single server, or a pair switched by hand, carries none of it. Moving the name to whichever server
-says it is the primary is left to you, with two documented arrangements (INSTALL.md, "Moving traffic
-to the primary"): both machines in DNS with Caddy forwarding to the primary
-(`deploy/Caddyfile.failover`), or, for a standby on a home connection, a script that runs your DNS
-command while the server is the primary (`deploy/follow-primary.sh`). Rebuilding the old primary as
-a standby afterwards is manual too.
+single server, or a pair switched by hand, carries none of it. The servers say which is the primary
+(`/api/health`); getting traffic to it is left to you (INSTALL.md, "Moving traffic to the primary" lists
+ways, with one example, `deploy/Caddyfile.failover`). Rebuilding the old primary as a standby
+afterwards is manual too.
 
 ### Two machines are enough
 
