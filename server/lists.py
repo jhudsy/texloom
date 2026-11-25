@@ -25,6 +25,11 @@ MAX_PER_OWNER = 32  # entries per creation code (a list, and the passkeys that u
 MAX_TOTAL = 50_000  # entries in all, for servers that let anyone create them
 RETIRED = -1  # sequence number of a replaced or deleted list: its id can't be used again
 RETIRED_KEEP = 365 * 86400  # seconds a retired id is remembered (like removal records in a list)
+# A retired id is a row too, kept a year and never pushed out (see retire), so they're counted:
+# an owner (or, on a server where anyone may create lists, everyone) with this many can't create
+# more lists until old ones go. Replacing a list's secret retires one id.
+MAX_RETIRED_PER_OWNER = 256
+MAX_RETIRED_TOTAL = 100_000
 
 
 class Lists:
@@ -85,9 +90,17 @@ class Lists:
         return await self.db.fetchval("SELECT COUNT(*) FROM lists WHERE owner=$1 AND seq<>$2", owner, RETIRED)
 
     async def room_for(self, owner: str) -> bool:
-        if await self.db.fetchval("SELECT COUNT(*) FROM lists WHERE seq<>$1", RETIRED) >= MAX_TOTAL:
+        """Whether `owner` may create a new list: its entries, and the retired ids it has left, and
+        everyone's, are under the limits."""
+        r = await self.db.fetchrow("SELECT COUNT(*) FILTER (WHERE seq<>$1) AS live, COUNT(*) FILTER (WHERE seq=$1) AS retired"
+                                   " FROM lists", RETIRED)
+        if r["live"] >= MAX_TOTAL or r["retired"] >= MAX_RETIRED_TOTAL:
             return False
-        return owner == "default" or await self.count(owner) < MAX_PER_OWNER
+        if owner == "default":
+            return True
+        r = await self.db.fetchrow("SELECT COUNT(*) FILTER (WHERE seq<>$1) AS live, COUNT(*) FILTER (WHERE seq=$1) AS retired"
+                                   " FROM lists WHERE owner=$2", RETIRED, owner)
+        return r["live"] < MAX_PER_OWNER and r["retired"] < MAX_RETIRED_PER_OWNER
 
     def _deleted(self, rows) -> int:
         for r in rows:

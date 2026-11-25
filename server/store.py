@@ -37,12 +37,17 @@ from .files import Files, FilesError, FolderFiles
 log = logging.getLogger("texloom.relay")
 
 MAX_REVOKED = 1000  # revocations kept per project
-# Compacted edits are remembered by hash so a replay of one isn't stored again. Only the most
-# recent are kept per project, and each counts against the allowance, so the table can't grow
-# without limit. Replaying something older is harmless: edits are idempotent, and the copy
-# counts against the allowance only until the next compaction.
+# Compacted edits are remembered by hash so a replay of one isn't stored again (anyone in a
+# project's room hears its signed edits, so anyone can replay them). Only the most recent are
+# kept per project, and each counts against the allowance, so the table can't grow without limit.
+# Eviction and turning storage off keep them too (else the whole history could be replayed into
+# an emptied project). A replay of something older is stored, but edits are idempotent and the
+# copy counts only until the next compaction (clients compact every few hundred entries, so small
+# ones can't fill a project); big ones (KEEP_BIG and up) are remembered for good, in `kept`, so
+# that a few old big edits can't fill a project without making a compaction due.
 GONE_KEEP = 10_000  # sequence numbers
 GONE_COST = 100  # bytes a remembered edit counts for
+KEEP_BIG = 64 * 1024  # an edit at least this big is remembered for good
 # Rows for projects that store nothing (relay-only mode, revocations) cost nothing to create,
 # so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
 META_RATE, META_BURST = 1.0, 600
@@ -53,7 +58,8 @@ ENTRY_BYTES = "octet_length(data) + octet_length(sig)"  # what a log entry store
 # remembered edits (GONE_COST each). `where` narrows it, to one project say.
 USAGE = (f"SELECT project, SUM({ENTRY_BYTES}) AS n FROM log {{where}} GROUP BY project"
          " UNION ALL SELECT project, SUM(size) AS n FROM stored {where} GROUP BY project"
-         f" UNION ALL SELECT project, COUNT(*) * {GONE_COST} AS n FROM gone {{where}} GROUP BY project")
+         f" UNION ALL SELECT project, COUNT(*) * {GONE_COST} AS n FROM gone {{where}} GROUP BY project"
+         f" UNION ALL SELECT project, COUNT(*) * {GONE_COST} AS n FROM kept {{where}} GROUP BY project")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS log (
@@ -84,6 +90,8 @@ CREATE TABLE IF NOT EXISTS projects (
 CREATE TABLE IF NOT EXISTS gone (
   project text NOT NULL, h bytea NOT NULL, seq bigint NOT NULL DEFAULT 0, PRIMARY KEY (project, h));
 CREATE TABLE IF NOT EXISTS floor (project text PRIMARY KEY, seq bigint NOT NULL);
+-- hashes of big compacted or evicted edits, remembered for good (KEEP_BIG)
+CREATE TABLE IF NOT EXISTS kept (project text NOT NULL, h bytea NOT NULL, PRIMARY KEY (project, h));
 CREATE TABLE IF NOT EXISTS deleted (
   project text PRIMARY KEY, at double precision NOT NULL, sig bytea NOT NULL, ts bigint NOT NULL);
 -- the apps that connect (for the admin page, and choosing --min-version): how often, last when
@@ -103,7 +111,7 @@ ALTER TABLE log ALTER COLUMN data SET STORAGE EXTERNAL;
 # Each table's primary key, for copying them in order (db.copy_tables), and the boolean columns
 TABLES = {"log": ("project", "seq"), "head": ("project",), "mode": ("project",), "stored": ("project", "id"),
           "trash": ("project", "id"), "revoked": ("project", "pub"), "projects": ("project",), "gone": ("project", "h"),
-          "floor": ("project",), "deleted": ("project",), "clients": ("app", "version"), "lists": ("id",)}
+          "kept": ("project", "h"), "floor": ("project",), "deleted": ("project",), "clients": ("app", "version"), "lists": ("id",)}
 BOOLEANS = frozenset({"snap", "relay"})
 
 
@@ -149,6 +157,9 @@ class Store:
         self.owner_bytes: dict[str, int] = defaultdict(int)  # checked on every stored edit: kept, not added up
         self.list_bytes: dict[str, int] = defaultdict(int)  # bytes of project lists, by owner
         self.seen: dict[str, float] = {}
+        # evicted (or purged), or turned relay-only, and not opened or written to since: what's kept
+        # of them is only what's remembered of their changes (GONE_KEEP), so they aren't evicted again
+        self.evicted: set[str] = set()
         self.meta_tokens, self.meta_at = float(META_BURST), time.monotonic()
         self.pending: dict[str, int] = defaultdict(int)  # bytes of uploads under way (see put_blob)
         self._reaper: asyncio.Task | None = None
@@ -174,8 +185,9 @@ class Store:
         self.list_bytes = defaultdict(int, {r["owner"]: int(r["n"]) for r in await c.fetch(
             "SELECT owner, SUM(octet_length(data)) AS n FROM lists GROUP BY owner")})
         self.total = sum(self.usage.values()) + sum(self.list_bytes.values())
-        projects = await c.fetch("SELECT project, owner, seen, created FROM projects")
+        projects = await c.fetch("SELECT project, owner, seen, created, evicted FROM projects")
         self.owners = {r["project"]: r["owner"] for r in projects}
+        self.evicted = {r["project"] for r in projects if r["evicted"]}
         self.seen = {r["project"]: max(r["seen"], r["created"]) for r in projects}
         for project, n in self.usage.items():
             if project in self.owners:
@@ -226,13 +238,20 @@ class Store:
         return self.owners.get(project)
 
     async def register(self, project: str, owner: str, label: str) -> None:
+        # counted against its owner at once, before anything else runs (a write reserved for it
+        # then counts for the owner: see Policy.may_store)
+        was = self.owners.get(project)
+        self._own(project, owner)
         await self.db.execute("INSERT INTO projects(project, created, owner) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
                                 project, time.time(), owner)
         # deleted meanwhile (a delete between a request's check and this, or seen by another server
         # sharing the database): the project stays unregistered
         if await self.db.execute("DELETE FROM projects WHERE project=$1 AND EXISTS (SELECT 1 FROM deleted WHERE project=$1)", project):
+            if was is not None:
+                self._own(project, was)
+            elif self.owners.pop(project, None) is not None:
+                self.owner_bytes[owner] -= self.usage.get(project, 0)
             return
-        self._own(project, owner)
         log.info("registered project %s… (%s)", project[:8], label)
 
     async def claim(self, project: str, owner: str) -> None:
@@ -272,12 +291,14 @@ class Store:
         if now - self.seen.get(project, 0) < 3600:
             return
         self.seen[project] = now
+        self.evicted.discard(project)
         await self.db.execute("UPDATE projects SET seen=$1, evicted=0 WHERE project=$2", now, project)
 
     def idle(self, days: float) -> list[str]:
-        """Stored projects nobody has opened for `days`."""
+        """Stored projects nobody has opened for `days` (not those evicted already, which keep only
+        the hashes of what they stored: see GONE_KEEP)."""
         cutoff = time.time() - days * 86400
-        return [p for p, n in self.usage.items() if n > 0 and self.seen.get(p, 0) < cutoff]
+        return [p for p, n in self.usage.items() if n > 0 and p not in self.evicted and self.seen.get(p, 0) < cutoff]
 
     async def evict(self, project: str) -> int:
         """Drop the stored copy (log and files) of an idle project. Its writers re-upload it
@@ -289,15 +310,22 @@ class Store:
             await self._forget_log(c, project)
             await c.execute("UPDATE projects SET evicted=$1 WHERE project=$2", time.time(), project)
         await self._drop_files(project)
-        return freed
+        self.evicted.add(project)
+        return freed - self.usage.get(project, 0)  # (what's remembered of it stays)
 
     @staticmethod
     async def _forget_log(c, project: str) -> None:
         """In transaction `c`, drop a project's log (eviction, relay-only mode). Its numbers keep
         counting, and `floor` says that nothing up to head can be stored again (a replay of an old,
-        validly signed change or snapshot)."""
+        validly signed snapshot); its changes are remembered by hash, as compaction does, so that
+        an old, validly signed change isn't stored again either (see GONE_KEEP)."""
+        await c.execute("INSERT INTO gone(project, h, seq) SELECT project, h, seq FROM log "
+                        "WHERE project=$1 AND NOT snap ON CONFLICT DO NOTHING", project)
+        await c.execute("INSERT INTO kept(project, h) SELECT project, h FROM log "
+                        "WHERE project=$1 AND NOT snap AND octet_length(data)>=$2 ON CONFLICT DO NOTHING", project, KEEP_BIG)
+        await c.execute("DELETE FROM gone WHERE project=$1 AND seq <= COALESCE((SELECT seq FROM head WHERE project=$1), 0) - $2",
+                        project, GONE_KEEP)
         await c.execute("DELETE FROM log WHERE project=$1", project)
-        await c.execute("DELETE FROM gone WHERE project=$1", project)
         await c.execute("INSERT INTO floor(project, seq) SELECT $1, COALESCE((SELECT seq FROM head WHERE project=$1), 0) "
                         "WHERE true ON CONFLICT (project) DO UPDATE SET seq=excluded.seq", project)
 
@@ -312,7 +340,7 @@ class Store:
 
     def stored_by(self, owner: str) -> list[str]:
         """Projects registered to this owner that have something stored."""
-        return [p for p, o in self.owners.items() if o == owner and self.usage.get(p, 0) > 0]
+        return [p for p, o in self.owners.items() if o == owner and self.usage.get(p, 0) > 0 and p not in self.evicted]
 
     async def _recount(self, project: str) -> None:
         n = await self.db.fetchval(f"SELECT COALESCE(SUM(n), 0) FROM ({USAGE.format(where='WHERE project=$1')}) u", project)
@@ -334,7 +362,7 @@ class Store:
         h = hashlib.sha256(data).digest()
         seq = await self.db.fetchval(
             "SELECT COALESCE((SELECT seq FROM log WHERE project=$1 AND h=$2 LIMIT 1),"
-            " (SELECT 0 FROM gone WHERE project=$1 AND h=$2))", project, h)
+            " (SELECT 0 FROM gone WHERE project=$1 AND h=$2), (SELECT 0 FROM kept WHERE project=$1 AND h=$2))", project, h)
         return None if seq is None else int(seq)
 
     async def append(self, project: str, data: bytes, sig: bytes) -> int:
@@ -344,6 +372,7 @@ class Store:
             await c.execute("INSERT INTO log(project, seq, data, sig, h) VALUES ($1,$2,$3,$4,$5)",
                             project, seq, data, sig, hashlib.sha256(data).digest())
         self._grew(project, len(data) + len(sig))
+        self.evicted.discard(project)
         return int(seq)
 
     async def same_entry(self, project: str, seq: int, h: bytes) -> bool | None:
@@ -363,15 +392,18 @@ class Store:
         """Bytes a snapshot would add (negative when it frees space)."""
         r = await self.db.fetchrow(
             f"SELECT COALESCE(SUM({ENTRY_BYTES}), 0) AS freed, COUNT(*) FILTER (WHERE NOT snap) AS remembered, "
+            "COUNT(*) FILTER (WHERE NOT snap AND octet_length(data)>=$4) AS kept, "
             "(SELECT COUNT(*) FROM gone WHERE project=$1 AND seq<=$3) AS forgotten FROM log WHERE project=$1 AND seq<=$2",
-            project, upto, upto - GONE_KEEP)
-        return size - int(r["freed"]) + (r["remembered"] - r["forgotten"]) * GONE_COST
+            project, upto, upto - GONE_KEEP, KEEP_BIG)
+        return size - int(r["freed"]) + (r["remembered"] + r["kept"] - r["forgotten"]) * GONE_COST
 
     async def snapshot(self, project: str, upto: int, data: bytes, sig: bytes) -> None:
         async with self.tx() as c:
             # remember what the snapshot replaces, so those updates can't be stored again
             await c.execute("INSERT INTO gone(project, h, seq) SELECT project, h, seq FROM log "
                             "WHERE project=$1 AND seq<=$2 AND NOT snap ON CONFLICT DO NOTHING", project, upto)
+            await c.execute("INSERT INTO kept(project, h) SELECT project, h FROM log WHERE project=$1 AND seq<=$2 AND NOT snap "
+                            "AND octet_length(data)>=$3 ON CONFLICT DO NOTHING", project, upto, KEEP_BIG)
             await c.execute("DELETE FROM gone WHERE project=$1 AND seq<=$2", project, upto - GONE_KEEP)
             await c.execute("DELETE FROM log WHERE project=$1 AND seq<=$2", project, upto)
             await c.execute("INSERT INTO log(project, seq, snap, data, sig, h) VALUES ($1,$2,true,$3,$4,$5)",
@@ -475,6 +507,8 @@ class Store:
                 await self._forget_log(c, project)
         self._facts.put(project, ((await self._fact(project))[0], relay_only))
         if relay_only:
+            self.evicted.add(project)
+        if relay_only:
             await self._drop_files(project)
         else:
             await self._recount(project)
@@ -491,7 +525,7 @@ class Store:
         async with self.tx() as c:
             await c.execute("INSERT INTO deleted(project, at, sig, ts) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", project, at, sig, ts)
             # the tombstone above is all that's kept: its registration (owner, dates) goes too
-            for table in ("log", "gone", "head", "floor", "mode", "projects"):
+            for table in ("log", "gone", "kept", "head", "floor", "mode", "projects"):
                 await c.execute(f"DELETE FROM {table} WHERE project=$1", project)
         self._facts.drop(project)
         msg = await self.deleted(project)  # the first deletion's, if there were two
@@ -500,6 +534,7 @@ class Store:
         self.owners.pop(project, None)  # its bytes came off its owner in _recount
         self.usage.pop(project, None)
         self.seen.pop(project, None)
+        self.evicted.discard(project)
         return msg
 
     # --- stored files ---------------------------------------------------------------
@@ -549,10 +584,19 @@ class Store:
         return await self.blob_size(project, bid) is not None
 
     def reserve(self, project: str, n: int) -> None:
-        """Count an upload from the moment it's accepted, so uploads under way at once can't together
-        pass a limit (put_blob takes the reservation back when it ends)."""
+        """Count a write from the moment it's accepted, so writes under way at once can't together
+        pass a limit (put_blob takes the reservation back when it ends; others call unreserve)."""
         self.pending[project] += n
         self._grew(project, n)
+
+    def unreserve(self, project: str, n: int) -> None:
+        """Take back a reservation (the write is now counted as stored, or didn't happen)."""
+        if not n:
+            return
+        self.pending[project] -= n
+        if not self.pending[project]:
+            del self.pending[project]
+        self._grew(project, -n)
 
     async def put_blob(self, project: str, bid: str, data: bytes | memoryview, kind: str = "file", reserved: bool = False) -> bool:
         """Store a file's content (counted from the start: see reserve). False if it was stored
@@ -572,6 +616,7 @@ class Store:
                     await c.execute("INSERT INTO stored(project, id, size, kind) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
                                     project, bid, n, kind)
                     await c.execute("DELETE FROM trash WHERE project=$1 AND id=$2", project, bid)  # not to be erased now
+                self.evicted.discard(project)
                 return True
         finally:
             self.pending[project] -= n
