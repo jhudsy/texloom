@@ -25,7 +25,7 @@ from pycrdt import Doc, Map, merge_updates
 from . import __version__, tls
 from .crypto import Keys, b64d, b64e, canonical_pub, revoke_msg
 from .packing import packed, unpack
-from .paths import replace_file
+from .paths import replace_file, sweep_temp
 
 log = logging.getLogger("texloom")
 
@@ -209,6 +209,8 @@ class Replica:
     def load(self) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
         os.chmod(self.dir, 0o700)  # holds the plaintext document and project keys
+        for d in (self.dir, self.dir / "blobs"):
+            sweep_temp(d)  # what a crash or a power cut mid-write left behind (replace_file)
         if (p := self.dir / "doc.bin").exists():
             self.doc.apply_update(p.read_bytes())
         if (p := self.dir / "state.json").exists():

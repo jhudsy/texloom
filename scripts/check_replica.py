@@ -275,6 +275,25 @@ async def desktop_only(links: dict) -> list[str]:
             if (len(asked) > before) != taken:
                 bad.append(f"{what}: {'taken' if len(asked) > before else 'not taken'}")
 
+    with tempfile.TemporaryDirectory() as tmp:  # what a crash mid-write left behind is swept at startup, and nothing else
+        import os
+        import time
+        state = Path(tmp) / "state"
+        (state / "blobs").mkdir(parents=True)
+        old, fresh, real = state / "blobs" / ".abc.q1w2e3.texloom-tmp", state / "blobs" / ".abc.r4t5y6.texloom-tmp", state / "blobs" / ("a" * 32)
+        stale_state = state / ".doc.bin.z9x8c7.texloom-tmp"
+        for f in (old, fresh, real, stale_state):
+            f.write_bytes(b"x")
+        for f in (old, stale_state):
+            os.utime(f, (time.time() - 7200, time.time() - 7200))
+        Replica(state, member, SERVER).load()
+        if old.exists() or stale_state.exists():
+            bad.append("a temporary file left long ago (a crash mid-write) wasn't swept")
+        if not fresh.exists():
+            bad.append("a temporary file just made (a write that may be in progress) was swept")
+        if not real.exists():
+            bad.append("a stored file was swept")
+
     with tempfile.TemporaryDirectory() as tmp:
         def signed(mode: str, at: int) -> dict:
             return {"m": mode, "at": at, "s": b64e(owner.sign(f"owner:storage:{mode}:{at}".encode()))}

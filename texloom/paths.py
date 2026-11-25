@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import re
 import sys
 import tempfile
@@ -45,6 +46,25 @@ def replace_file(path: Path, data: bytes, mode: int | None = None) -> os.stat_re
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def sweep_temp(folder: Path, older_than: float = 3600.0) -> int:
+    """Delete the temporary files replace_file left in `folder` (and not deeper) when the program or the computer
+    stopped mid-write: named .<name>.<random>.texloom-tmp, and not touched for `older_than` seconds, so that a write
+    in progress (another program's) is left alone. Returns how many went."""
+    gone = 0
+    try:
+        for f in folder.iterdir():
+            if f.name.startswith(".") and f.name.endswith(".texloom-tmp") and f.is_file() and not f.is_symlink():
+                try:
+                    if time.time() - f.stat().st_mtime > older_than:
+                        f.unlink()
+                        gone += 1
+                except OSError:
+                    pass  # another program has it, or it just went: next time
+    except OSError:
+        pass  # no such folder yet
+    return gone
 
 
 def write_json(path: Path, data, private: bool = False, **dump) -> None:
