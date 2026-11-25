@@ -13,8 +13,10 @@ How the pieces fit, and why (three ways to run it: one server; two with failover
    on one machine and in Docker (STANDBY.md; SCALING.md, "Way 2"). Left: trying it on a
    real pair. A cold standby restored nightly from the backups still covers losing both (SCALING.md,
    "Way 1: one server").
-2. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:
-   most of the traffic, off the relay. About 2 days.
+2. **[The TeX engine from a CDN](https://github.com/jhudsy/texloom/issues/15)**: most of the traffic, off the relay
+   (a base-URL setting for `/core/`, about a day; a bucket that doesn't charge for downloads could host the files). Parked until
+   monthly traffic nears what the server's hosting includes. The other half, compiled PDFs fetched only while someone is looking, is
+   done (`scripts/check_web_pdf.py`).
 3. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
    (TLA+) across several servers, and of the client-side GitHub lease. The failover model is done
    (`models/failover`).
