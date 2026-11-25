@@ -58,7 +58,7 @@ jobs:
         run: uv run --extra server python scripts/check_restore.py
       - name: A warm standby promoted after the primary is lost, one that missed the last changes (a real server, throwaway PostgreSQL)
         run: uv run --extra server python scripts/check_standby.py
-      - name: Automatic failover between two real servers: a lost primary, one cut off from the bucket (throwaway PostgreSQL, a stand-in bucket)
+      - name: "Automatic failover between two real servers: a lost primary, one cut off from the bucket (throwaway PostgreSQL, a stand-in bucket)"
         run: uv run --extra server python scripts/check_failover.py
       - name: What an outsider could do to the server (revocations off the budget, TeX Live paths; security review)
         run: uv run --extra server python scripts/check_server_abuse.py

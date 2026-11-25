@@ -305,8 +305,8 @@ class Failover:
         log.error("failover: %s stopping: %s", self.name, why)
         try:
             await asyncio.wait_for(self.relay.close_all(), 3)
-        except Exception:
-            pass
+        except Exception:  # (stopping is the point: a connection that won't close is dropped by the exit)
+            log.debug("failover: closing connections", exc_info=True)
         logging.shutdown()
         self._exit(EXIT_FENCED)
 

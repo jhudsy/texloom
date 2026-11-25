@@ -20,7 +20,7 @@ Settings live in one file, `/etc/texloom/texloom.toml` ([Settings](#settings)).
 - [The database](#the-database) · [Stored files](#stored-files)
 - [Creation codes](#creation-codes) · [Private servers](#private-servers) ·
   [Retiring old app versions](#retiring-old-app-versions) · [Idle projects, admin page, arXiv import](#idle-projects-admin-page-arxiv-import)
-- [Backups](#backups) · [A standby server](#a-standby-server), by hand or [by themselves](#letting-the-two-servers-switch-over-by-themselves) · [Updating](#updating)
+- [Backups](#backups) · [A standby server](#a-standby-server), by hand or [by themselves](#letting-the-two-servers-switch-over-by-themselves), and [moving traffic to the primary](#moving-traffic-to-the-primary) · [Updating](#updating)
 
 ## On an Ubuntu or Debian server
 
@@ -489,10 +489,8 @@ failover_name = "server-a"   # "server-b" on the other
   value is quicker and more easily upset by a slow bucket. Servers' clocks need not agree, only run
   at about the same speed: nothing compares one machine's clock with the other's.
 - **Who gets the traffic.** The standby answers every address but `/api/health` with 503, and
-  `/api/health` is 200 only on the primary, so something in front must send people to whichever
-  server says 200: a DNS service that checks `/api/health` and answers with the healthy one's address
-  (give the name a short lifetime), a floating address, or a small front end. The servers don't move
-  the name themselves.
+  `/api/health` is 200 only on the primary. The servers don't move the name themselves: see
+  [Moving traffic to the primary](#moving-traffic-to-the-primary).
 - **After a switch.** The server that stopped (or was lost) restarts as a standby, but its PostgreSQL
   is still a primary with a history the new one doesn't have, so it **won't take over** (it says so in
   its log) until you rebuild it as a standby of the new primary, as in "Afterwards" above. Until then
@@ -506,6 +504,27 @@ failover_name = "server-a"   # "server-b" on the other
   machine) after the other took over can accept changes for a moment until its first renewal fails.
   Nobody loses anything, because an app that was told "stored" by it checks, when it reconnects, that
   the new primary has its last change, and sends everything again if not.
+
+### Moving traffic to the primary
+
+Failover makes one server the primary; it does not move traffic. Each server's `/api/health` answers
+**200 only on the primary**, and 503 on a standby and on a server that has stopped itself (the body
+says which it is and who holds the lease). Whatever people reach the servers through must send them to
+the one that answers 200. How the servers are reached at all (their addresses, DNS, ports,
+certificates) depends on your network and is yours to arrange; it isn't something TeXLoom does.
+
+Some ways to follow the primary:
+
+- **A proxy on each machine that checks both servers.** `deploy/Caddyfile.failover` is an example for
+  two machines that the public can reach: both addresses are in DNS, and each machine's Caddy forwards
+  to whichever relay answers 200, so nothing changes at a switch. Its first lines say what the relays
+  need (to reach each other over a private network, and never port 8787 open to the internet).
+- **A load balancer, or a DNS service, with health checks** on `/api/health`.
+- **A floating address** that your own tooling moves to the primary.
+- **A command of your own** that looks at `/api/health` and updates whatever you use.
+
+Apps reconnect with backoff, so a switch looks like a short "connecting…": about the time the standby
+waits (see above), plus whatever your arrangement adds (a DNS record's lifetime, say).
 
 ### A hosted PostgreSQL
 

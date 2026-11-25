@@ -1,0 +1,40 @@
+# Caddy for TWO TeXLoom servers that are both reachable by the public (INSTALL.md, "Moving traffic to
+# the primary"). Put this on each machine, with both machines' addresses in DNS for the name. A visitor
+# who reaches either one is sent on to whichever server answers 200 on /api/health: the primary (a
+# standby, and a server that has stopped itself, answer 503). Nothing in DNS has to change when the
+# servers switch over, and no script runs; people wait only for the switch itself (about a minute).
+#
+# 1. Replace the name below, and PEER with the other machine's relay address.
+# 2. The relay must be reachable from the other machine, and ONLY from it: it speaks plain HTTP, so use
+#    a private network (WireGuard, Tailscale), set the relay's `--host` (`host =` in texloom.toml) to this
+#    machine's private address as well as keeping 127.0.0.1 reachable for Caddy (or listen on 0.0.0.0 and
+#    firewall port 8787 to the other machine), and never open 8787 to the internet.
+# 3. sudo caddy run --config /etc/caddy/Caddyfile
+#
+# Each Caddy sets X-Real-IP to the visitor's address before forwarding, so the relay's per-address limits
+# see the real visitor whichever machine they reached.
+texloom.example.org {
+	encode zstd gzip
+
+	@upload path /blob/*
+	request_body @upload {
+		max_size 75MB
+	}
+	@other not path /blob/*
+	request_body @other {
+		max_size 1MB
+	}
+
+	reverse_proxy 127.0.0.1:8787 PEER:8787 {
+		# the first of these that is healthy: this machine's own, if it is the primary, else the other's
+		lb_policy first
+		health_uri /api/health
+		health_interval 5s
+		health_timeout 3s
+		health_status 200
+		# a request that finds the server just gone is tried on the other for up to this long
+		lb_try_duration 20s
+		lb_try_interval 1s
+		header_up X-Real-IP {remote_host}
+	}
+}
