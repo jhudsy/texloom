@@ -171,14 +171,17 @@ class TexLive:
         if not db.exists():
             return
         self.db = sqlite3.connect(db, check_same_thread=False)
-        self.meta = json.loads((self.root / "repo.json").read_text())
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(pkgs)")}
+        if not {"bytes", "used"} <= cols:  # an index of an older layout (before the cache was counted on disk): started again, as for a new engine
+            log.info("dropping the TeX Live index and the files cached with it: it is of an older layout")
+            self.db.close()
+            self.db = None
+            shutil.rmtree(self.files, ignore_errors=True)
+            db.unlink(missing_ok=True)
+            (self.root / "repo.json").unlink(missing_ok=True)
+            return
+        self.meta = json.loads((self.root / "repo.json").read_text())
         with self.db:
-            # compat(data 0.4.33): a TeX Live index without its size columns (the server's own file); converted on read, when the server starts
-            if "bytes" not in cols:  # an index from before the cache was counted on disk
-                self.db.execute("ALTER TABLE pkgs ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0")
-            if "used" not in cols:
-                self.db.execute("ALTER TABLE pkgs ADD COLUMN used REAL NOT NULL DEFAULT 0")
             for (pkg,) in self.db.execute("SELECT name FROM pkgs WHERE installed=1 AND bytes=0").fetchall():
                 self.db.execute("UPDATE pkgs SET bytes=? WHERE name=?", (self._on_disk(pkg), pkg))
         self.used = self.db.execute("SELECT COALESCE(SUM(bytes), 0) FROM pkgs WHERE installed=1").fetchone()[0]

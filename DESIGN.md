@@ -1214,8 +1214,8 @@ Every place that handles something older carries a marker just above it, saying 
 before it can go (issue 27):
 
 ```
-# compat(refused 0.4.30): apps too old to say their version ("unknown" on the admin page): remove _hold and HOLD_UNVERSIONED
 // compat(data 0.4.35): the plain, unsigned storage value; converted on read: its owner signs it
+# compat(data 0.4.40): a folder's records in .texloom itself; converted on read: moved the first time
 ```
 
 - **app X**: apps older than X. Apps reach the server, and each other, only through a server, so

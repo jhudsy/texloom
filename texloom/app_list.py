@@ -218,7 +218,7 @@ class ProjectListPart:
                 away = []
             out = []
             for project, entry in away:
-                # compat(data 0.4.29): list entries without their server (s); not converted: read as the server that keeps the list
+                # an entry without a (valid) server is on the server that keeps the list
                 there = entry.get("s") if isinstance(entry.get("s"), str) and entry["s"].startswith(("https://", "http://")) else server
                 out.append((project, entry, there.rstrip("/")))
             self.away_cache = (key, out)

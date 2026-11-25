@@ -181,6 +181,22 @@ async def texlive(tmp: Path) -> None:
         check("a format number too long to read is just a miss", r.status == 404, r.status)
 
 
+async def texlive_old_index(tmp: Path) -> None:
+    """An index of an older layout (before the cache was counted on disk) is dropped with the files cached beside
+    it, and the server starts again from nothing, rather than failing to read it."""
+    root = tmp / "texlive-old"
+    (root / "texmf" / "tex").mkdir(parents=True)
+    (root / "texmf" / "tex" / "a.sty").write_text("old")
+    db = sqlite3.connect(root / "index.db")
+    db.execute("CREATE TABLE pkgs (name TEXT PRIMARY KEY, installed INTEGER NOT NULL DEFAULT 0)")
+    db.commit()
+    db.close()
+    (root / "repo.json").write_text(json.dumps({"year": YEAR}))
+    tl = TexLive(root)
+    check("an index of an older layout isn't used", not tl.ready)
+    check("it is dropped, with what was cached under it", not (root / "index.db").exists() and not (root / "texmf" / "tex" / "a.sty").exists())
+
+
 async def texlive_fetches(tmp: Path) -> None:
     """Many big packages asked for from one /64: only so many bytes an hour are fetched for it."""
     big = 200 * 1024 * 1024
@@ -268,6 +284,26 @@ async def connections(tmp: Path) -> None:
             check("a project has a limited number of connections", n == 4, n)
             for w in many:
                 await w.close()
+
+
+async def too_old(tmp: Path) -> None:
+    """With a minimum version, an app older than it, or too old to say its version, is told to update and the
+    connection closed; one at or above it is let in."""
+    async with client(tmp, min_version="0.4.50") as c:
+        for what, hello in (("an older app", {"app": "desktop", "v": "0.4.49"}), ("one too old to say its version", {"app": "desktop"})):
+            _, pid = keypair()
+            ws = await c.ws_connect(f"/ws/{pid}")
+            await ws.send_json({"t": "hello", "since": 0, **hello})
+            reply = await ws.receive_json(timeout=5)
+            m = await ws.receive(timeout=5)
+            check(f"{what} is told to update, then closed at once",
+                  reply.get("denied") is True and m.type in (WSMsgType.CLOSE, WSMsgType.CLOSED), (reply, m.type))
+        _, pid = keypair()
+        ws = await c.ws_connect(f"/ws/{pid}")
+        await ws.send_json({"t": "hello", "since": 0, "app": "desktop", "v": "0.4.50", "pages": 1})
+        reply = await ws.receive_json(timeout=5)
+        check("one at the minimum is let in", reply.get("t") == "log", reply)
+        await ws.close()
 
 
 async def unsigned(tmp: Path) -> None:
@@ -464,8 +500,8 @@ async def bodies(tmp: Path) -> None:
 
 
 async def main() -> int:
-    for name, part in (("Revocations", revocations), ("TeX Live", texlive), ("TeX Live fetches", texlive_fetches), ("Ids", ids),
-                       ("Connections", connections), ("Unsigned messages", unsigned), ("Memory", memory),
+    for name, part in (("Revocations", revocations), ("TeX Live", texlive), ("TeX Live fetches", texlive_fetches), ("TeX Live, an older index", texlive_old_index), ("Ids", ids),
+                       ("Connections", connections), ("Apps too old", too_old), ("Unsigned messages", unsigned), ("Memory", memory),
                        ("Private servers", private), ("Allowances", quota), ("Replays", replays), ("Project lists", lists),
                        ("Request bodies and headers", bodies)):
         print(f"{name}:", flush=True)

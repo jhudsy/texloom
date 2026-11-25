@@ -11,9 +11,8 @@ export const lf = (s: string) => (s.includes('\r') ? s.replace(/\r\n/g, '\n').re
 
 const LF = Symbol('texloom-lf') // the strips' own changes
 
-/** Keep "\r" out of the project's text: take out any already there, any a collaborator's older app
- *  brings in, and any pasted. Each "\r" is deleted by itself, so nothing else (cursors, comments) moves. */
-// compat(data 0.4.21): a "\r" left in projects by apps before 0.4.21; converted on read: a writer opening the project takes it out (pasted ones still need this)
+/** Keep "\r" out of the project's text: take out any already there, and any a collaborator's app brings in
+ *  or that is pasted. Each "\r" is deleted by itself, so nothing else (cursors, comments) moves. */
 export function keepLF(r: Replica) {
   if (!r.keys.writable) return
   const strip = (texts: Iterable<Y.Text>) => {
@@ -24,7 +23,7 @@ export function keepLF(r: Replica) {
         const s = yt.toString()
         for (let i = s.length - 1; i >= 0; i--) {
           if (s[i] !== '\r') continue
-          yt.delete(i, 1) // a lone "\r" too: left in mid-word by edits misplaced before 0.4.21 (Windows editors show it as a line break)
+          yt.delete(i, 1) // a lone "\r" too (Windows editors show it as a line break)
         }
       }
     }, LF)

@@ -478,9 +478,8 @@ class FolderSync:
         seen.append(h)
         del seen[:-30]  # not a text
 
-    # compat(data 0.4.21): a folder's records with no line-ending note: read from disk; converted as each file next syncs
     def _windows(self, rel: str) -> bool:
-        """Whether the file ends lines with \r\n: as remembered, or (noted before 0.4.21) as it is on disk."""
+        """Whether the file ends lines with \r\n: as remembered, or (a file with no record yet) as it is on disk."""
         k = self.known.get(rel, {})
         if "c" in k:
             return bool(k["c"])
@@ -530,7 +529,7 @@ class FolderSync:
     # --- disk -> CRDT ----------------------------------------------------------
     def keep_lf(self) -> None:
         """Take "\r" out of the project's texts (they keep "\n" only): any already there, and any a
-        collaborator's older app brings in. The web app does the same (keepLF, lineends.ts); a
+        collaborator's app brings in (pasted, say). The web app does the same (keepLF, lineends.ts); a
         project with only desktop apps would otherwise keep them. Files are written with their own
         line endings either way."""
         if not self.r.can_write or self.r.deleted_at is not None:
@@ -548,8 +547,7 @@ class FolderSync:
                 if not is_dir and rel.endswith(".texloom-tmp"):
                     remove_stale_temp(self.root / rel)
         if not self._lf_done:
-            # compat(data 0.4.21): a "\r" left in projects by apps before 0.4.21; converted on read: a writer opening the project takes it out
-            self._lf_done = True  # "\r" a copy of the app from before 0.4.21 put into the project
+            self._lf_done = True
             self.keep_lf()
         await self.ingest(set(self.disk_files()) | set(self.known))
         self.ingest_dirs()
@@ -734,7 +732,7 @@ class FolderSync:
                         self.r.files[rel] = Text(new)
                         self.base[rel] = new
                         return
-                    strip_cr(yt)  # a "\r" from an older copy of the app
+                    strip_cr(yt)  # a "\r" that came in with the change
                     cur, base = str(yt), self.base.get(rel)
                     if self.shared and base is not None:  # a save from another computer's older copy?
                         base = fork_point(self.base.history.get(rel) or [base], new)
@@ -770,7 +768,7 @@ class FolderSync:
         if self.standby:  # the file-sync service may have brought these files already
             await self._track(set(self.r.files.keys()) | set(self.r.bin.keys()))
             return
-        self.keep_lf()  # (an older app's "\r", or one pasted there)
+        self.keep_lf()  # (a "\r" that came in with the change: pasted, say)
         await self.write_out()
 
     async def _track(self, paths: set[str]) -> None:

@@ -7,8 +7,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { b64d, b64e, concat, seal, unseal } from './crypto'
 
 /** s: the project's server (a project lives on one server; the list may be kept on several). An entry
- *  from before 0.4.29 may lack it: its project is on the server that kept the list then. */
-// compat(data 0.4.29): list entries without their server (s); not converted: read as the server that keeps the list
+ *  without it is on the server that keeps the list. */
 export interface ListEntry { f: string; n: string; at: number; w: boolean; s?: string; nick?: string; t?: string; by?: string; c?: number; m?: number }
 export interface ListDoc { v: 1; projects: Record<string, ListEntry>; gone: Record<string, number> }
 

@@ -318,7 +318,8 @@ connect, with when each was last seen. Once old versions have stopped connecting
 allowed with `min_version = "X.Y.Z"`. Older apps, and those too old to say, are then turned away
 with a request to update: the desktop app shows "Update needed", the web app offers to reload (its
 newest version comes from the server), and project lists refuse them too. An app too old to say its
-version can't show the request, and is counted as "unknown" on the admin page.
+version can't show the request, is counted as "unknown" on the admin page, and is closed at once, so it
+tries again every second or two until its user updates it.
 
 ## Idle projects, admin page, arXiv import
 
