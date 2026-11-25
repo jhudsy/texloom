@@ -3,7 +3,24 @@
 # 2. Make ports 80 and 443 reachable (router port-forward if it's at home).
 # 3. Replace the hostname below, then:  sudo caddy run --config /etc/caddy/Caddyfile
 # Caddy obtains and renews the certificate itself and passes WebSockets through.
+#
+# Caddy has no rate limits of its own (deploy/install.sh's nginx site has them); the relay keeps
+# its own per-address limits (connections, arXiv imports, TeX Live fetches), counting by the
+# X-Real-IP set below. Only uploads (/blob/) may send large bodies.
 texloom.example.org {
 	encode zstd gzip
-	reverse_proxy 127.0.0.1:8787
+
+	@upload path /blob/*
+	request_body @upload {
+		max_size 75MB
+	}
+	@other not path /blob/*
+	request_body @other {
+		max_size 1MB
+	}
+
+	reverse_proxy 127.0.0.1:8787 {
+		# who the client is, for the relay's per-address limits: set here, so a client can't name another
+		header_up X-Real-IP {remote_host}
+	}
 }
