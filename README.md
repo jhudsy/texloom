@@ -207,6 +207,7 @@ the original's history, comments or collaborators, and it counts towards your st
 
 ### Editor
 
+
 | | |
 |---|---|
 | **⌘S** / **Ctrl+S** | compile |
@@ -233,11 +234,77 @@ hint; Settings turns them off. Spelling is checked with the browser's dictionary
 Settings), skipping commands, maths, labels and the preamble. With the cursor in maths
 (`$…$`, `\[…\]`, `equation`, `align`, …), a preview shows it typeset by KaTeX, using the
 project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turns it off).
+
 - **Left panel:** **Files**, **Search** (match case, whole words, regular expressions with
   `$1`), and **Outline** (sections in document order through `\input`/`\include`, with word
   counts: see **Word counts** below).
 - **Right panel:** **PDF**, **Assistant**, **Review** (comments and suggestions: reply,
   resolve, accept, reject) and **History** (versions, compare, restore, "who wrote this").
+- **Files:** the tree has folders. **New** (file, folder, reference, import) and **Upload** work in the selected folder,
+  you can drag to move, and dropping files or whole folders from your computer onto a folder uploads them
+  there (you're asked first if files would be replaced, or if it's a very large amount).
+- **Panes:** drag the dividers between the file list, the editor and the PDF/assistant
+  panel; ☰ and ▥ hide the side panes.
+- **Symbols:** the **Ω** tab beside Files, Search and Outline (⌘⌥S / Ctrl+Alt+S from the editor) holds mathematical
+  and text symbols. Clicking one types it at the
+  cursor, in `$…$` if you aren't already in maths. Hovering shows the command and any package it needs, and
+  using it adds that package to your preamble if it's missing.
+- **Word counts:** the Outline tab counts the document and each section; selecting text shows its count
+  in the corner of the editor. LaTeX commands, citations, maths and comments aren't counted. Chinese and
+  Japanese are counted by the character.
+  **Detailed count…** there runs [TeXCount](https://ctan.org/pkg/texcount) on your device for a breakdown of
+  text, headers, captions and maths (the desktop app's **Word count…** uses your own TeX installation's copy).
+- **Offline:** after the first visit the app (and, after one compile, the TeX engine) works
+  offline; browsers offer to install it as an app.
+- **Keyboard shortcuts:** press **?** (outside a text field), or **Keyboard shortcuts** in ⚙ Settings, for the list.
+
+**Phones and tablets.** In small windows the editor and the PDF take turns on screen, the file list
+opens over them from ☰, and the other commands are under ⋯. On touch screens a bar above the keyboard
+has the characters LaTeX needs.
+
+**Right-click.** On selected text: show it in the PDF, comment, suggest changes (suggest mode), search the project
+or ask the assistant. On a LaTeX command: go to a `\ref`'s label or a `\cite`'s bibliography entry,
+find the uses of a `\label`, open an `\input` or `\includegraphics` file, or show that line in the
+PDF. Anywhere else you get the browser's own menu with its spelling suggestions, and Shift +
+right-click always does. The file list has its own menu (preview, insert into the document,
+download, rename, delete), and so does the PDF (go to source, download, compile).
+
+### Compiling and the PDF
+
+- **Problems:** after compiling, errors and warnings are listed under the PDF with their
+  file and line; click one to go there. Biber and BibTeX errors (a missing `.bib`, say) are
+  listed too. **Raw log** shows the whole log under the PDF; drag its top edge to resize. **Compile from scratch** deletes LaTeX's
+  working files (`.aux`, `.bbl`, …) first: in-browser compiles always start from scratch,
+  so it matters when a texloom helper compiles with your own TeX (it keeps them in
+  `.texloom/build`).
+- **Compiling another file:** **Compile** compiles the open file if it has its own `\documentclass`
+  (a figure or a separate document), and otherwise the main file; right-click a file to compile it.
+  Only the main file's PDF is shared with collaborators.
+- **PDFs are fetched when you look at them:** a collaborator's (or your folder's) new PDF is downloaded only while this
+  browser shows the PDF tab (or has it popped out), and only the newest one. Elsewhere it waits until you open the tab. The
+  log is always read, so problems still show in the editor. The desktop app never downloads PDFs: it compiles with your own TeX.
+- **PDF in its own window:** **Pop out** above the PDF (or right-click the PDF) opens it in a separate window, for example
+  on another screen. It updates when you compile, double-clicking it jumps to the source, and it
+  stays in step if you reload the editor.
+- **Text and links in the PDF:** its text can be selected and copied, and with `hyperref` its links work: citations,
+  references and the table of contents scroll to their place (**↩ Back** returns), and web links open in a new tab.
+- **PDF zoom and pages:** − and + above the PDF change its size (⌘ or Ctrl + scroll, or pinching on a
+  trackpad, does the same), and the percentage goes back to normal size; it also offers **Fit width**,
+  **Fit page** (a whole page in view, kept as the window changes size) and set sizes, down to 10%. The zoom
+  is remembered. Once the PDF has been clicked, ← and → turn its pages (and ↑ ↓ too in Fit page); Home and
+  End go to the first and last.
+- **Pages and printing:** the box above the PDF shows the current page; type a number and press
+  Enter to go there. The printer button opens your browser's print dialog, with pages drawn at 200 dpi. For
+  a print that keeps the PDF's own text, download it and print that.
+- **Downloads:** the download button above the PDF, and **Source** (a `.zip`) in the header.
+
+**Preview.** Choosing a Markdown file, image or PDF in the file list shows it in the PDF panel, in
+place of the compiled document; **Compiled PDF** switches back, as does choosing a `.tex` file or
+compiling. Markdown updates as you type, with no compile, and can show the project's own images and
+math in `$…$` or `$$…$$`. Raw HTML appears as plain text, and images from other websites aren't loaded.
+
+### Comments and suggestions
+
 - **Suggest mode:** **✎ Suggest mode** in the Review tab (⌘⌥E / Ctrl+Alt+E, or right-click → *Suggest changes*) makes what
   you type into suggestions instead of changes, like tracked changes. You edit as usual; each changed
   stretch becomes a suggestion in the Review tab, shown word by word (removed words struck through in
@@ -254,45 +321,19 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   Review tab shows **@** and how many; click it, or tick **Mentions me**, to see just those. The
   server can't read projects, so a mention is seen when the project is opened, not sent by email.
   An agent can be asked for "the comments addressed to you" (`list_comments` with `mentioning`).
-- **Comments in your own editor:** a synced folder keeps `.texloom/comments.md`, an overview of the
-  open comments with their file and line (and the ones that mention you marked), for reading in any
-  editor. The desktop app shows how many are open and how many mention you, with **Review in
-  browser**, and since it runs in the background it gives a system notification when a new comment
-  mentions you. From a terminal, `texloom comments DIR` lists them (`--mine`, `--all`), and
-  `texloom comments reply DIR ID TEXT` and `texloom comments resolve DIR ID` answer them; they work
-  while the app is syncing the folder. The comments can also sit beside the text in your editor:
-  `texloom lsp` is a language server (also `TeXLoom lsp`, in the app) that shows each open comment as
-  a diagnostic on its text (a warning when it mentions you), the thread on hover, and **Resolve** and
-  **Open the Review tab** as code actions; it keeps its own copy of the project, so new comments appear
-  while you work, and follows the quoted text when the buffer has unsaved edits. In VS Code,
-  the **TeXLoom comments** extension ([Marketplace](https://marketplace.visualstudio.com/items?itemName=texloom.texloom),
-  [Open VSX](https://open-vsx.org/extension/texloom/texloom) for VSCodium and similar; source in
-  `editors/vscode`) starts it and shows native comment threads with reply and resolve, and starts
-  new comments from the + beside a line or **Add Comment** on a selection. Other editors start it as an extra server for `.tex`
-  files: Neovim `vim.lsp.config('texloom', { cmd = { 'texloom', 'lsp' }, filetypes = { 'tex', 'plaintex' },
-  root_markers = { '.texloom' } })` then `vim.lsp.enable('texloom')` (the setting names are for Neovim
-  0.11 or later); Emacs with lsp-mode `(lsp-register-client (make-lsp-client :new-connection
-  (lsp-stdio-connection '("texloom" "lsp")) :major-modes '(latex-mode) :server-id 'texloom :add-on? t))`
-  (eglot runs one server per buffer, so use lsp-mode beside texlab); Helix a `[language-server.texloom]`
-  with `command = "texloom", args = ["lsp"]` added to the `latex` language's `language-servers`; Zed,
-  Sublime Text (LSP package) and Kate have a "custom server" setting that takes the same command.
-  The app's **Show comments in your editor…** (File menu, beside Use an AI agent on your computer) shows the right command
-  and snippet for each editor. The app's Settings has a switch for each of the two servers (MCP for AI tools, and this one); when one is off
-  the command refuses to start on that computer.
-  Replying and starting a comment need an editor that can ask for text, as the VS Code extension
-  does (the server's `texloom.reply` and `texloom.addComment` commands): elsewhere, use
-  `texloom comments reply`, or the web app.
 - **Several at once:** **Resolve all…** in the Review tab resolves every open comment. To act on some,
   ⌘/Ctrl-click cards to select them (⇧-click for a run, ⌘/Ctrl+A for all), or select text in the
   editor and press **Select in text** for the comments and suggestions on it; a bar then offers
   Resolve, Accept and Reject for the lot. Each is one change for everyone, with **Undo** right after.
   Accepting several skips any suggestion whose text has changed since, to accept on its own.
-- **Problems:** after compiling, errors and warnings are listed under the PDF with their
-  file and line; click one to go there. Biber and BibTeX errors (a missing `.bib`, say) are
-  listed too. **Raw log** shows the whole log under the PDF; drag its top edge to resize. **Compile from scratch** deletes LaTeX's
-  working files (`.aux`, `.bbl`, …) first: in-browser compiles always start from scratch,
-  so it matters when a texloom helper compiles with your own TeX (it keeps them in
-  `.texloom/build`).
+- **Comments from the PDF:** select text in the PDF (in the app or a popped-out window), then right-click ▸ **Add a comment…**
+  or press C. A box opens beside the text, and the comment goes on those words in the source: SyncTeX gives the
+  lines, and the selected words are found there. Where they aren't in the source as such (maths, tables, generated text),
+  it goes on the line they come from, and the box says so; a bibliography entry is found in the `.bib` file.
+- **In your own editor:** a synced folder keeps the open comments in `.texloom/comments.md`, the desktop app and `texloom comments` list and answer them, and a language server (`texloom lsp`, with a VS Code extension) shows them beside the text: see [Comments in your own editor](#comments-in-your-own-editor).
+
+### Starting and exporting projects
+
 - **Create project** starts from a template (article, paper with bibliography, Beamer, thesis
   with chapters, letter) or an import: a `.zip` (Overleaf: Menu → Download → Source; a
   GitHub "Download ZIP"; any zipped folder) or an arXiv paper's LaTeX source. **From a folder
@@ -309,6 +350,9 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   verbatim, `\verb` and URLs; **One .tex file** merges the `\input` and `\include` files into the
   main one, and with BibTeX the bibliography too. When everything is inside the main file's folder,
   that folder is the `.zip`'s top level. Web app only.
+
+### References and Zotero
+
 - **New → Reference…** in the file list adds a bibliography entry with a readable key such as
   `vaswani2017attention`, and cites it at the cursor. Type words from the title and authors to search
   (Crossref for published work, DataCite for arXiv preprints) and pick the paper, or paste a DOI, a
@@ -330,63 +374,6 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   into the project's folder. Better BibTeX rewrites it whenever the collection changes, and the app
   syncs it to everyone. Better BibTeX's citation keys are stable and configurable, which some
   people prefer to Zotero's own.
-- **Offline:** after the first visit the app (and, after one compile, the TeX engine) works
-  offline; browsers offer to install it as an app.
-- **Files:** the tree has folders. **New** (file, folder, reference, import) and **Upload** work in the selected folder,
-  you can drag to move, and dropping files or whole folders from your computer onto a folder uploads them
-  there (you're asked first if files would be replaced, or if it's a very large amount).
-- **Panes:** drag the dividers between the file list, the editor and the PDF/assistant
-  panel; ☰ and ▥ hide the side panes.
-- **PDFs are fetched when you look at them:** a collaborator's (or your folder's) new PDF is downloaded only while this
-  browser shows the PDF tab (or has it popped out), and only the newest one. Elsewhere it waits until you open the tab. The
-  log is always read, so problems still show in the editor. The desktop app never downloads PDFs: it compiles with your own TeX.
-- **PDF in its own window:** **Pop out** above the PDF (or right-click the PDF) opens it in a separate window, for example
-  on another screen. It updates when you compile, double-clicking it jumps to the source, and it
-  stays in step if you reload the editor.
-- **Text and links in the PDF:** its text can be selected and copied, and with `hyperref` its links work: citations,
-  references and the table of contents scroll to their place (**↩ Back** returns), and web links open in a new tab.
-- **Comments from the PDF:** select text in the PDF (in the app or a popped-out window), then right-click ▸ **Add a comment…**
-  or press C. A box opens beside the text, and the comment goes on those words in the source: SyncTeX gives the
-  lines, and the selected words are found there. Where they aren't in the source as such (maths, tables, generated text),
-  it goes on the line they come from, and the box says so; a bibliography entry is found in the `.bib` file.
-- **PDF zoom and pages:** − and + above the PDF change its size (⌘ or Ctrl + scroll, or pinching on a
-  trackpad, does the same), and the percentage goes back to normal size; it also offers **Fit width**,
-  **Fit page** (a whole page in view, kept as the window changes size) and set sizes, down to 10%. The zoom
-  is remembered. Once the PDF has been clicked, ← and → turn its pages (and ↑ ↓ too in Fit page); Home and
-  End go to the first and last.
-- **Keyboard shortcuts:** press **?** (outside a text field), or **Keyboard shortcuts** in ⚙ Settings, for the list.
-- **Word counts:** the Outline tab counts the document and each section; selecting text shows its count
-  in the corner of the editor. LaTeX commands, citations, maths and comments aren't counted. Chinese and
-  Japanese are counted by the character.
-  **Detailed count…** there runs [TeXCount](https://ctan.org/pkg/texcount) on your device for a breakdown of
-  text, headers, captions and maths (the desktop app's **Word count…** uses your own TeX installation's copy).
-- **Symbols:** the **Ω** tab beside Files, Search and Outline (⌘⌥S / Ctrl+Alt+S from the editor) holds mathematical
-  and text symbols. Clicking one types it at the
-  cursor, in `$…$` if you aren't already in maths. Hovering shows the command and any package it needs, and
-  using it adds that package to your preamble if it's missing.
-- **Compiling another file:** **Compile** compiles the open file if it has its own `\documentclass`
-  (a figure or a separate document), and otherwise the main file; right-click a file to compile it.
-  Only the main file's PDF is shared with collaborators.
-- **Pages and printing:** the box above the PDF shows the current page; type a number and press
-  Enter to go there. The printer button opens your browser's print dialog, with pages drawn at 200 dpi. For
-  a print that keeps the PDF's own text, download it and print that.
-- **Downloads:** the download button above the PDF, and **Source** (a `.zip`) in the header.
-
-**Phones and tablets.** In small windows the editor and the PDF take turns on screen, the file list
-opens over them from ☰, and the other commands are under ⋯. On touch screens a bar above the keyboard
-has the characters LaTeX needs.
-
-**Right-click.** On selected text: show it in the PDF, comment, suggest changes (suggest mode), search the project
-or ask the assistant. On a LaTeX command: go to a `\ref`'s label or a `\cite`'s bibliography entry,
-find the uses of a `\label`, open an `\input` or `\includegraphics` file, or show that line in the
-PDF. Anywhere else you get the browser's own menu with its spelling suggestions, and Shift +
-right-click always does. The file list has its own menu (preview, insert into the document,
-download, rename, delete), and so does the PDF (go to source, download, compile).
-
-**Preview.** Choosing a Markdown file, image or PDF in the file list shows it in the PDF panel, in
-place of the compiled document; **Compiled PDF** switches back, as does choosing a `.tex` file or
-compiling. Markdown updates as you type, with no compile, and can show the project's own images and
-math in `$…$` or `$$…$$`. Raw HTML appears as plain text, and images from other websites aren't loaded.
 
 ## Running a server
 
@@ -662,7 +649,13 @@ with other people and computers there, some of them running TeXLoom on it too:
 A synced folder can also be a git repository: run `git init` in it (or clone your repo
 and run `texloom new` in it). The working files sync with collaborators as usual. With
 server storage (the default) they needn't be online at the same time: changes wait on
-the server until they next open the project.
+the server until they next open the project. There are three ways to use it:
+
+- [by hand](#by-hand-in-the-synced-folder), committing and pushing yourself;
+- [automatically](#automatically-from-a-computer-that-stays-on---git), with the helper's `--git`, on a computer that stays on;
+- [from the browser](#from-the-browser-github-gitlab-gitea-forgejo), with nothing to install.
+
+#### By hand, in the synced folder
 
 **What stays out of the project:**
 - `.git/` is never synced, and collaborators can't write into it.
@@ -688,9 +681,11 @@ sees the rewritten files as your edits and shares them. (History can undo it.) S
 - Do rebases and conflict resolution in the separate checkout: collaborators' edits can
   arrive in the synced folder mid-operation and look like unexpected changes to git.
 
-**Keeping a git repository in step automatically** (like Overleaf's GitHub sync, but
-continuous, and with any host: GitHub, GitLab, Bitbucket, your own): run the helper with `--git` on a folder that is also a git clone, on any
-computer that stays on (a desktop, a server, a Raspberry Pi).
+#### Automatically, from a computer that stays on (`--git`)
+
+Like Overleaf's GitHub sync, but continuous, and with any host (GitHub, GitLab, Bitbucket, your own): run the
+helper with `--git` on a folder that is also a git clone, on any computer that stays on (a desktop, a server, a
+Raspberry Pi).
 
 ```bash
 texloom run ~/papers/demo --git
@@ -718,9 +713,11 @@ existing project: `texloom clone '<link>' ~/papers/demo`, then in that folder `g
 once.) Lines that ask to run programs, arriving from git, are pointed out as they are for
 collaborators' changes.
 
-**Keeping a git repository in step from the browser** (nothing to install, nothing left
-running): project ⚙ Settings → **Integrations** → Git repositories. It works with **GitHub**,
-**GitLab** (gitlab.com or your own) and **Gitea or Forgejo** (Codeberg, gitea.com or your own).
+#### From the browser (GitHub, GitLab, Gitea, Forgejo)
+
+Nothing to install, nothing left running: project ⚙ Settings → **Integrations** → Git repositories. It works
+with **GitHub**, **GitLab** (gitlab.com or your own) and **Gitea or Forgejo** (Codeberg, gitea.com or your own).
+
 - **Connect** once per service with a token. It stays in your browser, and with a project list
   it follows the list, encrypted; it never goes into a project, and it's only ever sent to its
   own service.
@@ -753,6 +750,37 @@ running): project ⚙ Settings → **Integrations** → Git repositories. It wor
   same changes in twice; the app warns about such a folder.
 - **Bitbucket** isn't supported from the browser (its API doesn't say which files changed
   without downloading them all); use the `--git` bridge above, which works with any host.
+
+### Comments in your own editor
+
+A synced folder keeps `.texloom/comments.md`, an overview of the open comments with their file and line
+(the ones that mention you are marked), for reading in any editor.
+
+- **The desktop app** shows how many are open and how many mention you, with **Review in browser**, and,
+  since it runs in the background, gives a system notification when a new comment mentions you.
+- **From a terminal:** `texloom comments DIR` lists them (`--mine`, `--all`); `texloom comments reply DIR ID TEXT`
+  and `texloom comments resolve DIR ID` answer them. They work while the app is syncing the folder.
+- **Beside the text:** `texloom lsp` is a language server (also `TeXLoom lsp`, in the app). It shows each open
+  comment as a diagnostic on its text (a warning when it mentions you), the thread on hover, and **Resolve** and
+  **Open the Review tab** as code actions. It keeps its own copy of the project, so new comments appear while you
+  work, and it follows the quoted text when the buffer has unsaved edits. Set it up in:
+  - **VS Code:** the **TeXLoom comments** extension ([Marketplace](https://marketplace.visualstudio.com/items?itemName=texloom.texloom),
+    [Open VSX](https://open-vsx.org/extension/texloom/texloom) for VSCodium and similar; source in `editors/vscode`)
+    starts it and shows native comment threads with reply and resolve, and starts new comments from the + beside a
+    line or **Add Comment** on a selection.
+  - **Neovim** (0.11 or later): `vim.lsp.config('texloom', { cmd = { 'texloom', 'lsp' }, filetypes = { 'tex', 'plaintex' },
+    root_markers = { '.texloom' } })`, then `vim.lsp.enable('texloom')`.
+  - **Emacs** with lsp-mode: `(lsp-register-client (make-lsp-client :new-connection
+    (lsp-stdio-connection '("texloom" "lsp")) :major-modes '(latex-mode) :server-id 'texloom :add-on? t))`
+    (eglot runs one server per buffer, so use lsp-mode beside texlab).
+  - **Helix:** a `[language-server.texloom]` with `command = "texloom", args = ["lsp"]`, added to the `latex`
+    language's `language-servers`.
+  - **Zed, Sublime Text** (LSP package) **and Kate** have a "custom server" setting that takes the same command.
+- **Show comments in your editor…** (the app's File menu, beside Use an AI agent on your computer) shows the right
+  command and snippet for each editor. The app's Settings has a switch for each of the two servers (MCP for AI
+  tools, and this one); when one is off, the command refuses to start on that computer.
+- **Replying and starting a comment** need an editor that can ask for text, as the VS Code extension does (the
+  server's `texloom.reply` and `texloom.addComment` commands). Elsewhere, use `texloom comments reply`, or the web app.
 
 ### Agents (MCP)
 
@@ -811,7 +839,9 @@ collaborator:
 - every request's edits can be undone in one click, and they reach collaborators like
   anyone else's.
 
-Providers (pick one in the tab; settings via ⚙):
+### Providers
+
+Pick one in the tab; settings via ⚙:
 - **Anthropic (Claude):** uses the official SDK from the browser; the default model is
   `claude-opus-5-5`. Effort is adjustable, thinking summaries are shown, and if a safety
   classifier declines a request it is retried on Anthropic's recommended fallback model.
@@ -819,6 +849,8 @@ Providers (pick one in the tab; settings via ⚙):
 - **LM Studio / Ollama, running locally.** Enable CORS in LM Studio
   (`lms server start --cors`). Ollama accepts `localhost` pages by default; from another
   site, set `OLLAMA_ORIGINS`. Use a model with tool calling (for example a Qwen 3.x model).
+
+### Conversations and your instructions
 
 Conversations are saved in your browser, per project: **Past conversations** lists them to read, continue (on the provider and
 model they used) or delete, and they're removed if you remove the project from this browser. To keep none at all (on a shared
@@ -831,6 +863,8 @@ They're kept only in your browser. **What the assistant is sent…** next to the
 conversation itself: the assistant's instructions with yours, the tools it can use, the context block in front of
 each message, and roughly how many tokens they and the current conversation take.
 
+### Long conversations
+
 Each request sends the whole conversation, so a long one would eventually outgrow what the model can take in at
 once (its *context*). Before that happens, at 70% of the context (or of 200,000 tokens, if that's less), the
 assistant asks the model to summarise the earlier messages and carries on from the summary: "Earlier messages
@@ -839,6 +873,8 @@ anyway, it makes room the same way and tries once more. The context size comes f
 model is loaded), Ollama or OpenRouter; you can also enter it under ⚙ **Context window**. Local models are often
 loaded with a small context: 16,000 tokens or more leaves room to work, since the assistant's own instructions take
 a few thousand. A model that thinks before answering can take a few minutes over a summary.
+
+### More tools and more context
 
 **Tools for the Assistant**, under ⚙, adds tools from other MCP servers for it to use beside its own: a
 literature search, a reference manager, your lab's own tools. Give the server's address (https, or http on this

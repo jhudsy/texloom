@@ -20,7 +20,7 @@ No accounts: a project is shared by sending a link.
  browser editor  ─┐                         ┌─ browser editor (collaborator)
  (CodeMirror+Yjs) │   encrypted, signed     │
                   ├──── updates over WS ────┤
- local daemon    ─┘       ┌────────┐        └─ local daemon (collaborator)
+ local helper    ─┘       ┌────────┐        └─ local helper (collaborator)
  (Python, folder  ───────▶│ server │
   sync + latexmk)         │ relay +│  SQLite or PostgreSQL: opaque ciphertext log; files: a folder or S3 bucket
                           │ store  │
@@ -34,7 +34,7 @@ No accounts: a project is shared by sending a link.
    of a read-only link cannot write.
 2. **Web editor** (`web/`, TypeScript + Vite + CodeMirror 6 + Yjs). Full replica in
    IndexedDB, works offline, live cursors, file tree, PDF view, in-browser compile.
-3. **Daemon** (`texloom/`, Python + pycrdt). Mirrors a project to a real directory,
+3. **Helper** (`texloom/`, Python + pycrdt; the class is `Daemon`, the desktop app and `texloom run` host it). Mirrors a project to a real directory,
    bidirectionally, so any tool (Claude Code, vim, VS Code) can edit plain files. Also
    a full replica (an always-on peer if you want one), and the native-compile fallback.
 
@@ -403,11 +403,17 @@ host, a port forward, or a tunnel). Browsers also require HTTPS for WebCrypto. I
 direct browser-to-browser WebRTC is added later, it will need STUN, and TURN (or this
 relay) as the fallback for symmetric NATs.
 
-## Folder sync (daemon)
+## Folder sync (the helper)
 
 - `texloom new <dir>`: turn an existing folder into a project and print both links.
 - `texloom clone <link> <dir>`: check out a project into a folder.
 - `texloom run <dir>`: keep the folder and the project in sync, live.
+
+This is the main Claude Code integration: `cd ~/papers/x && claude "fix the
+related-work section"`. Edits appear live in collaborators' browsers.
+
+### How changes move between the folder and the project
+
 - Disk → CRDT: on a file change, diff the old text against the new and apply the
   minimal inserts/deletes. Concurrent edits from browsers therefore merge rather
   than being overwritten.
@@ -454,6 +460,11 @@ relay) as the fallback for symmetric NATs.
   same file name is preferred (a renamed folder). The browser's folder sync does the same.
 - Ignores build products (`*.aux`, `*.log`, `*.synctex.gz`, the main PDF, …) and
   `.texloom/`, `.git/`.
+- Blobs referenced by remote updates are fetched in the background. In relay mode
+  they arrive from a peer over the same connection, so fetching inline would deadlock.
+
+### Compiling from a folder
+
 - `--compile`: run `latexmk` after changes (debounced) and publish PDF + log to `out`.
   It also answers `p2p {k:"creq", n, at}` compile requests from browsers set to "compile
   with my own TeX" (acknowledging with `{k:"cack", by, n}`). Requests are signed like `upd`
@@ -463,6 +474,9 @@ relay) as the fallback for symmetric NATs.
   is ignored. The answers (`cack`, `cerr`) are signed too and carry the request's `n`:
   the browser takes only a writer's answer to one of its own recent requests, so a read-only
   member can't fake one, nor the server replay one.
+
+### Settings that stay on this computer
+
 - Local options (`compile`, `engine`, `latexmk_args`, `shell_escape` and the lines
   allowed to use it, `confine`, `git`, `label`) live in the user's own settings folder
   (`config.settings_path`: `folder-settings/<hash of the folder's path>.json`, which also
@@ -472,11 +486,6 @@ relay) as the fallback for symmetric NATs.
   0.4.56 brought each listed folder's old settings over, only `compile`, `engine` and `label` from a
   folder that may be shared (`config.looks_shared`).
   `.texloom/computers/<id>/config.json` keeps the link, creation code and name.
-- Blobs referenced by remote updates are fetched in the background. In relay mode
-  they arrive from a peer over the same connection, so fetching inline would deadlock.
-
-This is the main Claude Code integration: `cd ~/papers/x && claude "fix the
-related-work section"`. Edits appear live in collaborators' browsers.
 
 ### A folder also shared through a file-sync service
 
@@ -549,7 +558,7 @@ them (and a third as a plain collaborator); with `TEXLOOM_NO_TURNS=1` it shows t
    bigger package answers 503 and is there for the next compile. Servers without
    `--texlive` use the recommended (200 MB) and extra (340 MB) bundles instead, fetched when a
    document needs them.
-2. **Native:** a daemon with `--compile` (or the desktop app, per folder) runs `latexmk`.
+2. **Native:** a helper with `--compile` (or the desktop app, per folder) runs `latexmk`.
    Full TeX Live: shell-escape, minted, etc. It finds TeX the way a terminal would
    (`use_tex_on_path`: /etc/paths.d on macOS, TeX Live's and MiKTeX's usual folders), since
    programs started from the Finder, Dock, Start menu or at login don't get a terminal's PATH.
@@ -804,6 +813,8 @@ An optional, encrypted copy of a person's list of projects (`server/lists.py`, `
 `web/src/listsync.ts`; the two clients must match). The server stores opaque blobs and can't tie
 one to the projects it names.
 
+### The list, its API and its document
+
 - A list has a random 32-byte secret K, carried in a sync link (`/#sync=<K>`).
   `seed = HMAC-SHA256(K, "texloom list sign")` gives an Ed25519 key pair whose public key is the
   list's id; `aes = HMAC-SHA256(K, "texloom list encrypt")` is the AES-GCM key. The blob is
@@ -822,6 +833,8 @@ one to the projects it names.
   replaces an edit link with a read-only one, keeps the earliest `c` and latest `m`, and drops a
   project removed after it was last opened.
   Removal records are forgotten after a year.
+### Padding, and other ways in
+
 - Every entry's JSON is padded with spaces (which JSON ignores) to a multiple of 512 bytes before
   it is encrypted, so the small entries below look like a small list, tags or settings.
 - Other ways in are entries of the same kind holding `{"v":1,"wrap":<K>}`, opened by their own
@@ -841,7 +854,9 @@ one to the projects it names.
   signing seed (not its encryption key), so whoever holds K can remove them but not read them, and
   `h`, the SHA-256 of the way in's stored (encrypted) entry: the same encrypted entry is written to
   every copy.
-- **Copies.** A list can be kept on several servers (`web/src/listsync.ts`, `texloom/listsync.py`).
+### Copies on several servers
+
+- A list can be kept on several servers (`web/src/listsync.ts`, `texloom/listsync.py`).
   Its settings carry `copy:<origin>` (on or off, with when), each device remembers the set beside
   its key, and every entry is synced on every copy: each is read and merged into what's known so
   far, written back where that adds something, and the copies written before others added more are
@@ -859,6 +874,8 @@ one to the projects it names.
   servers allow `X-Seq` across sites, so a page can sync copies on other servers. Every list entry
   names its project's server (`s`), and every creation code its server (`code:<origin>`), because a list can be kept on
   several servers.
+### Retiring and replacing a list
+
 - `DELETE` retires an entry: its contents go, but its id answers 410 until it is purged, so a
   device with a replaced (perhaps leaked) link can't start the list again under that link. A retired
   id is kept a year and counted: an owner with 256 (100,000 in all on a server where anyone may make
@@ -874,11 +891,15 @@ one to the projects it names.
   and points to the server it sent the person to; any other (**Use in the TeXLoom app** in the web
   dialog sends it unasked, and so could any web page) is shown with a warning and used only once
   confirmed (No is the default), unless it is the list the app already has.
+### A sync link that arrives in the browser
+
 - A sync link that arrives in the web app's address (`/#sync=<K>`, from a link in any page or
   email, or the desktop app's **Add a passkey…**, which opens its saved link) is never used by
   itself: it opens the list dialog with the link filled in and a warning that it came from a link,
   that every project in the browser and the settings below would go on that list for whoever made
   it to read, and to use only your own; Cancel is focused and **Use this list** is the only way on.
+### Settings that follow the list
+
 - Settings that follow the list are a further entry opened by `HMAC-SHA256(K, "texloom list
   settings")`: `{"v":1,"s":{<name>:{"v":value,"at":ms}}}`, with the creation codes
   (`code:<origin>`), the servers keeping copies (`copy:<origin>`), the name shown to collaborators
@@ -893,6 +914,8 @@ one to the projects it names.
   app keeps one code per server in `creation-codes.json` (mode 600) in its config folder. A code
   entered before dates were kept counts as the oldest. Anyone with the sync link can read the codes
   and tokens, as they can every project on the list.
+
+### Tags
 
 - Tags are a person's own and never enter a project. They live in `texloom.tags` in the browser and,
   with a synced list, in a further entry opened by `HMAC-SHA256(K, "texloom list tags")`, separate
@@ -1252,6 +1275,6 @@ isn't built yet.
   eviction (`scripts/check_restore.py`). It can't tell once that change has been compacted away
   and forgotten (`GONE_KEEP` changes later), nor for apps from before 0.4.52, which don't send it.
 - Browser storage can be evicted: request persistent storage; the server copy and
-  daemon copies are the backup.
+  the helpers' copies are the backup.
 
 [texlyre-busytex]: https://github.com/TeXlyre/texlyre-busytex
