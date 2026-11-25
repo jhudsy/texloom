@@ -35,7 +35,7 @@ from .app_updates import CHANGELOG_URL, SOURCE_URL, UpdatesPart
 from .config import adopt, browser_link, config_path
 from .daemon import CURRENT, FOLDER, FolderTag
 from .dialogs import SettingsDialog
-from .dialogs_list import ProjectListDialog, just_asked
+from .dialogs_list import ProjectListDialog, expected
 from .dialogs_share import JoinDialog, LinksDialog, ShareFolderDialog
 from .dialogs_tools import ConnectToolDialog, EditorDialog
 from .i18n import _, app_pref, ngettext, set_app_pref
@@ -377,17 +377,20 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.list_busy = True
         in_background(listsync.sync_this_computer, done)
 
-    def project_list(self, link: str = "", from_web: bool = False) -> None:
+    def project_list(self, link: str = "", from_web: bool = False, nonce: str = "") -> None:
+        """The project list's window; with `link` from a web page (texloom://sync), which is used only
+        once confirmed unless it is the list this app sent someone to their browser for (`nonce`)."""
         self.show_window()
         if (open_now := ProjectListDialog.current) is not None:  # one is open: the list goes there, not to a second
             if link:
-                open_now.receive(link, from_web)
+                open_now.receive(link, from_web, nonce)
             open_now.raise_()
             open_now.activateWindow()
             return
-        d = ProjectListDialog(self, link, from_web and not just_asked())
-        if link and from_web and just_asked():  # the list this app sent someone to their browser for
-            d.receive(link, from_web=False)
+        asked = bool(link) and from_web and expected(link, nonce)
+        d = ProjectListDialog(self, link, from_web and not asked)
+        if asked:  # the list this app sent someone to their browser for
+            d.receive(link, from_web, nonce)
         d.exec()
         self.list_data = None if not listsync.saved_link() else self.list_data
         self.keep_list_updated(force=True)
@@ -618,8 +621,8 @@ def main(argv: list[str] | None = None) -> None:
         match parse_url(url):
             case ("new", server, code):
                 win.share_folder(server, code, from_web=True)
-            case ("sync", link):
-                win.project_list(link, from_web=True)
+            case ("sync", link, nonce):
+                win.project_list(link, from_web=True, nonce=nonce)
             case ("join", link):
                 win.join(link, from_web=True)
             case _:

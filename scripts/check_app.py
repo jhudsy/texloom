@@ -294,18 +294,43 @@ def list_window() -> None:
         QtWidgets.QMessageBox.question = lambda *a, **k: asked.append(a[2] if len(a) > 2 else "") or QtWidgets.QMessageBox.Yes
         d4 = dialogs_list.ProjectListDialog(None)
         d4.show()
+        d4.link.setText(listsync.ListKey.generate().link("https://example.org"))  # (the server it asks)
         d4.passkey()  # (opens the browser: offscreen, nothing happens)
-        sent = listsync.ListKey.generate().link("https://example.org")
+        nonce = dialogs_list.asked_nonce
+        check(len(nonce) >= 16, "asking the browser for the list sends a fresh nonce")
         check(dialogs_list.ProjectListDialog.current is d4, "the open window is the one a list from the browser goes to")
-        d4.receive(sent, from_web=True)
+        QtWidgets.QMessageBox.question = lambda *a, **k: asked.append(a[2] if len(a) > 2 else "") or QtWidgets.QMessageBox.No
+        d4.receive(listsync.ListKey.generate().link("https://example.org"), from_web=True)
+        check(len(asked) == 1 and listsync.saved_link() is None, "a list without the nonce is asked about, even just after asking the browser (and No keeps it out)")
+        d4.receive(listsync.ListKey.generate().link("https://elsewhere.example"), from_web=True, nonce=nonce)
+        check(len(asked) == 2 and listsync.saved_link() is None, "one with the nonce from another server is asked about too")
+        asked.clear()
+        sent = listsync.ListKey.generate().link("https://example.org")
+        d4.receive(sent, from_web=True, nonce=nonce)
         check(listsync.saved_link() == sent and not asked and d4.pages.currentIndex() == 1,
-              "a list the app just asked the browser for is used without a warning")
+              "the list the app just asked the browser for (its nonce, its server) is used without a warning")
+        QtWidgets.QMessageBox.question = lambda *a, **k: asked.append(a[2] if len(a) > 2 else "") or QtWidgets.QMessageBox.Yes
         other = listsync.ListKey.generate().link("https://example.org")
-        d4.receive(other, from_web=True)
-        check(bool(asked) and listsync.saved_link() == other, "one that arrives unasked is used only once confirmed")
+        d4.receive(other, from_web=True, nonce=nonce)
+        check(bool(asked) and listsync.saved_link() == other, "the nonce counts once: one arriving after it is used only once confirmed")
         d4.close()
         settle()
         check(dialogs_list.ProjectListDialog.current is None, "once closed, it's no longer the one")
+
+        # a new password is checked for strength, and a passphrase can be suggested
+        pw = dialogs_list.PasswordDialog(None, setting=True)
+        pw.username.setText("ada")
+        pw.password.setText("aaaaaaaaaaaa")
+        pw.again.setText("aaaaaaaaaaaa")
+        pw.check()
+        check(pw.result() != QtWidgets.QDialog.Accepted and "easy" in pw.msg.text(), "a long but predictable password is refused")
+        pw.suggest()
+        check(pw.password.text() == pw.again.text() and listsync.password_strength(pw.password.text())[1] is None, "Suggest a passphrase fills in a strong one")
+        pw.check()
+        check(pw.result() == QtWidgets.QDialog.Accepted, "which is taken")
+        from texloom.app_links import parse_url
+        check(parse_url("texloom://sync?link=" + "https%3A%2F%2Fexample.org%2F%23sync%3Dabc" + "&n=nonce123") == ("sync", "https://example.org/#sync=abc", "nonce123"),
+              "texloom://sync carries the nonce back")
     finally:
         for name, f in kept.items():
             setattr(listsync, name, f)

@@ -36,7 +36,6 @@ const zh: Catalog = {
   'A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else.': '忘记的密码任何人都无法重置。你需要同步链接或通行密钥才能设置新密码。获取服务器数据的人可能会尝试猜测密码，所以请使用一个未在其他地方使用过的长密码。',
   'Username or email': '用户名或邮箱',
   'Password': '密码',
-  'That password is too easy to guess.': '此密码太容易被猜到。',
   'Password again': '再次输入密码',
   'OK': '确定',
   'Passkey, added {{when}}': '通行密钥，添加于 {{when}}',
@@ -101,6 +100,40 @@ const zh: Catalog = {
   'Passkey': '通行密钥',
   'The username and password you set for the list': '你为列表设置的用户名和密码',
   'Open the list this sync link belongs to': '打开此同步链接所属的列表',
+  'That password is too easy to guess. Make it longer and less predictable, or use a suggested passphrase.':
+    '此密码太容易被猜到。请把它加长、减少规律，或使用建议的口令短语。',
+  'Keep this passphrase in your password manager, or write it down somewhere safe.':
+    '请把这个口令短语保存在密码管理器中，或写下来放在安全的地方。',
+  'Fill in a random passphrase that is hard to guess':
+    '填入一个难以猜到的随机口令短语',
+  'Suggest a passphrase':
+    '建议一个口令短语',
+  'Replace the sync link':
+    '替换同步链接',
+  'Whoever had the old link could also read the Zotero, GitHub, GitLab, Gitea and Dropbox tokens on the list: revoke them on those sites and connect again.':
+    '持有旧链接的人也能读取列表中的 Zotero、GitHub、GitLab、Gitea 和 Dropbox 令牌：请在这些网站上撤销它们，然后重新连接。',
+  'The new list is kept on {{server}}. Keep it on these servers too? Tick only servers you added yourself.':
+    '新列表保存在 {{server}}。也要保存在这些服务器上吗？只勾选你自己添加的服务器。',
+  'Another device, or someone else who has the sync link, added this server. Tick it only if you know it.':
+    '这个服务器是另一台设备，或其他持有同步链接的人添加的。只有在你认识它时才勾选。',
+  'added elsewhere: not used here until you tick it':
+    '在别处添加：勾选之前不会在这里使用',
+  'Use this project list?':
+    '使用这个项目列表？',
+  'This sync link came from a link you opened, not from this browser. If you use it, every project in this browser, your creation codes, your name and your Zotero, GitHub, GitLab, Gitea and Dropbox connections (with their access tokens) go on that list, and whoever made the link can read them all. Use it only if it is your own sync link.':
+    '这个同步链接来自你打开的一个链接，而不是来自此浏览器。如果使用它，此浏览器中的所有项目、你的创建码、你的名字，以及你的 Zotero、GitHub、GitLab、Gitea 和 Dropbox 连接（连同访问令牌）都会进入那个列表，制作链接的人可以读取所有这些内容。只有当它是你自己的同步链接时才使用。',
+  'This browser uses a different list now: this one would take its place.':
+    '此浏览器目前使用另一个列表：这个列表会取而代之。',
+  'Its server: {{server}}':
+    '它的服务器：{{server}}',
+  'Use this list':
+    '使用此列表',
+  'Add this browser’s projects and accounts to the list this link opens':
+    '把此浏览器的项目和账户加入这个链接打开的列表',
+  'The list is open here now.':
+    '列表现在已在这里打开。',
+  'The list goes to the program your browser opens texloom:// links with: the TeXLoom app, if it is installed. Your browser may ask before opening it.':
+    '列表会交给你的浏览器用来打开 texloom:// 链接的程序：如果已安装，就是 TeXLoom 应用。浏览器可能会先询问你。',
 }
 
 export default zh

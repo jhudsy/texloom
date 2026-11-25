@@ -36,7 +36,6 @@ const pt: Catalog = {
   'A forgotten password can’t be reset, by anyone. You’d need your sync link or a passkey to set a new one. Someone who got hold of the server’s data could try to guess it, so use a long password that you don’t use anywhere else.': 'Uma senha esquecida não pode ser redefinida por ninguém. Você precisaria do link de sincronização ou de uma chave de acesso para definir outra. Quem obtivesse os dados do servidor poderia tentar adivinhá-la, então use uma senha longa que você não use em nenhum outro lugar.',
   'Username or email': 'Nome de usuário ou e-mail',
   'Password': 'Senha',
-  'That password is too easy to guess.': 'Essa senha é fácil demais de adivinhar.',
   'Password again': 'Repita a senha',
   'OK': 'OK',
   'Passkey, added {{when}}': 'Chave de acesso, adicionada {{when}}',
@@ -101,6 +100,40 @@ const pt: Catalog = {
   'Passkey': 'Chave de acesso',
   'The username and password you set for the list': 'O nome de usuário e a senha que você definiu para a lista',
   'Open the list this sync link belongs to': 'Abra a lista a que pertence este link de sincronização',
+  'That password is too easy to guess. Make it longer and less predictable, or use a suggested passphrase.':
+    'Essa senha é fácil demais de adivinhar. Deixe-a mais longa e menos previsível, ou use uma frase-senha sugerida.',
+  'Keep this passphrase in your password manager, or write it down somewhere safe.':
+    'Guarde esta frase-senha no seu gerenciador de senhas, ou anote-a em um lugar seguro.',
+  'Fill in a random passphrase that is hard to guess':
+    'Preencher com uma frase-senha aleatória e difícil de adivinhar',
+  'Suggest a passphrase':
+    'Sugerir uma frase-senha',
+  'Replace the sync link':
+    'Substituir o link de sincronização',
+  'Whoever had the old link could also read the Zotero, GitHub, GitLab, Gitea and Dropbox tokens on the list: revoke them on those sites and connect again.':
+    'Quem tinha o link antigo também podia ler os tokens do Zotero, GitHub, GitLab, Gitea e Dropbox da lista: revogue-os nesses sites e conecte-se de novo.',
+  'The new list is kept on {{server}}. Keep it on these servers too? Tick only servers you added yourself.':
+    'A nova lista fica em {{server}}. Mantê-la também nestes servidores? Marque só servidores que você mesmo adicionou.',
+  'Another device, or someone else who has the sync link, added this server. Tick it only if you know it.':
+    'Outro dispositivo, ou outra pessoa que tem o link de sincronização, adicionou este servidor. Marque-o só se você o conhece.',
+  'added elsewhere: not used here until you tick it':
+    'adicionado em outro lugar: não é usado aqui até você marcá-lo',
+  'Use this project list?':
+    'Usar esta lista de projetos?',
+  'This sync link came from a link you opened, not from this browser. If you use it, every project in this browser, your creation codes, your name and your Zotero, GitHub, GitLab, Gitea and Dropbox connections (with their access tokens) go on that list, and whoever made the link can read them all. Use it only if it is your own sync link.':
+    'Este link de sincronização veio de um link que você abriu, não deste navegador. Se você usá-lo, todos os projetos deste navegador, seus códigos de criação, seu nome e suas conexões do Zotero, GitHub, GitLab, Gitea e Dropbox (com os tokens de acesso) vão para essa lista, e quem criou o link pode ler tudo. Use-o só se for o seu próprio link de sincronização.',
+  'This browser uses a different list now: this one would take its place.':
+    'Este navegador usa outra lista agora: esta tomaria o lugar dela.',
+  'Its server: {{server}}':
+    'Servidor dela: {{server}}',
+  'Use this list':
+    'Usar esta lista',
+  'Add this browser’s projects and accounts to the list this link opens':
+    'Adicionar os projetos e contas deste navegador à lista que este link abre',
+  'The list is open here now.':
+    'A lista está aberta aqui agora.',
+  'The list goes to the program your browser opens texloom:// links with: the TeXLoom app, if it is installed. Your browser may ask before opening it.':
+    'A lista vai para o programa com que o seu navegador abre links texloom://: o app TeXLoom, se estiver instalado. O navegador pode perguntar antes de abri-lo.',
 }
 
 export default pt

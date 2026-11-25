@@ -6,7 +6,7 @@
    "seq": 7,
    "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
    "signature": "Mhfffj9ymKBqLLIzkjxjtIGGqqGJle_Jc-3UxpOX2E4eJ44Nnu6JLkyeaomiT5wz6B6sOCQQXx-7XIvhqZe2DQ",
-   "ciphertext": "Ww9QV877UNnXJP1ybdZ1qiJm2DLKtIs3OLNrR8puUfBT637yOu7qcQ3kM3N39iOpqqJdoolG",
+   "ciphertext": "kcKl2az-18yLaNHa7BrmhIipPqBVTSntCtcZyXI8UdQlQyjm_ymqU-_WAf7OJNIonH9AkJG-",
    "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
    "link": "https://example.org/#sync=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
   },
@@ -16,7 +16,7 @@
    "seq": 7,
    "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
    "signature": "J1ku7E7WW-gFQlwPeTbinTvWFngJW8f7u-ALt7kwrOVgvOdlB0voBr60YGxv6P9xg_TtFvLUsJkJdwWvbgsvBg",
-   "ciphertext": "doPbw1CFA6sMDTYtjHTPKr98BYbmyoqzBdNn2QDy_3WmuXIFRc231pjl4j7FQzi-XenM7uGC",
+   "ciphertext": "ALJfS3I0eW_xSG1U0-sV_NLstFYhD0610e-cM8Mhky8kd156kDIWZn5mrmqNrJCVlCn3YCVb",
    "plain": "{\"v\":1,\"note\":\"déjà vu\"}",
    "link": "https://example.org/#sync=__________________________________________8"
   }
@@ -41,6 +41,11 @@
    "username": "ｗｉｄｅ",
    "password": "Ａ full-width pass",
    "secret": "NJZFBw6VSTR4BM91jH1zChET82WHd-hiEvPxukGDXOM"
+  },
+  {
+   "username": "﻿ada@example.org\u001c",
+   "password": "correct horse battery",
+   "secret": "5NSLwAp12TI0W05Nsxh95RKT3WwvpHku8Tgl9-qbFAA"
   }
  ],
  "merges": [
@@ -641,176 +646,6 @@
    "merged": "{\"on\":{},\"tags\":{\"a\":{\"at\":5,\"n\":\"Åsa\"}},\"v\":1}"
   }
  ],
- "tag_colours": [
-  {
-   "id": "aB3_-xyz",
-   "chosen": null,
-   "colour": "purple"
-  },
-  {
-   "id": "0000",
-   "chosen": null,
-   "colour": "yellow"
-  },
-  {
-   "id": "Zz9-",
-   "chosen": null,
-   "colour": "teal"
-  },
-  {
-   "id": "q",
-   "chosen": null,
-   "colour": "green"
-  },
-  {
-   "id": "Kf8wLm2P",
-   "chosen": null,
-   "colour": "orange"
-  },
-  {
-   "id": "aB3_-xyz",
-   "chosen": "pink",
-   "colour": "pink"
-  },
-  {
-   "id": "aB3_-xyz",
-   "chosen": "chartreuse",
-   "colour": "purple"
-  }
- ],
- "tag_tidies": [
-  {
-   "what": "old deletions, deleted tags and unlisted projects go",
-   "doc": {
-    "v": 1,
-    "tags": {
-     "a": {
-      "n": "A",
-      "at": 1
-     },
-     "b": {
-      "n": "",
-      "at": 32000000000000,
-      "gone": true
-     },
-     "c": {
-      "n": "",
-      "at": 1,
-      "gone": true
-     }
-    },
-    "on": {
-     "p": {
-      "a": 5,
-      "b": 32000000000000,
-      "d": 32000000000000
-     },
-     "q": {
-      "a": 5
-     },
-     "r": {
-      "a": -1
-     }
-    }
-   },
-   "listed": [
-    "p",
-    "r"
-   ],
-   "now": 32000000001000,
-   "tidied": "{\"on\":{\"p\":{\"a\":5}},\"tags\":{\"a\":{\"at\":1,\"n\":\"A\"},\"b\":{\"at\":32000000000000,\"gone\":true,\"n\":\"\"}},\"v\":1}"
-  }
- ],
- "setting_merges": [
-  {
-   "what": "the latest code wins",
-   "a": {
-    "v": 1,
-    "s": {
-     "code": {
-      "v": "AAAA-BBBB",
-      "at": 5
-     }
-    }
-   },
-   "b": {
-    "v": 1,
-    "s": {
-     "code": {
-      "v": "CCCC-DDDD",
-      "at": 9
-     }
-    }
-   },
-   "merged": "{\"s\":{\"code\":{\"at\":9,\"v\":\"CCCC-DDDD\"}},\"v\":1}"
-  },
-  {
-   "what": "a tie is the same either way",
-   "a": {
-    "v": 1,
-    "s": {
-     "code": {
-      "v": "AAAA",
-      "at": 5
-     }
-    }
-   },
-   "b": {
-    "v": 1,
-    "s": {
-     "code": {
-      "v": "ZZZZ",
-      "at": 5
-     }
-    }
-   },
-   "merged": "{\"s\":{\"code\":{\"at\":5,\"v\":\"ZZZZ\"}},\"v\":1}"
-  },
-  {
-   "what": "settings from either side are kept",
-   "a": {
-    "v": 1,
-    "s": {
-     "code": {
-      "v": "AAAA",
-      "at": 5
-     }
-    }
-   },
-   "b": {
-    "v": 1,
-    "s": {
-     "other": {
-      "v": "x",
-      "at": 1
-     }
-    }
-   },
-   "merged": "{\"s\":{\"code\":{\"at\":5,\"v\":\"AAAA\"},\"other\":{\"at\":1,\"v\":\"x\"}},\"v\":1}"
-  },
-  {
-   "what": "a cleared code is a setting too",
-   "a": {
-    "v": 1,
-    "s": {
-     "code": {
-      "v": "",
-      "at": 9
-     }
-    }
-   },
-   "b": {
-    "v": 1,
-    "s": {
-     "code": {
-      "v": "AAAA",
-      "at": 5
-     }
-    }
-   },
-   "merged": "{\"s\":{\"code\":{\"at\":9,\"v\":\"\"}},\"v\":1}"
-  }
- ],
  "registry_merges": [
   {
    "what": "ways in from either copy are kept",
@@ -953,6 +788,659 @@
     "slots": {}
    },
    "merged": "{\"slots\":{},\"v\":1}"
+  },
+  {
+   "what": "a way in's hash goes with it",
+   "a": {
+    "v": 1,
+    "slots": {
+     "a": {
+      "kind": "password",
+      "at": 5,
+      "seed": "c2VlZA",
+      "h": "aGFzaA"
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "slots": {
+     "b": {
+      "kind": "passkey",
+      "at": 6,
+      "seed": "c2VlZA"
+     }
+    }
+   },
+   "merged": "{\"slots\":{\"a\":{\"at\":5,\"h\":\"aGFzaA\",\"kind\":\"password\",\"seed\":\"c2VlZA\"},\"b\":{\"at\":6,\"kind\":\"passkey\",\"seed\":\"c2VlZA\"}},\"v\":1}"
+  }
+ ],
+ "setting_merges": [
+  {
+   "what": "the latest code wins",
+   "a": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "AAAA-BBBB",
+      "at": 5
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "CCCC-DDDD",
+      "at": 9
+     }
+    }
+   },
+   "merged": "{\"s\":{\"code\":{\"at\":9,\"v\":\"CCCC-DDDD\"}},\"v\":1}"
+  },
+  {
+   "what": "a tie is the same either way",
+   "a": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "AAAA",
+      "at": 5
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "ZZZZ",
+      "at": 5
+     }
+    }
+   },
+   "merged": "{\"s\":{\"code\":{\"at\":5,\"v\":\"ZZZZ\"}},\"v\":1}"
+  },
+  {
+   "what": "settings from either side are kept",
+   "a": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "AAAA",
+      "at": 5
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "other": {
+      "v": "x",
+      "at": 1
+     }
+    }
+   },
+   "merged": "{\"s\":{\"code\":{\"at\":5,\"v\":\"AAAA\"},\"other\":{\"at\":1,\"v\":\"x\"}},\"v\":1}"
+  },
+  {
+   "what": "a cleared code is a setting too",
+   "a": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "",
+      "at": 9
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "AAAA",
+      "at": 5
+     }
+    }
+   },
+   "merged": "{\"s\":{\"code\":{\"at\":9,\"v\":\"\"}},\"v\":1}"
+  },
+  {
+   "what": "a setting dated far ahead counts as dated a little ahead, so a later change wins over it",
+   "a": {
+    "v": 1,
+    "s": {
+     "copy:https://evil.example": {
+      "v": "1",
+      "at": 2800000000000
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "copy:https://evil.example": {
+      "v": "",
+      "at": 1800000600001
+     }
+    }
+   },
+   "now": 1800000600001,
+   "merged": "{\"s\":{\"copy:https://evil.example\":{\"at\":1800001200001,\"v\":\"1\"}},\"v\":1}"
+  },
+  {
+   "what": "two dated far ahead are both capped: the tie goes the same way on every device",
+   "a": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "AAAA",
+      "at": 2800000000000
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "code": {
+      "v": "ZZZZ",
+      "at": 1801000000000
+     }
+    }
+   },
+   "now": 1800000000000,
+   "merged": "{\"s\":{\"code\":{\"at\":1800000600000,\"v\":\"ZZZZ\"}},\"v\":1}"
+  },
+  {
+   "what": "one just within the skew keeps its time",
+   "a": {
+    "v": 1,
+    "s": {
+     "name": {
+      "v": "Ada",
+      "at": 1800000600000
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "name": {
+      "v": "Bob",
+      "at": 1800000599999
+     }
+    }
+   },
+   "now": 1800000000000,
+   "merged": "{\"s\":{\"name\":{\"at\":1800000600000,\"v\":\"Ada\"}},\"v\":1}"
+  },
+  {
+   "what": "now itself is fine",
+   "a": {
+    "v": 1,
+    "s": {
+     "name": {
+      "v": "Ada",
+      "at": 1800000000000
+     }
+    }
+   },
+   "b": {
+    "v": 1,
+    "s": {
+     "name": {
+      "v": "Bob",
+      "at": 1799999999999
+     }
+    }
+   },
+   "now": 1800000000000,
+   "merged": "{\"s\":{\"name\":{\"at\":1800000000000,\"v\":\"Ada\"}},\"v\":1}"
+  }
+ ],
+ "usernames": [
+  {
+   "username": "ada@example.org",
+   "norm": "ada@example.org"
+  },
+  {
+   "username": "  Ada@Example.ORG ",
+   "norm": "ada@example.org"
+  },
+  {
+   "username": "﻿ada﻿",
+   "norm": "ada"
+  },
+  {
+   "username": "\u001cada\u001f",
+   "norm": "ada"
+  },
+  {
+   "username": "ada　",
+   "norm": "ada"
+  },
+  {
+   "username": " ada ",
+   "norm": "ada"
+  },
+  {
+   "username": "\tAda\n",
+   "norm": "ada"
+  },
+  {
+   "username": "ｗｉｄｅ",
+   "norm": "wide"
+  },
+  {
+   "username": "İstanbul",
+   "norm": "i̇stanbul"
+  },
+  {
+   "username": "ΟΔΟΣ",
+   "norm": "οδος"
+  },
+  {
+   "username": "Straße",
+   "norm": "straße"
+  },
+  {
+   "username": "​ada",
+   "norm": "​ada"
+  },
+  {
+   "username": "ada​",
+   "norm": "ada​"
+  },
+  {
+   "username": "a d a",
+   "norm": "a d a"
+  }
+ ],
+ "strengths": [
+  {
+   "password": "aaaaaaaaaaaa",
+   "username": "",
+   "bits": 4,
+   "problem": "weak"
+  },
+  {
+   "password": "abcdefghijkl",
+   "username": "",
+   "bits": 9,
+   "problem": "weak"
+  },
+  {
+   "password": "abcabcabcabc",
+   "username": "",
+   "bits": 14,
+   "problem": "weak"
+  },
+  {
+   "password": "Password1234!",
+   "username": "",
+   "bits": 27,
+   "problem": "weak"
+  },
+  {
+   "password": "P@ssw0rd2024!!",
+   "username": "",
+   "bits": 40,
+   "problem": "weak"
+  },
+  {
+   "password": "qwertyuiop123",
+   "username": "",
+   "bits": 18,
+   "problem": "weak"
+  },
+  {
+   "password": "ada@example.org!!",
+   "username": "ada@example.org",
+   "bits": 41,
+   "problem": "weak"
+  },
+  {
+   "password": "short1!",
+   "username": "",
+   "bits": 42,
+   "problem": "short"
+  },
+  {
+   "password": "x7#Kp2!vQ9mL",
+   "username": "",
+   "bits": 78,
+   "problem": null
+  },
+  {
+   "password": "kqzmfwtrbnhx",
+   "username": "",
+   "bits": 56,
+   "problem": "weak"
+  },
+  {
+   "password": "kqzmfwtrbnhx4",
+   "username": "",
+   "bits": 67,
+   "problem": null
+  },
+  {
+   "password": "correct horse battery staple",
+   "username": "",
+   "bits": 147,
+   "problem": null
+  },
+  {
+   "password": "correcthorsebatterystaple",
+   "username": "",
+   "bits": 8,
+   "problem": "weak"
+  },
+  {
+   "password": "purple monkey dishwasher",
+   "username": "",
+   "bits": 80,
+   "problem": null
+  },
+  {
+   "password": "kofibu-tanemo-rilasu-pekodi",
+   "username": "",
+   "bits": 147,
+   "problem": null
+  },
+  {
+   "password": "9876543210ab",
+   "username": "",
+   "bits": 20,
+   "problem": "weak"
+  },
+  {
+   "password": "aabbccddeeff",
+   "username": "",
+   "bits": 28,
+   "problem": "weak"
+  },
+  {
+   "password": "Tr0ub4dor&3xyz",
+   "username": "",
+   "bits": 85,
+   "problem": null
+  },
+  {
+   "password": "日本語のパスワードです",
+   "username": "",
+   "bits": 73,
+   "problem": "short"
+  },
+  {
+   "password": "日本語のとても長いパスワードです",
+   "username": "",
+   "bits": 106,
+   "problem": null
+  },
+  {
+   "password": "𝔭𝔞𝔰𝔰𝔴𝔬𝔯𝔡𝔭𝔞𝔰𝔰",
+   "username": "",
+   "bits": 12,
+   "problem": "weak"
+  },
+  {
+   "password": "ab12ab12ab12ab12",
+   "username": "",
+   "bits": 25,
+   "problem": "weak"
+  },
+  {
+   "password": "monkeydragonshadowmaster",
+   "username": "",
+   "bits": 32,
+   "problem": "weak"
+  },
+  {
+   "password": "Ｐａｓｓｗｏｒｄ１２３４５６",
+   "username": "",
+   "bits": 19,
+   "problem": "weak"
+  },
+  {
+   "password": "jdk38-QQ!x z",
+   "username": "",
+   "bits": 72,
+   "problem": null
+  }
+ ],
+ "common_passwords": [
+  "password",
+  "passw0rd",
+  "qwerty",
+  "qwertyuiop",
+  "asdfgh",
+  "asdfghjkl",
+  "zxcvbn",
+  "zxcvbnm",
+  "qazwsx",
+  "1qaz2wsx",
+  "azerty",
+  "qwertz",
+  "letmein",
+  "welcome",
+  "iloveyou",
+  "iloveu",
+  "admin",
+  "administrator",
+  "login",
+  "master",
+  "monkey",
+  "dragon",
+  "football",
+  "baseball",
+  "soccer",
+  "hockey",
+  "princess",
+  "sunshine",
+  "shadow",
+  "superman",
+  "batman",
+  "trustno1",
+  "starwars",
+  "pokemon",
+  "charlie",
+  "michael",
+  "jennifer",
+  "jordan",
+  "hunter",
+  "buster",
+  "freedom",
+  "whatever",
+  "secret",
+  "computer",
+  "internet",
+  "samsung",
+  "google",
+  "apple",
+  "cheese",
+  "chocolate",
+  "summer",
+  "winter",
+  "spring",
+  "autumn",
+  "flower",
+  "butterfly",
+  "purple",
+  "orange",
+  "banana",
+  "cookie",
+  "pepper",
+  "ginger",
+  "liverpool",
+  "chelsea",
+  "arsenal",
+  "killer",
+  "mustang",
+  "harley",
+  "ranger",
+  "tigger",
+  "love",
+  "lovely",
+  "loveme",
+  "angel",
+  "baby",
+  "babygirl",
+  "family",
+  "friends",
+  "hello",
+  "abc123",
+  "test",
+  "testing",
+  "guest",
+  "default",
+  "changeme",
+  "temp",
+  "access",
+  "passport",
+  "matrix",
+  "nothing",
+  "thomas",
+  "daniel",
+  "andrew",
+  "robert",
+  "jessica",
+  "ashley",
+  "nicole",
+  "maggie",
+  "texloom",
+  "latex",
+  "overleaf",
+  "thesis",
+  "project",
+  "sync",
+  "mylist",
+  "mypassword",
+  "passwort",
+  "motdepasse",
+  "contrasena",
+  "senha",
+  "correcthorsebatterystaple",
+  "qwer",
+  "asdf",
+  "zxcv"
+ ],
+ "padded": [
+  {
+   "json": "",
+   "length": 512
+  },
+  {
+   "json": "{\"v\":1}",
+   "length": 512
+  },
+  {
+   "json": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "length": 512
+  },
+  {
+   "json": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "length": 512
+  },
+  {
+   "json": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "length": 1024
+  },
+  {
+   "json": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+   "length": 1024
+  }
+ ],
+ "slot_hashes": [
+  {
+   "data": "",
+   "h": "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU"
+  },
+  {
+   "data": "ZW5jcnlwdGVkIGJ5dGVzIAD_",
+   "h": "-8Afvdbc4EVs-X6s615xEQhtecy39hgzqeUy2ER3Jvw"
+  },
+  {
+   "data": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq-wsbKztLW2t7i5uru8vb6_wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6uvs7e7v8PHy8_T19vf4-fr7_P3-_wABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj9AQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5_gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp-goaKjpKWmp6ipqqusra6vsLGys7S1tre4ubq7vL2-v8DBwsPExcbHyMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5ufo6err7O3u7_Dx8vP09fb3-Pn6-_z9_v8AAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4_QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoOEhYaHiImKi4yNjo-QkZKTlJWWl5iZmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr_AwcLDxMXGx8jJysvMzc7P0NHS09TV1tfY2drb3N3e3-Dh4uPk5ebn6Onq6-zt7u_w8fLz9PX29_j5-vv8_f7_",
+   "h": "86JaqTqi-7oo15JgU1u9al6w_BwkqLDwThK0hMHf42M"
+  }
+ ],
+ "tag_colours": [
+  {
+   "id": "aB3_-xyz",
+   "chosen": null,
+   "colour": "purple"
+  },
+  {
+   "id": "0000",
+   "chosen": null,
+   "colour": "yellow"
+  },
+  {
+   "id": "Zz9-",
+   "chosen": null,
+   "colour": "teal"
+  },
+  {
+   "id": "q",
+   "chosen": null,
+   "colour": "green"
+  },
+  {
+   "id": "Kf8wLm2P",
+   "chosen": null,
+   "colour": "orange"
+  },
+  {
+   "id": "aB3_-xyz",
+   "chosen": "pink",
+   "colour": "pink"
+  },
+  {
+   "id": "aB3_-xyz",
+   "chosen": "chartreuse",
+   "colour": "purple"
+  }
+ ],
+ "tag_tidies": [
+  {
+   "what": "old deletions, deleted tags and unlisted projects go",
+   "doc": {
+    "v": 1,
+    "tags": {
+     "a": {
+      "n": "A",
+      "at": 1
+     },
+     "b": {
+      "n": "",
+      "at": 32000000000000,
+      "gone": true
+     },
+     "c": {
+      "n": "",
+      "at": 1,
+      "gone": true
+     }
+    },
+    "on": {
+     "p": {
+      "a": 5,
+      "b": 32000000000000,
+      "d": 32000000000000
+     },
+     "q": {
+      "a": 5
+     },
+     "r": {
+      "a": -1
+     }
+    }
+   },
+   "listed": [
+    "p",
+    "r"
+   ],
+   "now": 32000000001000,
+   "tidied": "{\"on\":{\"p\":{\"a\":5}},\"tags\":{\"a\":{\"at\":1,\"n\":\"A\"},\"b\":{\"at\":32000000000000,\"gone\":true,\"n\":\"\"}},\"v\":1}"
   }
  ]
 }

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
+import secrets
 import time
 from urllib.parse import urlparse
 
@@ -27,9 +29,22 @@ def keep_it_safe() -> QtWidgets.QLabel:
     return label
 
 
-def just_asked() -> bool:
-    """Whether this app sent someone to their browser to unlock the list a moment ago."""
-    return time.time() - asked_browser_at < EXPECTED_FOR
+def expected(link: str, nonce: str) -> bool:
+    """Whether a list from the browser is the one this app sent someone there for a moment ago: it
+    comes back with that request's nonce, from the server it was sent to."""
+    if not asked_nonce or not nonce or time.time() - asked_browser_at >= EXPECTED_FOR:
+        return False
+    try:
+        server = listsync.ListKey.from_link(link)[1]
+    except ValueError:
+        return False
+    return hmac.compare_digest(nonce.encode(), asked_nonce.encode()) and listsync._origin(server) == listsync._origin(asked_server)
+
+
+def ask_yes(parent, title: str, text: str) -> bool:
+    """A question whose default answer is No."""
+    return QtWidgets.QMessageBox.question(parent, title, text, QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                                          QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes
 
 
 def synced_ago(at: float) -> str:
@@ -68,7 +83,17 @@ class PasswordDialog(QtWidgets.QDialog):
         if setting:
             form.addRow(_("Password again"), self.again)
         lay.addLayout(form)
+        if setting:
+            suggest = QtWidgets.QPushButton(_("Suggest a passphrase"))
+            suggest.setToolTip(_("Fill in a random passphrase that is hard to guess"))
+            suggest.setAutoDefault(False)
+            suggest.clicked.connect(self.suggest)
+            row = QtWidgets.QHBoxLayout()
+            row.addWidget(suggest)
+            row.addStretch(1)
+            lay.addLayout(row)
         self.msg = QtWidgets.QLabel("")
+        self.msg.setWordWrap(True)
         lay.addWidget(self.msg)
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         bb.accepted.connect(self.check)
@@ -80,16 +105,24 @@ class PasswordDialog(QtWidgets.QDialog):
         if not user.strip() or not pw:
             return
         if self.setting:
-            if len(pw) < listsync.MIN_PASSWORD:
+            problem = listsync.password_strength(pw, user)[1]
+            if problem == "short":
                 self.msg.setText(red(_("Use at least {n} characters.", n=listsync.MIN_PASSWORD)))
                 return
-            if len(set(pw)) < 6:
-                self.msg.setText(red(_("That password is too easy to guess.")))
+            if problem:
+                self.msg.setText(red(_("That password is too easy to guess. Make it longer and less predictable, or use a suggested passphrase.")))
                 return
             if pw != self.again.text():
                 self.msg.setText(red(_("The two passwords don’t match.")))
                 return
         self.accept()
+
+    def suggest(self) -> None:
+        phrase = listsync.suggest_passphrase()
+        for field in (self.password, self.again):
+            field.setText(phrase)
+            field.setEchoMode(QtWidgets.QLineEdit.Normal)
+        self.msg.setText(_("Keep this passphrase in your password manager, or write it down somewhere safe."))
 
     @classmethod
     def ask(cls, parent, setting: bool) -> tuple[str, str] | None:
@@ -98,6 +131,8 @@ class PasswordDialog(QtWidgets.QDialog):
 
 
 asked_browser_at = 0.0  # when this app last sent someone to their browser to unlock the list there
+asked_nonce = ""  # with what nonce (it comes back with the list: expected())
+asked_server = ""  # and to which server
 EXPECTED_FOR = 600  # seconds: a list coming back from the browser within this is the one asked for
 
 
@@ -107,6 +142,8 @@ class ProjectListDialog(QtWidgets.QDialog):
     current: ProjectListDialog | None = None  # the one open now: a list coming back from the browser goes there
 
     def __init__(self, window, link: str = "", from_web: bool = False) -> None:
+        """`from_web`: `link` came from a web page (texloom://sync), unasked: shown, with a warning,
+        to be used only by choosing Open."""
         super().__init__(window)
         self.window_ = window
         self.setWindowTitle(_("Project list"))
@@ -359,8 +396,8 @@ class ProjectListDialog(QtWidgets.QDialog):
         """A passkey is made by a browser, so the list opens there, where one can be added."""
         _key, home = self._key_home()
         if QtWidgets.QMessageBox.question(self, _("Add a passkey"), _(
-                "Your browser will open this list on {server}. There, choose Add a passkey under “Other ways to open it”. "
-                "That browser keeps the list too.", server=urlparse(home).netloc)) != QtWidgets.QMessageBox.Yes:
+                "Your browser will open this list on {server}. There, confirm with Use this list, then choose Add a passkey under "
+                "“Other ways to open it”. That browser keeps the list too.", server=urlparse(home).netloc)) != QtWidgets.QMessageBox.Yes:
             return
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(listsync.saved_link() or ""))
         self.status.setText(_("Add the passkey in your browser, then come back and choose Sync now."))
@@ -375,11 +412,11 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.more_btn.setIcon(chevron(self.more_btn, down=on))
 
     def replace(self) -> None:
-        if QtWidgets.QMessageBox.question(self, _("Replace the sync link"), _(
-                "Replace the sync link? The old link, and every passkey and password, will stop working. Other devices will need the new link.")) != QtWidgets.QMessageBox.Yes:
+        keep = ReplaceDialog.ask(self, self._key_home()[1])
+        if keep is None:
             return
-        self.in_background(listsync.replace_list, lambda link: (self.link.setText(link), self.refresh_list(),
-                           self.status.setText(_("Done. Copy the new sync link and keep it safe. Add any passkeys and password again."))))
+        self.in_background(lambda: listsync.replace_list(keep), lambda link: (self.link.setText(link), self.refresh_list(),
+                           self.status.setText(_("Done. Copy the new sync link and keep it safe. Add any passkeys and password again.") + " " + TOKENS())))
 
     def delete(self) -> None:
         if QtWidgets.QMessageBox.question(self, _("Delete this list"), _(
@@ -390,13 +427,16 @@ class ProjectListDialog(QtWidgets.QDialog):
     def show_copies(self, home: str) -> None:
         """The servers keeping a copy of the list, and the others this computer knows, to tick."""
         self.home = home
-        on = set(listsync.copy_servers(home))
+        on, suggested = set(listsync.copy_servers(home)), listsync.suggested_copies(home)
         self.copies.blockSignals(True)
         self.copies.clear()
-        for server in [*listsync.copy_servers(home), *[x for x in listsync.known_servers() if x not in on]]:
+        for server in [*listsync.copy_servers(home), *suggested, *[x for x in listsync.known_servers() if x not in on and x not in suggested]]:
             trouble = listsync.copy_problems.get(server) if server in on else None
-            label = urlparse(server).netloc + (f"  ·  {listsync.explain(trouble)}" if trouble else "")
+            label = urlparse(server).netloc + (f"  ·  {listsync.explain(trouble)}" if trouble else "") \
+                + (f"  ·  {_('added elsewhere: not used here until you tick it')}" if server in suggested else "")
             item = QtWidgets.QListWidgetItem(label)
+            if server in suggested:
+                item.setToolTip(_("Another device, or someone else who has the sync link, added this server. Tick it only if you know it."))
             item.setData(Qt.UserRole, server)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked if server in on else Qt.Unchecked)
@@ -453,29 +493,28 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.in_background(work, then)
 
     def passkey(self) -> None:
-        global asked_browser_at
-        asked_browser_at = time.time()
-        QtGui.QDesktopServices.openUrl(QtCore.QUrl(f"{self._server()}/#unlock-for-app"))
+        global asked_browser_at, asked_nonce, asked_server
+        asked_browser_at, asked_nonce, asked_server = time.time(), secrets.token_urlsafe(18), self._server()
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(f"{asked_server}/#unlock-for-app={asked_nonce}"))
         self.status.setText(_("Unlock the list in your browser; it will come back here."))
 
     @staticmethod
     def web_warning(link: str) -> str:
-        text = _("A web page asked TeXLoom to use this project list. Your folders would be added to it, and anyone who has this link could open them. Use it only if the link is yours.")
+        text = _("A web page asked TeXLoom to use this project list. Your folders, your creation codes and your name would be added to it, and whoever made the link could read them all. Use it only if the link is yours.")
         if listsync.saved_link() and listsync.saved_link() != link:
             text += " " + _("This computer uses a different list now: this one would take its place.")
         return text
 
-    def receive(self, link: str, from_web: bool) -> None:
-        """A list sent here (from the browser) while this window is open: used straight away if this
-        app just asked for it, else only once confirmed."""
+    def receive(self, link: str, from_web: bool, nonce: str = "") -> None:
+        """A list sent here (from the browser) while this window is open: used straight away if it is
+        the one this app just asked for (expected), else only once confirmed (No is the default)."""
         if link == listsync.saved_link():
             self.refresh_list()
             return
-        if from_web and not just_asked() and QtWidgets.QMessageBox.question(
-                self, _("Project list"), self.web_warning(link)) != QtWidgets.QMessageBox.Yes:
+        if from_web and not expected(link, nonce) and not ask_yes(self, _("Project list"), self.web_warning(link)):
             return
-        global asked_browser_at
-        asked_browser_at = 0.0  # (once)
+        global asked_browser_at, asked_nonce
+        asked_browser_at, asked_nonce = 0.0, ""  # (once)
         self.web_warn.setVisible(False)
         self.adopt(link)
         self.status.setText(_("The list is open here now."))
@@ -497,3 +536,45 @@ class ProjectListDialog(QtWidgets.QDialog):
         self.link.clear()
         self.pages.setCurrentIndex(0)
         self.status.setText(text)
+
+
+def TOKENS() -> str:  # a constant, translated when shown
+    return _("Whoever had the old link could also read the Zotero, GitHub, GitLab, Gitea and Dropbox tokens on the list: revoke them on those sites and connect again.")
+
+
+class ReplaceDialog(QtWidgets.QDialog):
+    """Confirm replacing the sync link, choosing which other copies keep the new list (none ticked:
+    whoever had the old link could have added one). As the web app."""
+
+    def __init__(self, parent, home: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(_("Replace the sync link"))
+        self.setMinimumWidth(480)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(note(_("Replace the sync link? The old link, and every passkey and password, will stop working. Other devices will need the new link.")))
+        lay.addWidget(note(TOKENS(), AMBER))
+        self.boxes: list[tuple[str, QtWidgets.QCheckBox]] = []
+        others = [s for s in listsync.copy_servers(home) if s != home.rstrip("/")]
+        if others:
+            lay.addWidget(note(_("The new list is kept on {server}. Keep it on these servers too? Tick only servers you added yourself.",
+                                 server=urlparse(home).netloc)))
+        for server in others:
+            box = QtWidgets.QCheckBox(urlparse(server).netloc)
+            lay.addWidget(box)
+            self.boxes.append((server, box))
+        bb = QtWidgets.QDialogButtonBox()
+        cancel = bb.addButton(QtWidgets.QDialogButtonBox.Cancel)
+        go = bb.addButton(_("Replace the sync link"), QtWidgets.QDialogButtonBox.DestructiveRole)
+        go.setAutoDefault(False)
+        cancel.setDefault(True)
+        go.clicked.connect(self.accept)
+        cancel.clicked.connect(self.reject)
+        lay.addWidget(bb)
+
+    def kept(self) -> list[str]:
+        return [s for s, box in self.boxes if box.isChecked()]
+
+    @classmethod
+    def ask(cls, parent, home: str) -> list[str] | None:
+        d = cls(parent, home)
+        return d.kept() if d.exec() == QtWidgets.QDialog.Accepted else None
