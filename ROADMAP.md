@@ -15,9 +15,11 @@ How the pieces fit, and why (three ways to run it: one server; two with failover
    "Way 1: one server").
 2. **[The TeX engine from a CDN](https://github.com/jhudsy/texloom/issues/15)**: most of the traffic, off the relay.
    Parked until monthly traffic nears what the server's hosting includes. The server must stay self-contained, so the
-   first answer needs no TeXLoom change: the engine files already carry long cache headers, so a caching layer in front
-   of the site, pulling from the server, serves them. Only if that doesn't do would a separate host follow, opt-in, with the
-   server's copy as the fallback and the browser checking each file against the server's list of hashes. The other half,
+   first answer needs no TeXLoom change: the engine files already carry long cache headers, so a pull-through cache (one that
+   fetches from the server on demand, nothing uploaded) in front of the whole site serves them, at the cost of that cache
+   seeing all traffic's metadata (addresses, project ids). The other way keeps it to the public engine files: a separate
+   host for `/core/` that pulls from the server, opt-in, with the server's copy as the fallback and the browser checking
+   each file against the server's list of hashes. The other half,
    compiled PDFs fetched only while someone is looking, is done (`scripts/check_web_pdf.py`).
 3. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
    (TLA+) across several servers, and of the client-side GitHub lease. The failover model is done
