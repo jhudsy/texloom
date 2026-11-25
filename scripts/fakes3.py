@@ -6,6 +6,7 @@ not check signatures. It runs in the check's own event loop, so a check can reac
     s3 = FakeS3()
     url = await s3.start()               # the endpoint: http://127.0.0.1:PORT, bucket "bucket"
     s3.conditional = False               # a store that ignores conditions (the relay must refuse it)
+    s3.racy = True                       # a store that checks a condition, then writes: not atomic (also refused)
     s3.fail_for.add("relay-a")           # requests signed with this access key id get a 503 (a relay
                                          # cut off from the store, the others unaffected)
     s3.hang_for.add("relay-a")           # ... or never answer (a time-out)
@@ -27,6 +28,7 @@ class FakeS3:
     def __init__(self) -> None:
         self.objects: dict[str, tuple[bytes, str]] = {}  # key -> (data, etag)
         self.conditional = True
+        self.racy = False
         self.fail_for: set[str] = set()
         self.hang_for: set[str] = set()
         self.log: list[tuple[str, str, str]] = []  # (key id, method, key)
@@ -59,6 +61,8 @@ class FakeS3:
                     return web.Response(status=412, text="precondition failed")
                 if "If-Match" in request.headers and (old is None or old[1] != request.headers["If-Match"]):
                     return web.Response(status=412, text="precondition failed")
+            if self.racy:
+                await asyncio.sleep(0.05)  # (the check above and the write below aren't one step)
             etag = '"' + hashlib.md5(data).hexdigest() + '"'
             self.objects[key] = (data, etag)
             return web.Response(status=200, headers={"ETag": etag})

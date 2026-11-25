@@ -140,7 +140,11 @@ async def refusals(tmp: Path, s3: FakeS3) -> None:
           r.returncode != 0 and "conditional writes" in r.stderr, r.stderr[-300:])
     r = await run(*base, "--failover-check")
     check("--failover-check says so too", r.returncode != 0 and "conditional writes" in r.stderr, r.stderr[-300:])
-    s3.conditional = True
+    s3.conditional, s3.racy = True, True
+    r = await run(*base, "--failover-check")
+    check("a store whose conditions aren't atomic (simultaneous writers all win) is refused",
+          r.returncode != 0 and "simultaneous" in r.stderr, r.stderr[-300:])
+    s3.racy = False
     r = await run(*base, "--failover-check")
     check("--failover-check passes a store that does them", r.returncode == 0 and "can hold a failover lease" in r.stdout, r.stderr[-300:])
     check("and leaves nothing of its test behind", not [k for k in s3.objects if "check-" in k], list(s3.objects))
