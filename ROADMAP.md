@@ -32,6 +32,12 @@ is in [SCALING.md](SCALING.md). In this order, each building on the one before:
    web app's collaboration.
 2. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
+3. **Project list passwords that resist offline guessing better** (no issue yet): today a list
+   password's secret is scrypt (N=2^17) of the password, salted with the username, so whoever holds
+   a server's data can guess passwords offline, slowed only by scrypt and the strength check.
+   Either a memory-hard KDF tuned harder (Argon2id, which `@noble/hashes` and `cryptography` both
+   have), as a v2 secret alongside v1, or an OPRF with the server (OPAQUE-style), so guesses need the
+   server and can be rate-limited. Needs both clients and the server; 2–4 days.
 
 ## Testing
 

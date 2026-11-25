@@ -206,7 +206,8 @@ the owner's signature, and the shared project setting `meta.storage` is `{m, at,
 believe the server keeps a copy it doesn't (or stop them uploading). Without a valid one (a
 project from before 0.4.35, or one an editor overwrote), apps go by what the server last
 said it does, kept for when they're offline; the owner's app signs an old plain value on
-connecting. A replica sends a signed `mode`
+connecting. Each app keeps the highest `at` it has seen signed (with its mode) and ignores a lower
+one, so an editor can't roll the setting back by writing an older value the owner once signed. A replica sends a signed `mode`
 command only when its user *changes* the setting, queuing it if offline; it never
 "corrects" the server on connect, so a stale replica can't undo someone else's
 switch. Switching back to `server` re-uploads a full snapshot and all blobs.
@@ -431,11 +432,14 @@ relay) as the fallback for symmetric NATs.
 - Ignores build products (`*.aux`, `*.log`, `*.synctex.gz`, the main PDF, …) and
   `.texloom/`, `.git/`.
 - `--compile`: run `latexmk` after changes (debounced) and publish PDF + log to `out`.
-  It also answers `p2p {k:"creq", n}` compile requests from browsers set to "compile
-  with my own TeX" (acknowledging with `{k:"cack", by, n}`). The answers (`cack`, `cerr`)
-  are signed like `upd` and carry the request's random `n`: the browser takes only a writer's
-  answer to one of its own recent requests, so a read-only member can't fake one, nor the
-  server replay one.
+  It also answers `p2p {k:"creq", n, at}` compile requests from browsers set to "compile
+  with my own TeX" (acknowledging with `{k:"cack", by, n}`). Requests are signed like `upd`
+  (only a writer can ask) and carry when they were made (`at`, ms) and a random `n`: a helper
+  takes one made in the last five minutes (and at most a minute ahead of its clock) whose `n`
+  it hasn't seen, so a recorded request can't be replayed later; one without `at` (an older
+  app) is ignored. The answers (`cack`, `cerr`) are signed too and carry the request's `n`:
+  the browser takes only a writer's answer to one of its own recent requests, so a read-only
+  member can't fake one, nor the server replay one.
 - Local options in `.texloom/config.json`: `engine`, `latexmk_args`, `shell_escape`,
   `label`. They are never shared. Shell-escape runs code from collaborators, so it is
   strictly a local opt-in.
@@ -785,12 +789,25 @@ one to the projects it names.
   replaces an edit link with a read-only one, keeps the earliest `c` and latest `m`, and drops a
   project removed after it was last opened.
   Removal records are forgotten after a year.
+- Every entry's JSON is padded with spaces (which JSON ignores) to a multiple of 512 bytes before
+  it is encrypted, so the small entries below look like a small list, tags or settings.
 - Other ways in are entries of the same kind holding `{"v":1,"wrap":<K>}`, opened by their own
   secret. A password's secret is `scrypt(password, "texloom list password v1:" + username, N=2^17,
-  r=8, p=1)`, with the password NFKC-normalised and the username also trimmed and lower-cased. A
-  passkey's secret comes from WebAuthn PRF with the salt `texloom project list v1`. An entry opened
-  by `HMAC-SHA256(K, "texloom list slots")` records each way in with its signing seed (not its
-  encryption key), so whoever holds K can remove them but not read them.
+  r=8, p=1)`, with the password NFKC-normalised and the username lower-cased and NFKC-normalised
+  after stripping one fixed set of space characters from its ends (tab, LF, VT, FF, CR, U+001C–1F,
+  U+0085, the Unicode spaces and U+FEFF: the same in both apps, as JavaScript's `trim()` and
+  Python's `strip()` differ). A new password must be at least 12 characters, with at least 6
+  different ones, and score at least 60 bits on a small estimate both apps share
+  (`passwordStrength`/`password_strength`, held by the shared vectors): each character counts
+  log2 of the size of the character classes used, except repeats (`aaaa`, `abab`) and runs
+  (`abcd`, `4321`), and a common password, keyboard run or part of the username (matched after
+  undoing `0→o`, `@→a` and the like) counts 8 bits in all. The dialogs offer a generated
+  passphrase (four made-up words of three syllables, about 75 bits). Existing passwords still
+  open the list. A passkey's secret comes from WebAuthn PRF with the salt `texloom project list
+  v1`. An entry opened by `HMAC-SHA256(K, "texloom list slots")` records each way in with its
+  signing seed (not its encryption key), so whoever holds K can remove them but not read them, and
+  `h`, the SHA-256 of the way in's stored (encrypted) entry: the same encrypted entry is written to
+  every copy.
 - **Copies.** A list can be kept on several servers (`web/src/listsync.ts`, `texloom/listsync.py`).
   Its settings carry `copy:<origin>` (on or off, with when), each device remembers the set beside
   its key, and every entry is synced on every copy: each is read and merged into what's known so
@@ -798,29 +815,49 @@ one to the projects it names.
   written again. Everything in a list merges in any order (entries, tags, settings, and the record of
   ways in, which keeps removed ones as `gone`), so a copy that was offline just catches up; one that
   can't be reached is skipped, but one is needed. Settings are synced first, since they say where
-  the copies are. Password entries are copied to every copy, as they are (encrypted, and signed
-  with the seed the record of ways in keeps); passkeys belong to their server's address, so they
-  stay where they were made. A list retired on any copy is retired: replacing or deleting it retires
+  the copies are. A copy that appears through the settings, rather than being chosen on this
+  device, is marked to ask: it is neither read nor written until it is ticked in the list's
+  window (whoever had the sync link could have added one). Password entries are copied to every
+  copy, as they are (encrypted, and signed with the seed the record of ways in keeps), only when
+  their hash matches the record's `h` (so a copy can't have something else copied in its place),
+  and not if any copy says the entry is retired (410: a copy answering 404 just missed the
+  removal); passkeys belong to their server's address, so they stay where they were made. A list retired on any copy is retired: replacing or deleting it retires
   it on every copy. Dropping a copy leaves what's there, with its settings marking it dropped. The
   servers allow `X-Seq` across sites, so a page can sync copies on other servers. Every list entry
   names its project's server (`s`), and every creation code its server (`code:<origin>`), since
   "the server keeping the list" is no longer one server.
 - `DELETE` retires an entry: its contents go, but its id answers 410 until it is purged, so a
   device with a replaced (perhaps leaked) link can't start the list again under that link. Replacing
-  a link retires every way in, because anyone holding the old link can read what it records. The
-  desktop app can't use a passkey, so it opens `/#unlock-for-app`, and the page returns the sync
-  link through `texloom://sync?link=…` (at once if the browser already has the list; **Use in the
-  TeXLoom app** in the web dialog sends it unasked), which the app confirms before using unless it
-  is the list the app already has.
-- Settings that follow the list, for now just the creation code, are a further entry opened by
-  `HMAC-SHA256(K, "texloom list settings")`: `{"v":1,"s":{"code":{"v":code,"at":ms}}}`. The latest
-  `at` wins (a tie goes to the larger canonical form, the same on every device; checked by the shared
-  vectors), so a code entered in the web app reaches the desktop app's New project dialog and the
-  other way round. The web app records when its code was entered (`texloom.codeAt`); the desktop
+  a link retires every way in, because anyone holding the old link can read what it records, and
+  keeps the new list only on the server its link points to and the other copies the person ticks
+  then (none by default: whoever had the old link could have added one); the dialog says to
+  revoke the integration tokens the list carried. The desktop app can't use a passkey, so it opens
+  `/#unlock-for-app=<nonce>` (a fresh random nonce), and the page, which says the list goes to the
+  program that opens `texloom://` links, returns the sync link through
+  `texloom://sync?link=…&n=<nonce>` (at once if the browser already has the list). The app uses it
+  without asking only if it carries the nonce of the request it made in the last ten minutes, once,
+  and points to the server it sent the person to; any other (**Use in the TeXLoom app** in the web
+  dialog sends it unasked, and so could any web page) is shown with a warning and used only once
+  confirmed (No is the default), unless it is the list the app already has.
+- A sync link that arrives in the web app's address (`/#sync=<K>`, from a link in any page or
+  email, or the desktop app's **Add a passkey…**, which opens its saved link) is never used by
+  itself: it opens the list dialog with the link filled in and a warning that it came from a link,
+  that every project in the browser and the settings below would go on that list for whoever made
+  it to read, and to use only your own; Cancel is focused and **Use this list** is the only way on.
+- Settings that follow the list are a further entry opened by `HMAC-SHA256(K, "texloom list
+  settings")`: `{"v":1,"s":{<name>:{"v":value,"at":ms}}}`, with the creation codes
+  (`code:<origin>`), the servers keeping copies (`copy:<origin>`), the name shown to collaborators
+  (`name`), and the web app's integration accounts as JSON, with their tokens: Zotero (`zotero`,
+  its API key), GitHub (`github`), GitLab, Gitea and Forgejo (`git`) and Dropbox (`dropbox`, its
+  refresh token). The desktop app reads and writes the codes, copies and name, and keeps the others
+  as they are. The latest `at` wins (a tie goes to the larger canonical form, the same on every
+  device; checked by the shared vectors); an `at` more than ten minutes ahead of the merging
+  device's clock counts as now + ten minutes, so a setting dated far ahead can't outlast every
+  later change. So a code entered in the web app reaches the desktop app's New project dialog and
+  the other way round. The web app records when its code was entered (`texloom.codeAt`); the desktop
   app keeps one code per server in `creation-codes.json` (mode 600) in its config folder. A code
-  entered before dates were kept counts as the oldest. Anyone with the sync link can read the code,
-  as they can every project on the list. The times are each device's clock, so a device whose clock
-  is far ahead could keep an older code winning until a code is entered again after that time.
+  entered before dates were kept counts as the oldest. Anyone with the sync link can read the codes
+  and tokens, as they can every project on the list.
 
 - Tags are a person's own and never enter a project. They live in `texloom.tags` in the browser and,
   with a synced list, in a further entry opened by `HMAC-SHA256(K, "texloom list tags")`, separate
