@@ -3,25 +3,26 @@
 Local-first, collaborative LaTeX. Every collaborator has a full copy of the project,
 in the browser or as a plain folder on disk, and can keep working offline. A small
 server passes **end-to-end encrypted** changes between people and can be told to keep
-no copy at all. No accounts: you share a link. (The command-line tools are called
-`texloom`.)
+no copy at all. No accounts: you share a link. A desktop app and command-line tools (`texloom`) keep a project
+in step with an ordinary folder on your computer.
 
-- Live editing with other people's cursors (click someone's avatar to jump to them);
-  offline edits merge automatically on reconnect. Two files created under the same name while
-  apart are both kept (one as `name (conflict).tex`), and a paragraph two people both changed
-  while apart gets a **⚠ Check merge** note in the Review tab, since word-by-word merging can
-  leave it reading oddly. Installs as an offline-capable app.
+- Live editing with other people's cursors (click someone's avatar to jump to them). Offline
+  edits merge automatically on reconnect: two files created under one name while apart are both
+  kept (one as `name (conflict).tex`), and a paragraph two people both changed gets a
+  **⚠ Check merge** note in the Review tab, since word-by-word merging can leave it reading oddly.
 - Compile in the browser (TeX Live 2026 in WebAssembly), or with your own TeX installation.
-  Errors are listed with clickable locations; SyncTeX jumps between source and PDF
-  (the → / ← arrows on the editor/PDF divider, ⌘⌥→ / ⌘⌥←, or double-click / right-click the PDF).
+  Errors are listed with clickable locations; you can jump between a spot in the source and the
+  same spot in the PDF (the → / ← arrows on the editor/PDF divider, ⌘⌥→ / ⌘⌥←, or double-click / right-click the PDF).
 - History without git: automatic and named versions (name any version later, e.g. the one you
   submitted), compare with now, restore a file or everything, and see who wrote each line.
 - Comments and suggested changes (tracked changes) that collaborators accept or reject.
 - Edit the project as an ordinary folder, so Claude Code, vim or VS Code can work on it
   directly; changes flow both ways, live. Chrome and Edge can sync a folder with nothing
   installed.
-- Agents as collaborators: an MCP server (`texloom mcp`) lets Claude Code or any MCP
-  client read, edit, comment, suggest and compile, visible to everyone by name and cursor.
+- Keep a bibliography in step with Zotero, and a project in step with a git repository or a
+  Dropbox folder.
+- Agents as collaborators: an MCP server (`texloom mcp`; MCP is the standard AI agents use to
+  call tools) lets Claude Code or any MCP client read, edit, comment, suggest and compile, visible to everyone by name and cursor.
   A built-in assistant does the same with Claude, any OpenAI-compatible API, or a local
   model (LM Studio, Ollama).
 - LaTeX-aware editor: completion of environments, commands, files, citation keys and
@@ -49,9 +50,9 @@ Its security review was also AI-performed: an independent AI audit, followed by 
 that were verified by testing. That is not the same as a professional audit.
 
 Treat this as an early prototype: keep your own copies of important work, and read the
-security model below before relying on it.
+[security model](#security-model) before relying on it.
 
-## Using TeXLoom: nothing to install
+## Using TeXLoom in the browser
 
 One person runs a TeXLoom server, for example at `https://texloom.example.org`. Everyone
 else just opens a link in a browser. No accounts, no software. The first time someone
@@ -69,8 +70,8 @@ survives only on devices, so keep a folder copy or download a `.zip`.
 
 A project's **⚙ Settings** has tabs: **Project** (main file, engine, bibliography, spelling
 language, and removing it: shared with everyone in it), **Compiling** and **Editor** (this device),
-**Sync & storage** (syncing on this device; the server's copy and creation code; a copy in a folder),
-**Integrations** (Zotero and git repositories; your accounts are yours, the links are the project's) and **You** (your name
+**Sync & storage** (syncing on this device; the server's copy and your **creation code**, a code the server's owner gives you, which some servers ask for before they store a new project; a copy in a folder),
+**Integrations** (Zotero, git repositories and Dropbox; your accounts are yours, the links are the project's) and **You** (your name
 and the interface language, in every project). It opens on the tab you used last.
 
 The start page lists the projects you've opened **in that browser** (your name and the
@@ -82,57 +83,68 @@ language are under ⚙ at the top):
 - the folder icon keeps the project in a folder through the TeXLoom app (highlighted once the
   app does); ✎ gives a project a private label that only you see;
 - tick boxes, shown when you point at a project, select several to tag or remove together;
-- ✕ (or ⚙ Settings → Project → **Remove…**) asks what to remove: **from this browser only** (the
-  server's and collaborators' copies stay; the link brings it back), or, for the owner,
-  **from the server too** (the server deletes its encrypted copy and stops storing the
-  project; collaborators keep their copies and can still work together while online at the
-  same time), or **for everyone**: the server deletes its copy and refuses the project from
-  then on, so nobody can sync it or open it from a link again. Collaborators' browsers and apps
-  keep a read-only copy, with a notice and a download button. This can't be undone. Files in
-  folders on your computer are never deleted.
+- ✕ (or ⚙ Settings → Project → **Remove…**) asks what to remove:
+  - **from this browser only**: the server's and collaborators' copies stay, and the link brings
+    it back;
+  - **from the server too** (owner only): the server deletes its encrypted copy and stops
+    storing the project; collaborators keep their copies and can still work together while
+    online at the same time;
+  - **for everyone** (owner only): the server deletes its copy and refuses the project from then
+    on, so nobody can sync it or open it from a link again. Collaborators' browsers and apps keep
+    a read-only copy, with a notice and a download button. This can't be undone.
+
+  Files in folders on your computer are never deleted.
 
 The server can't read or recover links, so keep important links somewhere safe; a
 password manager works well.
 
 ### Sharing and revoking
 
-**Share** shows the links. Whoever created the project holds the **owner link**. From it
-they can make a **personal edit link** for each collaborator (by name), and later
-**revoke** one: the server and everyone's browsers then refuse that person's changes, and
-their app reopens read-only. The list shows the start of each link's key, so two people
-with the same name can be told apart; only the owner can switch off server storage. A revoked person can still *read* new changes, because the
-link holds the encryption key. To shut them out completely, **Move to new keys**: the
-project (with history and comments) is copied into a new project with new keys, files
-are re-encrypted, the old server copy is deleted, and you send new links to the people
-who should keep access. The plain **read-only link** works as before.
+**Share** shows the links. Whoever created the project holds the **owner link**.
+
+- From it they can make a **personal edit link** for each collaborator (by name). The list
+  shows the start of each link's key, so two people with the same name can be told apart.
+- They can **revoke** a personal link: the server and everyone's browsers then refuse that
+  person's changes, and their app reopens read-only. A revoked person can still *read* new
+  changes, because the link holds the encryption key.
+- To shut them out completely, **Move to new keys**: the project (with history and comments)
+  is copied into a new project with new keys, files are re-encrypted, the old server copy is
+  deleted, and you send new links to the people who should keep access.
+- The **read-only link** can be given to anyone. Only the owner can switch off server storage.
 
 **Send links from Share, not the address bar.** In the web app the address bar shows only the
 project's id. The keys stay in the browser, so a copied address opens nothing for anyone else (it
 says to ask for a link), and only works in the browser that opened the project. Links from Share
-work as usual, and old links and bookmarks that contain keys still open.
+open as usual.
 
 **Email…** next to a personal or read-only link opens your own email app with an
 invitation and the link filled in. The link travels in that email, never through the
 TeXLoom server (which must not see its keys), so anyone who can read the email can open
 the project. A personal link is shown, and can be emailed, only when you create it.
 
+**Move to another code.** A stored project belongs to the code it was first stored with, whoever edits it later. Its owner can
+move it to another code with **Move to another code…** (Settings → Sync & storage in the web app, the
+Project menu in the desktop app), for example when that code has lapsed, or when the project should
+count against someone else's plan. The server checks the new code is valid and has room for the
+project; links, collaborators and history stay as they are.
+
 ### Your project list on other devices
 
 The start page lists the projects opened in that browser, and only there. To take the list with
-you, choose **Sync this list…**: the list is kept on the server, encrypted, and merged
+you, choose **Sync between your devices…**: the list is kept on the server, encrypted, and merged
 between every browser and computer you connect. The server can't read it. Removing a project from
 the list on one device removes it on the others.
 
-**Copies on several servers.** Under **Copies of this list** (web app: Manage sync…; desktop
-app: Project list), tick other servers to keep a copy of the list there too, encrypted like the
-first. Every device keeps all the copies up to date, a copy that was offline catches up, and the
-list lives on if one of its servers closes. The sync link works on any of them (change its address),
-and so does a password; a passkey only works on the server where you added it.
+**Copies on several servers.** Under **Copies on other TeXLoom servers** (web app: Manage sync…;
+desktop app: Project list…), tick other servers to keep a copy of the list there too, encrypted like
+the first. Every device keeps all the copies up to date, a copy that was offline catches up, and the
+list lives on if one of its servers closes. A sync link or a password opens the list on any of these
+servers (for a link, change the address in it); a passkey works only on the server where you added it.
 
 A list is opened by a **sync link** (`https://server/#sync=…`). Keep that link in a password
 manager, because it opens every project on the list. You can also add a **passkey**, which your
 phone or password manager carries between devices; passkeys need a browser with the WebAuthn PRF
-feature and belong to the server's address. Or set a **username and password** in the web app:
+feature and belong to the server's address. Or set a **username and password** (web app or desktop app):
 both stay on your device, and only a value worked out from them (with scrypt) reaches the server.
 Only use a sync link that's yours, since using one adds your projects to that list.
 
@@ -146,13 +158,20 @@ a passkey. If you lose the link and every passkey, and forget any password, the 
 good. Your projects aren't deleted, but you'll need each project's own link to open it. A password
 is also the one way in that can be guessed, by someone with the server's data, so make it long.
 
-In the desktop app, use **File ▸ Project list…** (also in Settings), which also keeps the list up to date while the app
-runs and does the same as the web app's dialog: copy the link, set a password, remove a passkey or
-password, replace the link or delete the list. A passkey is made by a browser, so **Add a passkey…**
-opens the list there (that browser then keeps it too). Or, in the web app's list dialog, **Use in the TeXLoom app** sends the list to the app on this
-computer, which asks before using it. For the helper, see `texloom projects` below (`use --password`
-unlocks with a password). Starting a list counts as creating something on the server, so servers
-that require a creation code ask for one. Servers can turn lists off with `--no-project-lists`.
+In the desktop app:
+
+- **File ▸ Project list…** (also in Settings) keeps the list up to date while the app runs and does
+  the same as the web app's dialog: copy the link, set a password, remove a passkey or password,
+  replace the link or delete the list.
+- A passkey is made by a browser, so **Add a passkey…** opens the list there (that browser then keeps
+  it too).
+- In the web app's list dialog, **Use in the TeXLoom app** sends the list to the app on this computer,
+  which asks before using it.
+- The `texloom projects` command does the same from a terminal ([below](#working-on-a-project-as-a-folder)); `use --password`
+  unlocks with a password.
+
+Starting a list counts as creating something on the server, so servers that require a creation code
+ask for one. Servers can turn lists off with `--no-project-lists`.
 
 **Projects on other servers.** A list can hold projects from any TeXLoom server, not just the
 one keeping it. Paste another server's project link under **Paste a project link…**: the project
@@ -160,7 +179,7 @@ opens here and syncs with its own server, straight from this page, and the start
 that server's name. Only encrypted data goes there, as here; the keys stay in your browser. The
 desktop app lists its folders with their own servers too, and below them, under **On your list,
 not here**, the projects on your list that aren't on this computer, each with its server, to join
-(**View** can hide them). Your creation codes travel with the list, one per server. When you know more
+(**View** can hide them). When you know more
 than one server, **Create project** (and **Make a copy**, and the desktop app's **New project from a
 folder…**) asks which to keep the new project on, starting with the one you used last; **Another
 server…** takes any address. To move another server's project to new keys, open it on that server.
@@ -170,12 +189,6 @@ app is filled in when you make a project elsewhere, such as **New project from a
 app. Anyone with your sync link can see it, as they can every project on the list. The settings on
 the Your projects page (⚙) show it, with how much of its allowance is used, and let you enter or
 change it.
-
-A stored project belongs to the code it was first stored with, whoever edits it later. Its owner can
-move it to another code with **Move to another code…** (Settings → Sync & storage in the web app, the
-Project menu in the desktop app), for example when that code has lapsed, or when the project should
-count against someone else's plan. The server checks the new code is valid and has room for the
-project; links, collaborators and history stay as they are.
 
 ### Finding and copying projects
 
@@ -202,13 +215,12 @@ the original's history, comments or collaborators, and it counts towards your st
 | `\begin{…}` + **Enter** | adds the matching `\end{…}` (and `\item` for lists) |
 | typing `\` | completes commands and environments; `\begin{table}`, `figure`, `itemize`, `align`, … come with their usual contents. **Tab** moves between the fields to fill in |
 | inside `\includegraphics{`, `\cite{`, `\ref{`, `\input{`, `\usepackage{` | suggests the project's images, bibliography keys (with titles), labels, files and common packages |
-
 | **⌘⇧F** / **Ctrl+Shift+F** | search (and replace) across all files |
 | **⌘⌥M** / **Ctrl+Alt+M** | comment on the selection |
 | **⌘⌥E** / **Ctrl+Alt+E** | suggest mode on or off |
 | **⌘⌥→** / **Ctrl+Alt+→** | show the current line in the PDF |
 | **⌘⌥←** / **Ctrl+Alt+←** | go to the source of the spot last clicked in the PDF (or the middle of the view); double-clicking or right-clicking the PDF does the same |
-| paste or drop an image | adds it to `figs/` and inserts `\includegraphics` (a whole `figure` on an empty line) |
+| paste or drop an image | adds it to the project's image folder (`figs/` if there is none) and inserts `\includegraphics` (a whole `figure` on an empty line) |
 | `\cite{` + a DOI or arXiv id | fetches the BibTeX entry and adds it to your `.bib` |
 
 Images, citation keys and labels that don't exist in the project are underlined, as are
@@ -222,8 +234,8 @@ Settings), skipping commands, maths, labels and the preamble. With the cursor in
 (`$…$`, `\[…\]`, `equation`, `align`, …), a preview shows it typeset by KaTeX, using the
 project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turns it off).
 - **Left panel:** **Files**, **Search** (match case, whole words, regular expressions with
-  `$1`), and **Outline** (sections in document order through `\input`/`\include`, with
-  word counts; the total excludes maths and commands).
+  `$1`), and **Outline** (sections in document order through `\input`/`\include`, with word
+  counts: see **Word counts** below).
 - **Right panel:** **PDF**, **Assistant**, **Review** (comments and suggestions: reply,
   resolve, accept, reject) and **History** (versions, compare, restore, "who wrote this").
 - **Suggest mode:** **✎ Suggest mode** in the Review tab (⌘⌥E / Ctrl+Alt+E, or right-click → *Suggest changes*) makes what
@@ -277,7 +289,7 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   Accepting several skips any suggestion whose text has changed since, to accept on its own.
 - **Problems:** after compiling, errors and warnings are listed under the PDF with their
   file and line; click one to go there. Biber and BibTeX errors (a missing `.bib`, say) are
-  listed too. **Raw log** shows the whole log. **Compile from scratch** deletes LaTeX's
+  listed too. **Raw log** shows the whole log under the PDF; drag its top edge to resize. **Compile from scratch** deletes LaTeX's
   working files (`.aux`, `.bbl`, …) first: in-browser compiles always start from scratch,
   so it matters when a texloom helper compiles with your own TeX (it keeps them in
   `.texloom/build`).
@@ -334,9 +346,11 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
   or press C. A box opens beside the text, and the comment goes on those words in the source: SyncTeX gives the
   lines, and the selected words are found there. Where they aren't in the source as such (maths, tables, generated text),
   it goes on the line they come from, and the box says so; a bibliography entry is found in the `.bib` file.
-- **PDF zoom and pages:** the zoom percentage offers **Fit width**, **Fit page** (a whole page in view, kept as the window
-  changes size) and set sizes, down to 10%. Once the PDF has been clicked, ← and → turn its pages (and ↑ ↓ too in Fit page);
-  Home and End go to the first and last.
+- **PDF zoom and pages:** − and + above the PDF change its size (⌘ or Ctrl + scroll, or pinching on a
+  trackpad, does the same), and the percentage goes back to normal size; it also offers **Fit width**,
+  **Fit page** (a whole page in view, kept as the window changes size) and set sizes, down to 10%. The zoom
+  is remembered. Once the PDF has been clicked, ← and → turn its pages (and ↑ ↓ too in Fit page); Home and
+  End go to the first and last.
 - **Keyboard shortcuts:** press **?** (outside a text field), or **Keyboard shortcuts** in ⚙ Settings, for the list.
 - **Word counts:** the Outline tab counts the document and each section; selecting text shows its count
   in the corner of the editor. LaTeX commands, citations, maths and comments aren't counted. Chinese and
@@ -350,12 +364,9 @@ project's `\newcommand`, `\def` and `\DeclareMathOperator` macros (Settings turn
 - **Compiling another file:** **Compile** compiles the open file if it has its own `\documentclass`
   (a figure or a separate document), and otherwise the main file; right-click a file to compile it.
   Only the main file's PDF is shared with collaborators.
-- **PDF zoom:** − and + above the PDF change its size, and the percentage goes back to normal
-  size; ⌘ or Ctrl + scroll, or pinching on a trackpad, does the same. The zoom is remembered.
 - **Pages and printing:** the box above the PDF shows the current page; type a number and press
   Enter to go there. The printer button opens your browser's print dialog, with pages drawn at 200 dpi. For
   a print that keeps the PDF's own text, download it and print that.
-- **Compile log:** **Log** shows it under the PDF; drag its top edge to resize.
 - **Downloads:** the download button above the PDF, and **Source** (a `.zip`) in the header.
 
 **Phones and tablets.** In small windows the editor and the PDF take turns on screen, the file list
@@ -379,7 +390,9 @@ math in `$…$` or `$$…$$`. Raw HTML appears as plain text, and images from ot
 A server is one small Python process, with an SQLite file (nothing to install) or PostgreSQL as
 its database. [INSTALL.md](INSTALL.md) covers installing one (a script does it on Ubuntu or
 Debian), its settings file, moving from one database to the other, stored files in a folder or an
-S3-compatible bucket, creation codes and storage allowances, private servers, and backups.
+S3-compatible bucket, creation codes and storage allowances, private servers, backups, and a warm
+standby that can take over automatically. [SCALING.md](SCALING.md) says how far one server goes and
+what comes next.
 
 ## Working on a project as a folder
 
@@ -390,12 +403,15 @@ Use this for Claude Code or any other tool, and to compile with your own TeX ins
 browser restart, click **📁 Reconnect folder** once. (Safari and Firefox can't open a folder
 from a web page, so they don't offer this: use the app, below.)
 
-How a folder copy (browser or app) takes in an edit made on disk: only what changed since
-the file was last synced is applied, on top of collaborators' edits made meanwhile (lines
-changed on both sides take the folder's version; the other stays in History). An older
-version reappearing in the file (an editor saving or reloading a stale copy) is not an
-edit: the project's text is written back. Sync a folder with one TeXLoom at a time: the
-browser stops if it finds the app or `texloom run` keeping the same folder.
+How a folder copy (browser or app) takes in an edit made on disk:
+
+- Only what changed since the file was last synced is applied, on top of collaborators' edits made
+  meanwhile.
+- Lines changed on both sides take the folder's version; the other version stays in History.
+- An older version reappearing in the file (an editor saving or reloading a stale copy) is not an
+  edit: the project's text is written back.
+- Sync a folder with one TeXLoom at a time: the browser stops if it finds the app or `texloom run`
+  keeping the same folder.
 
 **With the TeXLoom app** (macOS, Windows, Linux): download it from the
 [releases page](https://github.com/jhudsy/texloom/releases/latest), or install it with
@@ -454,8 +470,7 @@ has **Tags…**, **Make a copy…** (a new project, in a new folder, from this o
 The downloads aren't signed with paid certificates yet, so the first time:
 - **macOS:** unzip the download and move TeXLoom to Applications. Open it once and close the
   warning, then go to System Settings → Privacy & Security, scroll down to the message about
-  TeXLoom, click **Open Anyway** and confirm. (On older versions of macOS, right-click the app →
-  **Open** also works.)
+  TeXLoom, click **Open Anyway** and confirm.
 - **Windows:** extract the `.zip` first (right-click → **Extract All**), then run `TeXLoom.exe`
   in the extracted folder. If Windows says it protected your PC, click **More info** →
   **Run anyway**.
@@ -495,16 +510,15 @@ collaborators type in their browsers. With `--compile`:
 - it runs `latexmk` after changes and shares the PDF with everyone;
 - browsers set to **Compile with my own TeX** send their compile requests to it.
 
-| command | |
+| command | what it does |
 |---|---|
 | `texloom start` | sync every folder on this computer's list, in one process |
 | `texloom autostart on\|off\|status` | run `texloom start` at login (macOS, Linux, Windows) |
 | `texloom list` / `add <dir>` / `leave <dir>` | the folder list (`clone` and `new` add to it; leaving keeps the files) |
-| `texloom projects` / `new --server URL` / `use '<sync link>'` / `off` | your encrypted project list on the server: what's on it (`--links` prints each project's link), start one, use one from elsewhere, stop on this computer |
+| `texloom projects show` / `projects new --server URL` / `projects use '<sync link>'` / `projects off` | your encrypted project list on the server: what's on it (`--links` prints each project's link), start one, use one from elsewhere, stop on this computer |
 | `texloom new <dir> --server URL [--code C]` | share an existing folder as a new project; prints both links |
 | `texloom clone <link> <dir>` | check out a project |
-| `texloom run <dir> [--compile] [--shell-restricted \| --shell-escape]` | keep the folder in sync, live |
-| `texloom run <dir> --git` | also keep the folder's git repository in step with the project (below) |
+| `texloom run <dir> [--compile] [--git] [--shell-restricted \| --shell-escape]` | keep the folder in sync, live; `--git` also keeps the folder's git repository in step with the project (below) |
 | `texloom sync <dir> [--git]` | sync once and exit (manual sync) |
 | `texloom storage <dir> server\|relay` | keep an encrypted copy on the server, or nothing |
 | `texloom links <dir>` | print the project code and the edit / read-only links |
@@ -521,10 +535,7 @@ compile = false   engine = null   latexmk_args = []   shell_escape = false   con
 ```
 
 They belong to the folder where it is, and its project: a folder that is moved or renamed
-starts over with these defaults. (Up to 0.4.55 they were in `<dir>/.texloom/config.json`: the
-first run of a later version brings them over, but from a folder that may be shared, such as
-one in Dropbox, only `compile`, `engine` and `label`; the log says which must be set again.)
-The project link and `create_code` stay in `<dir>/.texloom/config.json`, which only you can read.
+starts over with these defaults. The project link and `create_code` stay in `<dir>/.texloom/config.json`, which only you can read.
 
 Collaborators write the document, so compiling is locked down by default:
 - **No running programs:** TeX may not run programs (`-no-shell-escape`).
@@ -586,7 +597,7 @@ When a collaborator's change writes such a line into your folder, or an `% arara
 directive or `% !TeX program` comment (which your own LaTeX editor may follow), the helper
 and the browser's folder sync point it out once.
 
-### Dropbox from the browser
+### Dropbox from the web app
 
 Project ⚙ Settings → **Integrations** → Dropbox keeps a project in step with a folder in your
 Dropbox, or one shared with you there, with nothing to install:
@@ -614,7 +625,7 @@ For a server of your own: make an app in the [Dropbox App Console](https://www.d
 *Allow public clients* on), and set its app key as `dropbox_app_key` in the server's settings. The
 app secret isn't needed (the browser signs in with PKCE).
 
-### A folder in Dropbox (or iCloud Drive, OneDrive, Google Drive, Syncthing)
+### A folder kept by a file-sync service (Dropbox, iCloud Drive, OneDrive, Google Drive, Syncthing)
 
 A synced folder can live in a folder that a file-sync service keeps, and that folder can be shared
 with other people and computers there, some of them running TeXLoom on it too:
@@ -627,8 +638,7 @@ with other people and computers there, some of them running TeXLoom on it too:
 - **On another computer**, once the service has brought the folder: in the app, **Add folder**
   (or `texloom add <folder>`). It takes the project link from the first computer's records in the
   folder, and waits until it has the project from the server before it does anything.
-- **Each computer keeps its own records** in `.texloom/computers/<its id>/` (from 0.4.40; older
-  folders are moved there the first time). The service copies everyone's, but each computer only
+- **Each computer keeps its own records** in `.texloom/computers/<its id>/`. The service copies everyone's, but each computer only
   uses its own. Like the folder's files, they include the project's edit link: anyone the service
   folder is shared with can open the project.
 - **Saved on two computers at once:** where the service has kept one version and set the other
@@ -751,7 +761,6 @@ claude mcp add texloom -- texloom mcp '<edit link>'         # or straight from a
 With the downloadable app there's nothing more to install: the binary inside it runs the server
 too (`/Applications/TeXLoom.app/Contents/MacOS/TeXLoom mcp …` on a Mac, `TeXLoom.exe mcp …` in the
 app's folder on Windows). **Use an AI agent on your computer…** in the app gives the lines with its path.
-App builds check that the built app answers MCP (`scripts/check_bundled_mcp.py`).
 
 The agent appears to everyone as **Claude (agent)** (change with `--name`), with its own
 cursor and its lines credited in "who wrote this". Its tools: list, read, search, write and
@@ -854,23 +863,12 @@ browser to the provider.
 
 ## Settings
 
-**Project settings** are shared with everyone who has an edit link:
-- main file
-- engine (pdfLaTeX, XeLaTeX or LuaLaTeX; if none is chosen, documents using ctex, xeCJK or fontspec
-  compile with XeLaTeX in the browser, so Chinese works without changing anything)
-- bibliography tool (detect automatically, BibTeX, Biber or none)
-- server storage:
-  - **Keep an encrypted copy** (default)
-  - **Don't store anything:** this deletes the server's copy
-
-**Device settings** apply only in your browser:
-- your name
-- creation code
-- live or manual sync. Manual keeps changes on your device until you press **Sync now**.
-- where to compile, and whether to recompile automatically after you stop typing.
-
-The in-browser TeX engine is cached once per browser and shared by all projects (about
-125 MB up front; larger package sets load only if a document needs them).
+A project's **⚙ Settings** are described under [Using TeXLoom in the browser](#using-texloom-in-the-browser):
+the project's main file, engine and bibliography tool are shared with everyone who has an edit link, and
+the rest (compiling, sync, your name and creation code) apply to you. If no engine is chosen, a document
+using ctex, xeCJK or fontspec compiles with XeLaTeX in the browser, so Chinese works without changing
+anything. The in-browser TeX engine is cached once per browser and shared by all projects (about 125 MB up
+front; larger package sets load only if a document needs them), and can be removed under Compiling.
 
 ## Security model
 
@@ -910,6 +908,7 @@ Found a problem? Please open an issue.
 
 ```bash
 uv sync --extra server
+(cd web && npm ci)                      # once: the web app's packages
 uv run texloom-server --data data       # terminal 1: the server, its database in data/texloom.db
 cd web && npm run dev                   # terminal 2 -> http://localhost:5173 (proxies to :8787)
 ```
@@ -920,7 +919,7 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 
 | path | what |
 |---|---|
-| `server/app.py` | the relay's web application: its addresses, settings, database start and background upkeep (eviction, purges) |
+| `server/app.py` | the relay's web application: its addresses, settings, database start and background upkeep (eviction, purges, the usage recount) |
 | `server/relay.py` | relay (aiohttp): the WebSocket protocol (connections, catch-up, updates, storage modes), memory limits |
 | `server/policy.py` | storage rules: creation codes and allowances, limits, what may be stored and by whom |
 | `server/endpoints.py` | the relay's HTTP endpoints: stored files, `/api/info`, project lists, code checks; response headers |
@@ -928,7 +927,9 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 | `server/cli.py` | the server's command line (`texloom-server`): options, creation codes, backups |
 | `server/store.py` | what the relay stores: edit logs, projects, which files are stored |
 | `server/db.py` | the database under the store: SQLite or PostgreSQL, behind the same few calls; copying from one to the other |
-| `server/files.py` | where stored files' content goes: a folder or an S3-compatible bucket |
+| `server/files.py` | where stored files' content goes: a folder or an S3-compatible bucket (and the conditional writes the failover lease needs) |
+| `server/failover.py` | automatic failover between two servers: the lease in the bucket, promoting the standby (off unless `failover` is set; [SCALING.md](SCALING.md)) |
+| `server/lists.py`, `server/texlive.py` | encrypted project lists; TeX Live files on demand for the in-browser engine |
 | `server/config.py` | the server's settings: the settings file, `TEXLOOM_*` variables, the command line |
 | `texloom/crypto.py` | keys, links, AES-GCM, Ed25519 (mirrors `web/src/crypto.ts`) |
 | `texloom/replica.py` | folder helper's replica: pycrdt document, outbox, peer handshake, blobs |
@@ -938,9 +939,13 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 | `texloom/cli.py` | command line |
 | `texloom/config.py` | a synced folder's own settings and project link, and the folders on this computer's list |
 | `texloom/mcp.py` | MCP server (stdio JSON-RPC): tools, presence, comments and suggestions |
+| `texloom/daemon.py`, `registry.py`, `autostart.py` | `texloom start`: one process syncing every folder on this computer's list; that list; starting it at login |
+| `texloom/listsync.py`, `textpos.py` | the project list on the server (as `web/src/listsync.ts`); positions in a text, the only place a text is edited by position |
+| `texloom/confine.py`, `sharedfolder.py` | keeping a collaborator's document from reading this computer's other files; a folder also shared through a file-sync service |
+| `texloom/comments.py`, `lsp.py` | the Review tab's comments for people who work in their own editor: the overview file, and a language server |
 | `texloom/app.py`, `app_list.py`, `app_detail.py`, `app_updates.py` | the desktop app's window: menus and actions; the list of projects; the chosen project; updates |
 | `texloom/dialogs.py`, `dialogs_share.py`, `dialogs_list.py`, `dialogs_tags.py`, `dialogs_tools.py` | its dialogs: settings and copying; sharing and joining; the project list; tags; AI tools and editors |
-| `server/arxiv.py`, `server/admin.py` | arXiv source import proxy; read-only admin page |
+| `server/arxiv.py`, `server/admin.py` | arXiv source import proxy; read-only admin page (with a Failover section when failover is on) |
 | `web/src/main.ts` | entry: the start page or a project, as the address asks |
 | `web/src/startpage.ts`, `projectview.ts`, `appinfo.ts` | the start page and its list; a project open in the editor; what both share |
 | `web/src/replica.ts` | browser replica: Yjs + IndexedDB, outbox, peer handshake, awareness, blobs |
@@ -961,7 +966,7 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 | `web/src/sharing.ts`, `crypto.ts` | links, personal links, revocation, moving to new keys |
 | `web/src/foldersync.ts` | folder sync from the browser (File System Access API) |
 | `web/sw-template.js` | service worker (offline app) |
-| `deploy/` | install script (SQLite or PostgreSQL, nginx, certbot, systemd, settings file), Caddy config |
+| `deploy/` | install script (SQLite or PostgreSQL, nginx, certbot, systemd, settings file), Caddy configs (one server; two, for failover), `rebuild-standby.py` |
 
 
 ### Checks
@@ -976,15 +981,13 @@ uv run python scripts/check_packing.py          # compressed snapshots: both app
 uv run python scripts/check_replica.py          # what a replica does with the server's messages (replica-vectors.json, from make_replica_vectors.py)
 uv run python scripts/check_folder_rules.py     # the folder syncs' rules: which files sync, text or not, merging, settling, line endings, renames (folder-rules.json)
 uv run python scripts/make_folder_rules.py --check   # folder-rules.json is what make_folder_rules.py writes
-cd web
-npm run check-listsync && npm run check-xr && npm run check-packing && npm run check-replica && npm run check-folder-rules   # the web app's side of each
+cd web && npm run checks                        # the web app's side of each (and its own checks, below)
 ```
 
 The web app's own checks, in `web/` (`npm run checks` runs every `scripts/check-*.mjs`, the ones
 above too, a few at once, as CI does):
 
 ```bash
-npm run checks
 npm run check-i18n         # every text has its translations, plural forms and placeholders
 npm run check-versions     # saved versions: every one opens exactly, and storing them stays small
 npm run check-suggest      # suggest mode: random typing and collaborators' edits keep the view and suggestions in step
@@ -994,36 +997,61 @@ npm run check-mcpclient    # the Assistant's MCP client, against a stand-in serv
 npm run check-gitshacache  # the git id cache keeps only the project's current files, and survives blocked storage
 npm run check-props        # random texts and edits (Windows line endings, emoji): the editor and the shared text stay identical, no emoji is cut in two, merges and line endings behave
 npm run check-folder-model # the browser's folder sync through random steps, on a fake clock and folder
+npm run check-zotero       # the Zotero integration (the others above, and this, all run in `npm run checks`)
 ```
 
-The desktop app and the server, from the top folder:
+The desktop app and the server, from the top folder, by what they protect. Text handling:
 
 ```bash
-uv run --with hypothesis python scripts/check_props.py             # the property checks for the desktop, and its merge agrees with the web app's (needs npm ci in web/)
-uv run --with mypy python scripts/check_textpos.py                 # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
-uv run python scripts/check_compat.py                              # code kept for older apps, servers and data: listed, markers well formed (DESIGN.md)
-uv run python scripts/check_server_state.py                        # what each server keeps in memory, and its addresses, each listed for several servers (SCALING.md)
-uv run --with hypothesis python scripts/check_folder_model.py      # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
-uv run python scripts/check_folder_regressions.py                  # folder sync's old bugs: a deleted file brought back, a half-saved file shared, a renamed folder's files left behind
-uv run python scripts/check_settings.py                            # settings that run programs live in your own settings folder, never in the synced folder
-uv run python scripts/check_confine.py                             # a compile can't carry a file from outside the project into the PDF (needs TeX)
-uv run python scripts/check_comment_names.py                       # a comment author can't fake the verified ✓
-uv run --extra server python scripts/check_shared_folder.py        # two computers on one folder shared through a stand-in Dropbox: they take turns, nothing arrives twice
-uv run --extra server python scripts/check_store.py                # the server's database: SQLite and PostgreSQL give the same answers, and copy into each other
-uv run --extra server python scripts/check_files.py                # the server's file store: a folder, and Garage (S3) if installed
-uv run --extra server python scripts/check_move_code.py            # moving a project to another creation code, against a real server
-uv run --extra server python scripts/check_restore.py              # a server restored from a backup: an app that had seen later changes misses none
-uv run --extra server python scripts/check_standby.py              # a warm standby promoted (needs PostgreSQL's programs): apps miss none of the changes it never got
-uv run --extra server python scripts/check_failover.py             # automatic failover with two real servers: a lost primary, one cut off from the bucket, the refusals (needs PostgreSQL's programs)
-uv run --extra server python scripts/check_groundwork.py             # what several servers on one database need: the usage ledger, the lock, notifications, two stores hearing each other, upkeep once
-uv run python scripts/check_rebuild_standby.py                         # deploy/rebuild-standby.py: the old primary rebuilt as a standby (needs PostgreSQL's programs); it refuses the primary, another cluster, an unconfirmed run
-uv run --extra server python scripts/rehearse_failover.py             # by hand, needs Docker: failover with real parts (relays, PostgreSQL primary and standby, an S3 store, Caddy): a lost machine, a frozen one, a cut-off one, the bucket going away
-uv run --with pyyaml python scripts/check_workflows.py                   # every GitHub Actions file parses (one that doesn't is not a failing test: its workflow just stops running)
-uv run python scripts/check_model.py                                 # the failover design in TLA+ (needs Java): timers, the lease, the apps' hello check; some cases must fail
-uv run --extra server python scripts/check_server_abuse.py        # what an outsider could do: revocations come out of the row budget, TeX Live paths stay in the cache
-uv run --extra server python scripts/check_comments.py             # a folder's comments overview, texloom comments list/reply/resolve, and texloom lsp with a stdio client
-uv run --extra server python scripts/check_config.py               # texloom.example.toml lists every server setting, and parses
-uv run python scripts/conncheck.py https://app.texloom.org          # connect to a server the way the desktop app does, saying what happened at each step
+uv run --with hypothesis python scripts/check_props.py          # random texts and edits: the desktop's merge agrees with the web app's (needs npm ci in web/)
+uv run --with mypy python scripts/check_textpos.py              # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
+uv run --with hypothesis python scripts/check_folder_model.py   # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
+uv run python scripts/check_folder_regressions.py               # folder-sync mistakes that must not come back: a deleted file reappearing, a half-saved file shared, a renamed folder's files left behind
+```
+
+Security:
+
+```bash
+uv run python scripts/check_settings.py                         # settings that run programs live in your own settings folder, never in the synced folder
+uv run python scripts/check_confine.py                          # a compile can't carry a file from outside the project into the PDF (needs TeX)
+uv run python scripts/check_comment_names.py                    # a comment author can't fake the verified ✓
+uv run --extra server python scripts/check_server_abuse.py      # what an outsider could do: revocations come out of the row budget, TeX Live paths stay in the cache
+```
+
+The server (the ones marked need PostgreSQL's programs; each starts a throwaway server and database):
+
+```bash
+uv run --extra server python scripts/check_store.py             # the database: SQLite and PostgreSQL give the same answers, and copy into each other
+uv run --extra server python scripts/check_files.py             # the file store: a folder, and Garage (S3) if installed
+uv run --extra server python scripts/check_config.py            # texloom.example.toml lists every server setting, and parses
+uv run python scripts/check_server_state.py                     # what each server keeps in memory, and its addresses, each placed for several servers (SCALING.md)
+uv run --extra server python scripts/check_move_code.py         # moving a project to another creation code
+uv run --extra server python scripts/check_restore.py           # a server restored from a backup: an app that had seen later changes misses none
+uv run --extra server python scripts/check_standby.py           # a warm standby promoted (needs PostgreSQL): apps miss none of the changes it never got
+uv run --extra server python scripts/check_failover.py          # automatic failover with two real servers: a lost primary, one cut off from the bucket, the refusals (needs PostgreSQL)
+uv run python scripts/check_rebuild_standby.py                  # deploy/rebuild-standby.py: the old primary rebuilt as a standby; what it refuses (needs PostgreSQL)
+uv run --extra server python scripts/check_groundwork.py        # what several servers on one database need: the usage ledger, the lock, notifications, upkeep once (needs PostgreSQL)
+uv run python scripts/check_model.py                            # the failover design in TLA+ (needs Java): timers, the lease, the apps' hello check; some cases must fail
+uv run --extra server python scripts/rehearse_failover.py       # by hand, needs Docker: failover with real parts (relays, PostgreSQL primary and standby, an S3 store, Caddy)
+```
+
+Folders and comments, end to end:
+
+```bash
+uv run --extra server python scripts/check_shared_folder.py     # two computers on one folder shared through a stand-in Dropbox: they take turns, nothing arrives twice
+uv run --extra server python scripts/check_comments.py          # a folder's comments overview, texloom comments list/reply/resolve, and texloom lsp
+```
+
+Housekeeping:
+
+```bash
+uv run --with pyyaml python scripts/check_workflows.py          # every GitHub Actions file parses (one that doesn't is not a failing test: its workflow just stops running)
+uv run python scripts/check_quiet.py                            # no error swallowed without a trace (DESIGN.md → Errors deliberately ignored)
+uv run python scripts/check_compat.py                           # code kept for older apps, servers and data: listed, markers well formed (DESIGN.md)
+uv run --locked python scripts/check_version.py                 # the version is the same everywhere, and uv.lock is up to date
+uv run python scripts/check_i18n.py                             # every text has its translations in every language
+uv run python scripts/check_bundled_mcp.py texloom              # the MCP server answers over stdin/stdout (CI runs it on the built app too)
+uv run python scripts/conncheck.py https://app.texloom.org      # connect to a server the way the desktop app does, saying what happened at each step
 ```
 
 `conncheck.py` is for someone who can't connect; CI runs it on Windows, macOS and Linux on demand
@@ -1064,8 +1092,8 @@ uv run --extra server --with playwright python scripts/check_web_listways.py  # 
 uv run --extra server --with playwright python scripts/check_web_dropbox.py # keeping a project in step with a Dropbox folder (stand-in: scripts/fakedropbox.py)
 ```
 
-The same checks against a real deployment, such as a staging server tried before production
-(issue 23): set `TEXLOOM_CHECK_SERVER` to its address and, if it asks for creation codes,
+The same checks against a real deployment, such as a staging server tried before production:
+set `TEXLOOM_CHECK_SERVER` to its address and, if it asks for creation codes,
 `TEXLOOM_CHECK_CODE_FILE` to a file holding one. The browser opens it through a pass-through on
 127.0.0.1 (the test hooks are only for pages from localhost); past that it's all the deployment's
 own: TLS, the web server in front, the server. They store small test projects and a project list
@@ -1085,10 +1113,18 @@ and weekly (`desktop-app.yml`), and before each release build.
 `scripts/check_quiet.py` refuses errors swallowed without a trace (DESIGN.md → Errors deliberately
 ignored).
 
-The quick checks run on every push (`.github/workflows/checks.yml`). The sync-only check takes a
-few minutes, so it runs when the desktop app's sync or the server changes, every night, and on
-demand (Actions → Sync-only check), on Linux, macOS and a real Windows (`sync-only.yml`). The web
-app's browser checks run likewise when the web app or the server changes (`web-app.yml`).
+What CI runs (`.github/workflows/`):
+
+| workflow | when | what |
+|---|---|---|
+| `checks.yml` | every push to main and every pull request | the quick checks, as four parallel jobs: desktop, server, web, properties |
+| `sync-only.yml` | the desktop's sync or the server changes; nightly; on demand | sync-only projects end to end, on Linux, macOS and a real Windows (a few minutes). A server-only pull request runs on Ubuntu alone |
+| `web-app.yml` | the web app or the server changes; nightly; on demand | the web app in a real browser |
+| `desktop-app.yml` | the desktop app changes; weekly | the app's windows, and on macOS the menu-bar and Dock fixes |
+| `model.yml` | the model changes; weekly | the failover model (TLA+) |
+| `workflows.yml` | a workflow file changes | every workflow file parses |
+| `app.yml`, `vscode-extension.yml` | a release tag | the downloadable app builds; the VS Code extension's publication |
+| `conncheck.yml` | by hand | connect to a server the way the app does, on three systems |
 
 To see what a relay can take, `uv run --extra server python scripts/loadtest.py all` starts its own throwaway server
 and reports latency, CPU and memory for each scenario. Results depend on the machine.
@@ -1096,8 +1132,8 @@ and reports latency, CPU and memory for each scenario. Results depend on the mac
 ### Releasing the desktop app
 
 ```bash
-uv run python scripts/release.py 0.4.41 --dry-run   # can it be made? (changes nothing)
-uv run python scripts/release.py 0.4.41
+uv run python scripts/release.py X.Y.Z --dry-run   # can it be made? (changes nothing)
+uv run python scripts/release.py X.Y.Z             # --no-push: commit and tag, but don't push
 ```
 
 It refuses unless the version is newer, `main` is clean and level with GitHub, the tag is new
