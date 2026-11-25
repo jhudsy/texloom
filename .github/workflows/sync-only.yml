@@ -3,7 +3,11 @@
 # real). The script simulates Windows and Unix line endings, and the Windows runner adds a real
 # Windows. No TeX files here, so the web app doesn't compile (⌘S is still checked). A few minutes,
 # so it runs only when what it checks may have changed, every night, and on demand
-# (Actions → Sync-only check → Run workflow).
+# (Actions → Sync-only check → Run workflow). On a pull request that changes only the server's side
+# (server/, the checks' database helpers) the operating systems don't matter, because the server
+# only runs on Linux: that run is Ubuntu alone. Anything on a computer's side (the desktop app, the
+# web app's sync code, the checks themselves) runs on all three, as does every push to main, every
+# night and every manual run.
 name: Sync-only check
 
 on:
@@ -63,11 +67,35 @@ on:
   workflow_dispatch:
 
 jobs:
+  scope:
+    name: Which systems
+    runs-on: ubuntu-latest
+    outputs:
+      os: ${{ steps.pick.outputs.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # what only a computer's own side can change: the desktop app, the web app, these checks
+          ours='^(texloom/|web/|scripts/(check_synconly|check_shared_folder|checklib)\.py|scripts/refuse_writes/|pyproject\.toml|uv\.lock|\.github/(workflows/sync-only\.yml|actions/))'
+          changed=$(git diff --name-only "$BASE"...HEAD)  # (not piped into grep -q: under pipefail its early exit would flip the answer)
+          if [ "$EVENT" = pull_request ] && ! grep -qE "$ours" <<< "$changed"; then
+            echo 'os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo "Only the server's side changed: Ubuntu alone"
+          else
+            echo 'os=["ubuntu-latest","windows-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
+          fi
   sync-only:
+    needs: scope
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJSON(needs.scope.outputs.os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
