@@ -22,8 +22,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 import logging
 import os
+import secrets
 import shutil
 import time
 from collections import OrderedDict, defaultdict
@@ -52,6 +54,8 @@ KEEP_BIG = 64 * 1024  # an edit at least this big is remembered for good
 # so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
 META_RATE, META_BURST = 1.0, 600
 FACTS_KEPT = 20_000  # projects whose deletion and storage mode are kept in memory (see Store._facts)
+CHANNEL = "texloom_project"  # what servers sharing a database tell each other: "this project changed" (see Store._told)
+RECONCILE_EVERY = 86400  # seconds between recounts of the usage ledger against the stored data (see Store.reconcile)
 REVOKED_KEPT = 10_000  # projects whose revocations are kept in memory
 ENTRY_BYTES = "octet_length(data) + octet_length(sig)"  # what a log entry stores
 # What projects' data counts for, as (project, bytes) rows to add up: the log, stored files, and
@@ -103,6 +107,10 @@ CREATE TABLE IF NOT EXISTS lists (
   id text PRIMARY KEY, seq bigint NOT NULL, data bytea NOT NULL, owner text NOT NULL, seen double precision NOT NULL);
 CREATE INDEX IF NOT EXISTS lists_owner ON lists (owner, seq);
 CREATE INDEX IF NOT EXISTS lists_seen ON lists (seen);
+-- What each project's data counts for (USAGE below, added up), kept in step with every change to it, so
+-- that a server starting, or another server sharing this database, reads it rather than adding up the
+-- log. Only projects with something stored have a row. Store.reconcile checks it against a recount.
+CREATE TABLE IF NOT EXISTS usage (project text PRIMARY KEY, bytes bigint NOT NULL);
 """
 SCHEMA_POSTGRESQL = """
 -- ciphertext doesn't compress: store it as it is, out of line, without trying
@@ -111,7 +119,8 @@ ALTER TABLE log ALTER COLUMN data SET STORAGE EXTERNAL;
 # Each table's primary key, for copying them in order (db.copy_tables), and the boolean columns
 TABLES = {"log": ("project", "seq"), "head": ("project",), "mode": ("project",), "stored": ("project", "id"),
           "trash": ("project", "id"), "revoked": ("project", "pub"), "projects": ("project",), "gone": ("project", "h"),
-          "kept": ("project", "h"), "floor": ("project",), "deleted": ("project",), "clients": ("app", "version"), "lists": ("id",)}
+          "kept": ("project", "h"), "floor": ("project",), "deleted": ("project",), "clients": ("app", "version"), "lists": ("id",),
+          "usage": ("project",)}
 BOOLEANS = frozenset({"snap", "relay"})
 
 
@@ -164,6 +173,8 @@ class Store:
         self.pending: dict[str, int] = defaultdict(int)  # bytes of uploads under way (see put_blob)
         self._reaper: asyncio.Task | None = None
         self._locks: dict[str, list] = {}  # key -> [lock, users]
+        self.node = secrets.token_hex(4)  # this server's name in what it tells the others (it ignores its own)
+        self._refreshing: set[asyncio.Task] = set()  # looking again at projects the others changed
 
     @classmethod
     async def open(cls, url: str, files: Files | None = None, data: Path = Path("data"), serving: bool = False) -> Store:
@@ -180,8 +191,16 @@ class Store:
 
     async def _load(self) -> None:
         c = self.db
-        for project, n in await c.fetch(USAGE.format(where="")):
-            self.usage[project] += int(n or 0)
+        ledger = await c.fetch("SELECT project, bytes FROM usage")
+        if ledger:
+            for project, n in ledger:
+                self.usage[project] += int(n)
+        else:  # first start with a ledger (or nothing stored): add it up once, and keep it from now on
+            for project, n in await c.fetch(USAGE.format(where="")):
+                self.usage[project] += int(n or 0)
+            async with c.tx() as t:
+                await t.executemany("INSERT INTO usage(project, bytes) VALUES ($1,$2) ON CONFLICT (project) DO NOTHING",
+                                    [(p, n) for p, n in self.usage.items() if n])
         self.list_bytes = defaultdict(int, {r["owner"]: int(r["n"]) for r in await c.fetch(
             "SELECT owner, SUM(octet_length(data)) AS n FROM lists GROUP BY owner")})
         self.total = sum(self.usage.values()) + sum(self.list_bytes.values())
@@ -199,6 +218,7 @@ class Store:
         leftovers stay: its writers may have uploaded again since, and what's there is valid.)"""
         await self.files.check()
         log.info("stored files: %s", self.files.name)
+        await self.db.listen(CHANNEL, self._heard)
         left = await self.db.fetch("SELECT DISTINCT project FROM stored WHERE project IN "
                                      "(SELECT project FROM deleted UNION SELECT project FROM mode WHERE relay)")
         for (project,) in left:
@@ -259,6 +279,7 @@ class Store:
         await self.db.execute("UPDATE projects SET owner=$1 WHERE project=$2", owner, project)
         self._own(project, owner)
         log.info("project %s… now belongs to a creation code", project[:8])
+        await self._told(project)
 
     def _own(self, project: str, owner: str) -> None:
         n = self.usage.get(project, 0)
@@ -266,6 +287,80 @@ class Store:
             self.owner_bytes[self.owners[project]] -= n
         self.owner_bytes[owner] += n
         self.owners[project] = owner
+
+    # --- servers sharing a database --------------------------------------------------
+    async def _told(self, project: str) -> None:
+        """Tell the other servers on this database that something about a project changed (its owner, its
+        storage mode, what's stored, that it's deleted): any of them holding what it knew of it looks again.
+        Best effort: the project's own server is the one that changes it, and a server that missed this
+        looks again when it next hears, or at its next reconcile."""
+        try:
+            await self.db.notify(CHANNEL, json.dumps({"p": project, "n": self.node}, separators=(",", ":")))
+        except (DatabaseError, OSError) as e:
+            log.warning("couldn't tell the other servers about project %s…: %s", project[:8], e)
+        except Exception:  # (a failing database call: the change itself is made, and is what matters)
+            log.warning("couldn't tell the other servers about project %s…", project[:8], exc_info=True)
+
+    def _heard(self, payload: str) -> None:
+        """What another server told us (a callback in the event loop): look again at that project, or, for ""
+        (the connection was lost and came back: we may have missed some), at everything."""
+        if payload:
+            try:
+                d = json.loads(payload)
+                project, node = d["p"], d["n"]
+            except (ValueError, KeyError, TypeError):
+                log.warning("ignoring a notification that isn't one of ours: %r", payload[:80])
+                return
+            if node == self.node:
+                return  # our own
+            work = self.refresh_project(project)
+        else:
+            work = self.refresh_all()
+        task = asyncio.get_running_loop().create_task(work)
+        self._refreshing.add(task)
+        task.add_done_callback(self._refreshing.discard)
+
+    async def refresh_project(self, project: str) -> None:
+        """Take what the database now says of a project (its registration, and what it counts for) over what
+        this server remembers: it was changed by another server. What's kept only for speed (its storage
+        mode, the revocations) is dropped, to be read again when asked for."""
+        try:
+            row = await self.db.fetchrow("SELECT owner, seen, created, evicted FROM projects WHERE project=$1", project)
+            n = int(await self.db.fetchval("SELECT bytes FROM usage WHERE project=$1", project) or 0)
+        except DatabaseError:
+            log.warning("couldn't look again at project %s…", project[:8], exc_info=True)
+            return
+        self._facts.drop(project)
+        self._revoked.drop(project)
+        if row is None:  # gone (deleted, or never registered here)
+            if project in self.owners:
+                self.owner_bytes[self.owners[project]] -= self.usage.get(project, 0)
+                del self.owners[project]
+            self._grew_total(self.usage.pop(project, 0) * -1)
+            self.seen.pop(project, None)
+            self.evicted.discard(project)
+            return
+        self._own(project, row["owner"])
+        self._grew(project, n + self.pending.get(project, 0) - self.usage.get(project, 0))
+        self.seen[project] = max(row["seen"], row["created"])
+        (self.evicted.add if row["evicted"] else self.evicted.discard)(project)
+
+    async def refresh_all(self) -> None:
+        """Look again at everything this server remembers, as at the start (it may have missed what others said)."""
+        self._facts.items.clear()
+        self._revoked.items.clear()
+        self.usage = defaultdict(int)
+        self.total = 0
+        self.owners = {}
+        self.owner_bytes = defaultdict(int)
+        self.seen = {}
+        self.evicted = set()
+        await self._load()
+        for project, n in self.pending.items():
+            self._grew(project, n)
+
+    def _grew_total(self, n: int) -> None:
+        self.total += n
 
     def _grew(self, project: str, n: int) -> None:
         self.usage[project] += n
@@ -311,6 +406,7 @@ class Store:
             await c.execute("UPDATE projects SET evicted=$1 WHERE project=$2", time.time(), project)
         await self._drop_files(project)
         self.evicted.add(project)
+        await self._told(project)
         return freed - self.usage.get(project, 0)  # (what's remembered of it stays)
 
     @staticmethod
@@ -343,8 +439,42 @@ class Store:
         return [p for p, o in self.owners.items() if o == owner and self.usage.get(p, 0) > 0 and p not in self.evicted]
 
     async def _recount(self, project: str) -> None:
-        n = await self.db.fetchval(f"SELECT COALESCE(SUM(n), 0) FROM ({USAGE.format(where='WHERE project=$1')}) u", project)
-        self._grew(project, int(n) + self.pending.get(project, 0) - self.usage[project])
+        """Add up what a project's data counts for, from the tables: the ledger is set to it, and this server's
+        count (which also holds uploads under way, as `pending`) follows."""
+        n = int(await self.db.fetchval(f"SELECT COALESCE(SUM(n), 0) FROM ({USAGE.format(where='WHERE project=$1')}) u", project))
+        await self._ledger(project, n)
+        self._grew(project, n + self.pending.get(project, 0) - self.usage[project])
+
+    async def _ledger(self, project: str, n: int) -> None:
+        if n:
+            await self.db.execute("INSERT INTO usage(project, bytes) VALUES ($1,$2) "
+                                  "ON CONFLICT (project) DO UPDATE SET bytes = excluded.bytes", project, n)
+        else:
+            await self.db.execute("DELETE FROM usage WHERE project=$1", project)
+
+    async def reconcile(self) -> int:
+        """Check the usage ledger (and this server's counts) against the stored data, project by project,
+        and put right any that differ (a change that didn't keep it in step, a server that didn't know
+        of the ledger). Returns how many were wrong. Each one found is checked again, and recounted, under
+        the project's lock, so a write meanwhile is neither undone nor reported."""
+        truth: dict[str, int] = defaultdict(int)
+        for project, n in await self.db.fetch(USAGE.format(where="")):
+            truth[project] += int(n or 0)
+        ledger = {r["project"]: int(r["bytes"]) for r in await self.db.fetch("SELECT project, bytes FROM usage")}
+        wrong = 0
+        for project in sorted(set(truth) | set(ledger)):
+            if truth.get(project, 0) == ledger.get(project, 0) and truth.get(project, 0) == self.usage.get(project, 0) - self.pending.get(project, 0):
+                continue
+            async with self.lock(project):
+                now = int(await self.db.fetchval(f"SELECT COALESCE(SUM(n), 0) FROM ({USAGE.format(where='WHERE project=$1')}) u", project))
+                led = int(await self.db.fetchval("SELECT bytes FROM usage WHERE project=$1", project) or 0)
+                mem = self.usage.get(project, 0) - self.pending.get(project, 0)
+                if now != led or now != mem:
+                    await self._recount(project)
+                    wrong += 1
+                    log.warning("usage of project %s… was %s in the ledger and %s counted here, but is %s: put right",
+                                project[:8], led, mem, now)
+        return wrong
 
     def free_disk(self) -> int:
         return shutil.disk_usage(self.dir).free
@@ -371,6 +501,8 @@ class Store:
                                    "ON CONFLICT (project) DO UPDATE SET seq = head.seq + 1 RETURNING seq", project)
             await c.execute("INSERT INTO log(project, seq, data, sig, h) VALUES ($1,$2,$3,$4,$5)",
                             project, seq, data, sig, hashlib.sha256(data).digest())
+            await c.execute("INSERT INTO usage(project, bytes) VALUES ($1,$2) "
+                            "ON CONFLICT (project) DO UPDATE SET bytes = usage.bytes + excluded.bytes", project, len(data) + len(sig))
         self._grew(project, len(data) + len(sig))
         self.evicted.discard(project)
         return int(seq)
@@ -512,6 +644,7 @@ class Store:
             await self._drop_files(project)
         else:
             await self._recount(project)
+        await self._told(project)
 
     # --- deleted for everyone ---------------------------------------------------------
     @staticmethod
@@ -525,7 +658,7 @@ class Store:
         async with self.tx() as c:
             await c.execute("INSERT INTO deleted(project, at, sig, ts) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", project, at, sig, ts)
             # the tombstone above is all that's kept: its registration (owner, dates) goes too
-            for table in ("log", "gone", "kept", "head", "floor", "mode", "projects"):
+            for table in ("log", "gone", "kept", "head", "floor", "mode", "projects", "usage"):
                 await c.execute(f"DELETE FROM {table} WHERE project=$1", project)
         self._facts.drop(project)
         msg = await self.deleted(project)  # the first deletion's, if there were two
@@ -535,6 +668,7 @@ class Store:
         self.usage.pop(project, None)
         self.seen.pop(project, None)
         self.evicted.discard(project)
+        await self._told(project)
         return msg
 
     # --- stored files ---------------------------------------------------------------

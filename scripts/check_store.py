@@ -193,6 +193,7 @@ async def steps(url: str, tmp: Path) -> list:
     await lists.put(l2, 1, b"y" * 40, OTHER)
     ok(note("purge", await lists.purge_owner(OTHER)) == 1 and store.list_bytes[OTHER] == 0, "a code's lists go with it")
 
+    ok(note("ledger", await store.reconcile()) == 0, "the usage ledger matches a recount of the stored data, after all of that")
     total, owner_usage = store.total, (store.owner_usage(OWNER), store.owner_usage(OTHER))
     usages = dict(store.usage)
     await store.close()

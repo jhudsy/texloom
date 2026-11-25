@@ -176,7 +176,10 @@ the environment. On the command line they'd show in `ps`.
     `DATABASE=postgresql`);
   - `postgresql://texloom:PASSWORD@db.example.org:5432/texloom?sslmode=require`: elsewhere.
 
-  The server uses up to 10 connections.
+  The server uses up to 10 connections for its queries, plus one that listens for what other servers
+  tell it (a project changed, for several servers sharing the database), and, for a moment each hour, one
+  for its upkeep. PostgreSQL allows 100 by default (`max_connections`), which is the limit on how many
+  servers can share one database before a connection pooler (PgBouncer) is needed.
 
 The server creates its tables when it starts, either way. To move a server from one to the other
 (SQLite up to PostgreSQL, say), stop it, copy everything into the new, empty database, point the

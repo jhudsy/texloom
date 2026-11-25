@@ -52,6 +52,7 @@ STATE = {
     "Policy.busy": "connection",  # whether a project is open: asks this relay's connections only
     # each relay's own
     "Relay.memory": "per-server", "Relay.address_memory": "per-server", "Relay.held": "per-server", "Relay.stopping": "per-server", "Budget.*": "per-server",
+    "Store.node": "per-server", "Store._refreshing": "per-server",  # its name in what it tells the others; looking again at what they changed
     "Store.meta_tokens": "per-server", "Store.meta_at": "per-server",  # the budget for rows that store nothing
     "ArxivFetcher.*": "per-server",  # arXiv's rate limits, per relay
     "Failover.*": "per-server",  # which of the two servers this is, and its lease (one lease, in the bucket, for both)

@@ -13,12 +13,12 @@ from pathlib import Path
 
 from aiohttp import web
 
-from .db import redact
+from .db import MAINTENANCE_LOCK, redact
 from .endpoints import MAX_BODY, Endpoints, headers
 from .files import Files
 from .policy import GiB, CodeBook, Limits, Policy
 from .relay import Relay
-from .store import Store
+from .store import RECONCILE_EVERY, Store
 
 log = logging.getLogger("texloom.relay")
 
@@ -52,15 +52,27 @@ class Settings:
 async def upkeep(policy: Policy, evict_days: float, purge_days: float | None) -> None:
     """Background work while the server runs, hourly (more often for short eviction times): drop
     the stored copies of projects unopened for `evict_days`, and project lists unused as long, and
-    purge the projects of codes that expired more than `purge_days` ago."""
+    purge the projects of codes that expired more than `purge_days` ago; and, once a day, check the usage
+    ledger against the stored data. With several servers sharing a database only one does this at a time
+    (an advisory lock held while it does: the others find it taken and skip until the next round); with
+    one it is always held. A server with no database open yet (a standby) has nothing to do."""
+    last_reconcile = time.monotonic()
     while True:
         try:
-            if evict_days > 0:
-                await policy.evict_idle(evict_days)
-            if purge_days is not None:
-                await policy.purge_expired(purge_days)
-            if evict_days > 0 and policy.lists:
-                await policy.lists.drop_idle(time.time() - evict_days * 86400)
+            store = policy.store
+            if store is not None:
+                async with store.db.lock(MAINTENANCE_LOCK) as holding:
+                    if holding:
+                        if evict_days > 0:
+                            await policy.evict_idle(evict_days)
+                        if purge_days is not None:
+                            await policy.purge_expired(purge_days)
+                        if evict_days > 0 and policy.lists:
+                            await policy.lists.drop_idle(time.time() - evict_days * 86400)
+                        if time.monotonic() - last_reconcile >= RECONCILE_EVERY:
+                            last_reconcile = time.monotonic()
+                            if wrong := await store.reconcile():
+                                log.warning("%d project(s) had the wrong usage counted, now put right", wrong)
         except Exception:
             log.exception("maintenance")
         await asyncio.sleep(min(3600, max(60, evict_days * 8640)) if evict_days > 0 else 3600)
@@ -113,12 +125,11 @@ def make_app(s: Settings) -> web.Application:
     if s.admin_token:
         from .admin import Admin
         app.router.add_get("/admin", Admin(relay, s.admin_token, s.evict_days, s.purge_days, panels).page)
-    if s.evict_days > 0 or s.purge_days is not None:
-        async def maintenance(_app: web.Application):
-            task = asyncio.create_task(upkeep(policy, s.evict_days, s.purge_days))
-            yield
-            task.cancel()
-        app.cleanup_ctx.append(maintenance)
+    async def maintenance(_app: web.Application):  # (always: it also keeps the usage ledger right)
+        task = asyncio.create_task(upkeep(policy, s.evict_days, s.purge_days))
+        yield
+        task.cancel()
+    app.cleanup_ctx.append(maintenance)
     app.on_shutdown.append(relay.close_all)
     app.router.add_get("/ws/{project}", relay.ws_handler)
     app.router.add_put("/blob/{project}/{id}", http.put_blob)

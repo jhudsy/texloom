@@ -1015,6 +1015,7 @@ uv run --extra server python scripts/check_move_code.py            # moving a pr
 uv run --extra server python scripts/check_restore.py              # a server restored from a backup: an app that had seen later changes misses none
 uv run --extra server python scripts/check_standby.py              # a warm standby promoted (needs PostgreSQL's programs): apps miss none of the changes it never got
 uv run --extra server python scripts/check_failover.py             # automatic failover with two real servers: a lost primary, one cut off from the bucket, the refusals (needs PostgreSQL's programs)
+uv run --extra server python scripts/check_groundwork.py             # what several servers on one database need: the usage ledger, the lock, notifications, two stores hearing each other, upkeep once
 uv run python scripts/check_rebuild_standby.py                         # deploy/rebuild-standby.py: the old primary rebuilt as a standby (needs PostgreSQL's programs); it refuses the primary, another cluster, an unconfirmed run
 uv run --extra server python scripts/rehearse_failover.py             # by hand, needs Docker: failover with real parts (relays, PostgreSQL primary and standby, an S3 store, Caddy): a lost machine, a frozen one, a cut-off one, the bucket going away
 uv run --with pyyaml python scripts/check_workflows.py                   # every GitHub Actions file parses (one that doesn't is not a failing test: its workflow just stops running)
