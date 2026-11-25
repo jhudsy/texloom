@@ -126,7 +126,7 @@ def parser() -> argparse.ArgumentParser:
                    help="put back into the file store every stored file it lacks, from DIR (a restored backup, "
                         "or the folder when moving to a bucket), then exit")
     p.add_argument("--failover", action="store_true",
-                   help="take part in failover with a standby server (INSTALL.md, \"A standby server\"): this server "
+                   help="take part in failover with a standby server (STANDBY.md): this server "
                         "holds a lease in the bucket while it is the primary, or waits as the standby and takes over "
                         "when it isn't renewed. Needs PostgreSQL (this server's own, the standby's a replica) and "
                         "--files s3://… with a store that does conditional writes. Off (the default): nothing of this runs")

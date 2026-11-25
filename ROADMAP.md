@@ -10,7 +10,7 @@ How the pieces fit, and why (three ways to run it: one server; two with failover
 [SCALING.md](SCALING.md). In this order, each building on the one before:
 
 1. **[A warm standby and automatic failover](https://github.com/jhudsy/texloom/issues/12)**: built and checked
-   on one machine and in Docker (INSTALL.md, "A standby server"; SCALING.md, "Way 2"). Left: trying it on a
+   on one machine and in Docker (STANDBY.md; SCALING.md, "Way 2"). Left: trying it on a
    real pair. A cold standby restored nightly from the backups still covers losing both (SCALING.md,
    "Way 1: one server").
 2. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:

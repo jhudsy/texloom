@@ -1,4 +1,4 @@
-# Caddy for TWO TeXLoom servers that are both reachable by the public (INSTALL.md, "Moving traffic to
+# Caddy for TWO TeXLoom servers that are both reachable by the public (STANDBY.md, "Moving traffic to
 # the primary"). Put this on each machine, with both machines' addresses in DNS for the name. A visitor
 # who reaches either one is sent on to whichever server answers 200 on /api/health: the primary (a
 # standby, and a server that has stopped itself, answer 503). Nothing in DNS has to change when the

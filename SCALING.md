@@ -82,15 +82,14 @@ that the backups work.
 
 **A warm standby, switched by hand** (**built**). With PostgreSQL, a second machine follows the primary by
 streaming replication and can take over in minutes: one you run, or a hosted PostgreSQL that keeps its own
-standby (INSTALL.md, "A standby server"; the relay is told the same thing either way, its `database`). A
+standby ([STANDBY.md](STANDBY.md); the relay is told the same thing either way, its `database`). A
 person decides the primary is gone, promotes the standby, starts the relay on it and moves the name. The relay
 refuses to start on a database that is still a standby, and says why. The last moments before the loss may be
 missing on the standby; the apps send them again, as after a restore (`scripts/check_standby.py`).
 
 ### Switching over
 
-**Automatic failover** (**built**, off unless `failover` is set: `server/failover.py`, INSTALL.md, "Letting the
-two servers switch over by themselves"). No third machine is needed, because the bucket is the tie-breaker:
+**Automatic failover** (**built**, off unless `failover` is set: `server/failover.py`, [STANDBY.md](STANDBY.md#letting-the-two-servers-switch-over-by-themselves)). No third machine is needed, because the bucket is the tie-breaker:
 
 1. The primary renews a small lease object in the bucket every few seconds.
 2. The standby promotes itself only once the lease has not been renewed for long enough.
@@ -100,7 +99,7 @@ two servers switch over by themselves"). No third machine is needed, because the
 5. A primary that comes back reads the lease first and, its database being a former primary's, waits to be
    rebuilt as a standby (`deploy/rebuild-standby.py`).
 
-This needs a bucket that does conditional writes (not all do: INSTALL.md lists what is known, and a server
+This needs a bucket that does conditional writes (not all do: STANDBY.md lists what is known, and a server
 asked to fail over tests its store at start and refuses one that fails) and clocks that run at roughly the same
 speed: nothing compares one machine's clock with another's. It is **modelled** (`models/failover`,
 `scripts/check_model.py`, issue [#8](https://github.com/jhudsy/texloom/issues/8)) and run end to end, first
@@ -125,8 +124,8 @@ these points:
   unanswered (every 30 seconds), so people connected through it wait up to about a minute longer than for one
   that dies.
 
-**What it leaves to you:** how traffic reaches whichever server is primary (`/api/health` says which; INSTALL.md,
-"Moving traffic to the primary", lists ways). Rebuilding the old primary as a standby is one command
+**What it leaves to you:** how traffic reaches whichever server is primary (`/api/health` says which; [STANDBY.md](STANDBY.md#moving-traffic-to-the-primary)
+lists ways). Rebuilding the old primary as a standby is one command
 (`deploy/rebuild-standby.py`). It does not use both servers at once and does not scale.
 
 ## Way 3: several relays

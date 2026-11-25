@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A warm standby taking over: nobody misses a change (issue 12, INSTALL.md "A standby server").
+"""A warm standby taking over: nobody misses a change (issue 12, STANDBY.md).
 
 PostgreSQL streams the primary's changes to a standby. When the primary is lost the standby is
 promoted and the server started on it, at the same address (in real life the name moves). The

@@ -44,7 +44,7 @@ the version "hasn't changed" for as long as the outage lasted (`scripts/rehearse
 
 - The store's conditional write is atomic and strongly consistent. Most S3-compatible stores have
   this now; the server tests its own store at start and refuses to fail over on one that fails
-  (`texloom-server --failover-check`; INSTALL.md lists what is known).
+  (`texloom-server --failover-check`; STANDBY.md lists what is known).
 - One app and two servers; the app never loses its own copy; change ids are unique. (Several apps
   and a third server don't add a different kind of case: each app checks for itself.)
 - The app may connect to any server that thinks it is the primary, including an old one: more than

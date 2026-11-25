@@ -5,7 +5,7 @@ Off unless `failover` is set, and then this module is the only part of the serve
 it off nothing here is imported, no task runs and nothing is added to the path of a request.
 
 Two servers, each with its own PostgreSQL (the second a standby of the first, kept up by streaming
-replication, INSTALL.md "A standby server") and the same bucket. The bucket holds one small object,
+replication, STANDBY.md) and the same bucket. The bucket holds one small object,
 the lease: {"ver": n, "holder": "name"}, changed only by conditional writes ("if it is still the
 version I read"), so the store decides who wins.
 
@@ -24,7 +24,7 @@ version I read"), so the store decides who wins.
   the standby took over; what keeps that harmless is the apps' hello check).
 - A node whose own PostgreSQL is a primary, but which isn't the lease's last holder, must not claim
   by waiting: it is a former primary with a history the new one doesn't have. It says so and waits to be
-  rebuilt as a standby (INSTALL.md).
+  rebuilt as a standby (STANDBY.md).
 
 Until a node is the primary every address except /api/health answers 503, and /api/health says
 what it is, so a front end or a DNS health check sends people only to the primary.
@@ -125,7 +125,7 @@ async def check_conditional(files: Files) -> None:
                 problems.append(f"more than one of {RACERS} simultaneous writes for the same version succeeded")
         except FilesError as e:
             raise FilesError(f"{files.name} can't hold a failover lease: {e}. (A store that rejects If-Match or "
-                             "If-None-Match on writes can't: see INSTALL.md.)") from None
+                             "If-None-Match on writes can't: see STANDBY.md.)") from None
     finally:
         for name in (one, race):
             try:
@@ -212,7 +212,7 @@ class Failover:
         grid = "".join(f"<span>{k}</span><span>{v}</span>" for k, v in rows)
         return (f"<h2>Failover</h2><div class=grid>{grid}</div>"
                 f"<p class=muted>One server holds the lease and is the primary; the other waits and takes over after {self.wait:g} s "
-                "without a renewal (INSTALL.md, “Letting the two servers switch over by themselves”).</p>")
+                "without a renewal (STANDBY.md, “Letting the two servers switch over by themselves”).</p>")
 
     def context(self, app: web.Application):
         """The server's start and stop, in place of the plain database opening (cleanup_ctx)."""
@@ -279,7 +279,7 @@ class Failover:
                             if not await is_standby(self.s.database):
                                 log.error("failover: %s's lease hasn't been renewed for %.0f s, but this server's "
                                           "database is a primary (a former one): not taking over. Rebuild it as a "
-                                          "standby of the new primary (INSTALL.md, \"A standby server\")", holder, self.wait)
+                                          "standby of the new primary (STANDBY.md)", holder, self.wait)
                                 self._seen_at = clock()  # (say it again after another wait)
                             else:
                                 sent = clock()

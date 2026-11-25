@@ -393,9 +393,9 @@ math in `$…$` or `$$…$$`. Raw HTML appears as plain text, and images from ot
 A server is one small Python process, with an SQLite file (nothing to install) or PostgreSQL as
 its database. [INSTALL.md](INSTALL.md) covers installing one (a script does it on Ubuntu or
 Debian), its settings file, moving from one database to the other, stored files in a folder or an
-S3-compatible bucket, creation codes and storage allowances, private servers, backups, and a warm
-standby that can take over automatically. [SCALING.md](SCALING.md) says how far one server goes and
-what comes next.
+S3-compatible bucket, creation codes and storage allowances, private servers and backups.
+[STANDBY.md](STANDBY.md) adds a warm standby that can take over automatically. [SCALING.md](SCALING.md)
+says how far one server goes and what comes next.
 
 ## Working on a project as a folder
 

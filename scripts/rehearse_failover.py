@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """A rehearsal of failover with real parts, in Docker (needs Docker; by hand, not in CI: scripts/check_failover.py
-is the quick check). SCALING.md, INSTALL.md "Letting the two servers switch over by themselves".
+is the quick check). SCALING.md, STANDBY.md "Letting the two servers switch over by themselves".
 
-Two "machines" of containers on a private network, as INSTALL.md describes them: each has a relay
+Two "machines" of containers on a private network, as STANDBY.md describes them: each has a relay
 (built from this checkout, `--failover`), a PostgreSQL (the second a streaming standby of the first,
-set up with the commands INSTALL.md gives, and a role that may only promote through the grant), and a
+set up with the commands STANDBY.md gives, and a role that may only promote through the grant), and a
 Caddy running deploy/Caddyfile.failover (both machines' Caddys in front of both relays). They share
 a real S3-compatible store (RustFS) that does conditional writes, reached over a network of its own
 for each relay, so one relay can be cut off from it alone. Apps (the desktop sync engine) connect
@@ -111,14 +111,14 @@ class Cluster:
             ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--aws-sigv4", "aws:amz:us-east-1:s3", "-u", f"{S3_KEY}:{S3_SECRET}",
              "-X", "PUT", f"http://127.0.0.1:{s3_port}/bucket"], capture_output=True, text=True).stdout in ("200", "409"))
 
-        # the primary's PostgreSQL, set up as INSTALL.md says: a role for the server that may promote, a role to replicate
+        # the primary's PostgreSQL, set up as STANDBY.md says: a role for the server that may promote, a role to replicate
         docker("run", "-d", "--name", self.n("pg-a"), "--network", self.n("net"), "-e", "POSTGRES_PASSWORD=admin", PG,
                "-c", "wal_level=replica", "-c", "max_wal_senders=5")
         self._wait("PostgreSQL a", lambda: self.psql(self.n("pg-a"), "SELECT 1") == "1")
         for sql in ("CREATE ROLE texloom LOGIN PASSWORD 'tl'", "CREATE DATABASE texloom OWNER texloom",
                     "CREATE ROLE replicator REPLICATION LOGIN PASSWORD 'rp'"):
             self.psql(self.n("pg-a"), sql)
-        # (a function's privileges are per database: in the one the server uses, as INSTALL.md says)
+        # (a function's privileges are per database: in the one the server uses, as STANDBY.md says)
         self.psql(self.n("pg-a"), "GRANT EXECUTE ON FUNCTION pg_promote(boolean, integer) TO texloom", db="texloom")
         self.psql(self.n("pg-a"), "GRANT pg_monitor TO texloom")  # (optional: lets the admin page show the standby's state and delay)
         docker("exec", "-u", "postgres", self.n("pg-a"), "bash", "-c",
@@ -128,7 +128,7 @@ class Cluster:
         self.relay("a", "s3a")  # creates the lease and the tables; the standby's base backup needs the tables
         self._wait("relay a to serve", lambda: self.health("a")[0] == 200)
 
-        # the standby's PostgreSQL: a streaming base backup, as INSTALL.md does it
+        # the standby's PostgreSQL: a streaming base backup, as STANDBY.md does it
         docker("run", "--rm", "--network", self.n("net"), "-v", f"{self.n('pgb')}:/var/lib/postgresql/data", "-e", "PGPASSWORD=rp", PG,
                "bash", "-c", "chown postgres:postgres /var/lib/postgresql/data && chmod 700 /var/lib/postgresql/data && "
                f"gosu postgres pg_basebackup -h {self.n('pg-a')} -U replicator -D /var/lib/postgresql/data -R -X stream --checkpoint=fast",

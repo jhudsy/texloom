@@ -135,7 +135,7 @@ async def replication_status(url: str) -> dict:
 async def promote(url: str) -> None:
     """Make the PostgreSQL at `url` a primary if it is a standby (pg_promote, waiting for it); one
     that is a primary already is left alone. The role the server connects as needs EXECUTE on
-    pg_promote, granted once on the primary (INSTALL.md, "A standby server"): the grant is
+    pg_promote, granted once on the primary (STANDBY.md): the grant is
     replicated, so the standby has it."""
     if not await is_standby(url):
         return
@@ -147,7 +147,7 @@ async def promote(url: str) -> None:
         except asyncpg.InsufficientPrivilegeError:
             raise DatabaseError("this server's database role may not promote its standby PostgreSQL: on the primary, in "
                                 "the server's own database (psql DATABASE), GRANT EXECUTE ON FUNCTION "
-                                "pg_promote(boolean, integer) TO <that role> (INSTALL.md, \"A standby server\")") from None
+                                "pg_promote(boolean, integer) TO <that role> (STANDBY.md)") from None
         if not promoted or await c.fetchval("SELECT pg_is_in_recovery()"):
             raise DatabaseError(f"{redact(url)} didn't become a primary within 60 seconds")
     finally:
@@ -262,7 +262,7 @@ class PostgreSQL(_PgCalls, Database):
         if standby:
             await pool.close()
             raise DatabaseError(f"{redact(url)} is a standby, which can't be written to. Promote it first "
-                                "(INSTALL.md, \"A standby server\"), or point `database` at the primary")
+                                "(STANDBY.md), or point `database` at the primary")
         return cls(url, pool)
 
     @contextlib.asynccontextmanager
