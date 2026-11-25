@@ -118,6 +118,7 @@ export interface FolderSync {
 export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync> {
   const KEY = `known.${r.keys.project}`
   const DKEY = `dirs.known.${r.keys.project}`
+  const RKEY = `recent.${r.keys.project}` // the versions recently on disk, and who wrote the latest
   // What was in sync is remembered for the folder last linked. For any other folder, start
   // afresh: otherwise every project file missing from it would count as deleted on disk.
   const prev = await savedFolder(r.keys.project)
@@ -131,6 +132,13 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
   // Only when the latest was written here by the sync (others' changes) can an older version be a
   // stale copy coming back; when it was a save in the folder, going back is that editor's undo.
   const base = new Map<string, string>(), recent = new Map<string, string[]>(), wroteLast = new Map<string, boolean>()
+  // kept with the folder's other records: a page closed and opened again still knows an older copy
+  // coming back for what it is (without them it read as an edit, undoing what the sync last wrote)
+  if (same) {
+    const kept = await kv<{ recent: Record<string, string[]>; wrote: Record<string, boolean> }>(RKEY).catch((e) => quiet('the versions recently on disk not kept: an older copy coming back reads as an edit', e))
+    for (const [p, hs] of Object.entries(kept?.recent ?? {})) if (known[p] && Array.isArray(hs)) recent.set(p, hs.filter((h) => typeof h === 'string').slice(-30))
+    for (const [p, w] of Object.entries(kept?.wrote ?? {})) if (known[p] && typeof w === 'boolean') wroteLast.set(p, w)
+  }
   // Each text file's last-synced text is kept in this browser's storage too, with the hash noted for
   // the file (base is what the file holds): reopening the page needs it to merge a save made while it
   // was closed. Without it the save replaced the project's text, undoing changes the file never got.
@@ -182,7 +190,8 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
     }
     for (const p of [...savedBase.keys()]) if (!known[p]) { await kv(BKEY(p), null); savedBase.delete(p) }
   }
-  const save = () => Promise.all([kv(KEY, known), kv(DKEY, [...knownDirs]), saveBases()]).catch((e) => quiet('browser storage unavailable: the folder’s records stay in memory', e))
+  const save = () => Promise.all([kv(KEY, known), kv(DKEY, [...knownDirs]), saveBases(),
+    kv(RKEY, { recent: Object.fromEntries([...recent].filter(([p]) => known[p])), wrote: Object.fromEntries([...wroteLast].filter(([p]) => known[p])) })]).catch((e) => quiet('browser storage unavailable: the folder’s records stay in memory', e))
   const sync: FolderSync = { name: root.name, stop, status: () => last, onChange: null, onPrograms: null }
   const note = (s: string) => { last = s; sync.onChange?.() }
 
@@ -339,7 +348,14 @@ export async function startFolderSync(r: Replica, root: Dir): Promise<FolderSync
       unread.delete(path)
       const text = isText(path, data)
       const h = text !== null ? await sha(data) : await r.keys.blobId(data)
-      if (k?.h === h) { known[path] = { h, m: f.lastModified, z: f.size, c: crlf(data) }; if (text !== null) base.set(path, text); continue }
+      if (k?.h === h) { // saved back to what it held (an edit and its undo, say): nothing to read in
+        known[path] = { h, m: f.lastModified, z: f.size, c: crlf(data) }
+        if (text !== null) base.set(path, text)
+        // but a write held back while that save was unread (unreadNow) is still owed: the project
+        // may have changed meanwhile (typed here, or from collaborators), and nothing else would write it
+        if (text !== null ? r.files.get(path)?.toString() !== text : r.bin.get(path)?.h !== h) rewrite = true
+        continue
+      }
       if (text !== null && data.length && stale(path, h)) { // (an empty file is an editor halfway through saving)
         // an older version came back: not an edit (it would undo collaborators' changes)
         console.warn(`${path}: an older version reappeared in the folder; keeping the project's text`)

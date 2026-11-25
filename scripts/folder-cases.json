@@ -35,6 +35,16 @@
       "name": "a refused write, then nothing else changes",
       "found": "0.4.28: written for the browser, whose 2 s poll only read the folder: a refused write waited for the next change to be tried again.",
       "steps": [["refuse", "A", true], ["collab", 0, 0], ["deliver", "C", "A"], ["sync", "A"], ["refuse", "A", false], ["sync", "A"], ["sync", "A"]]
+    },
+    {
+      "name": "typed here, then an editor saves the file back to what it was before the sync wrote",
+      "found": "2026-11-25: a random run of the browser's model (CI, seed 1994967796). The sync held its write back while the editor's save was unread; reading the save found the file as it knew it, and nothing wrote the typed text out.",
+      "steps": [["type", 0, 0], ["save", "A", 0, 9], ["save", "A", 1, 7], ["older", "A", 0]]
+    },
+    {
+      "name": "a collaborator's line written here, the page closed and opened again, then the older copy comes back",
+      "found": "2026-11-25: a random run of the browser's model (seed 1994821993). Reopened, the page no longer knew which versions it had written, so the older copy read as an edit and took the collaborator's line out.",
+      "steps": [["collab_crlf", 0, 0], ["deliver", "C", "B"], ["toggle", "B"], ["toggle", "B"], ["older", "B", 0]]
     }
   ]
 }
