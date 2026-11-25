@@ -91,7 +91,15 @@ async def main() -> int:
                     break
                 await asyncio.sleep(0.1)
             check("the standby has what the primary has", ok)
-            check("and is in step with the server's log", await head(standby_url, keys.project) == await head(primary_url, keys.project) > 0)
+            # (replication is asynchronous: the two heads are read a moment apart, so wait for them to agree, and
+            # say what they were if they never do)
+            heads = (0, 0)
+            for _ in range(100):
+                heads = (await head(standby_url, keys.project), await head(primary_url, keys.project))
+                if heads[0] == heads[1] > 0:
+                    break
+                await asyncio.sleep(0.1)
+            check("and is in step with the server's log", heads[0] == heads[1] > 0, f"standby {heads[0]}, primary {heads[1]}")
 
             # the link to the standby is cut; edits go on, and the standby never gets them
             pg.stop(standby)
