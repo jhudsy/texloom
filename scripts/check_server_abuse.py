@@ -288,16 +288,30 @@ async def connections(tmp: Path) -> None:
 
 async def too_old(tmp: Path) -> None:
     """With a minimum version, an app older than it, or too old to say its version, is told to update and the
-    connection closed; one at or above it is let in."""
-    async with client(tmp, min_version="0.4.50") as c:
-        for what, hello in (("an older app", {"app": "desktop", "v": "0.4.49"}), ("one too old to say its version", {"app": "desktop"})):
+    connection closed (the one too old to say its version, which wouldn't understand and would come straight back,
+    after a while: compat 0.4.30); one at or above it is let in."""
+    with patched(relay_mod, HOLD_UNVERSIONED=1.0):
+        async with client(tmp, min_version="0.4.50") as c:
             _, pid = keypair()
             ws = await c.ws_connect(f"/ws/{pid}")
-            await ws.send_json({"t": "hello", "since": 0, **hello})
+            await ws.send_json({"t": "hello", "since": 0, "app": "desktop", "v": "0.4.49"})
             reply = await ws.receive_json(timeout=5)
             m = await ws.receive(timeout=5)
-            check(f"{what} is told to update, then closed at once",
+            check("an older app is told to update, then closed at once",
                   reply.get("denied") is True and m.type in (WSMsgType.CLOSE, WSMsgType.CLOSED), (reply, m.type))
+            _, pid = keypair()
+            ws = await c.ws_connect(f"/ws/{pid}")
+            await ws.send_json({"t": "hello", "since": 0, "app": "desktop"})
+            reply = await ws.receive_json(timeout=5)
+            try:
+                m = await ws.receive(timeout=0.4)
+                held = False
+            except TimeoutError:
+                held = True  # nothing yet: it is being held
+            check("one too old to say its version is told to update, and kept waiting, not closed at once", reply.get("denied") is True and held)
+            m = await ws.receive(timeout=5)
+            check("and closed after the hold", m.type in (WSMsgType.CLOSE, WSMsgType.CLOSED), m.type)
+    async with client(tmp, min_version="0.4.50") as c:
         _, pid = keypair()
         ws = await c.ws_connect(f"/ws/{pid}")
         await ws.send_json({"t": "hello", "since": 0, "app": "desktop", "v": "0.4.50", "pages": 1})

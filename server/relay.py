@@ -21,7 +21,7 @@ from texloom.crypto import b64e, canonical_pub, revoke_msg, signer
 
 from .policy import KiB, MiB, Policy
 from .store import Store
-from .wire import b64d, canonical_id, client_address, verify
+from .wire import b64d, canonical_id, client_address, verify, version_tuple
 
 log = logging.getLogger("texloom.relay")
 
@@ -49,6 +49,7 @@ PEER_BUFFER_MAX = 8 * MiB  # bytes waiting to go to one peer: beyond this it isn
 OUT_MAX = 128 * MiB  # bytes waiting to go out on all connections: beyond this, peers holding a lot are cut off
 STALL = 10  # seconds a large reply may make no progress before its reader is cut off
 HELLO_WAIT = 10  # seconds a new connection has to say who it is (apps do at once), or it's closed
+HOLD_UNVERSIONED = 600  # seconds a refused app too old to say its version is kept (see _hold)
 RECHECK = 60  # seconds between a private server's checks that a connected project's code still counts
 # Building and sending a catch-up reply holds the rows, their base64 and the JSON text: measured at
 # about 2.6 times its stored size (Python's own count, 12 MB snapshots); 4 leaves room for buffers.
@@ -528,6 +529,21 @@ class Relay:
             if conn.aware and not self.stopping:  # this also covers a crash or a lost connection, where a client can't say goodbye
                 await self.broadcast(project, {"t": "left", "from": conn.id})
 
+    # compat(refused 0.4.30): apps too old to say their version ("unknown" on the admin page): remove _hold and HOLD_UNVERSIONED
+    async def _hold(self, project: str, ws, conn: Conn) -> None:
+        """Keep a refused app that's too old to say its version (before 0.4.30) connected, hearing
+        nothing, for a while. It doesn't understand the refusal, and after a connection that opened it
+        waits only a second before the next: closed at once, it would connect every second or two until
+        its user updates it. Its pings are still answered (else it would leave and come straight back)."""
+        self.rooms[project].discard(ws)  # nothing more of the project reaches it
+        try:
+            async with asyncio.timeout(HOLD_UNVERSIONED):
+                async for raw in ws:
+                    if raw.type == WSMsgType.TEXT and not conn.allow(len(raw.data)):
+                        break
+        except TimeoutError:
+            pass
+
     async def _not_as_seen(self, project: str, last) -> bool:
         """An app's hello says which change it last has here ("last": [its number, its content's
         SHA-256]). True when this server's log isn't the one it got that from: the log ends before
@@ -575,6 +591,8 @@ class Relay:
             await self.policy.note_client(msg.get("app"), msg.get("v"))
         if self.policy.too_old(msg.get("v")):
             await ws.send_json({"t": "err", "denied": True, **self.policy.update_needed()})
+            if version_tuple(msg.get("v")) is None:
+                await self._hold(project, ws, conn)
             await ws.close(code=1008, message=b"update needed")
             return
         await self.store.touch(project)

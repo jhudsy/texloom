@@ -54,9 +54,10 @@ Not broken, but costing more the longer it's left (label `tech-debt`), roughly m
 - **[Browser checks for the PDF view, comments from the PDF, the service worker and the arXiv
   download](https://github.com/jhudsy/texloom/issues/21)**: only the git hosts and the Review tab have kept browser checks so far.
 - **[Code kept for older apps and data](https://github.com/jhudsy/texloom/issues/27)**: each place is marked and listed
-  (`scripts/check_compat.py`, DESIGN.md). Everything up to 0.4.33 is gone. Left: renaming the `github` settings, and
-  noting which app versions wrote to each stored project, so that what remains (8 places, all data from 0.4.35 on) can
-  be retired by evidence rather than judgement.
+  (`scripts/check_compat.py`, DESIGN.md). Everything up to 0.4.33 is gone except the shim that keeps an app too old to say its
+  version (before 0.4.30) from reconnecting every second when refused, which goes once the admin page shows none connect.
+  Left: renaming the `github` settings, and noting which app versions wrote to each stored project, so that what remains
+  can be retired by evidence rather than judgement.
 
 ## Parked
 
