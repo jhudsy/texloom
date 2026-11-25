@@ -7,9 +7,11 @@
 
 It stops this machine's texloom server and PostgreSQL, moves the data directory aside (it keeps it,
 as DIR.old-DATE, until you delete it), takes a streaming base backup of NEW-PRIMARY-HOST as the
-replication role, starts PostgreSQL as its standby, waits until it is streaming, and starts the
-texloom server again (which then waits as the standby). The replication password is PGPASSWORD in the
-environment, or the postgres user's ~/.pgpass.
+replication role, starts PostgreSQL as its standby, and waits until it is streaming. If failover is on
+(`failover = true` in the settings), it then starts the texloom server again, which waits as the standby;
+without failover a server can't run on a standby database (it says so and stops), so the server is left
+stopped (`--start-service` starts it anyway). The replication password is PGPASSWORD in the environment,
+or the postgres user's ~/.pgpass.
 
 It refuses, changing nothing, when
 - this machine's texloom server answers 200 on /api/health: it is the primary, and this would destroy
@@ -137,6 +139,20 @@ def remote_system_id(pg: Pg, host: str, port: int, user: str, env: dict[str, str
     return p.stdout.strip().split("|")[0]
 
 
+def failover_on() -> bool:
+    """Is automatic failover on for this machine's server (the settings file, or TEXLOOM_FAILOVER)?"""
+    on = re.compile(r"^\s*(failover\s*=\s*true|TEXLOOM_FAILOVER=(1|true|yes|on))\s*$", re.I | re.M)
+    if os.environ.get("TEXLOOM_FAILOVER", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    for f in ("/etc/texloom/texloom.toml", "/etc/texloom/env"):
+        try:
+            if on.search(Path(f).read_text()):
+                return True
+        except OSError:
+            pass
+    return False
+
+
 def is_primary_here(url: str) -> bool:
     try:
         return urllib.request.urlopen(url, timeout=3).status == 200
@@ -160,6 +176,8 @@ def main() -> None:
     ap.add_argument("--local-conninfo", help="how psql reaches this PostgreSQL (default: its Debian port, over the socket)")
     ap.add_argument("--health-url", default="http://127.0.0.1:8787/api/health", help="this machine's texloom server")
     ap.add_argument("--no-service", action="store_true", help="don't stop and start the texloom service")
+    ap.add_argument("--start-service", action="store_true",
+                    help="start the texloom service afterwards even if failover is off (it then can't run on a standby database)")
     ap.add_argument("--delete-old", action="store_true", help="delete the old data directory afterwards instead of keeping it")
     ap.add_argument("--yes", action="store_true", help="don't ask")
     a = ap.parse_args()
@@ -239,8 +257,12 @@ def main() -> None:
         say(f"the old data directory is kept as {old}: delete it when you are sure (it has the changes this one had that the new "
             "primary didn't; the apps send those again)")
     if not a.no_service:
-        say("starting the texloom server (it waits as the standby)")
-        subprocess.run(["systemctl", "start", "texloom"], check=False)
+        if a.start_service or failover_on():
+            say("starting the texloom server (it waits as the standby)")
+            subprocess.run(["systemctl", "start", "texloom"], check=False)
+        else:
+            say("the texloom server is left stopped: failover is off, and without it a server can't run on a standby "
+                "database. Promote this PostgreSQL when you need it (INSTALL.md, \"A standby server\"), then start it.")
 
 
 if __name__ == "__main__":

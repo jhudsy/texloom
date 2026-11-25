@@ -9,18 +9,15 @@ that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitat
 How the pieces fit, and why (three ways to run it: one server; two with failover; several relays), is in
 [SCALING.md](SCALING.md). In this order, each building on the one before:
 
-1. **[A warm standby](https://github.com/jhudsy/texloom/issues/12)**: done, by hand
-   (INSTALL.md, "A standby server"; `scripts/check_standby.py`), and **automatic failover** with a lease
-   in the bucket: built, off unless `failover` is set (`server/failover.py`;
-   `scripts/check_failover.py`), after the model (step 3). Its bucket is checked (`texloom-server --failover-check` passes on the production store). Left: trying
-   it on a real pair. A cold standby restored nightly from the backups still covers
-   losing both (SCALING.md, "Way 1: one server").
+1. **[A warm standby and automatic failover](https://github.com/jhudsy/texloom/issues/12)**: built and checked
+   on one machine and in Docker (INSTALL.md, "A standby server"; SCALING.md, "Way 2"). Left: trying it on a
+   real pair. A cold standby restored nightly from the backups still covers losing both (SCALING.md,
+   "Way 1: one server").
 2. **[The TeX engine from a CDN, PDFs only when someone is looking](https://github.com/jhudsy/texloom/issues/15)**:
    most of the traffic, off the relay. About 2 days.
 3. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
-   (TLA+), before several servers run at once. The model of failover (the lease, the standby, the
-   apps' hello check) is done (`models/failover`); it fixed the timers and showed that failover
-   depends on the apps' hello check. Left: the several-servers ordering, and the client-side GitHub lease.
+   (TLA+) across several servers, and of the client-side GitHub lease. The failover model is done
+   (`models/failover`).
 4. **[Several relays at once](https://github.com/jhudsy/texloom/issues/12)** (SCALING.md, "Way 3: several
    relays"): any relay serves any connection; live messages (cursors, presence, sync-only projects) pass
    between relays through a bus (Redis); the database is kept available by a standard tool, not by
@@ -33,8 +30,7 @@ How the pieces fit, and why (three ways to run it: one server; two with failover
 ## Later
 
 1. **[Comments in your own editor](https://github.com/jhudsy/texloom/issues/36)**: `texloom lsp` and
-   the TeXLoom comments extension for VS Code (on the Marketplace and Open VSX since 2026-11-24) are
-   done. Left, if they're used: live updates in VS Code, and a standalone VS Code extension with the
+   the TeXLoom comments extension for VS Code (on the Marketplace and Open VSX) are done. Left, if they're used: live updates in VS Code, and a standalone VS Code extension with the
    web app's collaboration.
 2. **[A PDF of the changes between two versions](https://github.com/jhudsy/texloom/issues/4)**, like
    `latexdiff`. 2–3 days; builds on the export's merging into one file.
@@ -44,12 +40,6 @@ How the pieces fit, and why (three ways to run it: one server; two with failover
    Either a memory-hard KDF tuned harder (Argon2id, which `@noble/hashes` and `cryptography` both
    have), as a v2 secret alongside v1, or an OPRF with the server (OPAQUE-style), so guesses need the
    server and can be rate-limited. Needs both clients and the server; 2–4 days.
-
-## Testing
-
-The **[TLA+ model](https://github.com/jhudsy/texloom/issues/8)** of the GitHub lease and the server
-protocol is step 3 of Next. What's checked already: README → Checks, and DESIGN.md → Guarding text
-handling.
 
 ## Technical debt
 
@@ -75,7 +65,7 @@ Decided to wait; each says when to revisit it.
 - **[Sync-only projects ask one peer for a file](https://github.com/jhudsy/texloom/issues/16)**, not
   every peer; when relay traffic is high with few people connected.
 - **[Keep documents from outgrowing snapshots](https://github.com/jhudsy/texloom/issues/18)**:
-  compressed snapshots are written since 0.4.36 (read since 0.4.31), about a third the size. Next,
+  compressed snapshots are written today, about a third the size. Next,
   if needed, a true checkpoint: when real projects' snapshots near 50 MB.
 - **[One-click desktop updates](https://github.com/jhudsy/texloom/issues/10)**: once the apps are
   signed.

@@ -1,10 +1,10 @@
 # Failover model
 
 A TLA+ model of automatic failover (SCALING.md, "Switching over"): a lease in the bucket, a standby
-that takes over, and an app that was told "stored" by a server that was then replaced. It exists to
-settle the design before the failover code is written (issue 8).
+that takes over, and an app that was told "stored" by a server that was then replaced. It settled the design
+that `server/failover.py` implements (issue 8).
 
-    uv run python scripts/check_model.py        # about half a minute; needs Java
+    uv run python scripts/check_model.py        # about half a minute (a few if the machine is slow); needs Java
 
 `Failover.tla` is the model. Each `.cfg` is one question, and says in its first lines whether it is
 expected to hold or to be violated (a violated one shows the model notices a wrong design):
@@ -31,20 +31,20 @@ expected to hold or to be violated (a violated one shows the model notices a wro
    apps, whose hello check finds the new primary's log lacks them and sends them again. **That check
    is therefore what failover depends on** (`no-hello`), and it must stay as it is: in particular an
    app's record of the last change it has (`last`, texloom/replica.py `_note_last`) must only move
-   forward. An earlier version of this model let it move back, and found a way to lose a change.
+   forward (the model finds a way to lose a change if it can move back).
 4. A clock that counts suspended time (`CLOCK_BOOTTIME` on Linux) removes most such overlaps and is
    worth using where there is one.
 
-A rehearsal with real parts (`scripts/rehearse_failover.py`, in Docker) added one rule the model
-only allows: **a standby that couldn't read the lease counts its wait afresh once it can** (its timer is
-only ever lengthened, so the model's results stand). Without it, a bucket that was away from both
-servers for longer than the wait was followed by a needless switch, because the version "hadn't
-changed" for as long as the outage lasted.
+One rule the model only allows and the code adds: **a standby that couldn't read the lease counts its wait
+afresh once it can** (its timer is only ever lengthened, so the model's results stand). Without it, a
+bucket that was away from both servers for longer than the wait is followed by a needless switch, because
+the version "hasn't changed" for as long as the outage lasted (`scripts/rehearse_failover.py outage`).
 
 ## What it assumes (check these on the real thing)
 
 - The store's conditional write is atomic and strongly consistent. Most S3-compatible stores have
-  this now; the failover code must test its own store at start and refuse to run on one without it.
+  this now; the server tests its own store at start and refuses to fail over on one that fails
+  (`texloom-server --failover-check`; INSTALL.md lists what is known).
 - One app and two servers; the app never loses its own copy; change ids are unique. (Several apps
   and a third server don't add a different kind of case: each app checks for itself.)
 - The app may connect to any server that thinks it is the primary, including an old one: more than

@@ -4,7 +4,7 @@
 A collaborator (the desktop's sync engine standing in for the web app) comments on a project, and
 a folder synced for "Dana" gets them, two ways:
 
-- the folder's .texloom/comments.md overview, after `texloom run --once`: the line each comment is
+- the folder's .texloom/comments.md overview, after one pass of the folder sync (`texloom.cli.run(..., once=True)`): the line each comment is
   on, the ones that mention Dana marked; `texloom comments DIR` lists them, and `reply` and
   `resolve` reach the collaborator, signed with the folder's link;
 - the comments language server (`texloom lsp`), opened like an editor would with a real stdio

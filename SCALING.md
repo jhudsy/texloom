@@ -126,8 +126,8 @@ these points:
   that dies.
 
 **What it leaves to you:** how traffic reaches whichever server is primary (`/api/health` says which; INSTALL.md,
-"Moving traffic to the primary", lists ways), and rebuilding the old primary as a standby. It does not use both
-servers at once and does not scale.
+"Moving traffic to the primary", lists ways). Rebuilding the old primary as a standby is one command
+(`deploy/rebuild-standby.py`). It does not use both servers at once and does not scale.
 
 ## Way 3: several relays
 

@@ -1,4 +1,4 @@
-# systemd unit for the TeXLoom relay server (deploy/install.sh writes the same unit).
+# systemd unit for the TeXLoom relay server (deploy/install.sh writes this unit, with its own paths).
 # Install: sudo cp deploy/texloom.service /etc/systemd/system/ && sudo systemctl enable --now texloom
 [Unit]
 Description=TeXLoom relay server
@@ -16,6 +16,7 @@ EnvironmentFile=-/etc/texloom/env
 Environment=MALLOC_MMAP_THRESHOLD_=1048576
 ExecStart=/var/www/texloom/.venv/bin/texloom-server --config /etc/texloom/texloom.toml --host 127.0.0.1 --port 8787
 Restart=on-failure
+LimitNOFILE=8192
 UMask=0077
 MemoryMax=1G
 TasksMax=128

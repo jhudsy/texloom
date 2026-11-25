@@ -4,8 +4,8 @@ A TeXLoom server is one Python process: it serves the web app and the in-browser
 relays and stores projects' encrypted changes. It can't read any project. It needs:
 
 - **a database** for the edit logs, project records and project lists: an SQLite file, which
-  needs nothing installed (the default), or PostgreSQL (14 or later) for a standby or several
-  servers ([The database](#the-database));
+  needs nothing installed (the default), or PostgreSQL (14 or later) for a warm standby
+  ([The database](#the-database));
 - **a place for stored files** (pictures, PDFs, uploads, all encrypted by the apps): a folder on
   the server, or an S3-compatible bucket;
 - **HTTPS** in front of it for anyone but yourself, because browsers only allow the encryption the
@@ -20,7 +20,11 @@ Settings live in one file, `/etc/texloom/texloom.toml` ([Settings](#settings)).
 - [The database](#the-database) · [Stored files](#stored-files)
 - [Creation codes](#creation-codes) · [Private servers](#private-servers) ·
   [Retiring old app versions](#retiring-old-app-versions) · [Idle projects, admin page, arXiv import](#idle-projects-admin-page-arxiv-import)
-- [Backups](#backups) · [A standby server](#a-standby-server), by hand or [by themselves](#letting-the-two-servers-switch-over-by-themselves), and [moving traffic to the primary](#moving-traffic-to-the-primary) · [Updating](#updating)
+- [Backups](#backups) · [Updating](#updating)
+- [A standby server](#a-standby-server): [your own PostgreSQL](#your-own-postgresql-primary-and-standby)
+  ([when the primary is lost](#when-the-primary-is-lost), [rebuilding the old primary](#afterwards-rebuild-the-old-primary)),
+  [switching over by themselves](#letting-the-two-servers-switch-over-by-themselves),
+  [moving traffic to the primary](#moving-traffic-to-the-primary), or [a hosted PostgreSQL](#a-hosted-postgresql)
 
 ## On an Ubuntu or Debian server
 
@@ -34,7 +38,10 @@ git clone https://github.com/jhudsy/texloom && cd texloom
 deploy/install.sh root@server.example.org texloom.example.org
 ```
 
-It works alongside other sites on the machine and only adds things:
+It is tested on Ubuntu 24.04 and Debian 13. It works alongside other sites on the machine and only adds
+things (and installs nginx, certbot, `python3-venv`, `rsync` and `curl` if they're missing, and PostgreSQL
+with `DATABASE=postgresql`; it also downloads about 700 MB of in-browser TeX files, checked against a
+checksum, so allow a few GB of disk):
 
 | what | where |
 |---|---|
@@ -76,7 +83,7 @@ without it aren't limited per address.
 
 ```bash
 git clone https://github.com/jhudsy/texloom && cd texloom
-uv sync --extra server                      # Python: the server (and the desktop app's folder sync)
+uv sync --extra server                      # Python: the server and its PostgreSQL driver
 cd web && npm ci && npm run build           # the web app -> web/dist
 npm run download-tex                        # in-browser TeX (~685 MB, into ../tex-assets)
 cd ..
@@ -90,8 +97,12 @@ name another ([The database](#the-database)).
 uv run texloom-server --config /etc/texloom/texloom.toml
 ```
 
-For every TeX Live package in in-browser compiles (otherwise only the bundles in `tex-assets`),
-build the package index once with `texlive = "/var/lib/texloom/texlive"` in the settings:
+To keep it running, create a `texloom` user and use [`deploy/texloom.service`](deploy/texloom.service) as a
+systemd unit (edit its paths); it reads `/etc/texloom/env` for `TEXLOOM_<NAME>` settings.
+
+To let in-browser compiles fetch any TeX Live package on demand (without this only the bundled packages in
+`tex-assets` are available), set `texlive = "/var/lib/texloom/texlive"` in the settings and build the
+package index once:
 
 ```bash
 uv run texloom-server --config /etc/texloom/texloom.toml --texlive-init   # ~2 s; re-run to refresh
@@ -117,11 +128,16 @@ Then open http://localhost:8787. Browsers treat `localhost` as secure, so no cer
 
 ## Settings
 
+**Running `texloom-server` yourself.** After the install script the program is
+`/var/www/texloom/.venv/bin/texloom-server`, which is not on `PATH`, and the settings file is only
+readable by the server's user. So a command in this guide that says `texloom-server …` means
+`sudo -u texloom /var/www/texloom/.venv/bin/texloom-server --config /etc/texloom/texloom.toml …` (or
+`uv run texloom-server …` if you installed by hand).
+
 Every option of `texloom-server` (`texloom-server --help` lists them) can be set in the settings
 file under its name, with `_` for `-`; [`texloom.example.toml`](texloom.example.toml) lists them
 all, and is what the install script starts from. The file is `--config`, else `TEXLOOM_CONFIG`,
-else `./texloom.toml`, else `/etc/texloom/texloom.toml`, if they exist (a `texloom.toml` in the
-checkout is ignored by git). Tables such as `[s3]` go last: in TOML, every line after one belongs
+else `./texloom.toml`, else `/etc/texloom/texloom.toml`, if they exist. Tables such as `[s3]` go last: in TOML, every line after one belongs
 to it. An environment variable `TEXLOOM_<NAME>`
 (`TEXLOOM_MIN_VERSION=0.4.30`) overrides the file, and the command line overrides both. A setting
 the server doesn't know is an error, so a typo doesn't go unnoticed. After a change:
@@ -153,9 +169,10 @@ min_free = "2G"
 | `dropbox_app_key` | none | the app key of a Dropbox app for this server (README → Dropbox): lets the web app keep projects in step with Dropbox folders |
 | `evict_idle_days` | `0` (never) | drop the stored copy of projects nobody opened for this long |
 | `purge_expired_after` | never | drop the stored copies of projects whose code expired this many days ago |
-| `admin_token` or `admin_token_file` | none | the password for `/admin` |
+| `admin_token` or `admin_token_file` | none | the password for `/admin` (at least 16 characters) |
 | `no_project_lists`, `no_arxiv` | `false` | turn off storing project lists, or importing from arXiv |
 | `texlive`, `texlive_max`, `texlive_mirror` | none, `4G`, none | TeX Live packages on demand: the cache folder, its size (the packages used least recently make room), mirrors to try first (a list) |
+| `failover`, `failover_name`, `failover_ttl` | `false`, the host name, `15` | switch to a standby by itself ([Letting the two servers switch over by themselves](#letting-the-two-servers-switch-over-by-themselves)) |
 
 Secrets (the database password, the S3 secret key, the admin token) belong in the settings file,
 readable only by the server's user (the install script makes it `root:texloom`, mode 640), or in
@@ -170,16 +187,15 @@ the environment. On the command line they'd show in `ps`.
   `texloom.db` in `data`. Nothing to install or look after, and the install script's choice. One
   server process uses it: a second one started on the same file refuses to run (one-off commands
   such as `--list-codes` can use it while the server runs).
-- **PostgreSQL** (14 or later), for a warm standby, replicas, or several servers sharing it:
+- **PostgreSQL** (14 or later), for a warm standby ([A standby server](#a-standby-server)):
   - `postgresql:///texloom?host=/var/run/postgresql`: on this machine, over the local socket, as
     the user the server runs as (no password anywhere; the install script's choice with
     `DATABASE=postgresql`);
   - `postgresql://texloom:PASSWORD@db.example.org:5432/texloom?sslmode=require`: elsewhere.
 
-  The server uses up to 10 connections for its queries, plus one that listens for what other servers
-  tell it (a project changed, for several servers sharing the database), and, for a moment each hour, one
-  for its upkeep. PostgreSQL allows 100 by default (`max_connections`), which is the limit on how many
-  servers can share one database before a connection pooler (PgBouncer) is needed.
+  The server uses up to 10 connections for its queries (PostgreSQL allows 100 by default), plus one that
+  listens for what other servers tell it and, for a moment each hour, one for its upkeep.
+  [SCALING.md](SCALING.md) says when the number of connections matters.
 
 The server creates its tables when it starts, either way. To move a server from one to the other
 (SQLite up to PostgreSQL, say), stop it, copy everything into the new, empty database, point the
@@ -194,8 +210,7 @@ sudo -u texloom texloom-server --config /etc/texloom/texloom.toml \
 systemctl start texloom
 ```
 
-(After the install script, the program is `/var/www/texloom/.venv/bin/texloom-server`.) The old
-database is left as it was.
+The old database is left as it was.
 
 ## Stored files
 
@@ -272,8 +287,7 @@ texloom-server --list-codes                                         # usage, exp
 texloom-server --purge-code K7P2-QX4M-9H3D
 ```
 
-(These read the settings file like the server does; run them as the server's user, e.g.
-`sudo -u texloom /var/www/texloom/.venv/bin/texloom-server …`.) A renewal with `--months` counts
+(These read the settings file like the server does: run them as described under Settings.) A renewal with `--months` counts
 from the later of today and the code's current expiry, so renewing early loses nothing.
 `--purge-code` refuses a code that is still valid; restart the server afterwards so its storage
 totals are current (`purge_expired_after`, inside the server, needs no restart).
@@ -306,10 +320,8 @@ The apps say which version they are when they connect, and the admin page lists 
 connect, with when each was last seen. Once old versions have stopped connecting, set the oldest
 allowed with `min_version = "X.Y.Z"`. Older apps, and those too old to say, are then turned away
 with a request to update: the desktop app shows "Update needed", the web app offers to reload (its
-newest version comes from the server), and project lists refuse them too. An app too old to say
-its version (before 0.4.30) can't show the request, and would reconnect every second or two: the
-server keeps it connected but hearing nothing for ten minutes at a time instead. It's counted as
-"unknown" on the admin page each time it reconnects, until its user updates it.
+newest version comes from the server), and project lists refuse them too. An app too old to say its
+version can't show the request, and is counted as "unknown" on the admin page.
 
 ## Idle projects, admin page, arXiv import
 
@@ -357,8 +369,9 @@ restore it on is a perfectly good setup. It needs PostgreSQL, and stored files i
 the standby sees them too ([Stored files](#stored-files)). With SQLite, [Backups](#backups) is the
 way.
 
-There are two ways to get the standby; the server is told the same thing either way (`database`),
-and everything else in this file stays as it is.
+There are two ways to get the standby, [your own PostgreSQL](#your-own-postgresql-primary-and-standby) or
+[a hosted one](#a-hosted-postgresql); the server is told the same thing either way (`database`), and
+everything else in this file stays as it is. Switching over by itself, and how traffic follows, come after.
 
 ### Your own PostgreSQL, primary and standby
 
@@ -406,12 +419,12 @@ the server refuses to start on it, saying why.
    `sudo -u postgres psql -c "SELECT pg_is_in_recovery(), now() - pg_last_xact_replay_timestamp()"`
    says `t` and how far behind it is (a quiet server shows the time since its last change).
 
-4. **Make the name movable.** The apps reach the server by its name, so a switch is moving the
-   name to the standby: give the DNS record a short lifetime (60 seconds) beforehand, and have a
-   certificate for the name ready on the standby (Caddy gets its own; with nginx and certbot, get
-   one for the name there with the DNS challenge, which works before the name points to it).
+4. **Plan how the name will move to the standby** ([Moving traffic to the primary](#moving-traffic-to-the-primary)),
+   including a certificate for the name on the standby before it is needed.
 
-**When the primary is lost**, on the standby:
+#### When the primary is lost
+
+On the standby:
 
 1. Make sure the old primary is really down, and will stay down. Two primaries would number
    changes differently, and the apps would have to untangle it. If you can't be sure (it may only be
@@ -419,12 +432,12 @@ the server refuses to start on it, saying why.
 2. Promote the standby: `sudo -u postgres psql -c "SELECT pg_promote()"`. It is now a primary and
    takes writes.
 3. Start the server there: `systemctl enable --now texloom`.
-4. Move the name to the standby's address. Apps reconnect on their own. Changes made in the last
-   moments before the loss may not have reached the standby: the apps hold them, notice that the
-   server's log isn't the one they last saw, and send everything again, so nothing is lost, and
-   nobody has to do anything.
+4. Move the name to the standby's address. Apps reconnect on their own, and send again whatever the
+   standby lacked (as in the introduction), so nobody has to do anything.
 
-**Afterwards** you have one server and no standby. The old primary must not come back as a primary:
+#### Afterwards: rebuild the old primary
+
+You now have one server and no standby. The old primary must not come back as a primary:
 rebuild it as a standby of the new one, with the helper, on the old primary's machine (as root):
 
 ```bash
@@ -434,14 +447,17 @@ sudo env PGPASSWORD='the replicator password' /var/www/texloom/deploy/rebuild-st
 It stops the TeXLoom server and PostgreSQL there, **keeps the old data directory aside** (as
 `….old-DATE`; delete it when you are sure: it holds the changes the new primary never got, which the
 apps send again), takes a streaming base backup of the new primary, starts PostgreSQL as its standby,
-waits until it is streaming, and starts the server again, which waits as the standby. It refuses,
+and waits until it is streaming. If `failover` is on it then starts the server again, which waits as
+the standby; without failover a server can't run on a standby database, so it leaves the server stopped
+and says so. It refuses,
 changing nothing, if this machine's server is the primary (it answers 200 on `/api/health`), if the
 address is another cluster, or if you don't confirm; if the backup fails it puts the old data back.
 `--cluster VERSION/NAME` picks one if there are several, and `--help` lists the rest. Until it has
-run, a failure of the new primary has no standby. To switch on purpose (maintenance), stop
-the server on the primary first and wait until the standby has everything (`SELECT
-pg_current_wal_lsn()` on the primary, and `pg_last_wal_replay_lsn()` on the standby, are equal),
-then promote and move the name: nothing is missing, so there is no catch-up.
+run, a failure of the new primary has no standby.
+
+#### Switching on purpose
+
+For maintenance: stop the server on the primary first, wait until the standby has everything (`SELECT pg_current_wal_lsn()` on the primary, and `pg_last_wal_replay_lsn()` on the standby, are equal), then promote and move the name: nothing is missing, so there is no catch-up.
 
 A standby copies mistakes as well as data (a project deleted, a table dropped), so it doesn't
 replace [Backups](#backups). Try the switch once on your own pair before you need it:
@@ -473,13 +489,11 @@ sudo -u texloom /var/www/texloom/.venv/bin/texloom-server --config /etc/texloom/
 A server asked to fail over runs the same test when it starts, and refuses a store that fails it.
 What is known (the stores change, so the test is what counts):
 
-| store | conditional writes |
-|---|---|
-| RustFS | passes the test (tried: the 2026-11 image) |
-| Cloudflare R2, AWS S3 | documented as supported (`If-Match`, `If-None-Match`); run the test on yours |
-| Backblaze B2 | reported by users of other tools to answer `If-None-Match` with 501, so it can't hold a lease; not tried here |
-| Garage | fails the test (v2.6.0 ignores the conditions): fine for stored files, not for the lease |
-| MinIO | not tried: its community edition no longer publishes images |
+- **Passes the test:** RustFS.
+- **Documented as supported** (`If-Match`, `If-None-Match`), so run the test on yours: Cloudflare R2, AWS S3.
+- **Fail or unconfirmed:** Garage ignores the conditions (fine for stored files, not for the lease);
+  Backblaze B2 is reported by users of other tools to answer `If-None-Match` with 501, so it can't hold a
+  lease (not tried here).
 
 If the bucket you keep files in can't, the lease can't live there (it is in the same bucket as the
 stored files); failover then isn't available until one that can is used.
@@ -511,19 +525,16 @@ failover_name = "server-a"   # "server-b" on the other
   holds the lease and how recently it was renewed (or, on the standby, how long it has been unchanged
   against the wait), and PostgreSQL's side: whether it is a primary and its standbys' state and delay, or
   a standby and how far its replay is behind. The standby serves the admin page too, with just that
-  section, since it has no database open. Without `failover` the page is as it always was.
+  section, since it has no database open.
 - **Time.** A primary stops itself after `failover_ttl` seconds without a successful renewal, and the
   standby waits twice that, plus a margin, before it takes over: with the default 15 seconds, about
   35, plus a few for PostgreSQL to promote, so people see "connecting…" for under a minute. A lower
   value is quicker and more easily upset by a slow bucket. Servers' clocks need not agree, only run
   at about the same speed: nothing compares one machine's clock with the other's.
-- **Who gets the traffic.** The standby answers every address but `/api/health` with 503, and
-  `/api/health` is 200 only on the primary. The servers don't move the name themselves: see
-  [Moving traffic to the primary](#moving-traffic-to-the-primary).
-- **After a switch.** The server that stopped (or was lost) restarts as a standby, but its PostgreSQL
-  is still a primary with a history the new one doesn't have, so it **won't take over** (it says so in
-  its log) until you rebuild it as a standby of the new primary with `deploy/rebuild-standby.py`, as in "Afterwards" above. Until then
-  you have one server and no standby, as after a manual switch.
+- **After a switch,** the server that stopped (or was lost) restarts as a standby, but its PostgreSQL is
+  still a primary with a history the new one doesn't have, so it **won't take over** (it says so in its
+  log) until you [rebuild it](#afterwards-rebuild-the-old-primary). Until then you have one server and no
+  standby.
 - **Starting a server again** (an update, a restart) while it holds the lease takes it back within a
   couple of renewal intervals (about ten seconds by default). The other server sees renewals missing
   for that long, which is well short of the wait before it takes over.
@@ -533,7 +544,7 @@ failover_name = "server-a"   # "server-b" on the other
   reach it for `failover_ttl` seconds stops serving, even though it and its database are fine. While the
   bucket is away from both servers nothing is served; when it is back the service resumes by itself, in
   about the time a restart takes, and the standby does not take over on the strength of the time it
-  couldn't look. (Stored files already depend on the bucket; editing and syncing did not until now.)
+  couldn't look. (Without failover, editing and syncing do not depend on the bucket.)
 - **A server that hangs, rather than stopping, is noticed by the apps after their pings go unanswered**
   (they ping every 30 seconds), so people connected through it wait up to about a minute longer than for
   a server that dies, whose connections are reset. The standby still takes over after the wait.
