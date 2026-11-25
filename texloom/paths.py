@@ -114,11 +114,19 @@ WIN_RESERVED = {"con", "prn", "aux", "nul", "conin$", "conout$",
                 *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 
 
+# Unicode's Default_Ignorable_Code_Point characters (invisible: zero-width spaces and joiners,
+# direction marks, variation selectors, tags…). Keep in sync with IGNORABLE in web/src/projectfiles.ts.
+IGNORABLE = re.compile("[­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮"
+                       "⁠-⁯ㅤ︀-️﻿ﾠ￰-￸\U0001bca0-\U0001bca3"
+                       "\U0001d173-\U0001d17a\U000e0000-\U000e0fff]")
+
+
 def safe_rel(rel: object) -> str | None:
     """Validate a project path received from collaborators. None if it must not touch disk.
 
     Rejects absolute paths, drive letters, backslashes, '.'/'..'/empty segments, control
-    characters, reserved names (compared case-insensitively, Unicode-normalised), and
+    characters, reserved names (compared case-insensitively, Unicode-normalised, without
+    invisible characters), and
     files that TeX tools would execute or treat as configuration.
     """
     if not isinstance(rel, str) or not rel or len(rel) > 300:
@@ -128,10 +136,13 @@ def safe_rel(rel: object) -> str | None:
     for seg in rel.split("/"):
         if seg in ("", ".", "..") or any(ord(c) < 32 or c in '<>:"|?*' for c in seg):
             return None
+        # (compared without invisible characters, which some file systems drop: macOS's HFS+
+        # stores ".l​atexmkrc" as ".latexmkrc")
+        bare = IGNORABLE.sub("", seg)
         # Windows drops trailing dots and spaces (".git." is ".git") and has 8.3 aliases ("GIT~1")
-        if seg[-1] in ". " or re.search(r"~\d", seg):
+        if bare in ("", ".", "..") or seg[-1] in ". " or bare[-1] in ". " or re.search(r"~\d", bare):
             return None
-        n = unicodedata.normalize("NFKC", seg).casefold()
+        n = unicodedata.normalize("NFKC", bare).casefold()
         if n in PROTECTED_DIRS or n in UNSAFE_NAMES or n.endswith(".latexmkrc"):
             return None
         if os.name == "nt" and n.split(".")[0] in WIN_RESERVED:

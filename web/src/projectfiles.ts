@@ -20,15 +20,22 @@ const PROTECTED_DIRS = new Set(['.texloom', '.git', '.hg', '.jj', '.sl', '.bzr',
 
 /** Normalise and validate a project-relative path; returns null if unacceptable. Every path
  *  that reaches a disk (folder sync, import) passes through here. */
+/** Unicode's Default_Ignorable_Code_Point characters (invisible: zero-width spaces and joiners, direction
+ *  marks, variation selectors, tags…). Keep in sync with IGNORABLE in texloom/paths.py. */
+const IGNORABLE = /[­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮⁠-⁯ㅤ︀-️﻿ﾠ￰-￸\u{1bca0}-\u{1bca3}\u{1d173}-\u{1d17a}\u{e0000}-\u{e0fff}]/gu
+
 export function cleanPath(input: string): string | null {
   const p = input.trim().replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\.?\//, '').replace(/\/$/, '')
   if (!p || p.length > 300) return null
   for (const seg of p.split('/')) {
     if (!seg || seg === '.' || seg === '..' || /[\x00-\x1f<>:"|?*]/.test(seg)) return null
+    // (compared without invisible characters, which some file systems drop: macOS's HFS+ stores
+    // ".l​atexmkrc" as ".latexmkrc")
+    const bare = seg.replace(IGNORABLE, '')
     // Windows drops trailing dots and spaces (".git." is ".git") and has 8.3 aliases ("GIT~1")
-    if (/[. ]$/.test(seg) || /~\d/.test(seg)) return null
+    if (bare === '' || bare === '.' || bare === '..' || /[. ]$/.test(seg) || /[. ]$/.test(bare) || /~\d/.test(bare)) return null
     // compared the way case-insensitive file systems (macOS, Windows) see names: ".GIT" is ".git"
-    const n = seg.normalize('NFKC').toLowerCase()
+    const n = bare.normalize('NFKC').toLowerCase()
     if (PROTECTED_DIRS.has(n) || UNSAFE_NAMES.has(n) || n.endsWith('.latexmkrc')) return null
   }
   return p

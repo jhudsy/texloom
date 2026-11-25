@@ -56,6 +56,11 @@ synced = [
     # paths a project refuses
     ("latexmkrc", "main.tex", False), ("sub/.latexmkrc", "main.tex", False), ("texmf.cnf", "main.tex", False), ("biber.conf", "main.tex", False),
     ("trailing.", "main.tex", False), ("PROGRA~1/x.tex", "main.tex", False), ("a:b.tex", "main.tex", False),
+    # ... however invisible characters hide them (macOS's HFS+ drops some: ".l​atexmkrc" is ".latexmkrc")
+    (".l​atexmkrc", "main.tex", False), ("sub/latexmk­rc", "main.tex", False), ("te﻿xmf.cnf", "main.tex", False),
+    ("biber⁠.conf", "main.tex", False), ("x.‍", "main.tex", False), ("PROGRA~‌1/x.tex", "main.tex", False),
+    ("​/x.tex", "main.tex", False), ("ch/‍.‍/x.tex", "main.tex", False),
+    ("café‍notes.tex", "main.tex", True),  # (a name with one is still a project file)
 ]
 
 MB4 = 4 * 1024 * 1024

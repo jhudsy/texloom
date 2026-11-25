@@ -260,6 +260,51 @@
    "path": "a:b.tex",
    "main": "main.tex",
    "want": false
+  },
+  {
+   "path": ".l​atexmkrc",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "sub/latexmk­rc",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "te﻿xmf.cnf",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "biber⁠.conf",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "x.‍",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "PROGRA~‌1/x.tex",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "​/x.tex",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "ch/‍.‍/x.tex",
+   "main": "main.tex",
+   "want": false
+  },
+  {
+   "path": "café‍notes.tex",
+   "main": "main.tex",
+   "want": true
   }
  ],
  "text": [
