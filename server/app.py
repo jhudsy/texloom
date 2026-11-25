@@ -14,7 +14,7 @@ from pathlib import Path
 from aiohttp import web
 
 from .db import redact
-from .endpoints import MAX_BLOB, Endpoints, headers
+from .endpoints import MAX_BODY, Endpoints, headers
 from .files import Files
 from .policy import GiB, CodeBook, Limits, Policy
 from .relay import Relay
@@ -78,7 +78,8 @@ def make_app(s: Settings) -> web.Application:
         else:
             log.warning("--texlive %s has no index yet: run with --texlive-init first", s.texlive)
     http = Endpoints(policy, relay.memory, texlive, s.codes_url, s.dropbox_app_key)
-    app = web.Application(middlewares=[headers], client_max_size=MAX_BLOB + 1024)
+    # bodies read whole are small (uploads are streamed, and checked against MAX_BLOB as they come)
+    app = web.Application(middlewares=[headers], client_max_size=MAX_BODY)
 
     async def database(_app: web.Application):
         store = await Store.open(s.database, s.files, s.data, serving=True)
@@ -111,7 +112,7 @@ def make_app(s: Settings) -> web.Application:
     app.router.add_post("/api/code", http.check_code)
     if s.arxiv:  # importing a paper's source (arXiv has no CORS, so the relay fetches it)
         from .arxiv import ArxivFetcher
-        app.router.add_get("/api/arxiv/{id}", ArxivFetcher(relay.memory).handle)
+        app.router.add_get("/api/arxiv/{id}", ArxivFetcher(relay.memory, s.data).handle)
     if s.tex and (s.tex / "busytex").is_dir():  # WebAssembly TeX Live for in-browser compiles
         app.router.add_static("/core", s.tex)
     if s.static and s.static.is_dir():

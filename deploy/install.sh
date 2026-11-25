@@ -211,14 +211,17 @@ systemctl restart texloom
 SITE=/etc/nginx/sites-available/$DOMAIN
 if [ ! -f "$SITE" ]; then
   cat > "$SITE" <<NGINX
-# Rate limits (http context; names prefixed to avoid clashing with other sites)
-limit_req_zone \$binary_remote_addr zone=texloom_code:1m rate=6r/m;
-limit_req_zone \$binary_remote_addr zone=texloom_list:1m rate=1r/s;
-limit_req_zone \$binary_remote_addr zone=texloom_texlive:1m rate=20r/s;
-map \$request_method \$texloom_put_key { PUT \$binary_remote_addr; default ""; }
-limit_req_zone \$texloom_put_key zone=texloom_upload:10m rate=10r/s;
-limit_conn_zone \$binary_remote_addr zone=texloom_ws:10m;
-limit_conn_zone \$binary_remote_addr zone=texloom_blob:10m;
+# Rate limits (http context; names prefixed to avoid clashing with other sites). They count per
+# client: an IPv4 address, or an IPv6 address's /64 (its first 8 bytes: one home or server gets a
+# whole /64, so counting single IPv6 addresses would limit nothing)
+map \$binary_remote_addr \$texloom_client { "~(?s)^(?<texloom_net>.{8}).{8}\$" \$texloom_net; default \$binary_remote_addr; }
+limit_req_zone \$texloom_client zone=texloom_code64:1m rate=6r/m;
+limit_req_zone \$texloom_client zone=texloom_list64:1m rate=1r/s;
+limit_req_zone \$texloom_client zone=texloom_texlive64:1m rate=20r/s;
+map \$request_method \$texloom_put_key { PUT \$texloom_client; default ""; }
+limit_req_zone \$texloom_put_key zone=texloom_upload64:10m rate=10r/s;
+limit_conn_zone \$texloom_client zone=texloom_ws64:10m;
+limit_conn_zone \$texloom_client zone=texloom_blob64:10m;
 # pages are always rechecked: an old copy would ask for build files a deploy has replaced (a blank page)
 map \$sent_http_content_type \$texloom_html_expires { ~^text/html epoch; default off; }
 
@@ -232,41 +235,46 @@ server {
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
 
-    # security headers (locations that set their own add_header repeat the essentials)
+    # security headers (a location that sets its own add_header loses these: it repeats them all)
     add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy no-referrer always;
     add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header Cross-Origin-Opener-Policy same-origin always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
 
     # encrypted sync (WebSocket); connections are long-lived
     location /ws/ {
-        limit_conn texloom_ws 30;
+        limit_conn texloom_ws64 30;
         proxy_pass http://127.0.0.1:8787;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 1h;
         proxy_send_timeout 1h;
     }
     # encrypted file blobs (images, PDFs)
     location /blob/ {
-        limit_conn texloom_blob 20;
-        limit_req zone=texloom_upload burst=40;
+        limit_conn texloom_blob64 20;
+        limit_req zone=texloom_upload64 burst=40;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
         client_max_body_size 75m;
         proxy_request_buffering off;
     }
     # server info and creation-code checks
     location = /api/code {
-        limit_req zone=texloom_code burst=5 nodelay;
+        limit_req zone=texloom_code64 burst=5 nodelay;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
     }
     # importing an arXiv paper's source: the relay fetches it (rate-limited there too)
     location /api/arxiv/ {
-        limit_req zone=texloom_code burst=3 nodelay;
+        limit_req zone=texloom_code64 burst=3 nodelay;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -274,26 +282,30 @@ server {
     }
     # project lists: slows anyone trying passwords or creation codes
     location /api/list/ {
-        limit_req zone=texloom_list burst=60 nodelay;
+        limit_req zone=texloom_list64 burst=60 nodelay;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
     }
     location /api/ {
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
     }
     # TeX Live files on demand (a package is fetched from a mirror the first time)
     location /texlive/ {
-        limit_req zone=texloom_texlive burst=1000 delay=400;
+        limit_req zone=texloom_texlive64 burst=1000 delay=400;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 60s;
     }
     # read-only admin page (HTTP basic auth against /etc/texloom/admin-token)
     location = /admin {
-        limit_req zone=texloom_code burst=5 nodelay;
+        limit_req zone=texloom_code64 burst=5 nodelay;
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
     }
 
     # the in-browser engine's scripts: revalidated (deploys can patch them; cheap with ETags)
@@ -301,6 +313,11 @@ server {
         alias $APP_DIR/tex-assets/\$1;
         add_header Cache-Control "no-cache";
         add_header X-Content-Type-Options nosniff always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Cross-Origin-Opener-Policy same-origin always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
     }
     # in-browser TeX engine and packages: big, immutable per version
     location /core/ {
@@ -308,6 +325,11 @@ server {
         expires 30d;
         add_header Cache-Control "public";
         add_header X-Content-Type-Options nosniff always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Cross-Origin-Opener-Policy same-origin always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
     }
     # hashed build output (.mjs is missing from nginx's default MIME table)
     location /assets/ {
@@ -315,6 +337,11 @@ server {
         expires 1y;
         add_header Cache-Control "public, immutable";
         add_header X-Content-Type-Options nosniff always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Cross-Origin-Opener-Policy same-origin always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
     }
     location / {
         try_files \$uri /index.html;
@@ -371,17 +398,17 @@ blocks = {
     }
 """,
 }
-if "zone=texloom_list:" not in site:
+if "zone=texloom_list" not in site:  # (named texloom_list64 since it counts IPv6 /64s)
     zone = "limit_req_zone $binary_remote_addr zone=texloom_list:1m rate=1r/s;\n"
     code_zone = site.index("limit_req_zone $binary_remote_addr zone=texloom_code:")
     site = site[:code_zone] + zone + site[code_zone:]
     open(path, "w").write(site)
-if "zone=texloom_texlive:" not in site:  # TeX Live files: anyone can ask, each first ask fetches a package
+if "zone=texloom_texlive" not in site:  # TeX Live files: anyone can ask, each first ask fetches a package
     at = site.index("limit_req_zone $binary_remote_addr zone=texloom_code:")
     site = site[:at] + "limit_req_zone $binary_remote_addr zone=texloom_texlive:1m rate=20r/s;\n" + site[at:]
     site = site.replace("    location /texlive/ {\n", "    location /texlive/ {\n        limit_req zone=texloom_texlive burst=1000 delay=400;\n", 1)
     open(path, "w").write(site)
-if "zone=texloom_blob:" not in site:
+if "zone=texloom_blob" not in site:
     at = site.index("limit_conn_zone $binary_remote_addr zone=texloom_ws:")
     site = site[:at] + "limit_conn_zone $binary_remote_addr zone=texloom_blob:10m;\n" + site[at:]
     site = site.replace("    location /blob/ {\n", "    location /blob/ {\n        limit_conn texloom_blob 20;\n", 1)
@@ -407,6 +434,44 @@ if missing and anchor in site:
     site = site.replace(anchor, missing + anchor, 1)
     open(path, "w").write(site)
     print("    nginx: added", ", ".join(k for k in blocks if k in missing))
+import re
+before = site
+# limits count an IPv6 address's /64, not each address (one home or server gets a whole /64). The
+# zones are renamed: nginx won't reload a zone whose key changed
+if "$texloom_client {" not in site:
+    at = min(i for i in (site.find("limit_req_zone "), site.find("map $request_method")) if i >= 0)
+    site = (site[:at] + "# limits count per client: an IPv4 address, or an IPv6 address's /64 (its first 8 bytes)\n"
+            'map $binary_remote_addr $texloom_client { "~(?s)^(?<texloom_net>.{8}).{8}$" $texloom_net; default $binary_remote_addr; }\n'
+            + site[at:])
+site = re.sub(r"\btexloom_(code|list|texlive|upload|ws|blob)\b", r"texloom_\g<1>64", site)
+site = (site.replace("limit_req_zone $binary_remote_addr ", "limit_req_zone $texloom_client ")
+        .replace("limit_conn_zone $binary_remote_addr ", "limit_conn_zone $texloom_client ")
+        .replace("{ PUT $binary_remote_addr;", "{ PUT $texloom_client;"))
+# every proxied location says who the client is (the relay's own per-address limits); one a client sends is replaced
+site = re.sub(r"(\n([ \t]*)proxy_set_header Host \$host;\n)(?![ \t]*proxy_set_header X-Real-IP)",
+              lambda m: m.group(1) + m.group(2) + "proxy_set_header X-Real-IP $remote_addr;\n", site)
+# security headers: two more for the server, and all of them in each location that sets its own
+# add_header (nginx then drops the server's: the in-browser engine's worker scripts had no policy)
+csp = re.search(r'^    add_header Content-Security-Policy (".*?") always;$', site, re.M)
+perm = '"camera=(), microphone=(), geolocation=(), payment=(), usb=()"'
+extra = ["add_header Cross-Origin-Opener-Policy same-origin always;", f"add_header Permissions-Policy {perm} always;"]
+referrer = "    add_header Referrer-Policy no-referrer always;\n"
+if "Cross-Origin-Opener-Policy" not in site and referrer in site:
+    site = site.replace(referrer, referrer + "".join(f"    {h}\n" for h in extra), 1)
+if csp:
+    every = [f"add_header Content-Security-Policy {csp[1]} always;", "add_header X-Content-Type-Options nosniff always;",
+             "add_header Referrer-Policy no-referrer always;", 'add_header Strict-Transport-Security "max-age=31536000" always;', *extra]
+
+    def headers(m):
+        body = m.group(2)
+        if "add_header" not in body or "Content-Security-Policy" in body:
+            return m.group(0)
+        add = "".join(f"        {h}\n" for h in every if h.split()[1] not in body)
+        return m.group(1) + body + add + m.group(3)
+    site = re.sub(r"(\n    location [^\n{]*\{\n)(.*?\n)(    \}\n)", headers, site, flags=re.S)
+if site != before:
+    open(path, "w").write(site)
+    print("    nginx: limits per IPv6 /64, X-Real-IP on every proxied location, security headers in every location")
 PY
 fi
 nginx -t -q && systemctl reload nginx || { cp "/root/texloom-backups/nginx-$DOMAIN.bak" "$SITE"; systemctl reload nginx; echo "nginx update failed: restored"; exit 1; }

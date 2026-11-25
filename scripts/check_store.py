@@ -42,6 +42,7 @@ from server.files import FolderFiles
 from server.lists import RETIRED, Lists
 from server.store import (
     BOOLEANS,
+    GONE_COST,
     SCHEMA,
     SCHEMA_POSTGRESQL,
     TABLES,
@@ -153,7 +154,10 @@ async def steps(url: str, tmp: Path) -> list:
     await store.touch(d)
     ok(note("idle", sorted(store.idle(-1))) == sorted([a, b, d]), "stored projects unopened for a time are listed (for eviction)")
     freed = await store.evict(d)
-    ok(note("evicted", (freed, await store.log_state(d), store.usage[d])) == (164, (1, 1, 0), 0), "an evicted project's log goes; its numbering stays")
+    ok(note("evicted", (freed, await store.log_state(d), store.usage[d])) == (164 - GONE_COST, (1, 1, 0), GONE_COST),
+       "an evicted project's log goes; its numbering stays, and its changes are remembered")
+    ok(note("replayed", (await store.duplicate(d, b"d" * 100), store.idle(-1).count(d))) == (0, 0),
+       "a change from before the eviction is a replay; and an evicted project isn't evicted again")
     msg = await store.delete_project(b, b"x" * 64, 1234)
     ok(note("deleted", (msg["t"], msg["ts"], await store.deleted_count(), await store.log_state(b))) == ("deleted", 1234, 1, (0, 0, 0)),
        "a project deleted for everyone keeps only its tombstone")

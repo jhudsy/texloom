@@ -65,6 +65,13 @@ Then [set up backups](#backups): the script keeps none.
 
 People only ever make outgoing HTTPS connections to the server, so their firewalls need no changes.
 
+The server limits what one client may do (connections, arXiv imports, TeX Live downloads) by its
+address, counting an IPv6 address's /64 as one. Behind a proxy on the same computer it takes the
+address from the `X-Real-IP` header, so the proxy must set it from the real client, replacing any
+the client sent (the nginx site and the Caddyfile do). Behind a tunnel that passes on a client's
+own `X-Real-IP`, a client could choose the address it counts as. Requests from the same computer
+without it aren't limited per address.
+
 ## Installing by hand
 
 ```bash

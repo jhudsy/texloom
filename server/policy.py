@@ -313,10 +313,13 @@ class Policy:
         self.lists = Lists(store.db, store.lists_grew) if self.want_lists else None
 
     # --- private servers -----------------------------------------------------------
-    async def denied(self, project: str, code: object, claim: bool = True) -> str | None:
+    async def denied(self, project: str, code: object, claim: bool = False) -> str | None:
         """On a private server, why this project may not use it (None if it may). A project
         belongs to a creation code, so people with its link need nothing else. One that has no
-        code yet gets the first valid one offered; one whose code has lapsed waits for a renewal."""
+        code yet gets the first valid one offered with a signed write (`claim`: an upload, once its
+        signature is checked; a stored change claims through may_store): anyone can make up a
+        project id, so merely connecting with a code binds nothing. One whose code has lapsed
+        waits for a renewal."""
         if not self.private:
             return None
         owner = self.store.owner(project)
@@ -360,9 +363,15 @@ class Policy:
         return {"code": "update-needed", "min": m, "m": f"this server needs TeXLoom {m} or later"}
 
     # --- storage policy ------------------------------------------------------------
-    async def may_store(self, project: str, nbytes: int, code: str | None) -> str | None:
-        """None if this write may be stored, else a reason code for the client."""
+    async def may_store(self, project: str, nbytes: int, code: str | None, reserve: bool = False) -> str | None:
+        """None if this write (signed: checked already) may be stored, else a reason code for the
+        client. With `reserve`, the bytes are counted (Store.reserve) as soon as they're allowed,
+        before anything else can run, so writes under way at once under one code can't together
+        pass its allowance: the caller then gives them back (Store.unreserve, or put_blob)."""
         owner = self.store.owner(project)
+        claim = self.private and code is not None and owner == "default"
+        if claim:  # a private server: the first signed write with a code binds a project made without one
+            owner = code
         if owner is None:  # first write: the creator's code (or the default) owns it
             owner = code or "default"
             if self.codes.allowance(owner) <= 0:
@@ -377,8 +386,12 @@ class Policy:
                 return "project-full"
             if self.store.total + nbytes > self.limits.max_bytes or self.store.free_disk() - nbytes < self.limits.min_free:
                 return "server-full"
+            if reserve:
+                self.store.reserve(project, nbytes)
         if self.store.owner(project) is None:
             await self.store.register(project, owner, self.codes.label(owner) if code else "default")
+        elif claim:
+            await self.store.claim(project, owner)
         return None
 
     async def move(self, project: str, code: str) -> dict | None:

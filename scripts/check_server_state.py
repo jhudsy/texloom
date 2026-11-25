@@ -46,14 +46,17 @@ STATE = {
     # connections on this relay
     "Relay.rooms": "connection", "Relay.conns": "connection", "Relay._next_id": "connection",
     "Conn.*": "connection", "Metered.*": "connection",
+    "Relay.per_address": "connection", "Relay.per_project": "connection",  # connections open here, for their limits
+    "Relay.room_pace": "connection", "Pace.*": "connection",  # the pace of what's relayed unsigned, per connection and room
+    "Capped.*": "connection",  # one arXiv import's unpacking
     "Policy.busy": "connection",  # whether a project is open: asks this relay's connections only
     # each relay's own
-    "Relay.memory": "per-server", "Relay.held": "per-server", "Relay.stopping": "per-server", "Budget.*": "per-server",
+    "Relay.memory": "per-server", "Relay.address_memory": "per-server", "Relay.held": "per-server", "Relay.stopping": "per-server", "Budget.*": "per-server",
     "Store.meta_tokens": "per-server", "Store.meta_at": "per-server",  # the budget for rows that store nothing
     "ArxivFetcher.*": "per-server",  # arXiv's rate limits, per relay
     "TexLive.*": "per-server",  # a cache of public TeX Live files
     # per project
-    "Store.usage": "project", "Store.owners": "project", "Store.seen": "project", "Store.pending": "project",
+    "Store.usage": "project", "Store.owners": "project", "Store.seen": "project", "Store.evicted": "project", "Store.pending": "project",
     "Store._facts": "project", "Store._revoked": "project", "Recent.*": "project",
     "Store._locks": "project",  # one project's steps in order: needs all its writes on one relay
     # across projects: into the database for several relays
