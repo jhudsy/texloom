@@ -81,10 +81,10 @@ without compiling.
   `grant = sign(owner seed, "grant:" ‖ personal public key ‖ ":" ‖ name)`. A personal
   signature is `'M' ‖ personal pub (32) ‖ grant (64) ‖ len(name) ‖ name ‖ sig (64)`, so
   anyone can verify it against the project id alone. A plain 64-byte signature is the
-  owner's. Signatures go to the server with every change, so since 0.4.35 a link's grant is
-  of an empty name (`n=` empty, `len(name)` 0): the server can't learn who people are. The
-  name is granted separately, in the encrypted `members` entry (`g` signs that name), which
-  is where apps show it from. Links issued before keep their name, and keep working.
+  owner's. Signatures go to the server with every change, so a link's grant is of an empty
+  name (`n=` empty, `len(name)` 0): the server can't learn who people are. The name is granted
+  separately, in the encrypted `members` entry (`g` signs that name), which is where apps show
+  it from.
 - **Revocation:** the owner sends `sign(owner seed, "revoke:" ‖ personal pub)`. Keys are
   always compared in their canonical base64url spelling (decoders accept variants of the
   same 32 bytes). The relay stores it, refuses that key's updates, snapshots, blobs, mode
@@ -111,22 +111,25 @@ without compiling.
 
 | client → server | meaning |
 |---|---|
-| `{t:"hello", since, app, v, pages?, last?}` | send me everything after sequence number `since` (a connection's first message, within 10 s, or it is closed); a long log comes in pages (below; `pages: 1` is what apps since 0.4.33 send); `last` = `[q, sha256]`, the newest change (not a snapshot) this copy has from the server, received or acknowledged, with the SHA-256 of its `d` (base64url): the server answers `lost` if its log ends before `q` or holds another change there; `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes (one without `v` can't understand that, so it is first held for 10 minutes, hearing nothing, rather than letting it reconnect at once). Project lists check `X-TeXLoom: app/version` the same way (426). |
+| `{t:"hello", since, app, v, code?, last?}` | send me everything after sequence number `since` (a connection's first message, within 10 s, or it is closed); a long log comes in pages (below); `code` = a creation code, checked once per connection; `last` = `[q, sha256]`, the newest change (not a snapshot) this copy has from the server, received or acknowledged, with the SHA-256 of its `d` (base64url): the server answers `lost` if its log ends before `q` or holds another change there; `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes. Project lists check `X-TeXLoom: app/version` the same way (426). |
 | `{t:"up", d, s}` | encrypted Yjs update `d` with signature `s`; stored and broadcast |
 | `{t:"snap", upto, d, s}` | compaction: encrypted full state replacing log entries ≤ `upto`; `s` signs `"snap:<upto>:" ‖ d` |
 | `{t:"aw", d}` | ephemeral, encrypted awareness (cursors, names); relayed, never stored; past 32 KiB/s a connection's are dropped |
 | `{t:"p2p", d, s?, to?}` | encrypted peer-to-peer payload (below); relayed to one peer or all, never stored; `s` must be a valid writer's signature (else dropped), and one without is paced (Per-connection limits, below) |
 | `{t:"mode", m, ts, s}` | set storage mode `"server"` or `"relay"`; `s` signs `"mode:<m>:<ts>"`, valid for 10 min; only from the owner |
 | `{t:"revoke", p, s}` | owner only: revoke personal key `p`; `s` signs `"revoke:" ‖ p` |
-| `{t:"move", c, ts, s}` | owner only: move the stored project to creation code `c` (issue #32); `s` signs `"move:<c>:<ts>"`, valid for 10 min. The server checks the code is valid and not lapsed, has room for the project and that the project is within the size limit for it, then makes it the project's owner code and recounts both codes. Answered with `moved`, or an `err` whose code is `move-bad-code`, `move-no-room` (with `need`, `free`), `move-too-big` (`need`, `max`), `move-not-stored`, `move-rejected` or `move-busy` (after five wrong codes on one connection). On a private server, someone holding a valid code may connect to a project whose code lapsed, so that it can be moved |
+| `{t:"usage"}` | ask for the project's storage figures again (what the reply to `hello` carries), fresh: an app showing how much is used asks when it shows them |
+| `{t:"move", c, ts, s}` | owner only: move the stored project to creation code `c`; `s` signs `"move:<c>:<ts>"`, valid for 10 min. The server checks the code is valid and not lapsed, has room for the project and that the project is within the size limit for it, then makes it the project's owner code and recounts both codes. Answered with `moved`, or an `err` whose code is `move-bad-code`, `move-no-room` (with `need`, `free`), `move-too-big` (`need`, `max`), `move-not-stored`, `move-rejected` or `move-busy` (after five wrong codes on one connection). On a private server, someone holding a valid code may connect to a project whose code lapsed, so that it can be moved |
 | `{t:"delete", ts, s}` | owner only: delete the project for everyone; `s` signs `"delete:<ts>"`, valid for 10 min. The server erases what it stores, keeps a tombstone (the `deleted` table, which purges never touch; its `projects` row goes) and from then on answers the project's connections with `deleted` and its file requests with 410 |
 
 | server → client | meaning |
 |---|---|
-| `{t:"log", entries:[{q,d,s}], head, floor, mode, you, peers, store, rv, more?}` | catch-up reply to `hello` (a snapshot, if any, comes first); `you` = this connection's peer id; `floor` = entries up to here were evicted; `rv` = revocations; `lost` = this log isn't the one the hello's `last` came from (the app catches up from the start, as after eviction); `more` = the rest follows as `logmore` |
+| `{t:"log", entries:[{q,snap,d,s}], head, floor, count, mode, you, peers, store, rv, lost?, more?}` | catch-up reply to `hello` (a snapshot, if any, comes first; `snap` marks it, as the signature's prefix differs); `count` = how many entries the server holds; `you` = this connection's peer id; `floor` = entries up to here were evicted; `rv` = revocations; `lost` = this log isn't the one the hello's `last` came from (the app catches up from the start, as after eviction); `more` = the rest follows as `logmore` |
 | `{t:"logmore", entries, more?}` | the next page of a catch-up; the last has no `more` |
-| `{t:"up", q, d, s}` | someone else's update |
-| `{t:"ack", q}` | your update was stored at sequence `q` |
+| `{t:"up", q, d, s}` | someone else's update (`q` 0: not stored, because the project is relay-only or the server refused it; you keep it and retry) |
+| `{t:"ack", q, id?}` | your update was stored at sequence `q` (`id` echoes the one sent with it); `q` 0: the project is relay-only, so the update was passed on and nothing is kept |
+| `{t:"snapped", upto}` | your `snap` was stored: its sender then deletes the uploads of the entries it replaced (Big changes as uploads, below) |
+| `{t:"err", code, m, …}` | a refusal or an error (an update that fails its signature check gets one with just `m`, and no `code`): `update-needed` (with `min`; the connection then closes); `needs-code`, `code-expired` (with `denied`, on a private server); for an `up`, with its `id`: `quota-full`, `project-full`, `server-full`, `code-expired`, `needs-code`; `mode-rejected`, `mode-busy`, `delete-rejected`; and the `move-*` codes above |
 | `{t:"aw", d, from}` | someone's awareness |
 | `{t:"left", from}` | that connection closed: stop showing the awareness it sent |
 | `{t:"p2p", d, s?, from}` | a peer's payload |
@@ -162,13 +165,9 @@ compact by itself: it can't read the data.)
 *packed*: `\x00TLz` followed by the update compressed with zlib, before it's encrypted
 (`texloom/packing.py`, `web/src/packing.ts`; `scripts/packing-vectors.json` checks that both read
 the same cases). Data counts as packed only if it also decompresses cleanly, so a plain update
-is never taken for one. Every app reads packed updates (since 0.4.31) and writes them (since
-0.4.36): snapshots, changes and what a peer catching up is sent, when 64 KiB or more and
-packing makes them smaller ([#18](https://github.com/jhudsy/texloom/issues/18)). A server
-whose apps write them should set `min_version = "0.4.31"`, so an older app is told to update
-rather than handed a snapshot it can't read. Text editing packs to about a third (59–67% saved,
-measured on real LaTeX sources with scattered edits by two people), so a document's whole
-history reaches the 50 MB a snapshot may take only after about 2.7 times as much editing.
+is never taken for one. Every app reads and writes packed updates: snapshots, changes and what a peer
+catching up is sent, when 64 KiB or more and packing makes them smaller. Text editing packs to
+about a third.
 
 **Peer catch-up (Yjs sync step 1/2, relayed):** after `hello`, every replica broadcasts
 `p2p {k:"sv1", sv}`, its state vector. Each writer that receives it replies directly
@@ -203,10 +202,9 @@ Blobs move the same way: `{k:"breq", id}` → `{k:"blob", id, b}`. The receiver 
 Only the owner chooses the mode, both ways: the server accepts a `mode` command only with
 the owner's signature, and the shared project setting `meta.storage` is `{m, at, s}` with
 `s` the owner's signature of `"owner:storage:<m>:<at>"`, so an editor can't make everyone
-believe the server keeps a copy it doesn't (or stop them uploading). Without a valid one (a
-project from before 0.4.35, or one an editor overwrote), apps go by what the server last
-said it does, kept for when they're offline; the owner's app signs an old plain value on
-connecting. Each app keeps the highest `at` it has seen signed (with its mode) and ignores a lower
+believe the server keeps a copy it doesn't (or stop them uploading). Without a valid one (an
+editor overwrote it), apps go by what the server last said it does, kept for when they're
+offline. Each app keeps the highest `at` it has seen signed (with its mode) and ignores a lower
 one, so an editor can't roll the setting back by writing an older value the owner once signed. A replica sends a signed `mode`
 command only when its user *changes* the setting, queuing it if offline; it never
 "corrects" the server on connect, so a stale replica can't undo someone else's
@@ -233,8 +231,7 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   stores (its other projects and project lists too), goes only to a connection that sent that
   code: anyone else would learn how much the owner keeps elsewhere. The web app shows the figures
   in Settings ▸ Sync & storage (`usage.ts`), the desktop app under the project's status, each
-  asking for fresh ones as it shows them (an older server, whose status lacks `ownerUsed`, isn't
-  asked).
+  asking for fresh ones as it shows them.
 - **Expiry:** after its `until` day (UTC) a code counts as removed: its projects fall back to
   `default`, and it no longer registers new projects. `--purge-expired-after DAYS` evicts
   (as idle eviction does) the stored projects of codes expired longer than that; re-uploads
@@ -248,9 +245,9 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   owner can add a code or make the project sync-only. They never switch by themselves: any
   server could send `needs-code`. (A project made without a code on a server that needs one
   is sync-only from the start.)
-- **Snapshots** must satisfy `max(last snapshot, floor) < upto ≤ head`, at most 12 MiB
-  (bigger documents just aren't compacted), and they are counted against limits by their
-  size change.
+- **Snapshots** must satisfy `max(last snapshot, floor) < upto ≤ head`. A `snap` frame carries at most
+  12 MiB; a bigger snapshot goes up as an upload (Big changes as uploads, below). Snapshots are counted
+  against limits by their size change.
 - **Replays:** an identical `up` (same ciphertext hash) is acked with its existing sequence
   number and not stored again; hashes of updates a snapshot replaced are kept (`gone`),
   so those can't be stored again either (anyone in a project's room hears its signed updates).
@@ -275,15 +272,19 @@ mint, so storage is governed by allowances in a codes file: `<code|default> <0|s
   SQLite allows one server process per file (a second is refused), PostgreSQL several. A project's
   edits are numbered in the database: `head` is incremented and read back (`UPDATE … RETURNING`)
   in the same transaction as the log row, so numbers stay right however many servers write.
-  Within one server, `Store.lock(project)` keeps a project's check-then-write steps (is this a
-  replay? may it be stored? store it; a snapshot's range check and the snapshot; mode changes,
-  deletion, an upload's quota check and reservation) from interleaving with another message for
-  it; different projects go on at once. What every message consults is also kept in memory:
-  usage per project and owner, owners, revocations, last-seen times, and the deletion and
-  storage mode of the 20,000 projects used most recently (the rest are read when needed).
-  That's right for one server. Several at once would pass live messages between them through a bus
-  and read totals across projects from the database (SCALING.md, "Way 3: several relays"); new
-  state follows the rules there, and `scripts/check_server_state.py` lists it all.
+- **Locking:** within one server, `Store.lock(project)` keeps a project's check-then-write steps (is this
+  a replay? may it be stored? store it; a snapshot's range check and the snapshot; mode changes,
+  deletion, an upload's quota check and reservation) from interleaving with another message for it;
+  different projects go on at once.
+- **Kept in memory, for speed:** each project's usage (read at the start from the `usage` table, a ledger
+  kept in step with every change and recounted daily against the stored data: `Store.reconcile`), owners and
+  each owner's total, last-seen times, the deletion and storage mode of the 20,000 projects used most
+  recently (the rest are read when needed), and the revocations of the 10,000 most recently used. That's
+  right for one server. Servers sharing a PostgreSQL tell each other when a project changes (LISTEN/NOTIFY,
+  `Store._told`) and the others read it again, and idle eviction, purges and the recount run on one server at
+  a time, under an advisory lock (`upkeep` in `server/app.py`). Several at once would also pass live messages
+  between them through a bus and read totals from the database at a quota check (SCALING.md, "Way 3: several
+  relays"); new state follows the rules there, and `scripts/check_server_state.py` lists it all.
 - **Erasing:** when a project is evicted, purged, made relay-only or deleted for everyone, or a
   file is deleted, its stored files stop counting and can no longer be fetched at once: their
   rows move to the table `trash`, and their content is erased in the background
@@ -410,7 +411,7 @@ relay) as the fallback for symmetric NATs.
   than being overwritten.
 - CRDT → disk: write the merged file. If the file changed on disk since the last
   sync, ingest that change first. A file that can't be written is tried again after 0.5 s,
-  doubling up to a minute, local edits taken in first as before any remote change: on Windows a
+  doubling up to 5 s (local edits are taken in first, as before any remote change): on Windows a
   file another program has open (an antivirus scan, an indexer, an editor) can't be replaced.
 - Reading a changed file: only once it has stopped changing. A read halfway through a save
   (some editors empty a file, then write it), or through copying a big file in, would share a
@@ -430,7 +431,7 @@ relay) as the fallback for symmetric NATs.
   if an editor saved meanwhile, it is read before anything is written there again.
 - Line endings: the project's texts break lines with "\n" only. A file saved on Windows ends
   lines with "\r\n"; it comes in as "\n" and is written back with "\r\n" (`c` in known.json,
-  judged by the file's first line; for entries from before it was noted, by the file on disk).
+  judged by the file's first line).
   The browser's folder sync does the same. The editor counts only "\n" as a line break
   (`EditorState.lineSeparator`; by default CodeMirror also takes "\r\n" as one), so its
   positions match the shared text's. Any "\r" in a project text (pasted, say; a lone one too,
@@ -456,8 +457,8 @@ relay) as the fallback for symmetric NATs.
   with my own TeX" (acknowledging with `{k:"cack", by, n}`). Requests are signed like `upd`
   (only a writer can ask) and carry when they were made (`at`, ms) and a random `n`: a helper
   takes one made in the last five minutes (and at most a minute ahead of its clock) whose `n`
-  it hasn't seen, so a recorded request can't be replayed later; one without `at` (an older
-  app) is ignored. The answers (`cack`, `cerr`) are signed too and carry the request's `n`:
+  it hasn't seen, so a recorded request can't be replayed later; one without a recent `at`
+  is ignored. The answers (`cack`, `cerr`) are signed too and carry the request's `n`:
   the browser takes only a writer's answer to one of its own recent requests, so a read-only
   member can't fake one, nor the server replay one.
 - Local options (`compile`, `engine`, `latexmk_args`, `shell_escape` and the lines
@@ -465,9 +466,7 @@ relay) as the fallback for symmetric NATs.
   (`config.settings_path`: `folder-settings/<hash of the folder's path>.json`, which also
   notes the project id), never in the folder: anyone sharing the folder through Dropbox or
   the like can write any file in it, `.texloom/computers/<id>/config.json` included. A
-  moved folder, or a link changed to another project, starts over with the defaults. The
-  first run of 0.4.56 brought each listed folder's old settings over, only `compile`,
-  `engine` and `label` from a folder that may be shared (`config.looks_shared`).
+  moved folder, or a link changed to another project, starts over with the defaults.
   `.texloom/computers/<id>/config.json` keeps the link, creation code and name.
 - Blobs referenced by remote updates are fetched in the background. In relay mode
   they arrive from a peer over the same connection, so fetching inline would deadlock.
@@ -487,9 +486,7 @@ service would also copy each computer's records to the others. So:
 - **Records per computer:** `paths.state_dir(folder)` = `.texloom/computers/<computer id>/`
   (the id: `computer-id` in the app's settings folder, random). Everything but the folder's
   `folder-id`, the `lock` and `.gitignore` lives there: the replica, `known.json`, the merge bases,
-  `config.json` (the link), the git bridge's lease id, build output. A folder from before 0.4.40
-  has them in `.texloom` itself; `state_dir` moves them (config.json last, so an interrupted move
-  finishes next time). FolderSync keeps its files in `replica.dir`.
+  `config.json` (the link), the git bridge's lease id, build output. FolderSync keeps its files in `replica.dir`.
 - **Finding each other:** `.texloom/folder-id` (random, made by the first computer; the service
   copies it). Each computer sends `{"k": "fold", "f": folder id, "m": computer id, "h": holds the
   turn, "by": name}` to the project's peers every ANNOUNCE (20 s): peer-to-peer through the relay,
@@ -612,7 +609,7 @@ A chat panel (`web/src/assistant/`) that acts on the project like another collab
   - **OpenAI-compatible:** `/v1/chat/completions` with `tools`, parsing the streamed
     `tool_calls` and `reasoning`/`reasoning_content` deltas. Covers OpenAI, OpenRouter,
     LM Studio, Ollama, vLLM, llama.cpp and LiteLLM.
-- **History:** each session keeps the provider-native message list and only appends
+- **Conversation:** each session keeps the provider-native message list and only appends
   to it, so Claude's thinking blocks (with signatures) are echoed back unchanged. A
   refused or truncated turn is never appended. After a mid-output fallback, blocks
   before the last `fallback` marker that the next model can't continue from are
@@ -620,7 +617,10 @@ A chat panel (`web/src/assistant/`) that acts on the project like another collab
 - **Tools** (`tools.ts`): `list_files`, `read_file` (with line numbers), `search`,
   `edit_file` (exact, unique match → one small Y.Text delete + insert), `write_file`
   (common prefix/suffix trimmed), `delete_file`, `compile`, `get_compile_log` (errors
-  and warnings extracted). Read-only links get only the non-writing tools.
+  and warnings extracted), and for the Review tab `suggest_edit`, `add_comment`, `list_comments`,
+  `reply_comment` and `resolve_comment`. Read-only links get only the non-writing tools. MCP servers
+  the person adds (⚙; `mcpclient.ts`, Streamable HTTP) are called straight from the browser, never
+  through the TeXLoom server, and their results are untrusted input.
   - Every input is validated with zod before running. Streamed and local-model inputs
     can be truncated or malformed; failures go back to the model as error results.
   - `edit_file` finds its target again *after* the user approves, because collaborators
@@ -852,8 +852,8 @@ one to the projects it names.
   removal); passkeys belong to their server's address, so they stay where they were made. A list retired on any copy is retired: replacing or deleting it retires
   it on every copy. Dropping a copy leaves what's there, with its settings marking it dropped. The
   servers allow `X-Seq` across sites, so a page can sync copies on other servers. Every list entry
-  names its project's server (`s`), and every creation code its server (`code:<origin>`), since
-  "the server keeping the list" is no longer one server.
+  names its project's server (`s`), and every creation code its server (`code:<origin>`), because a list can be kept on
+  several servers.
 - `DELETE` retires an entry: its contents go, but its id answers 410 until it is purged, so a
   device with a replaced (perhaps leaked) link can't start the list again under that link. A retired
   id is kept a year and counted: an owner with 256 (100,000 in all on a server where anyone may make
@@ -885,8 +885,8 @@ one to the projects it names.
   device's clock counts as now + ten minutes, so a setting dated far ahead can't outlast every
   later change. So a code entered in the web app reaches the desktop app's New project dialog and
   the other way round. The web app records when its code was entered (`texloom.codeAt`); the desktop
-  app keeps one code per server in `creation-codes.json` (mode 600) in its config folder. A code
-  entered before dates were kept counts as the oldest. Anyone with the sync link can read the codes
+  app keeps one code per server in `creation-codes.json` (mode 600) in its config folder.
+  Anyone with the sync link can read the codes
   and tokens, as they can every project on the list.
 
 - Tags are a person's own and never enter a project. They live in `texloom.tags` in the browser and,
@@ -915,7 +915,7 @@ words typed are sent.
 `web/src/zotero.ts` keeps a `.bib` file in step with a Zotero collection through api.zotero.org,
 also from the browser. Like any integration it has two levels. The **account** (an API key, the
 user id and name) is the person's: in `localStorage`, and in the project list's settings entry
-(`zotero`, beside `code`, the latest one set winning) so it follows them; never in a project. The
+(`zotero`, beside the `code:<origin>` entries, the latest one set winning) so it follows them; never in a project. The
 **link** is the project's: `meta.zotero = {<file>: {lib, libName, coll, collName, format, by, at}}`,
 so collaborators see the file is generated and by whom; anyone whose own key reads that library can
 refresh it. A refresh exports the collection's top-level items as BibTeX or BibLaTeX (100 per
@@ -966,7 +966,8 @@ The folder is checked to be the linked one every 10 minutes, not every round. Wi
 
 `web/src/github.ts` keeps a project in step with a git repository from the browser, through
 the host's own API (`web/src/forges.ts`: GitHub, GitLab, and Gitea or Forgejo, such as Codeberg;
-the file names are from when GitHub was the only one). A browser can't speak git's own protocol to
+`github.ts` and `githubui.ts` are this generic integration despite their names, and `meta.github` and
+`githubLease` its stored names). A browser can't speak git's own protocol to
 these hosts (they don't allow it from other sites), but their APIs do allow it (CORS; a
 self-hosted Gitea or Forgejo only once its admin turns that on). Each host is an adapter with the
 same few calls: whose token, a branch's commit, a commit's files with their git blob ids, a blob,
@@ -1025,9 +1026,10 @@ browser's token.
   A synced folder that is a plain clone of the linked repository, without `--git`, gets a
   warning: pulling there by hand while a browser syncs could bring changes in twice.
 
-## Projects on several servers
+## One person, projects on different servers
 
-A project lives on one server; a person's projects needn't. The web app belongs to the server it's
+A project lives on one server; a person's projects needn't. (This is about where a project lives, not
+how a server scales: see [SCALING.md](SCALING.md).) The web app belongs to the server it's
 loaded from (its "home": the list, settings, creation code and new projects are there), and a
 project from elsewhere syncs with its own server straight from the page (`web/src/servers.ts`):
 
@@ -1041,8 +1043,8 @@ project from elsewhere syncs with its own server straight from the page (`web/sr
 - A server must be `https` (`http` only on this computer, for testing, or when the app itself is
   on `http`), and nothing but encrypted data goes to it: the same as for the home server. The relay
   already answers any origin (CORS `*`), and the page's policy allows `https:`/`wss:` connections.
-- Creation codes are per server, each sent only to its own server. The list's settings carry `code`
-  (the list's own server's) and `code:<origin>` for each other; the desktop app's
+- Creation codes are per server, each sent only to its own server. The list's settings carry a
+  `code:<origin>` entry for each server; the desktop app's
   `creation-codes.json` maps onto them, so a code entered anywhere reaches every device.
 - A new project (or copy) goes on a server you choose when you know more than one: the home server,
   the servers of projects on your list, those you hold a code for (and in the desktop app, its
@@ -1215,10 +1217,6 @@ The server could help with this judgement by noting the newest app version that 
 each stored project. It knows that version from the hello, without seeing anything inside. That
 isn't built yet.
 
-Renaming stored names is a data change of the same kind. An example is the `github` and
-`githubLease` project settings, which now cover every git host. The apps read both names, write
-only the new one, and carry a `compat(data …)` marker on the old name until it can go.
-
 ## Known limitations / open questions
 
 - Deleting a project for everyone stops it on its server only. Anyone with a copy can still read
@@ -1247,7 +1245,7 @@ only the new one, and carry a `compat(data …)` marker on the old name until it
   has (`last`: number and content hash); when the server's log ends before it or holds another
   change there, it says `lost`, and the app catches up from the start and re-uploads, as after
   eviction (`scripts/check_restore.py`). It can't tell once that change has been compacted away
-  and forgotten (`GONE_KEEP` changes later), nor for apps from before 0.4.52, which don't send it.
+  and forgotten (`GONE_KEEP` changes later).
 - Browser storage can be evicted: request persistent storage; the server copy and
   daemon copies are the backup.
 

@@ -15,8 +15,8 @@ stays one process on one machine.
 - **The server only sees encrypted data.** A second, third or someone else's server needs no more trust than
   the first.
 - **Projects are independent.** Each project's changes are one ordered stream and nothing crosses between
-  projects, so a project can live on any server (see "Projects on several servers" in
-  [DESIGN.md](DESIGN.md)), and a database can later be split by project.
+  projects, so a project can live on any server (see "One person, projects on different
+  servers" in [DESIGN.md](DESIGN.md)), and a database can later be split by project.
 - **Compiling is not the server's job.** It happens on the user's machine (WebAssembly TeX Live in the
   browser, or TeX on the desktop). The server hands out the engine and TeX Live package files, which is disk
   and bandwidth, not CPU.
