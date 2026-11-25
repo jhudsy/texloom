@@ -8,6 +8,7 @@ link's signature vouches for that name, and whether it mentions you (web/src/men
 """
 from __future__ import annotations
 
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -113,8 +114,31 @@ def _when(ms: int) -> str:
     return time.strftime("%d %b %Y %H:%M", time.localtime(ms / 1000)) if ms else ""
 
 
-def _who(name: str, verified: bool) -> str:
-    return f"{name} ✓" if verified else name
+# Marks that look like the ✓ shown after a verified author's name: collaborators choose their own
+# names, so these are taken out of them, with invisible characters (which could hide where one is)
+CHECKS = re.compile("[✓✔✅☑√⍻\U0001f5f8\U0001f5f9☐☒✗✘"
+                    "­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮"
+                    "⁠-⁯ㅤ︀-️﻿ﾠ\U0001d173-\U0001d17a\U000e0000-\U000e0fff]")
+MARKDOWN = re.compile(r"([\\`*_\[\]()!<>&])")  # links, pictures, HTML, code and emphasis
+
+
+def plain_name(name: object) -> str:
+    """An author's name as they wrote it, without check marks or invisible characters."""
+    return CHECKS.sub("", str(name)).strip() or "?"
+
+
+def author(name: object, verified: bool) -> str:
+    """An author's name, with ✓ when a personal link's signature vouches for it."""
+    n = plain_name(name)
+    return f"{n} ✓" if verified else n
+
+
+def md(text: object) -> str:
+    """Text shown as itself in Markdown: no links, pictures (which an editor would fetch), HTML or code."""
+    return MARKDOWN.sub(r"\\\1", str(text))
+
+
+_who = author
 
 
 def overview(items: list[Comment], project: str, me: str = "") -> str:
@@ -135,13 +159,14 @@ def overview(items: list[Comment], project: str, me: str = "") -> str:
             current = c.file
         where = f"{c.file}:{c.line}" if c.line else f"{c.file} (the text it was on has changed)"
         flag = " · **mentions you**" if me and c.mentions(me) else ""
-        body.append(f"### {where} · {c.kind} by {_who(c.by, c.verified)} · {_when(c.at)}{flag}")
+        # (collaborators write all of it: shown as plain text, never as Markdown, which could load pictures)
+        body.append(f"### {md(where)} · {c.kind} by {md(_who(c.by, c.verified))} · {_when(c.at)}{flag}")
         body.append("")
         if c.kind == "suggestion":
-            body += [f"Replace: {c.quote!r}" if c.quote else "Insert:", f"With: {c.text!r}" if c.quote else repr(c.text)]
+            body += [f"Replace: {md(repr(c.quote))}" if c.quote else "Insert:", f"With: {md(repr(c.text))}" if c.quote else md(repr(c.text))]
         else:
-            body += [f"> {line}" for line in c.quote[:300].splitlines()] + ["", c.text]
-        body += [f"- {_who(rp.by, rp.verified)} ({_when(rp.at)}): {rp.text}" for rp in c.replies]
+            body += [f"> {md(line)}" for line in c.quote[:300].splitlines()] + ["", md(c.text)]
+        body += [f"- {md(_who(rp.by, rp.verified))} ({_when(rp.at)}): {md(rp.text)}" for rp in c.replies]
         body += ["", f"<sub>id {c.id}</sub>", ""]
     return "\n".join(head + body)
 

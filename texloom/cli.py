@@ -153,7 +153,7 @@ def comments_command(a: argparse.Namespace) -> None:
     """`texloom comments DIR` lists from this computer's copy of the project (as up to date as its
     last sync); `reply` and `resolve` connect with a copy of their own, as `texloom mcp` does, so
     they work while the app or `texloom run` is syncing the folder."""
-    from .comments import read, reply, resolve
+    from .comments import author, read, reply, resolve
     from .listsync import name_in
     act = a.args[0] if a.args[0] in ("reply", "resolve") else "list"
     rest = a.args[1:] if act != "list" else a.args
@@ -170,11 +170,11 @@ def comments_command(a: argparse.Namespace) -> None:
         for c in items:
             where = f"{c.file}:{c.line}" if c.line else f"{c.file} (text changed)"
             state = " [resolved]" if c.resolved else ""
-            print(f"{where}: {c.kind} by {c.by}{' ✓' if c.verified else ''}{state}  (id {c.id})")
+            print(f"{where}: {c.kind} by {author(c.by, c.verified)}{state}  (id {c.id})")
             body = c.text if c.kind == "comment" else (f"replace {c.quote!r} with {c.text!r}" if c.quote else f"insert {c.text!r}")
             print("    " + body.replace("\n", "\n    "))
             for rp in c.replies:
-                print(f"    ↳ {rp.by}{' ✓' if rp.verified else ''}: {rp.text}")
+                print(f"    ↳ {author(rp.by, rp.verified)}: {rp.text}")
         return
     if not keys.writable:
         sys.exit("this folder has a read-only link: it can't reply or resolve")

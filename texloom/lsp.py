@@ -31,7 +31,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
-from .comments import Comment, add, read, reply, resolve
+from .comments import Comment, add, author, md, plain_name, read, reply, resolve
 from .config import browser_link, config_path, load, load_config, side_replica
 from .listsync import name_in
 from .replica import Replica
@@ -84,8 +84,7 @@ def offset(text: str, pos: dict) -> int:
     return end
 
 
-def who(name: str, verified: bool) -> str:
-    return f"{name} ✓" if verified else name
+who = author
 
 
 class Lsp:
@@ -220,18 +219,19 @@ class Lsp:
             self.publish(uri)
 
     def thread(self, c: Comment) -> str:
-        head = f"**{who(c.by, c.verified)}** · {'suggested change' if c.kind == 'suggestion' else 'comment'}"
+        # (the comments are written by collaborators: shown as plain text, never as Markdown)
+        head = f"**{md(who(c.by, c.verified))}** · {'suggested change' if c.kind == 'suggestion' else 'comment'}"
         if c.kind == "suggestion":
-            body = (f"Replace `{c.quote}` with `{c.text}`" if c.quote else f"Insert `{c.text}`")
+            body = (f"Replace “{md(c.quote)}” with “{md(c.text)}”" if c.quote else f"Insert “{md(c.text)}”")
         else:
-            body = c.text
-        replies = "".join(f"\n\n---\n**{who(rp.by, rp.verified)}**: {rp.text}" for rp in c.replies)
+            body = md(c.text)
+        replies = "".join(f"\n\n---\n**{md(who(rp.by, rp.verified))}**: {md(rp.text)}" for rp in c.replies)
         return f"{head}\n\n{body}{replies}"
 
     def describe(self, c: Comment, text: str | None) -> dict:
-        return {"id": c.id, "kind": c.kind, "by": c.by, "verified": c.verified, "at": c.at, "text": c.text, "quote": c.quote,
+        return {"id": c.id, "kind": c.kind, "by": plain_name(c.by), "verified": c.verified, "at": c.at, "text": c.text, "quote": c.quote,
                 "mentionsMe": c.mentions(self.name), "range": self.range_of(c, text), "placed": c.span is not None,
-                "replies": [{"by": rp.by, "verified": rp.verified, "at": rp.at, "text": rp.text} for rp in c.replies]}
+                "replies": [{"by": plain_name(rp.by), "verified": rp.verified, "at": rp.at, "text": rp.text} for rp in c.replies]}
 
     # --- requests
     async def settle(self) -> None:
@@ -318,7 +318,7 @@ class Lsp:
                 continue
             diag = self.diagnostic(c, text)
             if c.kind == "comment" and self.replica.can_write:
-                out.append({"title": f"TeXLoom: resolve {c.by}’s comment", "kind": "quickfix", "diagnostics": [diag],
+                out.append({"title": f"TeXLoom: resolve {plain_name(c.by)}’s comment", "kind": "quickfix", "diagnostics": [diag],
                             "command": {"title": "Resolve", "command": "texloom.resolve", "arguments": [c.id]}})
             out.append({"title": "TeXLoom: open the Review tab in the browser", "kind": "quickfix", "diagnostics": [diag],
                         "command": {"title": "Open", "command": "texloom.openReview", "arguments": []}})
