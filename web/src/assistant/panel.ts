@@ -4,7 +4,7 @@ import { chats, type ChatMeta, type Entry } from './chats'
 import * as Y from 'yjs'
 import type { Replica } from '../replica'
 import { copyButton, dialog, h } from '../dom'
-import { aiPrefs, listModels, PRESETS, type ProviderConfig } from './providers'
+import { aiPrefs, findOnThisComputer, listModels, PRESETS, providerOf, PROVIDERS, type ProviderConfig } from './providers'
 import { createSession, explainError, tokensIn, type LlmSession, type TurnEvents, type TurnResult } from './llm'
 import { ASSISTANT, jsonSchema, runTool, toolsFor, type Change, type ToolCtx, type ToolDef } from './tools'
 import { checkUrl, explainServerError, serverTools, testServer, toolServers, type ToolServer } from './servers'
@@ -133,7 +133,8 @@ function offerEveryModel(input: HTMLInputElement): HTMLInputElement {
 
 export function createAssistantPanel(host: PanelHost): HTMLElement {
   const r = host.replica
-  let providerId = aiPrefs.activeId
+  // the provider in use: the one chosen last, while it's set up, else the first that is
+  let providerId = aiPrefs.setUp(aiPrefs.activeId) ? aiPrefs.activeId : PROVIDERS.find((id) => aiPrefs.setUp(id)) ?? aiPrefs.activeId
   let cfg: ProviderConfig = aiPrefs.get(providerId)
   let session: LlmSession | null = null
   let chat: { meta: ChatMeta; entries: Entry[] } | null = null // the conversation being saved
@@ -142,22 +143,9 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   let lastUndoBtn: HTMLButtonElement | null = null
 
   // ---- elements ----
-  const option = (id: string) => h('option', { value: id, ...(id === providerId ? { selected: true } : {}) }, PRESETS[id].label)
-  const providerSel = h('select', { title: t('Provider'), onchange: (e: any) => switchProvider(e.target.value) },
-    h('optgroup', { label: t('Online') }, ...['anthropic', 'openai', 'openrouter'].map(option)),
-    h('optgroup', { label: t('On this computer') }, ...['lmstudio', 'ollama'].map(option)),
-    option('custom')) as HTMLSelectElement
-  const modelList = h('datalist', { id: 'ai-models' })
-  const modelIn = offerEveryModel(h('input', {
-    class: 'model', list: 'ai-models', placeholder: t('choose a model'), title: t('Model'),
-    onchange: (e: any) => {
-      const model = e.target.value.trim()
-      if (!model || model === cfg.model) return // (left empty: the model is put back when the field loses focus)
-      cfg.model = model
-      aiPrefs.save(providerId, { model })
-      newChat()
-    },
-  }) as HTMLInputElement)
+  // one picker: the models of every provider that's set up, by provider (they're set up in ⚙)
+  const picker = h('select', { class: 'model', title: t('Model'), 'aria-label': t('Model'), onchange: () => choose(picker.value) }) as HTMLSelectElement
+  const setUpBtn = h('button', { class: 'primary', onclick: () => configDialog() }, t('Set up the assistant…')) as HTMLButtonElement
   const log = h('div', { class: 'ai-log' })
   const input = h('textarea', { rows: 3, placeholder: host.writable ? t('Ask, or tell it what to change… (Enter to send, Shift+Enter for a new line)') : t('Ask about this project… (read-only link: no edits)') }) as HTMLTextAreaElement
   const sendBtn = h('button', { class: 'primary', onclick: () => (abort ? stop() : send()) }, t('Send')) as HTMLButtonElement
@@ -174,31 +162,56 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   const filesEl = h('div', { class: 'ai-files' })
   const historyBtn = h('button', { onclick: () => historyDialog() }, t('Past conversations')) as HTMLButtonElement
 
-  /** Whether the provider can be asked for its models: with a key, or a server on this computer. */
-  const askable = (c: ProviderConfig) => !!c.apiKey || (c.kind === 'openai' && !/^https:/.test(c.baseUrl))
-  /** Ask the provider which models it has (they change: new Claude models, what a local server has
-   *  downloaded) and offer them in the field. `loud`: say why it couldn't, else it's quiet. */
-  const loadModels = (loud = false) => {
-    if (!askable(cfg)) { if (loud) hint(t('Set an API key in ⚙.'), 'note', false); return }
-    const asked = providerId
+  const setUpNow = () => PROVIDERS.filter((id) => aiPrefs.setUp(id))
+  function renderPicker() {
+    const ids = setUpNow()
+    picker.hidden = refreshBtn.hidden = !ids.length
+    setUpBtn.hidden = !!ids.length
+    const chosen = aiPrefs.setUp(providerId) && cfg.model ? `${providerId}\n${cfg.model}` : ''
+    picker.replaceChildren(
+      ...(chosen ? [] : [h('option', { value: '', disabled: true }, t('choose a model'))]),
+      ...ids.map((id) => {
+        const c = aiPrefs.get(id)
+        const models = !c.model || c.models.includes(c.model) ? c.models : [c.model, ...c.models]
+        return h('optgroup', { label: c.label }, ...(models.length
+          ? models.map((m) => h('option', { value: `${id}\n${m}` }, m))
+          : [h('option', { value: `${id}\n`, disabled: true }, t('no models listed yet (⟳)'))]))
+      }))
+    picker.value = chosen
+  }
+  /** A model picked: its provider becomes the one in use. */
+  function choose(value: string) {
+    const [id, model] = value.split('\n')
+    if (!model || (id === providerId && model === cfg.model)) return
+    providerId = id
+    aiPrefs.activeId = id
+    aiPrefs.save(id, { model })
+    cfg = aiPrefs.get(id)
+    renderPicker()
+    newChat(!chat) // (before any conversation, the introduction says which model)
+  }
+  /** Ask each provider that's set up which models it has (they change: new Claude models, what a server
+   *  has downloaded). `loud`: say what was found, or why not; else quietly. */
+  async function loadModels(loud = false) {
     refreshBtn.disabled = true
-    listModels(cfg).then((models) => {
-      aiPrefs.save(asked, { models })
-      if (asked !== providerId) return
-      cfg = aiPrefs.get(asked)
-      modelList.replaceChildren(...cfg.models.map((m) => h('option', { value: m })))
-      if (loud) hint(tn(models.length, '{{n}} model found', '{{n}} models found'), 'note', false)
-    }).catch((e) => {
-      if (loud && asked === providerId) hint(explainError(e, cfg), 'err', false)
-      else quiet('the provider’s models weren’t listed: ⟳ or Load models in ⚙ says why', e)
-    }).finally(() => { refreshBtn.disabled = false })
+    const said: string[] = []
+    await Promise.all(setUpNow().map(async (id) => {
+      const c = aiPrefs.get(id)
+      try {
+        aiPrefs.save(id, { models: await listModels(c) })
+        said.push(`${c.label}: ${tn(aiPrefs.get(id).models.length, '{{n}} model found', '{{n}} models found')}`)
+      } catch (e) {
+        if (loud) said.push(`${c.label}: ${explainError(e, c)}`)
+        else quiet('a provider’s models weren’t listed: ⟳ says why', e)
+      }
+    }))
+    cfg = aiPrefs.get(providerId)
+    renderPicker()
+    refreshBtn.disabled = false
+    if (loud && said.length) hint(said.join(' · '), 'note', false)
   }
   const refreshBtn = h('button', { title: t('Refresh the list of models'), 'aria-label': t('Refresh the list of models'), onclick: () => loadModels(true) }, '⟳') as HTMLButtonElement
-  const refreshModels = () => {
-    modelIn.value = cfg.model
-    modelList.replaceChildren(...cfg.models.map((m) => h('option', { value: m })))
-    loadModels()
-  }
+  const refreshModels = () => { renderPicker(); void loadModels() }
   refreshModels()
 
   input.addEventListener('keydown', (e) => {
@@ -206,7 +219,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   })
 
   const panel = h('div', { class: 'assistant' },
-    h('div', { class: 'ai-bar' }, providerSel, modelIn, modelList, refreshBtn,
+    h('div', { class: 'ai-bar' }, setUpBtn, picker, refreshBtn,
       h('button', { title: t('Assistant settings'), onclick: () => configDialog() }, '⚙'),
     ),
     h('div', { class: 'ai-bar' }, h('button', { onclick: () => newChat(true) }, t('New conversation')), historyBtn),
@@ -391,17 +404,17 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   async function openChat(meta: ChatMeta) {
     const body = await chats.body(meta.id)
     if (!body || abort) return
-    if (meta.provider in PRESETS && (meta.provider !== providerId || meta.model !== cfg.model)) { // back to what it was using
-      providerId = meta.provider
+    const was = providerOf(meta.provider)
+    if (was in PRESETS && aiPrefs.setUp(was) && (was !== providerId || meta.model !== cfg.model)) { // back to what it was using
+      providerId = was
       aiPrefs.activeId = providerId
-      providerSel.value = providerId
+      if (meta.model !== aiPrefs.get(providerId).model) aiPrefs.save(providerId, { model: meta.model })
       cfg = aiPrefs.get(providerId)
-      if (meta.model !== cfg.model) { cfg.model = meta.model; aiPrefs.save(providerId, { model: cfg.model }) }
-      refreshModels()
+      renderPicker()
     }
     lastUndoBtn = null
     chat = { meta, entries: body.entries }
-    session = body.state && meta.provider in PRESETS ? createSession(cfg, toolsFor(host.writable), systemPrompt(), body.state) : null
+    session = body.state && was === providerId ? createSession(cfg, toolsFor(host.writable), systemPrompt(), body.state) : null
     // Claude's thinking blocks are tied to the instructions they were made under (which change with your own, or a new version)
     if (session && body.sys !== fingerprint(session.system)) session.forgetThinking()
     log.replaceChildren(...body.entries.map(entryEl))
@@ -445,7 +458,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       items.replaceChildren(...all.map((m) => h('li', { class: 'chatrow' },
         h('button', { class: 'chatopen', onclick: () => { dlg.close(); openChat(m) } },
           h('span', { class: 'chattitle' }, m.title),
-          h('span', { class: 'muted small' }, `${new Date(m.at).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })} · ${PRESETS[m.provider]?.label ?? m.provider}${m.model ? ` · ${m.model}` : ''}`)),
+          h('span', { class: 'muted small' }, `${new Date(m.at).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })} · ${PRESETS[providerOf(m.provider)]?.label ?? m.provider}${m.model ? ` · ${m.model}` : ''}`)),
         h('button', { class: 'icon', title: t('Delete the conversation “{{name}}”', { name: m.title }), 'aria-label': t('Delete the conversation “{{name}}”', { name: m.title }), onclick: async () => { await forget(m.id); render() } }, '✕'))))
     }
     const dlg = dialog('settings',
@@ -468,24 +481,17 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     h('div', {}, connectButton()))
 
   function intro() {
+    const ready = aiPrefs.setUp(providerId)
     log.replaceChildren(h('div', { class: 'ai-note' }, [
-      t('Assistant using {{provider}}.', { provider: cfg.label + (cfg.model ? ` · ${cfg.model}` : '') }),
+      ready ? t('Assistant using {{provider}}.', { provider: cfg.label + (cfg.model ? ` · ${cfg.model}` : '') }) : '',
       host.writable ? t('It can read, search and edit files and compile this project.') : t('It can read, search and compile this project.'),
       t('Edits appear for collaborators like anyone else’s.'),
-      cfg.apiKey || !/^https:/.test(cfg.baseUrl) ? '' : t('Set an API key in ⚙.'),
+      !ready ? t('To start, set it up with a key from Anthropic, OpenAI or OpenRouter, or with a model server of your own.') : !cfg.model ? t('Choose a model above.') : '',
     ].filter(Boolean).join(' ')), otherWay())
   }
   intro()
   renderCtx()
   host.onContextChange(() => { renderCtx(); renderFiles() })
-
-  function switchProvider(id: string) {
-    providerId = id
-    aiPrefs.activeId = id
-    cfg = aiPrefs.get(id)
-    refreshModels()
-    newChat(true)
-  }
 
   function newChat(clear = false) {
     if (abort) stop()
@@ -589,8 +595,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   async function send() {
     const text = input.value.trim()
     if (!text) return
-    if (!cfg.model) return configDialog(t('Choose a model first.'))
-    if (cfg.kind === 'anthropic' && !cfg.apiKey) return configDialog(t('Add your Anthropic API key first.'))
+    if (!aiPrefs.setUp(providerId)) return configDialog()
+    if (!cfg.model) { hint(t('Choose a model above.'), 'note', false); picker.focus(); return }
     input.value = ''
 
     chat ??= { meta: { id: crypto.randomUUID(), project: r.keys.project, title: text.replace(/\s+/g, ' ').slice(0, 80), provider: providerId, model: cfg.model, at: Date.now() }, entries: [] }
@@ -743,66 +749,129 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     }
   }
 
-  // ---- provider settings ----
+  // ---- settings: the providers, set up one by one, and what applies to all of them ----
   function configDialog(message?: string) {
-    const c = aiPrefs.get(providerId)
-    const status = h('span', { class: 'muted small' })
-    const base = h('input', { value: c.baseUrl }) as HTMLInputElement
-    const key = h('input', { type: 'password', value: c.apiKey, placeholder: c.kind === 'anthropic' ? 'sk-ant-…' : t('optional for local servers'), autocomplete: 'off' }) as HTMLInputElement
-    const model = offerEveryModel(h('input', { value: c.model, list: 'ai-models-dlg' }) as HTMLInputElement)
-    const dl = h('datalist', { id: 'ai-models-dlg' }, ...c.models.map((m) => h('option', { value: m })))
-    const effort = h('select', {}, ...EFFORTS.map(([e, label]) => h('option', { value: e, ...(e === c.effort ? { selected: true } : {}) }, label))) as HTMLSelectElement
-    const contextIn = h('input', { type: 'number', min: 1024, step: 1024, value: c.contextWindow ?? '', placeholder: t('automatic'),
-      title: t('How many tokens the model can take in at once. Long conversations are summarised before they reach it.') }) as HTMLInputElement
+    // shown first: the one in use, or (nothing set up yet) Anthropic
+    let id = providerId
+    const which = h('select', { 'aria-label': t('Provider'), onchange: () => { keep(); id = which.value; fill() } },
+      ...PROVIDERS.map((p) => h('option', { value: p }))) as HTMLSelectElement
+    const labelProviders = () => PROVIDERS.forEach((p, i) => {
+      (which.options[i] as HTMLOptionElement).textContent = PRESETS[p].label + (aiPrefs.setUp(p) ? ` — ${t('set up')}` : '')
+    })
+    const box = h('div', { class: 'provider-box' })
+    const status = h('p', { class: 'muted small', role: 'status' })
+    let fields: { base: HTMLInputElement; key: HTMLInputElement; model: HTMLInputElement; effort: HTMLSelectElement; context: HTMLInputElement } | null = null
+
+    /** The provider shown, with its fields; set up, or with what it takes to set it up. */
+    function fill() {
+      labelProviders()
+      which.value = id
+      status.textContent = ''
+      const c = aiPrefs.get(id)
+      const ready = aiPrefs.setUp(id)
+      const self = id === 'selfhosted'
+      const base = h('input', { value: c.baseUrl, placeholder: self ? t('empty: find Ollama or LM Studio on this computer') : PRESETS[id].baseUrl }) as HTMLInputElement
+      const key = h('input', { type: 'password', value: c.apiKey, placeholder: self ? t('optional') : c.kind === 'anthropic' ? 'sk-ant-…' : 'sk-…', autocomplete: 'off' }) as HTMLInputElement
+      const model = offerEveryModel(h('input', { value: c.model, list: 'ai-models-dlg', placeholder: t('one not listed, if the server has no list') }) as HTMLInputElement)
+      const effort = h('select', {}, ...EFFORTS.map(([e, label]) => h('option', { value: e, ...(e === c.effort ? { selected: true } : {}) }, label))) as HTMLSelectElement
+      const context = h('input', { type: 'number', min: 1024, step: 1024, value: c.contextWindow ?? '', placeholder: t('automatic'),
+        title: t('How many tokens the model can take in at once. Long conversations are summarised before they reach it.') }) as HTMLInputElement
+      fields = { base, key, model, effort, context }
+      const found = h('span', { class: 'muted small' })
+      if (ready && c.model) {
+        createSession(c, [], '').contextWindow()
+          .then((n) => { found.textContent = n ? t('Found: {{n}} tokens', { n: n.toLocaleString(locale) }) : t('Not found: enter it if you know it') })
+          .catch((e) => quiet('the model’s context size wasn’t found: the field stays empty', e))
+      }
+      const setUp = h('button', { class: 'primary', onclick: () => void setUpThis(setUp) }, self ? t('Connect') : t('Set up')) as HTMLButtonElement
+      const remove = h('button', { onclick: () => {
+        aiPrefs.save(id, { apiKey: '', models: [], model: '', on: false, ...(self ? { baseUrl: '' } : {}) })
+        settled()
+        fill()
+      } }, t('Remove'))
+      box.replaceChildren(
+        c.help ? Object.assign(h('p', { class: 'muted small' }), { innerHTML: md(c.help) }) : '',
+        h('div', { class: 'grid' },
+          h('span', {}, t('Address')), base,
+          h('span', {}, t('API key')), key,
+          ...(ready ? [
+            h('span', {}, t('Model')), h('div', {}, model, h('datalist', { id: 'ai-models-dlg' }, ...c.models.map((m) => h('option', { value: m })))),
+            ...(c.kind === 'anthropic' ? [h('span', {}, t('Effort')), effort] : []),
+            h('span', {}, t('Context window')), h('div', { class: 'row' }, context, found),
+          ] : [])),
+        h('div', { class: 'row' }, ready ? h('span', { class: 'muted small' }, tn(c.models.length, 'Set up: {{n}} model, offered above the conversation.', 'Set up: {{n}} models, offered above the conversation.')) : '',
+          h('span', { class: 'spacer' }), ready ? remove : setUp))
+    }
+
+    /** Set up the provider shown: its models listed proves the key or the server works. */
+    async function setUpThis(btn: HTMLButtonElement) {
+      if (!fields) return
+      const c = { ...aiPrefs.get(id), baseUrl: fields.base.value.trim(), apiKey: fields.key.value.trim() }
+      if (id !== 'selfhosted' && !c.apiKey) { status.textContent = t('Give the API key first.'); return }
+      if (id !== 'selfhosted' && !c.baseUrl) c.baseUrl = PRESETS[id].baseUrl
+      btn.disabled = true
+      status.textContent = c.baseUrl ? t('Connecting…') : t('Looking on this computer…')
+      try {
+        let models: string[]
+        if (c.baseUrl) models = await listModels(c)
+        else {
+          const there = await findOnThisComputer(c.apiKey)
+          if (!there) { status.textContent = t('No model server found on this computer. Start Ollama or LM Studio (with CORS on), or give the address of yours.'); return }
+          ;({ baseUrl: c.baseUrl, models } = there)
+        }
+        aiPrefs.save(id, { baseUrl: c.baseUrl, apiKey: c.apiKey, models, on: true })
+        settled()
+        fill()
+      } catch (e) {
+        status.textContent = explainError(e, c)
+      } finally { btn.disabled = false }
+    }
+
+    /** The shown provider's changes, once it's set up (else Set up / Connect is what saves it). */
+    function keep() {
+      if (!fields || !aiPrefs.setUp(id)) return
+      const { base, key, model, effort, context } = fields
+      const was = aiPrefs.get(id)
+      aiPrefs.save(id, { baseUrl: base.value.trim() || was.baseUrl, apiKey: key.value.trim(), model: model.value.trim(), effort: effort.value as any,
+        contextWindow: Math.round(Number(context.value)) >= 1024 ? Math.round(Number(context.value)) : undefined })
+      contextOf.clear() // a model reloaded with another context is asked again
+      if (id === providerId) cfg = aiPrefs.get(id)
+    }
+
+    /** After setting a provider up or removing it: the one in use is one that's set up, if any is. */
+    function settled() {
+      if (!aiPrefs.setUp(providerId) || !aiPrefs.get(providerId).model) {
+        const next = aiPrefs.setUp(id) ? id : PROVIDERS.find((p) => aiPrefs.setUp(p))
+        if (next) { providerId = next; aiPrefs.activeId = next }
+      }
+      cfg = aiPrefs.get(providerId)
+      renderPicker()
+      if (!chat) intro()
+    }
+
     const mine = h('textarea', { rows: 4, maxlength: MAX_INSTRUCTIONS, class: 'my-instructions',
       placeholder: t('For example: write in British English; use \\cref for cross-references; keep explanations short.') }) as HTMLTextAreaElement
     mine.value = aiPrefs.instructions
-    const found = h('span', { class: 'muted small' })
-    const detect = () => {
-      found.textContent = ''
-      if (!c.model) return
-      createSession({ ...c, baseUrl: base.value.trim(), apiKey: key.value.trim(), model: model.value.trim() }, [], '').contextWindow()
-        .then((n) => { found.textContent = n ? t('Found: {{n}} tokens', { n: n.toLocaleString(locale) }) : t('Not found: enter it if you know it') })
-        .catch((e) => quiet('the model’s context size wasn’t found: the field stays empty', e))
-    }
-    detect()
-    const load = h('button', {
-      onclick: async () => {
-        status.textContent = t('Loading…')
-        try {
-          const models = await listModels({ ...c, baseUrl: base.value.trim(), apiKey: key.value.trim() })
-          dl.replaceChildren(...models.map((m) => h('option', { value: m })))
-          aiPrefs.save(providerId, { models })
-          status.textContent = tn(models.length, '{{n}} model found', '{{n}} models found')
-          if (!model.value && models[0]) model.value = models[0]
-        } catch (e) { status.textContent = explainError(e, { ...c, baseUrl: base.value }) }
-      },
-    }, t('Load models'))
+    fill()
     const dlg = dialog('settings',
-      h('h3', {}, t('Assistant — {{provider}}', { provider: c.label })),
+      h('h3', {}, t('Assistant settings')),
       message ? h('p', { class: 'err' }, message) : '',
-      c.help ? Object.assign(h('p', { class: 'muted' }), { innerHTML: md(c.help) }) : '',
-      h('div', { class: 'grid' },
-        h('span', {}, t('Endpoint')), base,
-        h('span', {}, t('API key')), key,
-        h('span', {}, t('Model')), h('div', { class: 'row' }, model, dl, load),
-        ...(c.kind === 'anthropic' ? [h('span', {}, t('Effort')), effort] : []),
-        h('span', {}, t('Context window')), h('div', { class: 'row' }, contextIn, found),
-      ),
+      h('h4', {}, t('Models')),
+      h('p', { class: 'muted small' }, t('Set up the providers you’ll use; the models of all of them are then offered above the conversation.')),
+      h('label', { class: 'field' }, t('Provider'), which),
+      box,
       status,
       h('label', { class: 'block' }, h('span', {}, t('Your instructions')), mine),
       h('p', { class: 'muted small' }, t('Sent with every request, to every model and provider, and kept when a long conversation is summarised. Stored only in this browser. Saving starts a new conversation.'),
         ' ', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); sentDialog() } }, t('What the assistant is sent…'))),
       toolsSection(),
       otherWay(),
-      h('p', { class: 'muted small' }, t('Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to the endpoint above.')),
+      h('p', { class: 'muted small' }, t('Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to each provider.')),
       h('div', { class: 'row end' },
         h('button', { onclick: () => dlg.close() }, t('Cancel')),
         h('button', {
           class: 'primary', onclick: () => {
-            aiPrefs.save(providerId, { baseUrl: base.value.trim(), apiKey: key.value.trim(), model: model.value.trim(), effort: effort.value as any,
-              contextWindow: Math.round(Number(contextIn.value)) >= 1024 ? Math.round(Number(contextIn.value)) : undefined })
-            contextOf.clear() // a model reloaded with another context is asked again
+            keep()
             aiPrefs.instructions = mine.value.slice(0, MAX_INSTRUCTIONS)
             cfg = aiPrefs.get(providerId)
             refreshModels()

@@ -23,8 +23,8 @@ in step with an ordinary folder on your computer.
   Dropbox folder.
 - Agents as collaborators: an MCP server (`texloom mcp`; MCP is the standard AI agents use to
   call tools) lets Claude Code or any MCP client read, edit, comment, suggest and compile, visible to everyone by name and cursor.
-  A built-in assistant does the same with Claude, any OpenAI-compatible API, or a local
-  model (LM Studio, Ollama).
+  A built-in assistant does the same with Claude, any OpenAI-compatible API, or a model
+  server of your own (Ollama, LM Studio, vLLM).
 - LaTeX-aware editor: completion of environments, commands, files, citation keys and
   labels; a preview of the equation under the cursor; a checker for common mistakes, with
   one-click fixes; spell check that skips LaTeX; search and replace across files; an outline with
@@ -851,15 +851,19 @@ collaborator:
 
 ### Providers
 
-Pick one in the tab (grouped as online or on this computer); settings via ⚙. The models
-offered are the provider's own list, asked for whenever it can answer (once there's a key,
-or straight away for a local server); ⟳ asks again.
+Set providers up under ⚙ (a key, or a server of your own); the tab's picker then offers the
+models of every provider that's set up, grouped by provider, and choosing one switches to it.
+The models are the provider's own list, asked for when it's set up and whenever the panel opens;
+⟳ asks again.
 - **Anthropic (Claude):** uses the official SDK from the browser. Effort is adjustable, thinking summaries are shown, and if a safety
   classifier declines a request it is retried on Anthropic's recommended fallback model.
-- **OpenAI, OpenRouter, or any OpenAI-compatible endpoint** (vLLM, llama.cpp, LiteLLM, …).
-- **LM Studio / Ollama, running locally.** Enable CORS in LM Studio
-  (`lms server start --cors`). Ollama accepts `localhost` pages by default; from another
-  site, set `OLLAMA_ORIGINS`. Use a model with tool calling (for example a Qwen 3.x model).
+- **OpenAI, OpenRouter.**
+- **Self-hosted:** Ollama, LM Studio, vLLM, llama.cpp, LiteLLM or any server with the OpenAI API, on
+  this computer or another. With no address, it finds Ollama or LM Studio on this computer. The
+  server must allow this site (CORS): `lms server start --cors` for LM Studio, `OLLAMA_ORIGINS` for
+  Ollama. Browsers block plain http to another machine from an https page, so a server elsewhere
+  needs an https address, or an SSH tunnel (`ssh -L 11434:localhost:11434 your-server`) with the
+  address left empty. Use a model with tool calling (for example a Qwen 3.x model).
 
 ### Conversations and your instructions
 

@@ -640,6 +640,11 @@ A chat panel (`web/src/assistant/`) that acts on the project like another collab
   - **OpenAI-compatible:** `/v1/chat/completions` with `tools`, parsing the streamed
     `tool_calls` and `reasoning`/`reasoning_content` deltas. Covers OpenAI, OpenRouter,
     LM Studio, Ollama, vLLM, llama.cpp and LiteLLM.
+- **Providers** (`providers.ts`): Anthropic, OpenAI, OpenRouter and Self-hosted, kept in this
+  browser only. One is set up when it has a key (Self-hosted: when a server answered, found on
+  this computer at Ollama's or LM Studio's port when no address is given), and the panel's picker
+  offers the models of all that are, as each provider lists them. Settings saved under the old
+  LM Studio, Ollama and Other entries become Self-hosted.
 - **Conversation:** each session keeps the provider-native message list and only appends
   to it, so Claude's thinking blocks (with signatures) are echoed back unchanged. A
   refused or truncated turn is never appended. After a mid-output fallback, blocks

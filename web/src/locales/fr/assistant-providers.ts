@@ -2,14 +2,8 @@ import type { Catalog } from '../../i18n'
 const fr: Catalog = {
   'Get a key at console.anthropic.com. The key is sent straight from this browser to Anthropic.':
     'Obtenez une clé sur console.anthropic.com. Elle est envoyée directement de ce navigateur à Anthropic.',
-  'Any model with tool (function) calling. Use “Load models” to list them.':
-    'Tout modèle d’IA qui prend en charge l’appel d’outils (fonctions). Utilisez « Charger les modèles » pour les lister.',
-  'Start the server with CORS enabled: `lms server start --cors` (or Developer → Settings → Enable CORS). Pick a model that supports tool use.':
-    'Lancez le serveur avec CORS activé : `lms server start --cors` (ou Developer → Settings → Enable CORS). Choisissez un modèle d’IA qui prend en charge les outils.',
-  'Works from localhost out of the box. From another origin, set OLLAMA_ORIGINS to this site’s address. Pick a model that supports tools (e.g. qwen2.5, llama3.1).':
-    'Fonctionne tel quel depuis localhost. Depuis une autre origine, définissez OLLAMA_ORIGINS avec l’adresse de ce site. Choisissez un modèle d’IA qui prend en charge les outils (p. ex. qwen2.5, llama3.1).',
-  'Other (OpenAI-compatible)': 'Autre (compatible OpenAI)',
-  'vLLM, llama.cpp server, LiteLLM, or any /v1/chat/completions endpoint with tool calling.':
-    'vLLM, serveur llama.cpp, LiteLLM, ou tout point de terminaison /v1/chat/completions avec appel d’outils.',
+  'Pick a model that supports tool (function) calling.': 'Choisissez un modèle qui prend en charge l’appel d’outils (fonctions).',
+  'Self-hosted': 'Auto-hébergé',
+  'Ollama, LM Studio, vLLM, llama.cpp, LiteLLM or any server with the OpenAI API, on this computer or another. Leave the address empty to find Ollama or LM Studio on this computer. The server must allow requests from this site (CORS): `lms server start --cors` for LM Studio, `OLLAMA_ORIGINS` for Ollama. Browsers don’t let this page reach plain http on another machine: give that server an https address, or reach it through an SSH tunnel (`ssh -L 11434:localhost:11434 your-server`) and leave the address empty. Pick a model that supports tools.': 'Ollama, LM Studio, vLLM, llama.cpp, LiteLLM ou tout serveur doté de l’API OpenAI, sur cet ordinateur ou un autre. Laissez l’adresse vide pour trouver Ollama ou LM Studio sur cet ordinateur. Le serveur doit autoriser les requêtes de ce site (CORS) : `lms server start --cors` pour LM Studio, `OLLAMA_ORIGINS` pour Ollama. Les navigateurs ne laissent pas cette page joindre du http simple sur une autre machine : donnez à ce serveur une adresse https, ou passez par un tunnel SSH (`ssh -L 11434:localhost:11434 your-server`) et laissez l’adresse vide. Choisissez un modèle qui prend en charge les outils.',
 }
 export default fr

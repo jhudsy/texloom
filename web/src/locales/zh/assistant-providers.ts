@@ -2,11 +2,9 @@ import type { Catalog } from '../../i18n'
 
 const zh: Catalog = {
   'Get a key at console.anthropic.com. The key is sent straight from this browser to Anthropic.': '请在 console.anthropic.com 获取密钥。密钥由此浏览器直接发送给 Anthropic。',
-  'Any model with tool (function) calling. Use “Load models” to list them.': '任何支持工具（函数）调用的模型。使用“加载模型”可列出模型。',
-  'Start the server with CORS enabled: `lms server start --cors` (or Developer → Settings → Enable CORS). Pick a model that supports tool use.': '启动服务器时启用 CORS：`lms server start --cors`（或 Developer → Settings → Enable CORS）。请选择支持工具调用的模型。',
-  'Works from localhost out of the box. From another origin, set OLLAMA_ORIGINS to this site’s address. Pick a model that supports tools (e.g. qwen2.5, llama3.1).': '在 localhost 上可直接使用。从其他来源访问时，请将 OLLAMA_ORIGINS 设为此网站的地址。请选择支持工具调用的模型（例如 qwen2.5、llama3.1）。',
-  'Other (OpenAI-compatible)': '其他（兼容 OpenAI）',
-  'vLLM, llama.cpp server, LiteLLM, or any /v1/chat/completions endpoint with tool calling.': 'vLLM、llama.cpp 服务器、LiteLLM，或任何支持工具调用的 /v1/chat/completions 接口。',
+  'Pick a model that supports tool (function) calling.': '请选择支持工具（函数）调用的模型。',
+  'Self-hosted': '自托管',
+  'Ollama, LM Studio, vLLM, llama.cpp, LiteLLM or any server with the OpenAI API, on this computer or another. Leave the address empty to find Ollama or LM Studio on this computer. The server must allow requests from this site (CORS): `lms server start --cors` for LM Studio, `OLLAMA_ORIGINS` for Ollama. Browsers don’t let this page reach plain http on another machine: give that server an https address, or reach it through an SSH tunnel (`ssh -L 11434:localhost:11434 your-server`) and leave the address empty. Pick a model that supports tools.': 'Ollama、LM Studio、vLLM、llama.cpp、LiteLLM 或任何提供 OpenAI API 的服务器，可以在本机，也可以在另一台机器上。地址留空即可在本机查找 Ollama 或 LM Studio。服务器必须允许来自本站的请求（CORS）：LM Studio 用 `lms server start --cors`，Ollama 设置 `OLLAMA_ORIGINS`。浏览器不允许本页访问另一台机器上的普通 http：请给该服务器配置 https 地址，或通过 SSH 隧道（`ssh -L 11434:localhost:11434 your-server`）访问并将地址留空。请选择支持工具调用的模型。',
 }
 
 export default zh
