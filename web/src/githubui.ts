@@ -69,7 +69,7 @@ export function githubAccountBox(changed: () => void = () => {}, only?: { kind?:
       make.textContent = t('Make a token at {{site}}', { site: (s ?? DEFAULT_HOST[k()]).replace(/^https?:\/\//, '') })
       make.setAttribute('href', tokenPage(k(), s ?? DEFAULT_HOST[k()]))
       how.replaceChildren(k() === 'github'
-        ? t('Make a fine-grained token for just the repositories you’ll use, with read and write access to their contents, then paste it here.')
+        ? t('Make a fine-grained token for just the repositories you’ll use, with read and write access to their contents, then paste it here. For an organisation’s repository, choose the organisation as the resource owner; it may need an admin to approve the token.')
         : k() === 'gitlab'
           ? t('Make a personal access token, then paste it here. A fine-grained one: choose only the projects you’ll use and give them Projects ▸ Project: Read, and Repository ▸ Repository: Read, Branch: Read and Create, and Commit: Create; then on the User tab, System Access ▸ User: Read. A legacy one needs the “api” scope.')
           : t('Make an access token with read and write access to repositories, and read access to your user, then paste it here. A server of your own must allow other sites to use its API (CORS).'),
