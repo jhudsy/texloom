@@ -146,6 +146,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   // one picker: the models of every provider that's set up, by provider (they're set up in ⚙)
   const picker = h('select', { class: 'model', title: t('Model'), 'aria-label': t('Model'), onchange: () => choose(picker.value) }) as HTMLSelectElement
   const setUpBtn = h('button', { class: 'primary', onclick: () => configDialog() }, t('Set up the assistant…')) as HTMLButtonElement
+  const gearBtn = h('button', { title: t('Assistant settings'), 'aria-label': t('Assistant settings'), onclick: () => configDialog() }, '⚙') as HTMLButtonElement
   const log = h('div', { class: 'ai-log' })
   const input = h('textarea', { rows: 3, placeholder: host.writable ? t('Ask, or tell it what to change… (Enter to send, Shift+Enter for a new line)') : t('Ask about this project… (read-only link: no edits)') }) as HTMLTextAreaElement
   const sendBtn = h('button', { class: 'primary', onclick: () => (abort ? stop() : send()) }, t('Send')) as HTMLButtonElement
@@ -165,7 +166,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   const setUpNow = () => PROVIDERS.filter((id) => aiPrefs.setUp(id))
   function renderPicker() {
     const ids = setUpNow()
-    picker.hidden = refreshBtn.hidden = !ids.length
+    picker.hidden = refreshBtn.hidden = gearBtn.hidden = !ids.length // (until then, Set up the assistant… is the way in)
     setUpBtn.hidden = !!ids.length
     const chosen = aiPrefs.setUp(providerId) && cfg.model ? `${providerId}\n${cfg.model}` : ''
     picker.replaceChildren(
@@ -220,7 +221,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
 
   const panel = h('div', { class: 'assistant' },
     h('div', { class: 'ai-bar' }, setUpBtn, picker, refreshBtn,
-      h('button', { title: t('Assistant settings'), onclick: () => configDialog() }, '⚙'),
+      gearBtn,
     ),
     h('div', { class: 'ai-bar' }, h('button', { onclick: () => newChat(true) }, t('New conversation')), historyBtn),
     log,
