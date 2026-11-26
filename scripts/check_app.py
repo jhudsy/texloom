@@ -110,6 +110,7 @@ def windows(win: appmod.Window) -> None:
     opens_over(win.join, JoinDialog, win, "Join a project")
     opens_over(win.project_list, ProjectListDialog, win, "Sync between your computers")
     opens_over(win.share_folder, ShareFolderDialog, win, "New project from a folder")
+    opens_over(win.a_from_git.trigger, ShareFolderDialog, win, "New project from a git repository")
     opens_over(win.manage_tags, ManageTagsDialog, win, "Manage tags")
     if appmod.MAC:  # a window of its own on a Mac, a dialog elsewhere
         win.settings_window()

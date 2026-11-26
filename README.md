@@ -712,7 +712,10 @@ texloom run ~/papers/demo --git
 - **Options:** `texloom settings <dir> 'git={"interval": 60, "quiet": 120, "push": true}'`.
   `texloom sync <dir> --git` does one round and exits (e.g. from cron).
 
-To set it up from an existing repository: `git clone <repo> ~/papers/demo`, then
+To set it up from an existing repository, in the app: *Add project ▸ New project from a git repository…*
+clones it (or, with a folder's path in it such as `papers/2026-loom`, just that folder, as a sparse
+checkout) and makes the project with this turned on; in the web app, *Create project ▸ From a git
+repository…* links a new project to it instead. By hand: `git clone <repo> ~/papers/demo`, then
 `texloom new ~/papers/demo --server https://your.server` and share its links. From an
 existing project: `texloom clone '<link>' ~/papers/demo`, then in that folder `git init`,
 `git add -A`, `git commit`, `git remote add origin <repo>` and `git push -u origin main`.

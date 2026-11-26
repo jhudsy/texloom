@@ -137,6 +137,8 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.a_join = a(_("Join a project with a link…"), self.join, "InsertLink", "Ctrl+J")
         self.a_add = a(_("Add a TeXLoom folder from this computer…"), self.add_existing, "FolderOpen")
         self.a_new.setToolTip(_("Turn a folder on this computer into a new project, to share with others"))
+        self.a_from_git = a(_("New project from a git repository…"), lambda: self.share_folder(from_git=True), "FolderNew")
+        self.a_from_git.setToolTip(_("Clone a repository, or one folder of it, and keep the project and the repository in step"))
         self.a_join.setToolTip(_("Join a project someone shared with you, from its link"))
         self.a_list = a(_("Project list…"), self.project_list)
         self.a_pause = a(_("Pause syncing"), self.toggle_pause, "MediaPlaybackPause")
@@ -174,7 +176,7 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.a_update.setVisible(False)
         self.update_info: tuple[str, str] | None = None
         self.add_menu = QtWidgets.QMenu(self)
-        for act in (self.a_new, self.a_join, self.a_add):
+        for act in (self.a_new, self.a_from_git, self.a_join, self.a_add):
             self.add_menu.addAction(act)
         self.more_menu = QtWidgets.QMenu(self)
         for act in (self.a_tags, self.a_copy, self.a_store, self.a_move, self.a_count, self.a_mcp, self.a_lsp, None, self.a_leave):
@@ -206,7 +208,7 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
     def build_menus(self) -> None:
         mb = self.menuBar()
         m = mb.addMenu(_("File"))
-        for act in (self.a_new, self.a_join, self.a_add, None, self.a_list, None, self.a_pause, None,
+        for act in (self.a_new, self.a_from_git, self.a_join, self.a_add, None, self.a_list, None, self.a_pause, None,
                     self.a_settings, self.a_close, self.a_quit):
             m.addSeparator() if act is None else m.addAction(act)
         m = mb.addMenu(_("Project"))
@@ -424,11 +426,12 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.engine.call(self.engine.daemon.poke)
         self.refresh()
 
-    def share_folder(self, server: str = "", code: str = "", from_web: bool = False) -> None:
+    def share_folder(self, server: str = "", code: str = "", from_web: bool = False, from_git: bool = False) -> None:
         """`from_web`: asked for by the web app (Create project ▸ From a folder), so the new project
-        is opened there too, which puts it on that browser's list of projects."""
+        is opened there too, which puts it on that browser's list of projects. `from_git`: New project
+        from a git repository (cloned first)."""
         self.show_window()
-        dlg = ShareFolderDialog(self.engine, self, server, code, from_web)
+        dlg = ShareFolderDialog(self.engine, self, server, code, from_web, from_git)
         if not dlg.exec():
             return
         self.find.clear()

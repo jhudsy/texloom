@@ -21,7 +21,8 @@ from .crypto import Keys
 from .daemon import FolderProblem
 from .i18n import _, ngettext
 from .paths import state_dir, write_json
-from .ui import AMBER, Dialog, Engine, default_parent, folder_of, note, open_path, red, server_choices, slug, warn
+from .gitsync import clone, repo_name
+from .ui import AMBER, Dialog, Engine, default_parent, folder_of, in_background, note, open_path, red, server_choices, slug, warn
 
 
 def issued_file(d: Path) -> Path:
@@ -358,31 +359,54 @@ def ask_code(parent, engine: Engine, server: str, title: str, text: str, code: s
 class ShareFolderDialog(Dialog):
     """Share an existing folder as a new project (`texloom new`)."""
 
-    def __init__(self, engine: Engine, parent=None, server: str = "", code: str = "", from_web: bool = False) -> None:
-        """`server` and `code` come from the web app (texloom://new), to fill in."""
+    def __init__(self, engine: Engine, parent=None, server: str = "", code: str = "", from_web: bool = False,
+                 from_git: bool = False) -> None:
+        """`server` and `code` come from the web app (texloom://new), to fill in. `from_git`: New project
+        from a git repository: the folder is cloned first (all of the repository, or one folder of it),
+        and its git sync turned on."""
         super().__init__(parent)
         self.engine = engine
+        self.from_git = from_git
         # a server named by a web page is used for this project only: it doesn't become the default
         self.web_server = server.rstrip("/") if from_web else ""
-        self.setWindowTitle(_("New project from a folder"))
+        self.setWindowTitle(_("New project from a git repository") if from_git else _("New project from a folder"))
         self.setMinimumWidth(560)
         lay = QtWidgets.QFormLayout(self)
         lay.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)  # macOS keeps fields narrow otherwise
+        self.repo = self.inside = None
         if from_web:
             lay.addRow(note(_("A web page asked TeXLoom to make a new project from a folder. Go on only if you "
                               "expected it, and check the server it goes to."), AMBER))
-        intro = QtWidgets.QLabel(_("The folder’s files are uploaded, encrypted, and the folder stays in step with the "
-                                   "project from then on. You can invite people once it’s made."))
+        if from_git:
+            intro = QtWidgets.QLabel(_("The repository is cloned to this computer with your own git setup, and the project is "
+                                       "made from it, or from one folder of it. The project and the repository are then kept "
+                                       "in step: TeXLoom commits, pulls and pushes."))
+        else:
+            intro = QtWidgets.QLabel(_("The folder’s files are uploaded, encrypted, and the folder stays in step with the "
+                                       "project from then on. You can invite people once it’s made."))
         intro.setWordWrap(True)
         lay.addRow(intro)
+        if from_git:
+            self.repo = QtWidgets.QLineEdit()
+            self.repo.setPlaceholderText("git@gitlab.com:group/repository.git")
+            self.repo.setToolTip(_("The address you’d give git clone, from the repository’s page (its Clone or Code button)"))
+            self.repo.textEdited.connect(lambda _t: self.suggest_place())
+            lay.addRow(_("Repository"), self.repo)
+            self.inside = QtWidgets.QLineEdit()
+            self.inside.setPlaceholderText(_("e.g. papers/2026-loom (empty: the whole repository)"))
+            self.inside.setToolTip(_("The folder’s path from the top of the repository, as the repository’s page shows it"))
+            self.inside.textEdited.connect(lambda _t: self.suggest_place())
+            lay.addRow(_("Folder in the repository"), self.inside)
+            lay.addRow("", note(_("Only that folder becomes the project: nothing else of the repository is uploaded or "
+                                  "shared. Only it, and the files at the top of the repository, are fetched to this computer.")))
         row = QtWidgets.QHBoxLayout()
         self.folder = QtWidgets.QLineEdit()
         choose = QtWidgets.QPushButton(_("Choose…"))
-        choose.setToolTip(_("Choose the folder on this computer"))
+        choose.setToolTip(_("Choose where to put the clone") if from_git else _("Choose the folder on this computer"))
         choose.clicked.connect(self.choose)
         row.addWidget(self.folder, 1)
         row.addWidget(choose)
-        lay.addRow(_("Folder"), row)
+        lay.addRow(_("Clone into") if from_git else _("Folder"), row)
         self.name = QtWidgets.QLineEdit()
         lay.addRow(_("Project name"), self.name)
         # the servers this computer knows (last used first), and any other typed in
@@ -425,19 +449,51 @@ class ShareFolderDialog(Dialog):
 
     def choose(self) -> None:
         d = QtWidgets.QFileDialog.getExistingDirectory(self, _("Folder for the new project"), str(Path.home()))
-        if d:
+        if d and self.from_git:  # (a folder for the clone, inside the one chosen)
+            self.folder.setText(str(Path(d) / repo_name(self.repo.text())) if self.repo.text().strip() else d)
+        elif d:
             self.folder.setText(d)
             if not self.name.text():
                 self.name.setText(Path(d).name)
 
+    def suggest_place(self) -> None:
+        """From a git repository: a folder for the clone, and the project's name (until either is typed)."""
+        url = self.repo.text().strip()
+        if not url:
+            return
+        if not self.folder.isModified():
+            self.folder.setText(str(Path.home() / "TeXLoom" / repo_name(url)))
+        if not self.name.isModified():
+            inside = self.inside.text().strip().strip("/")
+            self.name.setText(inside.rsplit("/", 1)[-1] if inside else repo_name(url))
+
     def do_share(self) -> None:
         d, server = Path(self.folder.text()).expanduser(), self.server.currentText().strip().rstrip("/")
-        if not d.is_dir():
-            self.msg.setText(red(_("Choose an existing folder.")))
-            return
         if not server.startswith(("https://", "http://")):
             self.msg.setText(red(_("The server address starts with https://")))
             return
+        if self.from_git:
+            url, inside = self.repo.text().strip(), self.inside.text().strip()
+            if not url:
+                self.msg.setText(red(_("Give the repository’s address.")))
+                return
+            self.go.setEnabled(False)
+            self.msg.setText(_("Cloning…"))
+            in_background(lambda: clone(url, d, inside), lambda got, err: self.cloned(got, err, server))
+            return
+        if not d.is_dir():
+            self.msg.setText(red(_("Choose an existing folder.")))
+            return
+        self.share(d, server)
+
+    def cloned(self, d: Path | None, err, server: str) -> None:
+        if err or d is None:
+            self.msg.setText(red(_("Couldn’t clone the repository: {err}", err=err)))
+            self.go.setEnabled(True)
+            return
+        self.share(d, server)
+
+    def share(self, d: Path, server: str) -> None:
         self.go.setEnabled(False)
         self.msg.setText(_("Uploading…"))
         code = self.code.text().strip()
@@ -454,5 +510,7 @@ class ShareFolderDialog(Dialog):
         if server != self.web_server:
             listsync.remember_server(server)  # the default next time
         self.made = d.resolve()
+        if self.from_git:  # kept in step with its repository (before the folder starts syncing)
+            update_config(d, git=True)
         self.engine.call(self.engine.daemon.poke)
         self.accept()

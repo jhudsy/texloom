@@ -83,6 +83,42 @@ def repo_top(d: Path) -> Path | None:
     return None
 
 
+def repo_name(url: str) -> str:
+    """A repository's name from its address (…/group/paper.git → paper), for a folder to clone it into."""
+    return re.sub(r"\.git$", "", url.strip().rstrip("/").replace(":", "/").rsplit("/", 1)[-1]) or "repository"
+
+
+def clone(url: str, dest: Path, folder: str = "") -> Path:
+    """Clone a repository into `dest` (new, or an empty folder), with your own git setup and
+    credentials, and return the project's folder: `dest` itself, or `dest/folder`. With a folder,
+    only it is checked out (and the repository's top-level files, which aren't the project's): a
+    sparse checkout, its other files' contents fetched only when needed, so the rest of a large
+    repository takes no room here. Raises GitError, saying why, if it can't."""
+    import subprocess
+    folder = folder.strip().strip("/")
+    if folder and any(part in ("", ".", "..") for part in folder.split("/")):
+        raise GitError(f"“{folder}” isn’t a folder’s path in the repository")
+    if dest.exists() and any(dest.iterdir()):
+        raise GitError(f"{dest} already has files in it: choose an empty folder or a new one")
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}  # (no password prompt nobody would see)
+
+    def git(*args: str, cwd: Path | None = None) -> None:
+        try:
+            done = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True, timeout=1800)
+        except FileNotFoundError:
+            raise GitError("git isn’t installed") from None
+        if done.returncode:
+            raise GitError(done.stderr.strip().splitlines()[-1] if done.stderr.strip() else f"git {args[0]} failed")
+    if folder:
+        git("clone", "-q", "--filter=blob:none", "--sparse", "--", url, str(dest))
+        git("sparse-checkout", "set", "--", folder, cwd=dest)
+        if not (dest / folder).is_dir():
+            raise GitError(f"the repository has no folder “{folder}” (its path from the top, as the repository’s page shows it)")
+        return dest / folder
+    git("clone", "-q", "--", url, str(dest))
+    return dest
+
+
 async def clone_of_link(root: Path, link: object) -> bool:
     """Whether the folder is in a git clone of the repository the project is linked to."""
     if not isinstance(link, dict) or not isinstance(link.get("repo"), str) or repo_top(root.resolve()) is None:

@@ -9,7 +9,9 @@ the whole repository or one folder in it (a paper in a repository that holds muc
   staged there (work of your own stays as it was);
 - git -> TeXLoom: a co-author's push is merged, and the project's new files are shared;
 - what mustn't come in doesn't: a change to .texloom in the project, or conflict markers, leave
-  the project as it was (in a folder, a .texloom elsewhere in the repository isn't the project's).
+  the project as it was (in a folder, a .texloom elsewhere in the repository isn't the project's);
+- cloning just a folder (New project from a git repository): only it is checked out, and it syncs
+  both ways as any other.
 
     uv run python scripts/check_gitsync.py
 """
@@ -30,7 +32,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from checklib import check, summary  # noqa: E402
 
 from texloom.folderrules import not_project_file  # noqa: E402
-from texloom.gitsync import GitBridge, repo_top  # noqa: E402
+from texloom.gitsync import GitBridge, GitError, clone, repo_top  # noqa: E402
 
 
 class Meta(dict):
@@ -181,6 +183,42 @@ async def whole(tmp: Path) -> None:
     check("but not .texloom", at_remote(remote, ".texloom/config.json") is None)
 
 
+async def cloned_folder(tmp: Path) -> None:
+    print("cloning just a folder (New project from a git repository):")
+    remote, _mine, theirs = repository(tmp)
+    url = remote.as_uri()  # (a file:// address: a plain path would ignore the partial clone)
+    try:
+        clone(url, tmp / "nope", "papers/missing")
+        check("a folder the repository hasn't is refused", False)
+    except GitError as e:
+        check("a folder the repository hasn't is refused, saying so", "no folder" in str(e), e)
+    write(tmp / "full" / "something.txt", "here already\n")
+    try:
+        clone(url, tmp / "full", "papers/p1")
+        check("a folder with files in it isn't cloned into", False)
+    except GitError as e:
+        check("a folder with files in it isn't cloned into", "already has files" in str(e), e)
+    p1 = clone(url, tmp / "paper", "papers/p1")
+    check("the project's folder is the one named", p1 == tmp / "paper" / "papers" / "p1" and (p1 / "main.tex").exists())
+    check("and nothing else of the repository is checked out", not (tmp / "paper" / "code").exists() and not (tmp / "paper" / "papers" / "p2").exists(),
+          sorted(str(x.relative_to(tmp / "paper")) for x in (tmp / "paper").rglob("*") if ".git" not in x.parts))
+    b, fs = bridge(p1)
+    check("git sync takes it", await b.check() is None and b.sub == "papers/p1")
+    write(p1 / "main.tex", "edited in a sparse clone\n")
+    await b.cycle(force=True)
+    check("edits go up", at_remote(remote, "papers/p1/main.tex") == "edited in a sparse clone\n")
+    check("leaving the rest of the repository as it was", at_remote(remote, "code/x.py") == "print(1)\n" and at_remote(remote, "papers/p2/main.tex") == "another paper\n")
+    git(theirs, "pull", "-q")
+    write(theirs / "papers" / "p1" / "new.tex", "from a co-author\n")
+    write(theirs / "code" / "x.py", "print(3)\n")
+    git(theirs, "add", "-A")
+    git(theirs, "commit", "-qm", "both")
+    git(theirs, "push", "-q")
+    await b.cycle()
+    check("a co-author's push comes in", (p1 / "new.tex").read_text() == "from a co-author\n" and fs.shared == 1)
+    check("still only the folder on disk", not (tmp / "paper" / "code").exists())
+
+
 async def nowhere(tmp: Path) -> None:
     print("not in a repository:")
     d = tmp / "plain"
@@ -192,7 +230,7 @@ async def nowhere(tmp: Path) -> None:
 
 
 async def main() -> int:
-    for case in (in_a_folder, whole, nowhere):
+    for case in (in_a_folder, whole, cloned_folder, nowhere):
         with tempfile.TemporaryDirectory() as tmp:
             await case(Path(tmp).resolve())
     return summary("git bridge")
