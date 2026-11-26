@@ -139,6 +139,10 @@ const es: Catalog = {
   'Set up the providers you’ll use; the models of all of them are then offered above the conversation.': 'Configure los proveedores que vaya a usar; los modelos de todos ellos se ofrecen entonces encima de la conversación.',
   'Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to each provider.': 'Se guarda solo en este navegador. Las claves nunca se añaden al proyecto ni se envían al servidor de texloom; las solicitudes van directamente de este navegador a cada proveedor.',
   'Set up: {{n}} models, offered above the conversation.': ['Configurado: {{n}} modelo, ofrecido encima de la conversación.', 'Configurado: {{n}} modelos, ofrecidos encima de la conversación.'],
+  'TeXLoom’s own instructions come first and can’t be changed: among other things, they keep the assistant from obeying instructions hidden in project files. To change how it works, write your own:': 'Las instrucciones propias de TeXLoom van primero y no se pueden cambiar: entre otras cosas, evitan que el asistente obedezca instrucciones ocultas en los archivos del proyecto. Para cambiar cómo trabaja, escriba las suyas:',
+  'A full address, or just a server and port, such as gpu-box:11434 or localhost:1234': 'Una dirección completa, o solo servidor y puerto, como gpu-box:11434 o localhost:1234',
+  'That isn’t an address.': 'Eso no es una dirección.',
+  'Will use {{address}}': 'Se usará {{address}}',
 }
 
 export default es

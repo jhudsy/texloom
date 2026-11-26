@@ -4,7 +4,7 @@ import { chats, type ChatMeta, type Entry } from './chats'
 import * as Y from 'yjs'
 import type { Replica } from '../replica'
 import { copyButton, dialog, h } from '../dom'
-import { aiPrefs, findOnThisComputer, listModels, PRESETS, providerOf, PROVIDERS, type ProviderConfig } from './providers'
+import { aiPrefs, findOnThisComputer, listModels, PRESETS, providerOf, PROVIDERS, serverAddress, type ProviderConfig } from './providers'
 import { createSession, explainError, tokensIn, type LlmSession, type TurnEvents, type TurnResult } from './llm'
 import { ASSISTANT, jsonSchema, runTool, toolsFor, type Change, type ToolCtx, type ToolDef } from './tools'
 import { checkUrl, explainServerError, serverTools, testServer, toolServers, type ToolServer } from './servers'
@@ -146,7 +146,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   // one picker: the models of every provider that's set up, by provider (they're set up in ⚙)
   const picker = h('select', { class: 'model', title: t('Model'), 'aria-label': t('Model'), onchange: () => choose(picker.value) }) as HTMLSelectElement
   const setUpBtn = h('button', { class: 'primary', onclick: () => configDialog() }, t('Set up the assistant…')) as HTMLButtonElement
-  const gearBtn = h('button', { title: t('Assistant settings'), 'aria-label': t('Assistant settings'), onclick: () => configDialog() }, '⚙') as HTMLButtonElement
+  const gearBtn = h('button', { class: 'ai-icon', title: t('Assistant settings'), 'aria-label': t('Assistant settings'), onclick: () => configDialog() }, '⚙') as HTMLButtonElement
   const log = h('div', { class: 'ai-log' })
   const input = h('textarea', { rows: 3, placeholder: host.writable ? t('Ask, or tell it what to change… (Enter to send, Shift+Enter for a new line)') : t('Ask about this project… (read-only link: no edits)') }) as HTMLTextAreaElement
   const sendBtn = h('button', { class: 'primary', onclick: () => (abort ? stop() : send()) }, t('Send')) as HTMLButtonElement
@@ -211,7 +211,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
     refreshBtn.disabled = false
     if (loud && said.length) hint(said.join(' · '), 'note', false)
   }
-  const refreshBtn = h('button', { title: t('Refresh the list of models'), 'aria-label': t('Refresh the list of models'), onclick: () => loadModels(true) }, '⟳') as HTMLButtonElement
+  const refreshBtn = h('button', { class: 'ai-icon', title: t('Refresh the list of models'), 'aria-label': t('Refresh the list of models'), onclick: () => loadModels(true) }, '⟳') as HTMLButtonElement
   const refreshModels = () => { renderPicker(); void loadModels() }
   refreshModels()
 
@@ -560,7 +560,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   }
 
   /** Everything the assistant is sent besides the conversation, to read (and copy). */
-  async function sentDialog() {
+  async function sentDialog(toMine?: () => void) {
     const tools = [...toolsFor(host.writable), ...await serverTools(() => {})]
     const system = systemPrompt()
     const toolText = tools.map((d) => `${d.name}(${Object.keys((jsonSchema(d) as any).properties ?? {}).join(', ')})\n${d.description}`).join('\n\n')
@@ -576,6 +576,8 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       h('p', { class: 'muted' }, t('Every request sends these instructions and the tool descriptions, then the whole conversation so far. Each of your messages starts with the context block below.')),
       usage,
       h('div', { class: 'row' }, h('h4', {}, t('Instructions')), h('span', { class: 'spacer' }), copy(system)),
+      h('p', { class: 'muted small' }, t('TeXLoom’s own instructions come first and can’t be changed: among other things, they keep the assistant from obeying instructions hidden in project files. To change how it works, write your own:'),
+        ' ', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); dlg.close(); toMine?.() } }, t('Your instructions')), '.'),
       h('pre', { class: 'sent-text' }, system),
       h('div', { class: 'row' }, h('h4', {}, t('Tools')), h('span', { class: 'spacer' }), copy(toolText)),
       fromServers.length ? h('p', { class: 'muted small' }, t('Of these, from tool servers you added:')) : '',
@@ -771,7 +773,15 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       const c = aiPrefs.get(id)
       const ready = aiPrefs.setUp(id)
       const self = id === 'selfhosted'
-      const base = h('input', { value: c.baseUrl, placeholder: self ? t('empty: find Ollama or LM Studio on this computer') : PRESETS[id].baseUrl }) as HTMLInputElement
+      const base = h('input', { value: c.baseUrl, placeholder: self ? t('empty: find Ollama or LM Studio on this computer') : PRESETS[id].baseUrl,
+        title: t('A full address, or just a server and port, such as gpu-box:11434 or localhost:1234') }) as HTMLInputElement
+      const willUse = h('div', { class: 'muted small' })
+      const showAddress = () => {
+        const a = serverAddress(base.value, c.kind)
+        willUse.textContent = a === null ? t('That isn’t an address.') : a && a !== base.value.trim() ? t('Will use {{address}}', { address: a }) : ''
+      }
+      base.addEventListener('input', showAddress)
+      showAddress()
       const key = h('input', { type: 'password', value: c.apiKey, placeholder: self ? t('optional') : c.kind === 'anthropic' ? 'sk-ant-…' : 'sk-…', autocomplete: 'off' }) as HTMLInputElement
       const model = offerEveryModel(h('input', { value: c.model, list: 'ai-models-dlg', placeholder: t('one not listed, if the server has no list') }) as HTMLInputElement)
       const effort = h('select', {}, ...EFFORTS.map(([e, label]) => h('option', { value: e, ...(e === c.effort ? { selected: true } : {}) }, label))) as HTMLSelectElement
@@ -793,21 +803,23 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       box.replaceChildren(
         c.help ? Object.assign(h('p', { class: 'muted small' }), { innerHTML: md(c.help) }) : '',
         h('div', { class: 'grid' },
-          h('span', {}, t('Address')), base,
+          h('span', {}, t('Address')), h('div', {}, base, willUse),
           h('span', {}, t('API key')), key,
           ...(ready ? [
             h('span', {}, t('Model')), h('div', {}, model, h('datalist', { id: 'ai-models-dlg' }, ...c.models.map((m) => h('option', { value: m })))),
             ...(c.kind === 'anthropic' ? [h('span', {}, t('Effort')), effort] : []),
             h('span', {}, t('Context window')), h('div', { class: 'row' }, context, found),
           ] : [])),
-        h('div', { class: 'row' }, ready ? h('span', { class: 'muted small' }, tn(c.models.length, 'Set up: {{n}} model, offered above the conversation.', 'Set up: {{n}} models, offered above the conversation.')) : '',
+        h('div', { class: 'row provider-actions' }, ready ? h('span', { class: 'muted small' }, tn(c.models.length, 'Set up: {{n}} model, offered above the conversation.', 'Set up: {{n}} models, offered above the conversation.')) : '',
           h('span', { class: 'spacer' }), ready ? remove : setUp))
     }
 
     /** Set up the provider shown: its models listed proves the key or the server works. */
     async function setUpThis(btn: HTMLButtonElement) {
       if (!fields) return
-      const c = { ...aiPrefs.get(id), baseUrl: fields.base.value.trim(), apiKey: fields.key.value.trim() }
+      const typed = serverAddress(fields.base.value, aiPrefs.get(id).kind)
+      if (typed === null) { status.textContent = t('That isn’t an address.'); return }
+      const c = { ...aiPrefs.get(id), baseUrl: typed, apiKey: fields.key.value.trim() }
       if (id !== 'selfhosted' && !c.apiKey) { status.textContent = t('Give the API key first.'); return }
       if (id !== 'selfhosted' && !c.baseUrl) c.baseUrl = PRESETS[id].baseUrl
       btn.disabled = true
@@ -833,7 +845,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       if (!fields || !aiPrefs.setUp(id)) return
       const { base, key, model, effort, context } = fields
       const was = aiPrefs.get(id)
-      aiPrefs.save(id, { baseUrl: base.value.trim() || was.baseUrl, apiKey: key.value.trim(), model: model.value.trim(), effort: effort.value as any,
+      aiPrefs.save(id, { baseUrl: serverAddress(base.value, was.kind) || was.baseUrl, apiKey: key.value.trim(), model: model.value.trim(), effort: effort.value as any,
         contextWindow: Math.round(Number(context.value)) >= 1024 ? Math.round(Number(context.value)) : undefined })
       contextOf.clear() // a model reloaded with another context is asked again
       if (id === providerId) cfg = aiPrefs.get(id)
@@ -864,7 +876,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       status,
       h('label', { class: 'block' }, h('span', {}, t('Your instructions')), mine),
       h('p', { class: 'muted small' }, t('Sent with every request, to every model and provider, and kept when a long conversation is summarised. Stored only in this browser. Saving starts a new conversation.'),
-        ' ', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); sentDialog() } }, t('What the assistant is sent…'))),
+        ' ', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); sentDialog(() => mine.focus()) } }, t('What the assistant is sent…'))),
       toolsSection(),
       otherWay(),
       h('p', { class: 'muted small' }, t('Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to each provider.')),

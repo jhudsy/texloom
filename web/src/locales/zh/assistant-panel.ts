@@ -139,6 +139,10 @@ const zh: Catalog = {
   'Set up the providers you’ll use; the models of all of them are then offered above the conversation.': '设置你要用的提供方；它们的模型都会显示在对话上方供选择。',
   'Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to each provider.': '仅保存在此浏览器中。密钥从不加入项目，也不会发送到 texloom 服务器；请求直接从此浏览器发往各个提供方。',
   'Set up: {{n}} models, offered above the conversation.': { other: '已设置：{{n}} 个模型，显示在对话上方。' },
+  'TeXLoom’s own instructions come first and can’t be changed: among other things, they keep the assistant from obeying instructions hidden in project files. To change how it works, write your own:': 'TeXLoom 自带的指令排在最前，不能修改：其作用之一是防止助手听从藏在项目文件里的指令。要改变它的工作方式，请写下你自己的指令：',
+  'A full address, or just a server and port, such as gpu-box:11434 or localhost:1234': '完整地址，或只写服务器和端口，例如 gpu-box:11434 或 localhost:1234',
+  'That isn’t an address.': '这不是一个地址。',
+  'Will use {{address}}': '将使用 {{address}}',
 }
 
 export default zh

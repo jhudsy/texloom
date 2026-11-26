@@ -144,5 +144,9 @@ const fr: Catalog = {
   'Set up the providers you’ll use; the models of all of them are then offered above the conversation.': 'Configurez les fournisseurs que vous utiliserez ; les modèles de chacun sont alors proposés au-dessus de la conversation.',
   'Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to each provider.': 'Stocké uniquement dans ce navigateur. Les clés ne sont jamais ajoutées au projet ni envoyées au serveur texloom ; les requêtes vont directement de ce navigateur à chaque fournisseur.',
   'Set up: {{n}} models, offered above the conversation.': ['Configuré : {{n}} modèle, proposé au-dessus de la conversation.', 'Configuré : {{n}} modèles, proposés au-dessus de la conversation.'],
+  'TeXLoom’s own instructions come first and can’t be changed: among other things, they keep the assistant from obeying instructions hidden in project files. To change how it works, write your own:': 'Les instructions propres à TeXLoom viennent en premier et ne peuvent pas être modifiées : entre autres, elles empêchent l’assistant d’obéir à des instructions cachées dans les fichiers du projet. Pour changer sa façon de travailler, écrivez les vôtres :',
+  'A full address, or just a server and port, such as gpu-box:11434 or localhost:1234': 'Une adresse complète, ou seulement le serveur et le port, comme gpu-box:11434 ou localhost:1234',
+  'That isn’t an address.': 'Ce n’est pas une adresse.',
+  'Will use {{address}}': 'Sera utilisé : {{address}}',
 }
 export default fr

@@ -139,6 +139,10 @@ const pt: Catalog = {
   'Set up the providers you’ll use; the models of all of them are then offered above the conversation.': 'Configure os fornecedores que vai usar; os modelos de todos eles passam a ser oferecidos acima da conversa.',
   'Stored only in this browser. Keys are never added to the project or sent to the texloom server; requests go directly from this browser to each provider.': 'Guardado apenas neste navegador. As chaves nunca são adicionadas ao projeto nem enviadas ao servidor do texloom; os pedidos vão diretamente deste navegador para cada fornecedor.',
   'Set up: {{n}} models, offered above the conversation.': ['Configurado: {{n}} modelo, oferecido acima da conversa.', 'Configurado: {{n}} modelos, oferecidos acima da conversa.'],
+  'TeXLoom’s own instructions come first and can’t be changed: among other things, they keep the assistant from obeying instructions hidden in project files. To change how it works, write your own:': 'As instruções próprias do TeXLoom vêm primeiro e não podem ser alteradas: entre outras coisas, impedem o assistente de obedecer a instruções escondidas nos ficheiros do projeto. Para mudar a forma como trabalha, escreva as suas:',
+  'A full address, or just a server and port, such as gpu-box:11434 or localhost:1234': 'Um endereço completo, ou só o servidor e a porta, como gpu-box:11434 ou localhost:1234',
+  'That isn’t an address.': 'Isso não é um endereço.',
+  'Will use {{address}}': 'Será usado {{address}}',
 }
 
 export default pt

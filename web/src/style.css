@@ -300,6 +300,9 @@ details { margin-top: 12px; }
 .ai-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); align-items: center; }
 .ai-bar select { max-width: 44%; }
 .ai-bar .model { flex: 1; min-width: 0; }
+.ai-bar .ai-icon { font-size: 22px; line-height: 1; padding: 1px 7px; }
+.provider-box .provider-actions { margin-top: 12px; }
+.provider-box .grid > div:not(.row) > input { width: 100%; box-sizing: border-box; }
 .ai-log { flex: 1; overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .ai-user { align-self: flex-end; max-width: 88%; background: color-mix(in srgb, var(--accent) 16%, transparent); padding: 6px 10px; border-radius: 10px 10px 2px 10px; white-space: pre-wrap; }
 .ai-turn { display: flex; flex-direction: column; gap: 6px; }

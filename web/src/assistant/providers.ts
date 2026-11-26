@@ -106,6 +106,22 @@ export const aiPrefs: {
   set instructions(v: string) { setString('texloom.ai.instructions', v.trim() ? v : null) },
 }
 
+/** A server's address as typed, in full: `gpu-box:11434` is https://gpu-box:11434/v1, `localhost:1234`
+ *  http://localhost:1234/v1 (plain http reaches only this computer from this page), and an address
+ *  with a path keeps it (Anthropic's gets none: its library adds the rest). '' when nothing is typed;
+ *  null when it isn't an address. */
+export function serverAddress(typed: string, kind: Kind = 'openai'): string | null {
+  const v = typed.trim()
+  if (!v) return ''
+  const local = /^(localhost|127(\.\d+){3}|\[::1\])(:|\/|$)/i
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `${local.test(v) ? 'http' : 'https'}://${v}`)
+    if (!/^https?:$/.test(u.protocol) || !u.hostname || /\s/.test(v)) return null
+    if (kind === 'openai' && (u.pathname === '/' || !u.pathname)) u.pathname = '/v1'
+    return u.toString().replace(/\/$/, '')
+  } catch { return null }
+}
+
 /** Find a model server on this computer (Ollama, LM Studio): its address and models, or null. */
 export async function findOnThisComputer(apiKey = ''): Promise<{ baseUrl: string; models: string[] } | null> {
   for (const baseUrl of ON_THIS_COMPUTER) {
