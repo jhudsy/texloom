@@ -4,6 +4,9 @@ import { copyButton, dialog, h } from '../dom'
 import { t } from '../i18n'
 
 type Access = 'suggest' | 'edit' | 'read'
+// one tool at a time: Claude Code takes a command, the others a settings file (as in texloom/dialogs_tools.py)
+const TOOLS = ['Claude Code', 'Claude Desktop', 'Cursor', 'other'] as const
+type Tool = (typeof TOOLS)[number]
 const INSTALL = 'uv tool install git+https://github.com/jhudsy/texloom'
 // The downloadable app runs the MCP server itself (packaging/app_main.py). Where it is is known only on a
 // Mac; elsewhere it's wherever its folder was unpacked, and the app's own dialog gives its path.
@@ -24,13 +27,26 @@ export function connectToolDialog(writable: boolean, link: (write: boolean) => s
   const command = () => (viaApp ? MAC_APP : 'texloom')
   const args = (name: string) => ['mcp', ...(access === 'suggest' ? ['--suggest-only'] : []), '--name', name, link(access !== 'read')]
   const quoted = (a: string) => (/^[\w.-]+$/.test(a) ? a : `"${a}"`) // double quotes work in every common shell, and the link has nothing they'd expand
-  const claude = codeBlock(() => `claude mcp add texloom -- ${[command(), ...args('Claude Code')].map(quoted).join(' ')}`)
-  const other = codeBlock(() => JSON.stringify({ mcpServers: { texloom: { command: command(), args: args('AI agent') } } }, null, 2))
+  let tool: Tool = 'Claude Code'
+  const inside = () => ' ' + t('If the file already has “mcpServers”, put the “texloom” part inside it.')
+  const how: Record<Tool, () => string> = {
+    'Claude Code': () => t('Run this in a terminal, in the folder you start Claude Code from.'),
+    'Claude Desktop': () => t('In Claude Desktop, open Settings ▸ Developer ▸ Edit Config, add this to the file, then restart Claude Desktop.') + inside(),
+    Cursor: () => t('Add this to the file .cursor/mcp.json in your home folder (make it if it isn’t there), then restart Cursor.') + inside(),
+    other: () => t('Add this to the tool’s MCP settings, as its documentation describes.') + inside(),
+  }
+  const snippet = codeBlock(() => tool === 'Claude Code'
+    ? `claude mcp add texloom -- ${[command(), ...args('Claude Code')].map(quoted).join(' ')}`
+    : JSON.stringify({ mcpServers: { texloom: { command: command(), args: args(tool === 'other' ? 'AI agent' : tool) } } }, null, 2)) // (the name is shown to collaborators)
+  const howTo = h('p', { class: 'small' })
+  const picker = h('select', { 'aria-label': t('The program you want to connect'), title: t('The program you want to connect'),
+    onchange: (e: any) => { tool = e.target.value as Tool; update() } },
+    ...TOOLS.map((v) => h('option', { value: v }, v === 'other' ? t('Another tool') : v)))
   const install = codeBlock(() => INSTALL)
   const helper = h('div', {}, install.el,
     h('p', { class: 'muted small' }, h('a', { href: 'https://docs.astral.sh/uv/getting-started/installation/', target: '_blank', rel: 'noopener' }, t('How to install uv'))),
     h('p', { class: 'muted small' }, t('If your tool can’t find the texloom command, give its full path instead.')))
-  const update = () => { claude.update(); other.update(); helper.hidden = viaApp }
+  const update = () => { snippet.update(); howTo.textContent = how[tool](); helper.hidden = viaApp }
   const choice = (value: Access, label: string) => h('label', { class: 'check' },
     h('input', { type: 'radio', name: 'connect-access', value, checked: access === value, onchange: () => { access = value; update() } }), label)
   const runner = (app: boolean, label: string) => h('label', { class: 'check' },
@@ -50,8 +66,7 @@ export function connectToolDialog(writable: boolean, link: (write: boolean) => s
     writable ? h('div', { class: 'connect-access' },
       choice('suggest', t('Suggest changes for people to accept')), choice('edit', t('Edit files directly')), choice('read', t('Read the project only'))) : null,
     h('h4', {}, t('Add it to your tool')),
-    h('p', { class: 'small' }, t('Claude Code: run this in a terminal')), claude.el,
-    h('p', { class: 'small' }, t('Other tools: add this to their MCP settings')), other.el,
+    h('div', {}, picker), howTo, snippet.el,
     h('p', { class: 'muted small' }, t('If this project is also in a folder on this computer, you can use the folder’s path instead of the link.')),
     h('p', { class: 'risk small' }, t('These lines contain this project’s link, and your tool saves it in its settings. Anyone who can read those settings can open the project.')),
     h('p', { class: 'muted small' }, t('The tool reads text other people wrote in this project, which could include instructions aimed at it. On shared projects, suggesting is the safer choice.')),

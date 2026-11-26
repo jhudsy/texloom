@@ -10,8 +10,6 @@ const es: Catalog = {
   'Edit files directly': 'Editar archivos directamente',
   'Read the project only': 'Solo leer el proyecto',
   'Add it to your tool': 'Añádela a tu herramienta',
-  'Claude Code: run this in a terminal': 'Claude Code: ejecuta esto en una terminal',
-  'Other tools: add this to their MCP settings': 'Otras herramientas: añade esto a sus ajustes de MCP',
   'These lines contain this project’s link, and your tool saves it in its settings. Anyone who can read those settings can open the project.': 'Estas líneas contienen el enlace de este proyecto, y tu herramienta lo guarda en sus ajustes. Cualquiera que pueda leer esos ajustes puede abrir el proyecto.',
   'The tool reads text other people wrote in this project, which could include instructions aimed at it. On shared projects, suggesting is the safer choice.': 'La herramienta lee texto escrito por otras personas en este proyecto, que podría incluir instrucciones dirigidas a ella. En proyectos compartidos, sugerir es la opción más segura.',
   'This is separate from the Assistant tab: you talk to the tool in its own window, not there, and the two don’t share conversations. What the tool does appears in the project under its name, like a collaborator’s work.': 'Esto es independiente de la pestaña Asistente: hablas con la herramienta en su propia ventana, no allí, y las dos no comparten conversaciones. Lo que hace la herramienta aparece en el proyecto con su nombre, como el trabajo de un colaborador.',
@@ -21,6 +19,13 @@ const es: Catalog = {
   'The TeXLoom app, in Applications: nothing more to install': 'La aplicación TeXLoom, en Aplicaciones: nada más que instalar',
   'The TeXLoom command-line helper, installed once': 'El asistente de línea de comandos de TeXLoom, instalado una vez',
   'If the TeXLoom desktop app is on this computer, nothing more needs installing: open this project in the app and choose Use an AI agent on your computer… there, for lines that run the app itself. Otherwise, install the TeXLoom command-line helper once:': 'Si la aplicación de escritorio TeXLoom está en este ordenador, no hace falta instalar nada más: abre este proyecto en la aplicación y elige allí Usar un agente de IA en tu ordenador… para obtener líneas que ejecutan la propia aplicación. Si no, instala una vez el asistente de línea de comandos de TeXLoom:',
+  "If the file already has “mcpServers”, put the “texloom” part inside it.": "Si el archivo ya tiene «mcpServers», pon la parte «texloom» dentro.",
+  "Run this in a terminal, in the folder you start Claude Code from.": "Ejecuta esto en un terminal, en la carpeta desde la que inicias Claude Code.",
+  "In Claude Desktop, open Settings ▸ Developer ▸ Edit Config, add this to the file, then restart Claude Desktop.": "En Claude Desktop, abre Settings ▸ Developer ▸ Edit Config, añade esto al archivo y reinicia Claude Desktop.",
+  "Add this to the file .cursor/mcp.json in your home folder (make it if it isn’t there), then restart Cursor.": "Añade esto al archivo .cursor/mcp.json de tu carpeta personal (créalo si no existe) y reinicia Cursor.",
+  "Add this to the tool’s MCP settings, as its documentation describes.": "Añade esto a los ajustes MCP de la herramienta, como indica su documentación.",
+  "The program you want to connect": "El programa que quieres conectar",
+  "Another tool": "Otra herramienta",
 }
 
 export default es
