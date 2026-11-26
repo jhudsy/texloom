@@ -31,7 +31,7 @@ const zh: Catalog = {
   "Token": "令牌",
   "Make a token at {{site}}": "在 {{site}} 创建令牌",
   "Make a fine-grained token for just the repositories you’ll use, with read and write access to their contents, then paste it here.": "仅为你要使用的仓库创建一个细粒度令牌，授予其内容的读写权限，然后粘贴到这里。",
-  "Make a personal access token, then paste it here. A fine-grained one: choose only the projects you’ll use, give them Project: Read, Repository: Read, Branch: Read and Create, and Commit: Create, and add User: Read. A legacy one needs the “api” scope.": "创建一个个人访问令牌，然后粘贴到这里。细粒度令牌：只选择你要用的项目，授予 Project: Read、Repository: Read、Branch: Read 和 Create 以及 Commit: Create，并添加 User: Read。旧版（legacy）令牌需要“api”权限范围。",
+  "Make a personal access token, then paste it here. A fine-grained one: choose only the projects you’ll use and give them Projects ▸ Project: Read, and Repository ▸ Repository: Read, Branch: Read and Create, and Commit: Create; then on the User tab, System Access ▸ User: Read. A legacy one needs the “api” scope.": "创建一个个人访问令牌，然后粘贴到这里。细粒度令牌：只选择你要用的项目，授予 Projects ▸ Project: Read，以及 Repository ▸ Repository: Read、Branch: Read 和 Create、Commit: Create；然后在 User 标签页中授予 System Access ▸ User: Read。旧版（legacy）令牌需要“api”权限范围。",
   "Make an access token with read and write access to repositories, and read access to your user, then paste it here. A server of your own must allow other sites to use its API (CORS).": "创建一个对仓库有读写权限、对你的用户有读取权限的访问令牌，然后粘贴到这里。自建服务器须允许其他网站使用其 API（CORS）。",
   "That isn’t a server address.": "这不是服务器地址。",
   "Connect another:": "连接另一个：",
