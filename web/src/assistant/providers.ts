@@ -3,6 +3,7 @@
 
 import { t } from '../i18n'
 import { getString, readJson, setString, writeJson } from '../store'
+import { anthropicModels } from './llm'
 
 export type Kind = 'anthropic' | 'openai'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -23,8 +24,7 @@ export interface ProviderConfig {
 export const PRESETS: Record<string, ProviderConfig> = {
   anthropic: {
     kind: 'anthropic', label: 'Anthropic (Claude)', baseUrl: 'https://api.anthropic.com', apiKey: '',
-    model: 'claude-opus-5-5', effort: 'high',
-    models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
+    model: '', effort: 'high', models: [], // (the models are Anthropic's to list: asked once there's a key)
     help: t('Get a key at console.anthropic.com. The key is sent straight from this browser to Anthropic.'),
   },
   openai: {
@@ -35,11 +35,11 @@ export const PRESETS: Record<string, ProviderConfig> = {
     kind: 'openai', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: '', effort: 'high', models: [],
   },
   lmstudio: {
-    kind: 'openai', label: t('LM Studio (local)'), baseUrl: 'http://localhost:1234/v1', apiKey: '', model: '', effort: 'high', models: [],
+    kind: 'openai', label: 'LM Studio', baseUrl: 'http://localhost:1234/v1', apiKey: '', model: '', effort: 'high', models: [],
     help: t('Start the server with CORS enabled: `lms server start --cors` (or Developer → Settings → Enable CORS). Pick a model that supports tool use.'),
   },
   ollama: {
-    kind: 'openai', label: t('Ollama (local)'), baseUrl: 'http://localhost:11434/v1', apiKey: '', model: '', effort: 'high', models: [],
+    kind: 'openai', label: 'Ollama', baseUrl: 'http://localhost:11434/v1', apiKey: '', model: '', effort: 'high', models: [],
     help: t('Works from localhost out of the box. From another origin, set OLLAMA_ORIGINS to this site’s address. Pick a model that supports tools (e.g. qwen2.5, llama3.1).'),
   },
   custom: {
@@ -84,8 +84,9 @@ export const aiPrefs: {
   set instructions(v: string) { setString('texloom.ai.instructions', v.trim() ? v : null) },
 }
 
-/** List models from an OpenAI-compatible /models endpoint. */
+/** List the models a provider offers: Anthropic's own list, or an OpenAI-compatible /models endpoint. */
 export async function listModels(cfg: ProviderConfig): Promise<string[]> {
+  if (cfg.kind === 'anthropic') return anthropicModels(cfg)
   const r = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/models`, {
     headers: cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {},
   })

@@ -851,9 +851,10 @@ collaborator:
 
 ### Providers
 
-Pick one in the tab; settings via ⚙:
-- **Anthropic (Claude):** uses the official SDK from the browser; the default model is
-  `claude-opus-5-5`. Effort is adjustable, thinking summaries are shown, and if a safety
+Pick one in the tab (grouped as online or on this computer); settings via ⚙. The models
+offered are the provider's own list, asked for whenever it can answer (once there's a key,
+or straight away for a local server); ⟳ asks again.
+- **Anthropic (Claude):** uses the official SDK from the browser. Effort is adjustable, thinking summaries are shown, and if a safety
   classifier declines a request it is retried on Anthropic's recommended fallback model.
 - **OpenAI, OpenRouter, or any OpenAI-compatible endpoint** (vLLM, llama.cpp, LiteLLM, …).
 - **LM Studio / Ollama, running locally.** Enable CORS in LM Studio

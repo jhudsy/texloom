@@ -142,11 +142,14 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   let lastUndoBtn: HTMLButtonElement | null = null
 
   // ---- elements ----
+  const option = (id: string) => h('option', { value: id, ...(id === providerId ? { selected: true } : {}) }, PRESETS[id].label)
   const providerSel = h('select', { title: t('Provider'), onchange: (e: any) => switchProvider(e.target.value) },
-    ...Object.entries(PRESETS).map(([id, p]) => h('option', { value: id, ...(id === providerId ? { selected: true } : {}) }, p.label))) as HTMLSelectElement
+    h('optgroup', { label: t('Online') }, ...['anthropic', 'openai', 'openrouter'].map(option)),
+    h('optgroup', { label: t('On this computer') }, ...['lmstudio', 'ollama'].map(option)),
+    option('custom')) as HTMLSelectElement
   const modelList = h('datalist', { id: 'ai-models' })
   const modelIn = offerEveryModel(h('input', {
-    class: 'model', list: 'ai-models', placeholder: t('model'), title: t('Model'),
+    class: 'model', list: 'ai-models', placeholder: t('choose a model'), title: t('Model'),
     onchange: (e: any) => {
       const model = e.target.value.trim()
       if (!model || model === cfg.model) return // (left empty: the model is put back when the field loses focus)
@@ -171,9 +174,30 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   const filesEl = h('div', { class: 'ai-files' })
   const historyBtn = h('button', { onclick: () => historyDialog() }, t('Past conversations')) as HTMLButtonElement
 
+  /** Whether the provider can be asked for its models: with a key, or a server on this computer. */
+  const askable = (c: ProviderConfig) => !!c.apiKey || (c.kind === 'openai' && !/^https:/.test(c.baseUrl))
+  /** Ask the provider which models it has (they change: new Claude models, what a local server has
+   *  downloaded) and offer them in the field. `loud`: say why it couldn't, else it's quiet. */
+  const loadModels = (loud = false) => {
+    if (!askable(cfg)) { if (loud) hint(t('Set an API key in ⚙.'), 'note', false); return }
+    const asked = providerId
+    refreshBtn.disabled = true
+    listModels(cfg).then((models) => {
+      aiPrefs.save(asked, { models })
+      if (asked !== providerId) return
+      cfg = aiPrefs.get(asked)
+      modelList.replaceChildren(...cfg.models.map((m) => h('option', { value: m })))
+      if (loud) hint(tn(models.length, '{{n}} model found', '{{n}} models found'), 'note', false)
+    }).catch((e) => {
+      if (loud && asked === providerId) hint(explainError(e, cfg), 'err', false)
+      else quiet('the provider’s models weren’t listed: ⟳ or Load models in ⚙ says why', e)
+    }).finally(() => { refreshBtn.disabled = false })
+  }
+  const refreshBtn = h('button', { title: t('Refresh the list of models'), 'aria-label': t('Refresh the list of models'), onclick: () => loadModels(true) }, '⟳') as HTMLButtonElement
   const refreshModels = () => {
     modelIn.value = cfg.model
     modelList.replaceChildren(...cfg.models.map((m) => h('option', { value: m })))
+    loadModels()
   }
   refreshModels()
 
@@ -182,7 +206,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   })
 
   const panel = h('div', { class: 'assistant' },
-    h('div', { class: 'ai-bar' }, providerSel, modelIn, modelList,
+    h('div', { class: 'ai-bar' }, providerSel, modelIn, modelList, refreshBtn,
       h('button', { title: t('Assistant settings'), onclick: () => configDialog() }, '⚙'),
     ),
     h('div', { class: 'ai-bar' }, h('button', { onclick: () => newChat(true) }, t('New conversation')), historyBtn),
@@ -448,7 +472,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       t('Assistant using {{provider}}.', { provider: cfg.label + (cfg.model ? ` · ${cfg.model}` : '') }),
       host.writable ? t('It can read, search and edit files and compile this project.') : t('It can read, search and compile this project.'),
       t('Edits appear for collaborators like anyone else’s.'),
-      cfg.kind === 'anthropic' || cfg.apiKey || !/^https:/.test(cfg.baseUrl) ? '' : t('Set an API key in ⚙.'),
+      cfg.apiKey || !/^https:/.test(cfg.baseUrl) ? '' : t('Set an API key in ⚙.'),
     ].filter(Boolean).join(' ')), otherWay())
   }
   intro()
@@ -761,7 +785,7 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       h('div', { class: 'grid' },
         h('span', {}, t('Endpoint')), base,
         h('span', {}, t('API key')), key,
-        h('span', {}, t('Model')), h('div', { class: 'row' }, model, dl, c.kind === 'openai' ? load : ''),
+        h('span', {}, t('Model')), h('div', { class: 'row' }, model, dl, load),
         ...(c.kind === 'anthropic' ? [h('span', {}, t('Effort')), effort] : []),
         h('span', {}, t('Context window')), h('div', { class: 'row' }, contextIn, found),
       ),

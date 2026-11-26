@@ -94,7 +94,18 @@ export function explainError(e: unknown, cfg: ProviderConfig): string {
 // ---------------------------------------------------------------------------
 // Models that accept server-side refusal fallbacks ("default" routing).
 const FALLBACK_MODELS = new Set(['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5'])
-const ADAPTIVE_ONLY = /^claude-(fable|opus-5|opus-4-[678]|sonnet-5|haiku-5|sonnet-4-6)/
+// Claude models before adaptive thinking; every later one has it (named here by the old ones, so a model
+// newer than this file, picked from the list Anthropic gives, still thinks)
+const BEFORE_ADAPTIVE = /^claude-(?:[0-3]|instant|(?:opus|sonnet|haiku)-4(?:-[015])?(?:-\d{8})?$)/
+const adaptive = (model: string) => model.startsWith('claude-') && !BEFORE_ADAPTIVE.test(model)
+
+/** The models an Anthropic key can use, newest first, as Anthropic lists them. */
+export async function anthropicModels(cfg: ProviderConfig): Promise<string[]> {
+  const client = new Anthropic({ apiKey: cfg.apiKey, baseURL: cfg.baseUrl, dangerouslyAllowBrowser: true })
+  const ids: string[] = []
+  for await (const m of client.models.list({ limit: 100 })) ids.push(m.id)
+  return ids
+}
 
 class AnthropicSession implements LlmSession {
   private client: Anthropic
@@ -177,7 +188,7 @@ class AnthropicSession implements LlmSession {
 
   async ask(system: string, prompt: string, signal: AbortSignal) {
     const params: any = { model: this.cfg.model, max_tokens: 16000, system, messages: [{ role: 'user', content: prompt }] }
-    if (ADAPTIVE_ONLY.test(this.cfg.model)) params.output_config = { effort: 'low' }
+    if (adaptive(this.cfg.model)) params.output_config = { effort: 'low' }
     const msg = await this.client.messages.stream(params, { signal }).finalMessage()
     if (msg.stop_reason === 'refusal') throw new Error(t('The model declined to summarise the conversation.'))
     return msg.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n').trim()
@@ -205,7 +216,7 @@ class AnthropicSession implements LlmSession {
       tools: this.tools,
       cache_control: { type: 'ephemeral' }, // reuse the cached prefix across the tool loop
     }
-    if (ADAPTIVE_ONLY.test(model)) {
+    if (adaptive(model)) {
       params.thinking = { type: 'adaptive', display: 'summarized' }
       params.output_config = { effort: this.cfg.effort }
     }

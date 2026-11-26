@@ -10,7 +10,10 @@ const fr: Catalog = {
   '… {{n}} unchanged lines': ['… {{n}} ligne inchangée', '… {{n}} lignes inchangées'],
   // panel
   'Provider': 'Fournisseur',
-  'model': 'modèle',
+  'Refresh the list of models': 'Actualiser la liste des modèles',
+  'choose a model': 'choisissez un modèle',
+  'Online': 'En ligne',
+  'On this computer': 'Sur cet ordinateur',
   'Model': 'Modèle',
   'Ask, or tell it what to change… (Enter to send, Shift+Enter for a new line)':
     'Posez une question ou dites-lui quoi modifier… (Entrée pour envoyer, Maj+Entrée pour aller à la ligne)',

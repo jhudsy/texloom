@@ -630,7 +630,8 @@ A chat panel (`web/src/assistant/`) that acts on the project like another collab
 
 - **Adapters** (`llm.ts`), both streaming:
   - **Anthropic:** the official `@anthropic-ai/sdk`, used from the browser
-    (`dangerouslyAllowBrowser`; the user's own key). Defaults to `claude-opus-5-5` with
+    (`dangerouslyAllowBrowser`; the user's own key). Models come from Anthropic's list
+    (`models.list`), not built in; every model newer than the ones before adaptive thinking gets
     adaptive thinking shown as summaries and an explicit `output_config.effort`. On
     models that support it, `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`)
     reruns a classifier-declined request on the recommended fallback model. Tools use
