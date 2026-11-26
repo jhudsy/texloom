@@ -123,6 +123,7 @@ const zh: Catalog = {
   'Move to another code…': '转移到另一个代码…',
   'The code this project is stored under has run out: move it to one with room.': '存储此项目的代码已用尽或过期：请转移到一个有空间的代码。',
   'Its storage counts against the code it was first stored with.': '它的存储计入首次存储时所用的代码。',
+  "This project is kept in step with the git repository {{repo}}. Don’t choose a folder that’s in a clone of it: changes would then come into the clone twice, through the folder and through git. For a clone, use the TeXLoom app with “Keep this folder’s git repository in step”.": "此项目与 git 仓库 {{repo}} 保持同步。请不要选择位于其克隆中的文件夹：否则更改会两次进入克隆，一次通过文件夹，一次通过 git。对于克隆，请使用 TeXLoom 应用并开启“保持此文件夹的 git 仓库同步”。",
 }
 
 export default zh

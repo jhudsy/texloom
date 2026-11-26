@@ -123,6 +123,7 @@ const es: Catalog = {
   'Move to another code…': 'Mover a otro código…',
   'The code this project is stored under has run out: move it to one with room.': 'El código con el que se guarda este proyecto se ha agotado: muévelo a uno con espacio.',
   'Its storage counts against the code it was first stored with.': 'Su almacenamiento cuenta para el código con el que se guardó por primera vez.',
+  "This project is kept in step with the git repository {{repo}}. Don’t choose a folder that’s in a clone of it: changes would then come into the clone twice, through the folder and through git. For a clone, use the TeXLoom app with “Keep this folder’s git repository in step”.": "Este proyecto se mantiene al día con el repositorio git {{repo}}. No elijas una carpeta que esté en un clon de él: los cambios llegarían dos veces al clon, por la carpeta y por git. Para un clon, usa la app TeXLoom con «Mantener al día el repositorio git de esta carpeta».",
 }
 
 export default es

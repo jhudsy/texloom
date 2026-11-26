@@ -38,7 +38,7 @@ import { watchClashes, type Clash } from './clashes'
 import { watchMerges } from './merges'
 import { checking, wellFormed } from './invariants'
 import { sharedPos, type SharedPos } from './positions'
-import { runGitHub } from './githubui'
+import { repositoryDialog, runGitHub } from './githubui'
 import { runDropbox } from './dropboxui'
 import { shareDialog } from './sharing'
 import { awayServer } from './servers'
@@ -85,6 +85,7 @@ export async function openProject(keys: Keys, server: string) {
     const seed = () => {
       if (r.files.size || r.bin.size || r.meta.get('seeded')) return
       if (template === 'import') { importDialog(r, { fresh: true, onDone: () => tree.open(mainFile(r) ?? '') }); return }
+      if (template === 'git') { repositoryDialog(r, () => me.name, () => tree.open(mainFile(r) ?? '')); return }
       const t = TEMPLATES.find((x) => x.id === template) ?? TEMPLATES[0]
       applyTemplate(r, t, me.name)
       tree.open(t.main)

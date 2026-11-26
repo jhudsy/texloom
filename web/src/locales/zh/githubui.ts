@@ -48,6 +48,11 @@ const zh: Catalog = {
   "Everyone in the project sees the link. It syncs from the browser (or the TeXLoom app) of whoever has connected an account with that service, one at a time.": "项目中的每个人都能看到此关联。它会从已连接该服务账户的人的浏览器（或 TeXLoom 应用）同步，每次一个。",
   "Enter the repository as owner/name, or its address on {{service}}.": "请以 所有者/名称 的形式输入仓库，或输入其在 {{service}} 上的地址。",
   "Linked; {{n}} files came in from the repository.": {"other": "已关联；从仓库拉取了 {{n}} 个文件。"},
+  "From a git repository": "从 git 仓库",
+  "First connect your account with the service the repository is on.": "请先连接您在该仓库所在服务上的账户。",
+  "Bring it in": "导入",
+  "Give the folder’s path from the top of the repository, as the repository’s page shows it (for example papers/2026-loom), and only that folder comes into the project: nothing else of the repository. Leave it empty for all of it. From then on the project and that folder are kept in step, both ways.": "填写文件夹从仓库根目录起的路径，即仓库页面上显示的路径（例如 papers/2026-loom），只有该文件夹会进入项目，仓库的其他内容都不会。留空则为整个仓库。此后项目与该文件夹双向保持同步。",
+  "e.g. papers/2026-loom (empty: the whole repository)": "例如 papers/2026-loom（留空：整个仓库）",
 }
 
 export default zh

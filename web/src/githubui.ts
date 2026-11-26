@@ -7,6 +7,7 @@ import { t, tn } from './i18n'
 import { accountFor, accounts, approve, approved, connect, GitError, linkOf, linkRepo, pull, push, setAccount, setLink, startGitHub } from './github'
 import { forge, hostOf, kindOf, normalHost, repoPath, serviceName, tokenPage, type Account, type Kind } from './forges'
 import type { Status } from './integrationcard'
+import { UNTITLED } from './appinfo'
 
 const DEFAULT_HOST: Record<Kind, string> = { github: 'https://github.com', gitlab: 'https://gitlab.com', gitea: 'https://codeberg.org' }
 
@@ -173,15 +174,29 @@ export function githubSection(r: Replica, me: () => string, writable: boolean): 
   return box
 }
 
-/** Choose the repository, branch and folder; combine the two; start syncing. */
-function linkDialog(r: Replica, me: () => string, done: () => void) {
+/** A new project from a git repository (Create project ▸ From a git repository…): an account with the
+ *  service first if none is connected yet, then the link, which brings the repository's files in (or
+ *  one folder's: nothing else of the repository comes into the project). */
+export function repositoryDialog(r: Replica, me: () => string, done: () => void) {
+  if (accounts().length) { linkDialog(r, me, done, true); return }
+  const dlg = dialog('settings zlinkdlg',
+    h('h3', {}, t('From a git repository')),
+    h('p', { class: 'muted small' }, t('First connect your account with the service the repository is on.')),
+    githubAccountBox(() => { if (accounts().length) { dlg.close(); linkDialog(r, me, done, true) } }),
+    h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Cancel'))))
+}
+
+/** Choose the repository, branch and folder; combine the two; start syncing. `fresh`: a project just
+ *  made for it (repositoryDialog), so there's nothing to combine: the repository's files come in, and
+ *  an unnamed project takes the folder's name (or the repository's). */
+function linkDialog(r: Replica, me: () => string, done: () => void, fresh = false) {
   const have = accounts()
   if (!have.length) return
   const which = h('select', { 'aria-label': t('Service') }, ...have.map((a, i) => h('option', { value: String(i) }, `${serviceName(a)} (${a.login || '?'})`))) as HTMLSelectElement
   const account = () => have[Number(which.value)] ?? have[0]
   const repo = h('input', { placeholder: 'owner/repository', 'aria-label': t('Repository'), spellcheck: 'false' }) as HTMLInputElement
   const branch = h('input', { placeholder: 'main', 'aria-label': t('Branch'), spellcheck: 'false' }) as HTMLInputElement
-  const dir = h('input', { placeholder: t('(the whole repository)'), 'aria-label': t('Folder in the repository'), spellcheck: 'false' }) as HTMLInputElement
+  const dir = h('input', { placeholder: fresh ? t('e.g. papers/2026-loom (empty: the whole repository)') : t('(the whole repository)'), 'aria-label': t('Folder in the repository'), spellcheck: 'false' }) as HTMLInputElement
   const many = [...r.files.keys(), ...r.bin.keys()].length > 1
   const prefer = (v: 'repo' | 'project', label: string) => h('label', { class: 'radio' }, h('input', { type: 'radio', name: 'gh-prefer', value: v, checked: (v === 'project') === many }), label)
   const msg = h('p', { class: 'small', role: 'status' })
@@ -196,16 +211,20 @@ function linkDialog(r: Replica, me: () => string, done: () => void) {
   hint()
   repo.addEventListener('change', fill)
   which.addEventListener('change', () => { hint(); fill() })
-  const go = h('button', { class: 'primary', onclick: () => run() }, t('Link'))
+  const go = h('button', { class: 'primary', onclick: () => run() }, fresh ? t('Bring it in') : t('Link'))
   const dlg = dialog('settings zlinkdlg',
-    h('h3', {}, t('Link a git repository')),
+    h('h3', {}, fresh ? t('From a git repository') : t('Link a git repository')),
     have.length > 1 ? h('label', { class: 'field' }, t('Service'), which) : h('p', { class: 'muted small' }, t('On {{service}}, as {{name}}.', { service: serviceName(have[0]), name: have[0].login || '?' })),
     h('label', { class: 'field' }, t('Repository'), repo),
     h('label', { class: 'field' }, t('Branch'), branch),
     h('label', { class: 'field' }, t('Folder in the repository'), dir),
-    h('p', { class: 'muted small' }, t('Files only in the repository come into the project, and files only in the project go to the repository. Where both have a file and they differ, keep:')),
-    prefer('repo', t('the repository’s version')),
-    prefer('project', t('the project’s version (it goes to the repository as a commit)')),
+    ...(fresh ? [
+      h('p', { class: 'muted small' }, t('Give the folder’s path from the top of the repository, as the repository’s page shows it (for example papers/2026-loom), and only that folder comes into the project: nothing else of the repository. Leave it empty for all of it. From then on the project and that folder are kept in step, both ways.')),
+    ] : [
+      h('p', { class: 'muted small' }, t('Files only in the repository come into the project, and files only in the project go to the repository. Where both have a file and they differ, keep:')),
+      prefer('repo', t('the repository’s version')),
+      prefer('project', t('the project’s version (it goes to the repository as a commit)')),
+    ]),
     h('p', { class: 'muted small' }, t('Everyone in the project sees the link. It syncs from the browser (or the TeXLoom app) of whoever has connected an account with that service, one at a time.')),
     h('p', { class: 'muted small' }, t('If you also keep this repository in a folder with the TeXLoom app, turn on “Keep this folder’s git repository in step” there: the app and browsers then take turns, so changes never come in twice.')),
     msg,
@@ -221,6 +240,7 @@ function linkDialog(r: Replica, me: () => string, done: () => void) {
       if (!info.canPush) throw new GitError(t('The token can read {{repo}} but not write to it.', { repo: n }))
       const keep = (dlg.querySelector('input[name=gh-prefer]:checked') as HTMLInputElement | null)?.value === 'project' ? 'project' : 'repo'
       const got = await linkRepo(r, a, me(), n, branch.value.trim() || info.defaultBranch, folder, keep)
+      if (fresh && r.meta.get('name') === UNTITLED) r.meta.set('name', (folder || n).split('/').pop() || UNTITLED)
       tell(got ? tn(got, 'Linked; {{n}} file came in from the repository.', 'Linked; {{n}} files came in from the repository.') : t('Linked.'))
       dlg.close(); done()
       engine?.now()

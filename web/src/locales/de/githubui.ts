@@ -48,6 +48,11 @@ const de: Catalog = {
   "Everyone in the project sees the link. It syncs from the browser (or the TeXLoom app) of whoever has connected an account with that service, one at a time.": "Alle im Projekt sehen die Verknüpfung. Abgeglichen wird vom Browser (oder der TeXLoom-App) derjenigen, die ein Konto bei diesem Dienst verbunden haben, jeweils von einem.",
   "Enter the repository as owner/name, or its address on {{service}}.": "Geben Sie das Repository als Besitzer/Name oder als seine Adresse auf {{service}} ein.",
   "Linked; {{n}} files came in from the repository.": ["Verknüpft; {{n}} Datei kam aus dem Repository.", "Verknüpft; {{n}} Dateien kamen aus dem Repository."],
+  "From a git repository": "Aus einem Git-Repository",
+  "First connect your account with the service the repository is on.": "Verbinden Sie zuerst Ihr Konto bei dem Dienst, auf dem das Repository liegt.",
+  "Bring it in": "Übernehmen",
+  "Give the folder’s path from the top of the repository, as the repository’s page shows it (for example papers/2026-loom), and only that folder comes into the project: nothing else of the repository. Leave it empty for all of it. From then on the project and that folder are kept in step, both ways.": "Geben Sie den Pfad des Ordners ab der obersten Ebene des Repositorys an, wie ihn die Seite des Repositorys zeigt (zum Beispiel papers/2026-loom), dann kommt nur dieser Ordner ins Projekt: nichts sonst aus dem Repository. Lassen Sie das Feld leer für das ganze Repository. Danach werden das Projekt und dieser Ordner in beide Richtungen abgeglichen.",
+  "e.g. papers/2026-loom (empty: the whole repository)": "z. B. papers/2026-loom (leer: das ganze Repository)",
 }
 
 export default de

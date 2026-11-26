@@ -283,6 +283,7 @@ function emptyState(): HTMLElement {
     h('div', { class: 'tgrid' },
       card(t('From a template…'), t('An article, a paper with references, slides, a thesis or a letter.'), () => createProject()),
       card(t('Import…'), t('From a .zip (e.g. Overleaf, GitHub) or an arXiv paper.'), () => createProject({ from: 'import', name: '' })),
+      card(t('From a git repository…'), t('One folder of a repository on GitHub, GitLab, Gitea or Forgejo, or all of it, kept in step with the project.'), () => createProject({ from: 'git', name: '' })),
       card(t('From a folder on this computer…'), t('A folder you already have, kept in sync with the project by the TeXLoom app.'), () => newProjectInApp())),
     h('p', { class: 'muted small' }, t('Someone shared a project with you? Paste its link above.')))
 }

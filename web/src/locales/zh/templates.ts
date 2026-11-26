@@ -24,7 +24,6 @@ const zh: Catalog = {
   'From arXiv': '从 arXiv',
   'The paper’s LaTeX source, fetched through this server.': '论文的 LaTeX 源文件，通过此服务器获取。',
   'Replace the project’s current files (they stay in History)': '替换项目的当前文件（保留在历史记录中）',
-  'From git: clone the repository, then run “texloom new <folder>” in it, or open this project in a folder with “texloom run” and copy the files in.': '从 git：克隆仓库后，在其中运行“texloom new <folder>”，或用“texloom run”在文件夹中打开此项目并将文件复制进去。',
   'Done': '完成',
   'That file is over 200 MB.': '该文件超过 200 MB。',
   'Reading {{name}}…': '正在读取 {{name}}…',
@@ -40,6 +39,9 @@ const zh: Catalog = {
   "Start from a template": "从模板开始",
   "Or bring your own": "或使用你自己的",
   "That archive is too large once unpacked (over 512 MB or 20,000 files).": "该压缩包解压后过大（超过 512 MB 或 20,000 个文件）。",
+  "From a git repository…": "从 git 仓库…",
+  "One folder of a repository on GitHub, GitLab, Gitea or Forgejo, or all of it, kept in step with the project.": "GitHub、GitLab、Gitea 或 Forgejo 上仓库中的一个文件夹（或整个仓库），与项目保持同步。",
+  "From a git repository: link it in this project’s Settings ▸ Integrations, or start a project with Create project ▸ From a git repository…. Only the folder you name comes in, and the two are kept in step.": "从 git 仓库：在此项目的设置 ▸ 集成中关联，或通过创建项目 ▸ 从 git 仓库… 新建项目。只有您指定的文件夹会进入，两者保持同步。",
 }
 
 export default zh

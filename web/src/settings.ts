@@ -10,6 +10,7 @@ import { t, LANGUAGES, langPref, setLangPref, type Lang } from './i18n'
 import { editorMarkup, type Markup } from './review'
 import { zoteroSection, zoteroStatus } from './zoteroui'
 import { githubSection, gitStatus } from './githubui'
+import { linkOf as gitLink } from './github'
 import { dropboxSection, dropboxStatus } from './dropboxui'
 import { integrationCard } from './integrationcard'
 import { serverInfo } from './servers'
@@ -231,6 +232,8 @@ export async function settingsDialog(r: Replica, link: string, onDevice: (d: Dev
         h('button', { onclick: async () => { const { askCode } = await import('./storagenotice'); if (await askCode()) r.retryStore() } }, t('Creation code…')),
         h('span', { class: 'muted small' }, t('Needed only to store new projects on servers that ask for one.'), ' ', codeSourceSlot())),
       h('h4', {}, t('Keep a copy in a folder on this computer')),
+      // a browser can't see above the folder it's given, so it can't tell whether that's part of a clone: say it
+      gitLink(r) ? h('p', { class: 'risk small' }, t('This project is kept in step with the git repository {{repo}}. Don’t choose a folder that’s in a clone of it: changes would then come into the clone twice, through the folder and through git. For a clone, use the TeXLoom app with “Keep this folder’s git repository in step”.', { repo: gitLink(r)!.repo })) : null,
       chooseFolder ? h('div', {},
         h('p', { class: 'muted small' }, t('This browser can sync a folder itself while this tab is open: nothing to install. Changes go both ways; files changed on both sides take the folder’s version (it stays in History).')),
         h('p', { class: 'muted small' }, t('Collaborators’ files are written there. TeXLoom won’t write files that LaTeX tools run as programs, and points out lines that ask to run one, but compile the folder with your own tools only if you trust everyone who can edit this project.')),

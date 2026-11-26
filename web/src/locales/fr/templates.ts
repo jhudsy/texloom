@@ -24,8 +24,6 @@ const fr: Catalog = {
   'From arXiv': 'Depuis arXiv',
   'The paper’s LaTeX source, fetched through this server.': 'La source LaTeX de l’article, récupérée par l’intermédiaire de ce serveur.',
   'Replace the project’s current files (they stay in History)': 'Remplacer les fichiers actuels du projet (ils restent dans l’historique)',
-  'From git: clone the repository, then run “texloom new <folder>” in it, or open this project in a folder with “texloom run” and copy the files in.':
-    'Depuis git : clonez le dépôt, puis lancez « texloom new <dossier> » à l’intérieur, ou ouvrez ce projet dans un dossier avec « texloom run » et copiez-y les fichiers.',
   'Done': 'Terminé',
   'That file is over 200 MB.': 'Ce fichier dépasse 200 Mo.',
   'Reading {{name}}…': 'Lecture de {{name}}…',
@@ -41,5 +39,8 @@ const fr: Catalog = {
   "Start from a template": "Partir d’un modèle",
   "Or bring your own": "Ou apportez le vôtre",
   "That archive is too large once unpacked (over 512 MB or 20,000 files).": "Cette archive est trop volumineuse une fois décompressée (plus de 512 Mo ou 20 000 fichiers).",
+  "From a git repository…": "Depuis un dépôt git…",
+  "One folder of a repository on GitHub, GitLab, Gitea or Forgejo, or all of it, kept in step with the project.": "Un dossier d’un dépôt sur GitHub, GitLab, Gitea ou Forgejo, ou tout le dépôt, synchronisé avec le projet.",
+  "From a git repository: link it in this project’s Settings ▸ Integrations, or start a project with Create project ▸ From a git repository…. Only the folder you name comes in, and the two are kept in step.": "Depuis un dépôt git : liez-le dans les Paramètres de ce projet ▸ Intégrations, ou commencez un projet avec Créer un projet ▸ Depuis un dépôt git…. Seul le dossier indiqué entre, et les deux restent synchronisés.",
 }
 export default fr

@@ -7,10 +7,11 @@ in); the project's edits, a new file and a deletion go up as a commit; a commit 
 with the project's own edit to the same file; a clash is reported and "Keep the project's version"
 sends it; someone pushing just as a change goes up loses nothing; an empty repository and a branch
 that doesn't exist yet get the project. Also: an approval saved before there were other hosts (no
-host in it) still counts. GitLab's and Gitea's tree listings come in pages.
+host in it) still counts. GitLab's and Gitea's tree listings come in pages. And Create project ▸
+From a git repository… ("new"): one folder of a larger repository, nothing else of it.
 
     cd web && npm run build && cd ..
-    uv run --extra server --with playwright python scripts/check_web_git.py [github gitlab gitea]
+    uv run --extra server --with playwright python scripts/check_web_git.py [github gitlab gitea new]
 """
 
 from __future__ import annotations
@@ -155,8 +156,49 @@ def run(s: webcheck.Session, kind: str) -> None:
     page.close()
 
 
+def from_repository(s: webcheck.Session) -> None:
+    """Create project ▸ From a git repository…: one folder of a repository that holds much else, on
+    GitLab, with no account connected yet. Only that folder comes in; the project takes its name."""
+    fake = s.urls["forge"]
+    F.REPOS.clear()
+    repo = F.REPOS["grp/big"] = F.Repo()
+    repo.push("main", {"README.md": b"the repository\n", "code/x.py": b"print(1)\n", "data/big.bin": PNG,
+                       "papers/p1/main.tex": b"\\documentclass{article}\n\\begin{document}\nPaper one.\n\\end{document}\n",
+                       "papers/p1/sec/intro.tex": b"Intro.\n", "papers/p2/main.tex": b"another paper\n"}, "first")
+    page = s.page()
+    page.goto(s.urls["texloom"])
+    page.locator("button.primary.big", has_text="Create project").click()
+    page.locator("dialog[open] button.choice", has_text="From a git repository…").click()
+    page.wait_for_selector("dialog[open] button:has-text('Start')", timeout=30000)  # the new project's own first dialog
+    page.fill("dialog[open] input[placeholder='Shown to collaborators']", "Tester")
+    page.locator("dialog[open] label.radio", has_text="Don’t compile here").last.click()
+    page.click("dialog[open] button:has-text('Start')")
+    dlg = page.locator("dialog[open]")
+    box = dlg.locator(".git-accounts")
+    box.wait_for(timeout=30000)
+    s.check("from a repository: with no account yet, it asks for one first", "From a git repository" in dlg.locator("h3").inner_text())
+    box.locator("select").select_option("gitlab")
+    box.locator("input[aria-label='Server']").fill(f"{fake}/gl")
+    box.locator("input[type=password]").fill(F.TOKEN)
+    box.locator("button:has-text('Connect')").click()
+    ld = page.locator("dialog.zlinkdlg[open]:has(input[aria-label='Repository'])")
+    ld.wait_for(timeout=10000)
+    s.check("from a repository: then the repository, with no “whose version” to choose", ld.locator("input[name=gh-prefer]").count() == 0)
+    ld.locator("input[aria-label='Repository']").fill("grp/big")
+    ld.locator("input[aria-label='Folder in the repository']").fill("papers/p1")
+    ld.locator("button:has-text('Bring it in')").click()
+    page.wait_for_selector("dialog.zlinkdlg", state="detached", timeout=15000)
+    f = files_of(page)
+    s.check("from a repository: only the folder's files come in, at the top of the project",
+            set(f) == {"main.tex", "sec/intro.tex"} and "Paper one." in f["main.tex"], str(sorted(f)))
+    s.check("from a repository: the project is named after the folder", page.evaluate("() => __texloom.r.meta.get('name')") == "p1")
+    link = page.evaluate("() => __texloom.r.meta.get('github')")
+    s.check("from a repository: and kept in step with that folder", link.get("dir") == "papers/p1" and link.get("head") == repo.branches["main"], str(link))
+    page.close()
+
+
 if __name__ == "__main__":
     with webcheck.Session({"forge": F.make_fake()}) as s:
-        for kind in sys.argv[1:] or ["github", "gitlab", "gitea"]:
-            run(s, kind)
+        for kind in sys.argv[1:] or ["github", "gitlab", "gitea", "new"]:
+            from_repository(s) if kind == "new" else run(s, kind)
     s.done()

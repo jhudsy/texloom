@@ -312,7 +312,7 @@ export function importDialog(r: Replica, opts: { onDone?: () => void; fresh?: bo
     h('div', { class: 'row' }, arxivIn, h('button', { onclick: () => fromArxiv() }, t('Import'))),
     nonEmpty ? h('label', { class: 'check small' }, replace, t('Replace the project’s current files (they stay in History)')) : null,
     msg,
-    h('p', { class: 'muted small' }, t('From git: clone the repository, then run “texloom new <folder>” in it, or open this project in a folder with “texloom run” and copy the files in.')),
+    h('p', { class: 'muted small' }, t('From a git repository: link it in this project’s Settings ▸ Integrations, or start a project with Create project ▸ From a git repository…. Only the folder you name comes in, and the two are kept in step.')),
     h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => dlg.close() }, t('Done'))))
   fileIn.addEventListener('change', async () => {
     const f = fileIn.files?.[0]
@@ -341,8 +341,9 @@ export function importDialog(r: Replica, opts: { onDone?: () => void; fresh?: bo
   return dlg
 }
 
-/** What Create project starts from: a template's id, 'import' (a .zip or an arXiv paper), or
- *  'folder' (a folder on this computer, kept in sync by the TeXLoom app); and the name, if given. */
+/** What Create project starts from: a template's id, 'import' (a .zip or an arXiv paper), 'git' (a git
+ *  repository, or one folder of it, linked: githubui.ts), or 'folder' (a folder on this computer, kept in
+ *  sync by the TeXLoom app); and the name, if given. */
 export interface NewProject { from: string; name: string }
 
 /** Create project: a name, then a template, or a project of your own (an import, or a folder). */
@@ -361,6 +362,7 @@ export function chooseTemplate(): Promise<NewProject | null> {
       h('h4', {}, t('Or bring your own')),
       h('div', { class: 'tgrid two' },
         card('import', t('Import…'), t('From a .zip (e.g. Overleaf, GitHub) or an arXiv paper.')),
+        card('git', t('From a git repository…'), t('One folder of a repository on GitHub, GitLab, Gitea or Forgejo, or all of it, kept in step with the project.')),
         card('folder', t('From a folder on this computer…'), t('A folder you already have, kept in sync with the project by the TeXLoom app.'))),
       h('div', { class: 'row end' }, h('button', { onclick: () => dlg.close() }, t('Cancel'))))
     dlg.addEventListener('close', () => resolve(choice))

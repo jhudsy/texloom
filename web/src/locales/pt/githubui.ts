@@ -48,6 +48,11 @@ const pt: Catalog = {
   "Everyone in the project sees the link. It syncs from the browser (or the TeXLoom app) of whoever has connected an account with that service, one at a time.": "Todos no projeto veem a ligação. Sincroniza a partir do navegador (ou da app TeXLoom) de quem tiver ligado uma conta desse serviço, um de cada vez.",
   "Enter the repository as owner/name, or its address on {{service}}.": "Escreva o repositório como dono/nome, ou o seu endereço no {{service}}.",
   "Linked; {{n}} files came in from the repository.": ["Ligado; veio {{n}} ficheiro do repositório.", "Ligado; vieram {{n}} ficheiros do repositório."],
+  "From a git repository": "De um repositório git",
+  "First connect your account with the service the repository is on.": "Primeiro conecte sua conta no serviço onde está o repositório.",
+  "Bring it in": "Trazer",
+  "Give the folder’s path from the top of the repository, as the repository’s page shows it (for example papers/2026-loom), and only that folder comes into the project: nothing else of the repository. Leave it empty for all of it. From then on the project and that folder are kept in step, both ways.": "Informe o caminho da pasta a partir da raiz do repositório, como a página do repositório o mostra (por exemplo papers/2026-loom), e só essa pasta entra no projeto: nada mais do repositório. Deixe vazio para o repositório inteiro. A partir daí, o projeto e essa pasta ficam sincronizados nos dois sentidos.",
+  "e.g. papers/2026-loom (empty: the whole repository)": "ex.: papers/2026-loom (vazio: o repositório inteiro)",
 }
 
 export default pt
