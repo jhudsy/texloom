@@ -120,9 +120,9 @@ these points:
   is removed). A clock that counts suspended time (`CLOCK_BOOTTIME` on Linux) shortens the window.
 - **The bucket becomes something everything waits on.** A primary that cannot reach it stops serving even
   though it and its database are fine; when it is back, service resumes by itself.
-- **A server that hangs, rather than stops,** is noticed by the apps only when their keep-alive pings go
-  unanswered (every 30 seconds), so people connected through it wait up to about a minute longer than for one
-  that dies.
+- **A server that hangs, rather than stops,** is noticed by the apps when their keep-alive goes unanswered:
+  a `ping` after 10 seconds of hearing nothing, given up 10 seconds later (DESIGN.md, the sync protocol), so
+  people connected through it wait up to about 20 seconds longer than for one that dies.
 
 **What it leaves to you:** how traffic reaches whichever server is primary (`/api/health` says which; [STANDBY.md](STANDBY.md#moving-traffic-to-the-primary)
 lists ways). Rebuilding the old primary as a standby is one command

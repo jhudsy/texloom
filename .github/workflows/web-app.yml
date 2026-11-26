@@ -12,7 +12,9 @@ on:
       - 'server/**'
       - 'scripts/webcheck.py'
       - 'scripts/check_web_*.py'
+      - 'scripts/check_keepalive.py'
       - 'texloom/listsync.py'
+      - 'texloom/replica.py'
       - 'scripts/fakeforge.py'
       - 'scripts/fakedropbox.py'
       - 'scripts/pg.py'
@@ -26,7 +28,9 @@ on:
       - 'server/**'
       - 'scripts/webcheck.py'
       - 'scripts/check_web_*.py'
+      - 'scripts/check_keepalive.py'
       - 'texloom/listsync.py'
+      - 'texloom/replica.py'
       - 'scripts/fakeforge.py'
       - 'scripts/fakedropbox.py'
       - 'scripts/pg.py'
@@ -66,6 +70,9 @@ jobs:
       - name: A new version of the app is offered to a tab that is already open
         if: (success() || failure()) && steps.chromium.outcome == 'success'
         run: uv run --extra server --with playwright python scripts/check_web_update.py
+      - name: A server that stops answering is noticed (keep-alive), by the web app and the desktop helper
+        if: (success() || failure()) && steps.chromium.outcome == 'success'
+        run: uv run --extra server --with playwright python scripts/check_keepalive.py
       - name: The project list keeps when a project was opened
         if: (success() || failure()) && steps.chromium.outcome == 'success'
         run: uv run --extra server --with playwright python scripts/check_web_listsync.py

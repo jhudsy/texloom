@@ -193,6 +193,16 @@ export class Replica {
   private blobWaiters = new Map<string, ((b: Uint8Array) => void)[]>()
   private noFile = new Map<string, Set<number>>() // file -> the peers that said they haven't got it
   private backoff = 1000
+  // Keeping the connection alive, with a server that offers it ("ka" in its catch-up, in seconds). A
+  // server that stops without closing the connection (its machine or network gone, or this computer
+  // asleep and woken on another network) would otherwise look connected for ever: a browser sends no
+  // WebSocket pings of its own. After `ka` with nothing heard, a "ping"; nothing at all back within as
+  // long again, and the connection is given up (shown as offline, and connected again as usual).
+  private ka = 0 // ms; 0: not offered
+  private heardAt = 0 // when anything last came from the server
+  private pingAt = 0 // when the ping still unanswered went (0: none)
+  private kaTimer: ReturnType<typeof setInterval> | undefined
+  private readonly checkNow = () => this.keepAlive(true) // back from sleep or a hidden tab, or a network change
   private closed = false
   private manualDone: (() => void) | null = null
   /** A catch-up whose later pages are still coming. */
@@ -200,6 +210,10 @@ export class Replica {
   private pages: Promise<void> = Promise.resolve()
 
   constructor(readonly keys: Keys, readonly server: string, public syncMode: SyncMode = 'live') {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', this.checkNow)
+      document.addEventListener('visibilitychange', this.checkNow)
+    }
     this.meta.observe(() => this.noteStorage()) // every value that comes, even one replaced in the same catch-up
   }
 
@@ -300,6 +314,10 @@ export class Replica {
 
   async close() {
     this.closed = true
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.checkNow)
+      document.removeEventListener('visibilitychange', this.checkNow)
+    }
     awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], 'close')
     this.ws?.close()
     await this.persistence.destroy()
@@ -341,16 +359,43 @@ export class Replica {
     this.ws = ws
     ws.onopen = () => this.opened(ws)
     ws.onmessage = (ev) => {
+      this.heardAt = Date.now()
       const m = JSON.parse(ev.data), run = () => this.handle(m)
       // a catch-up's pages are applied one after another, in order (other messages don't wait)
       const done = m.t === 'log' || m.t === 'logmore' ? (this.pages = this.pages.then(run, run)) : run()
       done.catch((e) => console.error(e))
     }
-    ws.onclose = () => {
-      this.dropped()
-      if (this.closed || this.deletedAt || this.syncMode !== 'live') return
-      // A refusal won't change in seconds; renewing a code or entering one calls reconnect().
-      this.retry = setTimeout(() => this.connect(), this.denied ? 5 * 60_000 : (this.backoff = Math.min(this.backoff * 2, 30000)))
+    ws.onclose = () => this.lost()
+  }
+
+  /** The connection closed, or was given up: connect again (unless that's not wanted). */
+  private lost() {
+    this.dropped()
+    if (this.closed || this.deletedAt || this.syncMode !== 'live') return
+    // A refusal won't change in seconds; renewing a code or entering one calls reconnect().
+    this.retry = setTimeout(() => this.connect(), this.denied ? 5 * 60_000 : (this.backoff = Math.min(this.backoff * 2, 30000)))
+  }
+
+  /** Every second while a server that offers it is connected (and at once, with `now`): a ping when
+   * nothing has been heard for a while, or the connection given up when nothing answered one.
+   * Measured from when the ping went, so a hidden tab whose timers the browser slows isn't taken for
+   * one whose server has gone. */
+  private keepAlive(now = false) {
+    const ws = this.ws as WebSocket | null
+    if (!this.ka || !ws || ws.readyState !== WebSocket.OPEN || this.status !== 'online') return
+    if (now && typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    const t = Date.now()
+    if (this.pingAt && this.heardAt < this.pingAt) {
+      if (t - this.pingAt < this.ka) return
+      console.warn(`no answer from the server in ${Math.round((t - this.pingAt) / 1000)} s: connecting again`)
+      ws.onopen = ws.onmessage = ws.onclose = null // (closing a dead connection can take minutes to finish)
+      ws.close()
+      this.lost()
+      return
+    }
+    if (now || t - this.heardAt >= this.ka) {
+      this.pingAt = t
+      ws.send(JSON.stringify({ t: 'ping' }))
     }
   }
 
@@ -362,13 +407,15 @@ export class Replica {
     this.logPending = null
     this.peerConns.clear() // (connection numbers are per connection to the server)
     this.missing.clear() // (this catch-up finds them again if they're still missing)
-    ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ...(this.last ? { last: this.last } : {}),
+    ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ka: 1, ...(this.last ? { last: this.last } : {}),
       ...(code ? { code } : {}) }))
   }
 
   /** The connection closed (check-replica.mjs calls this too). */
   private dropped() {
     this.ws = null
+    clearInterval(this.kaTimer)
+    this.ka = this.pingAt = 0
     this.parts.clear()
     this.synced = false
     this.inflight.clear()
@@ -407,6 +454,12 @@ export class Replica {
         this.heard(m.mode)
         this.peers = m.peers ?? 0
         this.storeInfo = m.store ?? null
+        // offered ("ka") by servers since 0.4.63; older ones answer a ping with an error, so none is sent to them
+        if (typeof m.ka === 'number' && m.ka > 0 && !this.ka) {
+          this.ka = Math.max(m.ka, 1) * 1000
+          this.heardAt = Date.now()
+          this.kaTimer = setInterval(() => this.keepAlive(), 1000)
+        }
         this.learnRevoked(m.rv ?? [])
         if (this.storeInfo?.registered && this.refusal === 'needs-code') this.refusal = null
         // the server dropped its copy (idle eviction): everything up to `floor` is gone; or its log

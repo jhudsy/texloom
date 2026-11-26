@@ -77,6 +77,12 @@ AW_RATE, AW_BURST = 32 * KiB, 256 * KiB  # awareness (cursors, names) per connec
 UNSIGNED_BACKLOG = 2 * MiB  # (with one 6 MiB frame on top, still under PEER_BUFFER_MAX)
 AW_BACKLOG = 256 * KiB
 MAX_PAUSE = 20  # seconds a connection is left unread at a time (its pings must still get through)
+# An app that asks for it ("ka" in its hello) is told this in the catch-up, then sends a "ping" when it
+# has heard nothing for this many seconds and gives up on the connection when nothing at all comes
+# back within as long again. A server that has stopped without closing its connections (its machine
+# or network gone, or hung) is noticed in at most twice this. While its connection is left unread
+# (its pace), it's sent a "wait" every half of this instead, so it isn't taken for gone.
+KEEPALIVE = 10
 SLOW = 30  # seconds a recipient that didn't take an unsigned message in SEND_TIMEOUT gets no more of them
 
 
@@ -112,6 +118,7 @@ class Conn:
         self.recheck = 0.0  # private servers: when to check the project's code again
         self.held = 0  # bytes received and not yet finished with (see Metered)
         self.aware = False  # has sent awareness, so others must hear when it goes
+        self.ka = False  # its app keeps the connection alive (hello "ka"): sent "wait" while left unread
         self.pace = Pace(UNSIGNED_RATE, UNSIGNED_BURST)  # unsigned messages relayed (see UNSIGNED_RATE)
         self.aw_pace = Pace(AW_RATE, AW_BURST)
         self.pause = 0.0  # seconds to leave it unread before its next message (its pace)
@@ -506,6 +513,9 @@ class Relay:
                     t = field(msg, "t", str)
                     if len(raw.data) > FRAME_LIMITS.get(t, 4 * KiB):
                         raise BadMessage(f"{t} frame too large")
+                    if t == "ping":  # (answered here, before anything that could wait on the database)
+                        await ws.send_json({"t": "pong"})
+                        continue
                     await self.handle(project, ws, conn, t, msg)
                 except ConnectionError:  # it went while its message was handled (an answer had nowhere to go)
                     break
@@ -518,7 +528,11 @@ class Relay:
                     del raw, msg
                 if conn.pause:  # past its pace (unsigned messages): nothing more is read from it for a while
                     pause, conn.pause = min(conn.pause, MAX_PAUSE), 0.0
-                    await asyncio.sleep(pause)
+                    end = time.monotonic() + pause
+                    while (left := end - time.monotonic()) > 0:
+                        if conn.ka:  # so that its app, hearing nothing, doesn't give up on the connection
+                            await ws.send_json({"t": "wait"})
+                        await asyncio.sleep(min(left, KEEPALIVE / 2))
         finally:
             room.discard(ws)
             self.conns.pop(ws, None)
@@ -589,6 +603,7 @@ class Relay:
         if not conn.counted:  # (once per connection: hellos repeat)
             conn.counted = True
             await self.policy.note_client(msg.get("app"), msg.get("v"))
+        conn.ka = msg.get("ka") == 1
         if self.policy.too_old(msg.get("v")):
             await ws.send_json({"t": "err", "denied": True, **self.policy.update_needed()})
             if version_tuple(msg.get("v")) is None:
@@ -617,7 +632,7 @@ class Relay:
             head, floor, count = await self.store.log_state(project)
             await asyncio.wait_for(self.send_large(ws,
                 {"t": "log", "entries": entries, "head": head, "floor": floor, "count": count, "you": conn.id,
-                 "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1,
+                 "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1, "ka": KEEPALIVE,
                  "store": self.policy.store_status(project, conn.code),
                  "rv": [{"p": p, "s": b64e(sig)} for p, sig in (await self.store.revoked(project)).items()],
                  **({"lost": True} if lost else {}), **({} if done else {"more": True})}), CATCHUP_TIMEOUT)

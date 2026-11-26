@@ -191,9 +191,9 @@ failover_name = "server-a"   # "server-b" on the other
   bucket is away from both servers nothing is served; when it is back the service resumes by itself, in
   about the time a restart takes, and the standby does not take over on the strength of the time it
   couldn't look. (Without failover, editing and syncing do not depend on the bucket.)
-- **A server that hangs, rather than stopping, is noticed by the apps after their pings go unanswered**
-  (they ping every 30 seconds), so people connected through it wait up to about a minute longer than for
-  a server that dies, whose connections are reset. The standby still takes over after the wait.
+- **A server that hangs, rather than stopping, is noticed by the apps when their keep-alive goes unanswered**
+  (a ping after 10 seconds of hearing nothing, given up 10 seconds later), so people connected through it
+  wait up to about 20 seconds longer than for a server that dies, whose connections are reset. The standby still takes over after the wait.
 - **What it can't do** (see `models/failover/README.md`): a machine suspended and woken (a virtual
   machine) after the other took over can accept changes for a moment until its first renewal fails.
   Nobody loses anything, because an app that was told "stored" by it checks, when it reconnects, that

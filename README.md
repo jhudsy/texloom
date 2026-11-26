@@ -1133,6 +1133,7 @@ uv run --extra server --with playwright python scripts/check_web_git.py     # ke
 uv run --extra server --with playwright python scripts/check_web_review.py  # the Review tab: comments in reading order, several drafts at once, acting on several
 uv run --extra server --with playwright python scripts/check_web_pdf.py     # a compiled PDF is downloaded only while the PDF is on screen (or popped out), and only the newest
 uv run --extra server --with playwright python scripts/check_web_update.py  # a new version of the app is offered (Reload) to a tab that is already open
+uv run --extra server --with playwright python scripts/check_keepalive.py   # a server that stops answering without closing anything is noticed (web app and desktop helper), and connected to again
 uv run --extra server --with playwright python scripts/check_web_listsync.py  # the project list: a project opened while the list syncs keeps the time it was opened
 uv run --extra server --with playwright python scripts/check_web_listways.py  # the project list's passwords, replacing and deleting it, across the desktop app and the web app
 uv run --extra server --with playwright python scripts/check_web_dropbox.py # keeping a project in step with a Dropbox folder (stand-in: scripts/fakedropbox.py)

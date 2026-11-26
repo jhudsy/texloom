@@ -145,6 +145,11 @@ class Replica:
         self.synced = asyncio.Event()  # first catch-up complete
         self._log_pending: tuple[int, int, bool] | None = None  # a catch-up whose later pages are still coming: (head, count, lost)
         self._caught_up = False  # this connection's log (and revocation list) has been applied
+        # Keeping the connection alive, with a server that offers it ("ka" in its catch-up, seconds): see
+        # _keep_alive. 0: not offered. (aiohttp's own pings, every 30 s, stay for servers that don't.)
+        self._ka = 0.0
+        self._heard_at = 0.0  # when anything last came from the server (time.monotonic)
+        self._ping_at = 0.0  # when the ping still unanswered went (0: none)
         self._revocations: list[dict] = []  # owner-signed, kept in state.json
         self.storage_top: tuple[int, str] | None = None  # (at, mode): the latest owner-signed storage value seen (kept)
         self.meta.observe(lambda _e: self._note_storage())  # every value that comes, even one replaced in the same catch-up
@@ -919,17 +924,24 @@ class Replica:
                 self.synced.set()
             while self.deleted_at is None:  # a deleted project stays as it is: nothing to connect to
                 try:
-                    async with http.ws_connect(ws_url, heartbeat=30, max_msg_size=64 * 1024 * 1024) as ws:
+                    # (a close waits only briefly for the server's answer: one given up on gives none)
+                    async with http.ws_connect(ws_url, heartbeat=30, max_msg_size=64 * 1024 * 1024,
+                                               timeout=aiohttp.ClientWSTimeout(ws_close=3.0)) as ws:
                         backoff = 1
                         log.info("connected to %s", self.server)
                         await self._opened(ws)
-                        async for msg in ws:
-                            if msg.type != aiohttp.WSMsgType.TEXT:
-                                continue
-                            try:
-                                await self._handle(json.loads(msg.data))
-                            except Exception as e:  # noqa: BLE001 - never let one bad frame kill the helper
-                                log.warning("ignored a malformed message (%s: %s)", type(e).__name__, str(e)[:120])
+                        keep = asyncio.create_task(self._keep_alive(ws))
+                        try:
+                            async for msg in ws:
+                                self._heard_at = time.monotonic()
+                                if msg.type != aiohttp.WSMsgType.TEXT:
+                                    continue
+                                try:
+                                    await self._handle(json.loads(msg.data))
+                                except Exception as e:  # noqa: BLE001 - never let one bad frame kill the helper
+                                    log.warning("ignored a malformed message (%s: %s)", type(e).__name__, str(e)[:120])
+                        finally:
+                            keep.cancel()
                         log.info("disconnected (%s%s)", ws.close_code, f": {ws.exception()}" if ws.exception() else "")
                 except (aiohttp.ClientError, OSError) as e:
                     log.info("offline (%s); retrying in %ds", e.__class__.__name__, backoff)
@@ -948,13 +960,37 @@ class Replica:
         self._missing.clear()  # (this catch-up finds them again if they're still missing)
         self._peers.clear()  # (connection numbers are per connection to the server)
         self._resync = 0 if self._resync == 1 else self._resync
+        self._ka, self._ping_at, self._heard_at = 0.0, 0.0, time.monotonic()
         self.connected.set()
-        hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__, "pages": 1}  # (--min-version)
+        hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__, "pages": 1, "ka": 1}  # (--min-version)
         if self.last:
             hello["last"] = list(self.last)
         if self.create_code:
             hello["code"] = self.create_code
         await ws.send_json(hello)
+
+    async def _keep_alive(self, ws) -> None:
+        """While connected to a server that offers it: a "ping" when nothing has been heard for `_ka`
+        seconds, and the connection given up (then made again, as after any drop) when nothing at all
+        comes back within as long again. A server that stops without closing the connection (its
+        machine or network gone, or hung) is noticed in at most twice `_ka`, not left looking connected."""
+        while not ws.closed:
+            await asyncio.sleep(1)
+            if not self._ka or not self._caught_up:
+                continue
+            now = time.monotonic()
+            if self._ping_at and self._heard_at < self._ping_at:
+                if now - self._ping_at >= self._ka:
+                    log.info("no answer from the server in %ds: connecting again", round(now - self._ping_at))
+                    self._dropped()  # (at once: the close below waits a little for an answer that won't come)
+                    await ws.close()
+                    return
+            elif now - self._heard_at >= self._ka:
+                self._ping_at = now
+                try:
+                    await ws.send_json({"t": "ping"})
+                except (ConnectionError, RuntimeError):
+                    return
 
     def _dropped(self) -> None:
         """The connection closed (scripts/check_replica.py calls this too)."""
@@ -1019,6 +1055,9 @@ class Replica:
             self.denied = None
             self.store_info = m.get("store") if isinstance(m.get("store"), dict) else None
             self._heard(m.get("mode", "server"))
+            ka = m.get("ka")  # offered by servers since 0.4.63; older ones answer a ping with an error, so none is sent to them
+            if isinstance(ka, (int, float)) and not isinstance(ka, bool) and ka > 0:
+                self._ka = max(float(ka), 1.0)
             self._revoked(m.get("rv", []))
             # the server dropped its copy (idle eviction): everything up to `floor` is gone
             floor = m.get("floor") or 0
