@@ -584,8 +584,12 @@ def main(argv: list[str] | None = None) -> None:
     hidden = "--hidden" in argv
     urls = [a for a in argv if a.startswith(f"{SCHEME}:")]
 
+    # the name in the menu bar, and in "About TeXLoom": set before the application object, whose menus are made from it
+    QtCore.QCoreApplication.setApplicationName("TeXLoom")
+    if MAC and not getattr(sys, "frozen", False):  # run from source: not "python"
+        from .mac import name_this_process
+        name_this_process("TeXLoom")
     app = App([sys.argv[0]])
-    app.setApplicationName("TeXLoom")
     app.setWindowIcon(QtGui.QIcon(str(ICON)))
     app.setQuitOnLastWindowClosed(False)
     app.installEventFilter(Tints(app))  # grey and amber text follows light and dark mode

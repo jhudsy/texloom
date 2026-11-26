@@ -63,6 +63,22 @@ class Dialog(QtWidgets.QDialog):
             attach(self)
 
 
+def fit_to_text(w: QtWidgets.QWidget) -> None:
+    """Make a window as tall as its wrapped text needs at its width. Qt sizes a window before
+    working out how many lines a wrapped label takes, so without this the labels are squeezed and
+    overlap what's below them."""
+    lay = w.layout()
+    if lay is None:
+        return
+    lay.invalidate()  # (sizes changed since the layout last looked: a box made taller, say)
+    lay.activate()
+    if not lay.hasHeightForWidth():
+        return
+    need = lay.totalHeightForWidth(w.width())
+    w.setMinimumHeight(need)
+    w.resize(w.width(), need)  # (and no taller: spare height would spread the text out)
+
+
 def message(parent, icon: QtWidgets.QMessageBox.Icon, title: str, text: str,
             buttons=QtWidgets.QMessageBox.Ok, default=QtWidgets.QMessageBox.NoButton) -> QtWidgets.QMessageBox.StandardButton:
     """A message box tied to its window (a sheet on macOS), the button pressed. The title shows

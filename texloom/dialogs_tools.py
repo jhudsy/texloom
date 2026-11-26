@@ -8,12 +8,24 @@ import re
 import sys
 from pathlib import Path
 
-from PySide6 import QtGui, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from .config import load
 from .i18n import _
-from .ui import heading, note
+from .ui import fit_to_text, heading, note
+
+
+def texloom_command() -> tuple[str, bool]:
+    """What an AI tool or editor runs to start TeXLoom, and whether it must be installed first. The
+    downloadable app runs it itself (packaging/app_main.py). Run from source, it's the texloom command
+    beside this Python (its virtual environment), by its full path. Otherwise, one installed with uv."""
+    if getattr(sys, "frozen", False):
+        return sys.executable, False
+    here = Path(sys.executable).with_name("texloom.exe" if sys.platform == "win32" else "texloom")
+    if here.exists():
+        return str(here), False
+    return "texloom", True
 
 
 class ConnectToolDialog(QtWidgets.QDialog):
@@ -27,14 +39,13 @@ class ConnectToolDialog(QtWidgets.QDialog):
         self.folder = folder.resolve()
         self.keys, self.server = load(folder)
         self.access = "suggest" if self.keys.writable else "read"
-        # the downloadable app runs the MCP server itself (packaging/app_main.py): nothing more to install
-        self.command = sys.executable if getattr(sys, "frozen", False) else "texloom"
+        self.command, to_install = texloom_command()
         self.setWindowTitle(_("Use an AI agent on your computer"))
         self.setMinimumWidth(620)
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(note(_("Tools that support MCP, such as Claude Code, Claude Desktop or Cursor, can work on this project like a collaborator. They run on your computer under your own account with that tool, so no API key is needed here."), None))
         self.install = None
-        if self.command == "texloom":
+        if to_install:
             lay.addWidget(heading(_("Install the TeXLoom command-line helper once"), wrap=True))
             self.install = self.block(lay, 1, lambda: self.INSTALL)
             how = note(f'<a href="https://docs.astral.sh/uv/getting-started/installation/">{_("How to install uv")}</a>', None)
@@ -50,12 +61,24 @@ class ConnectToolDialog(QtWidgets.QDialog):
                 radio.setChecked(access == self.access)
                 radio.toggled.connect(functools.partial(self.choose, access))
                 lay.addWidget(radio)
+        # one tool at a time: Claude Code takes a command, the others a settings file
         lay.addWidget(heading(_("Add it to your tool"), wrap=True))
-        lay.addWidget(note(_("Claude Code: run this in a terminal"), None))
-        self.claude = self.block(lay, 3, lambda: "claude mcp add texloom -- " + " ".join(self.quoted(a) for a in (self.command, *self.args("Claude Code"))))
-        lay.addWidget(note(_("Other tools: add this to their MCP settings"), None))
-        self.other = self.block(lay, 9, lambda: json.dumps({"mcpServers": {"texloom": {"command": self.command, "args": self.args("AI agent")}}}, indent=2, ensure_ascii=False))
-        if self.install:
+        inside = _("If the file already has “mcpServers”, put the “texloom” part inside it.")
+        self.tools = {
+            "Claude Code": _("Run this in a terminal, in the folder you start Claude Code from."),
+            "Claude Desktop": _("In Claude Desktop, open Settings ▸ Developer ▸ Edit Config, add this to the file, then restart Claude Desktop.") + " " + inside,
+            "Cursor": _("Add this to the file .cursor/mcp.json in your home folder (make it if it isn’t there), then restart Cursor.") + " " + inside,
+            _("Another tool"): _("Add this to the tool’s MCP settings, as its documentation describes.") + " " + inside,
+        }
+        self.tool = QtWidgets.QComboBox()
+        self.tool.addItems(list(self.tools))
+        self.tool.setToolTip(_("The program you want to connect"))
+        self.tool.currentIndexChanged.connect(lambda _i: self.show_commands())
+        lay.addWidget(self.tool, 0, Qt.AlignLeft)
+        self.tool_note = note("", None)
+        lay.addWidget(self.tool_note)
+        self.snippet = self.block(lay, 9, self.snippet_text)
+        if to_install:
             lay.addWidget(note(_("If your tool can’t find the texloom command, give its full path instead."), None))
         lay.addWidget(note(_("Suggesting and editing use this folder’s path. Reading uses a read-only link, which your tool saves in its settings, so anyone who can read those settings can read the project."), None))
         lay.addWidget(note(_("The tool reads text other people wrote in this project, which could include instructions aimed at it. On shared projects, suggesting is the safer choice."), None))
@@ -66,6 +89,17 @@ class ConnectToolDialog(QtWidgets.QDialog):
         row.addWidget(close)
         lay.addLayout(row)
         self.show_commands()
+
+    def snippet_text(self) -> str:
+        name = self.tool.currentText()
+        if name == "Claude Code":
+            return "claude mcp add texloom -- " + " ".join(self.quoted(a) for a in (self.command, *self.args(name)))
+        label = name if name in ("Claude Desktop", "Cursor") else "AI agent"  # (shown to collaborators)
+        return json.dumps({"mcpServers": {"texloom": {"command": self.command, "args": self.args(label)}}}, indent=2, ensure_ascii=False)
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        fit_to_text(self)
 
     def block(self, lay: QtWidgets.QBoxLayout, lines: int, text) -> tuple:
         box = QtWidgets.QPlainTextEdit(readOnly=True)
@@ -102,9 +136,14 @@ class ConnectToolDialog(QtWidgets.QDialog):
             self.show_commands()
 
     def show_commands(self) -> None:
-        for box, copy, text in filter(None, (self.install, self.claude, self.other)):
+        self.tool_note.setText(self.tools[self.tool.currentText()])
+        box = self.snippet[0]
+        box.setFixedHeight(box.fontMetrics().lineSpacing() * (3 if self.tool.currentIndex() == 0 else 10) + 14)
+        for box, copy, text in filter(None, (self.install, self.snippet)):
             box.setPlainText(text())
             copy.setText(_("Copy"))
+        if self.isVisible():
+            QtCore.QTimer.singleShot(0, lambda: fit_to_text(self))  # once Qt has taken in the box's new height
 
 
 class EditorDialog(ConnectToolDialog):
@@ -113,7 +152,7 @@ class EditorDialog(ConnectToolDialog):
 
     def __init__(self, parent=None) -> None:
         QtWidgets.QDialog.__init__(self, parent)
-        self.command = sys.executable if getattr(sys, "frozen", False) else "texloom"
+        self.command, to_install = texloom_command()
         self.setWindowTitle(_("Show comments in your editor"))
         self.setMinimumWidth(620)
         lay = QtWidgets.QVBoxLayout(self)
@@ -132,7 +171,7 @@ class EditorDialog(ConnectToolDialog):
         self.what = note("", None)
         lay.addWidget(self.what)
         self.snippet = self.block(lay, 9, self.text)
-        if self.command == "texloom":
+        if to_install:
             lay.addWidget(note(_("If your editor can’t find the texloom command, give its full path instead."), None))
         lay.addWidget(note(_("Comments that mention you stand out, and hovering shows the whole thread. Replying and starting a comment need an editor that can ask for text, as the VS Code extension does; elsewhere, reply with texloom comments reply, or use the web app. You can turn this off in Settings."), None))
         row = QtWidgets.QHBoxLayout()

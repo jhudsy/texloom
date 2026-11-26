@@ -29,6 +29,28 @@ def nsapp(selector: bytes, arg: int = 0) -> None:
         log.debug("NSApp %s failed", selector, exc_info=True)
 
 
+def name_this_process(name: str) -> None:
+    """Run from source, macOS names the app after the program that started it: "python" in the menu
+    bar. Before Qt starts, give the process TeXLoom's name (the downloadable app's bundle already has it).
+    Any failure is logged and otherwise ignored."""
+    try:
+        import ctypes
+        import ctypes.util
+        objc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+        ctypes.cdll.LoadLibrary(ctypes.util.find_library("Foundation"))
+        objc.objc_getClass.restype = objc.sel_registerName.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        send = ctypes.cast(objc.objc_msgSend, ctypes.c_void_p).value
+        get = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(send)
+        utf8 = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p)(send)
+        put = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(send)
+        text = utf8(objc.objc_getClass(b"NSString"), objc.sel_registerName(b"stringWithUTF8String:"), name.encode())
+        info = get(objc.objc_getClass(b"NSProcessInfo"), objc.sel_registerName(b"processInfo"))
+        put(info, objc.sel_registerName(b"setProcessName:"), text)
+    except Exception:
+        log.debug("naming the process failed", exc_info=True)
+
+
 def mac_dock(show: bool) -> None:
     """On a Mac, show or hide TeXLoom in the Dock and ⌘-Tab: while no window is open it runs from
     its menu-bar icon alone, like other background sync apps (the Accessory activation policy)."""
