@@ -42,7 +42,7 @@ export function serviceName(a: { kind?: Kind; host?: string } | null | undefined
 /** Where to make a token, with what it needs. */
 export function tokenPage(kind: Kind, host: string): string {
   if (kind === 'github') return 'https://github.com/settings/personal-access-tokens/new'
-  if (kind === 'gitlab') return `${host}/-/user_settings/personal_access_tokens?name=TeXLoom&scopes=api`
+  if (kind === 'gitlab') return `${host}/-/user_settings/personal_access_tokens?name=TeXLoom`
   return `${host}/user/settings/applications`
 }
 

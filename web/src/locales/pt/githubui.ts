@@ -31,7 +31,7 @@ const pt: Catalog = {
   "Token": "Token",
   "Make a token at {{site}}": "Criar um token em {{site}}",
   "Make a fine-grained token for just the repositories you’ll use, with read and write access to their contents, then paste it here.": "Crie um token detalhado (fine-grained) só para os repositórios que vai usar, com acesso de leitura e escrita ao seu conteúdo, e cole-o aqui.",
-  "Make a personal access token with the “api” scope (GitLab has no narrower one that can make commits), then paste it here. A project access token limits it to one repository.": "Crie um token de acesso pessoal com o âmbito «api» (o GitLab não tem nenhum mais restrito que permita fazer commits) e cole-o aqui. Um token de acesso de projeto limita-o a um repositório.",
+  "Make a personal access token, then paste it here. A fine-grained one: choose only the projects you’ll use, give them Project: Read, Repository: Read, Branch: Read and Create, and Commit: Create, and add User: Read. A legacy one needs the “api” scope.": "Crie um token de acesso pessoal e cole-o aqui. Um token granular (fine-grained): escolha só os projetos que vai usar, dê-lhes Project: Read, Repository: Read, Branch: Read e Create, e Commit: Create, e acrescente User: Read. Um token legado (legacy) precisa do âmbito «api».",
   "Make an access token with read and write access to repositories, and read access to your user, then paste it here. A server of your own must allow other sites to use its API (CORS).": "Crie um token de acesso com leitura e escrita em repositórios e leitura do seu utilizador, e cole-o aqui. Um servidor próprio tem de permitir que outros sites usem a sua API (CORS).",
   "That isn’t a server address.": "Isso não é um endereço de servidor.",
   "Connect another:": "Ligar outro:",

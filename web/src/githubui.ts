@@ -71,7 +71,7 @@ export function githubAccountBox(changed: () => void = () => {}, only?: { kind?:
       how.replaceChildren(k() === 'github'
         ? t('Make a fine-grained token for just the repositories you’ll use, with read and write access to their contents, then paste it here.')
         : k() === 'gitlab'
-          ? t('Make a personal access token with the “api” scope (GitLab has no narrower one that can make commits), then paste it here. A project access token limits it to one repository.')
+          ? t('Make a personal access token, then paste it here. A fine-grained one: choose only the projects you’ll use, give them Project: Read, Repository: Read, Branch: Read and Create, and Commit: Create, and add User: Read. A legacy one needs the “api” scope.')
           : t('Make an access token with read and write access to repositories, and read access to your user, then paste it here. A server of your own must allow other sites to use its API (CORS).'),
       ' ', make)
     }
