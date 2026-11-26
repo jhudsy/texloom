@@ -4,6 +4,7 @@
 import { t } from '../i18n'
 import { getString, readJson, setString, writeJson } from '../store'
 import { anthropicModels } from './llm'
+import { quiet } from '../quiet'
 
 export type Kind = 'anthropic' | 'openai'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -109,7 +110,7 @@ export const aiPrefs: {
 export async function findOnThisComputer(apiKey = ''): Promise<{ baseUrl: string; models: string[] } | null> {
   for (const baseUrl of ON_THIS_COMPUTER) {
     try { return { baseUrl, models: await listModels({ ...PRESETS.selfhosted, baseUrl, apiKey }) } }
-    catch { /* not there: the next */ }
+    catch (e) { quiet(`no model server at ${baseUrl}: the next place is tried`, e) }
   }
   return null
 }
