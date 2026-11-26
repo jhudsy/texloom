@@ -73,7 +73,7 @@ jobs:
     outputs:
       os: ${{ steps.pick.outputs.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - id: pick
@@ -98,8 +98,8 @@ jobs:
         os: ${{ fromJSON(needs.scope.outputs.os) }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
       - uses: ./.github/actions/web  # npm ci, and web/dist built: the server serves it
       - name: Chromium for the web app's pairings
         uses: ./.github/actions/chromium
@@ -118,7 +118,7 @@ jobs:
           CHECK_DIR: ${{ runner.temp }}/synconly-refused
           CHECK_REFUSE_WRITES: '0.3'
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: synconly-${{ matrix.os }}
           path: |

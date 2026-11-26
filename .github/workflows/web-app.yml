@@ -48,8 +48,8 @@ jobs:
     env:
       TEXLOOM_CHECK_DATABASE: postgresql  # the server's database here (the other checks use SQLite)
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
       - uses: ./.github/actions/web  # npm ci, and web/dist built: the server serves it
       - name: PostgreSQL's programs (scripts/pg.py runs a throwaway one)
         run: ls /usr/lib/postgresql/*/bin/initdb >/dev/null 2>&1 || sudo apt-get install -y postgresql
