@@ -156,6 +156,7 @@ class JoinDialog(Dialog):
         self.link = QtWidgets.QLineEdit(link)
         self.link.setPlaceholderText("https://…/#p=…")
         self.check = QtWidgets.QPushButton(_("Check"))
+        self.check.setToolTip(_("Check the link, and see which project it is"))
         self.check.clicked.connect(self.do_peek)
         row.addWidget(self.link, 1)
         row.addWidget(self.check)
@@ -176,11 +177,13 @@ class JoinDialog(Dialog):
         frow = QtWidgets.QHBoxLayout()
         self.folder = QtWidgets.QLineEdit("")
         choose = QtWidgets.QPushButton(_("Choose…"))
+        choose.setToolTip(_("Choose the folder on this computer"))
         choose.clicked.connect(self.choose)
         frow.addWidget(self.folder, 1)
         frow.addWidget(choose)
         lay.addLayout(frow)
         self.compile = QtWidgets.QCheckBox(_("Compile with my own TeX (latexmk) when files change"))
+        self.compile.setToolTip(_("Run latexmk here whenever the project’s files change, and share the PDF with collaborators"))
         lay.addWidget(self.compile)
         lay.addWidget(note(_("Collaborators’ files will be written to this folder. TeXLoom won’t write files that "
                              "LaTeX tools run as programs, but compile it with your own tools only if you trust "
@@ -375,6 +378,7 @@ class ShareFolderDialog(Dialog):
         row = QtWidgets.QHBoxLayout()
         self.folder = QtWidgets.QLineEdit()
         choose = QtWidgets.QPushButton(_("Choose…"))
+        choose.setToolTip(_("Choose the folder on this computer"))
         choose.clicked.connect(self.choose)
         row.addWidget(self.folder, 1)
         row.addWidget(choose)
@@ -384,6 +388,7 @@ class ShareFolderDialog(Dialog):
         # the servers this computer knows (last used first), and any other typed in
         self.server = QtWidgets.QComboBox()
         self.server.setEditable(True)
+        self.server.setToolTip(_("The server that passes changes between collaborators, and keeps the project with a creation code"))
         self.server.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         servers = server_choices(server)
         self.server.addItems(servers)

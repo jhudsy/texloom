@@ -15,7 +15,7 @@ from . import listsync, tags
 from .config import load
 from .dialogs_tags import ManageTagsDialog, TagsDialog
 from .i18n import _, app_pref, ngettext, set_app_pref
-from .ui import GREY, ICON, TAGS_ROLE, Disclosure, dot, heading, in_background, note, project_name, shade, tag_hex
+from .ui import GREY, ICON, TAGS_ROLE, dot, heading, in_background, note, project_name, shade, tag_hex
 
 log = logging.getLogger("texloom")
 
@@ -121,6 +121,7 @@ class ProjectListPart:
         ask.setAlignment(Qt.AlignCenter)
         wl.addWidget(ask)
         b = QtWidgets.QPushButton(_("Open your project list…"))
+        b.setToolTip(_("Connect the project list you use in the browser"))
         b.setDefault(True)
         b.setMinimumHeight(36)
         b.clicked.connect(lambda: self.project_list())
@@ -136,6 +137,7 @@ class ProjectListPart:
         row.addStretch(1)
         for act in (self.a_new, self.a_join):
             b = QtWidgets.QPushButton(act.icon(), act.text())
+            b.setToolTip(act.toolTip())
             b.setMinimumHeight(36)
             b.clicked.connect(act.trigger)
             row.addWidget(b)
@@ -164,11 +166,11 @@ class ProjectListPart:
         self.find.setClearButtonEnabled(True)
         self.find.textChanged.connect(lambda _text: self.refresh())
         self.view_btn = QtWidgets.QToolButton()
-        self.view_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.view_btn.setAutoRaise(True)
         self.view_menu = QtWidgets.QMenu(self.view_btn)
         self.view_menu.aboutToShow.connect(self.fill_view_menu)
-        self.view_btn.setMenu(self.view_menu)
+        # its menu opens on a click, below it, without the small arrow Qt draws on a button given a menu
+        self.view_btn.clicked.connect(lambda: self.view_menu.exec(self.view_btn.mapToGlobal(QtCore.QPoint(0, self.view_btn.height()))))
         self.view_btn.setFixedHeight(self.find.sizeHint().height())
         row.addWidget(self.find, 1)
         row.addWidget(self.view_btn)
@@ -181,21 +183,22 @@ class ProjectListPart:
         self.list.itemDoubleClicked.connect(lambda _it: self.open_folder())
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self.list_menu)
-        lay.addWidget(self.list, 3)
-        # the projects on your list that aren't on this computer, to join (from the last list sync)
+        lay.addWidget(self.list, 1)
+        # the projects on your list that aren't on this computer, to join (from the last list sync); hidden
+        # from the sort and filter menu (⇅), not folded away: folded, the side was left with only the search
         self.list_data: tuple[str, dict] | None = None  # (server, the list): set beside the window by keep_list_updated
         self.away_cache: tuple | None = None  # (what it was worked out from, the entries)
         self.away_rows: tuple | None = None  # what the rows last showed
-        self.away_head = Disclosure(is_open=bool(app_pref("away_open", True)))
+        lay.addSpacing(6)
+        self.away_head = heading("")
         self.away_head.setToolTip(_("Projects on your project list that aren’t on this computer. Join one to keep it in a folder here."))
-        self.away_head.opened.connect(self.open_away)
         lay.addWidget(self.away_head)
         self.away = QtWidgets.QListWidget()
         self.away.setItemDelegate(ProjectRows(self.away))
         self.away.setMinimumWidth(220)
         self.away.itemSelectionChanged.connect(self.away_selected)
         self.away.itemDoubleClicked.connect(lambda _it: self.join_away())
-        lay.addWidget(self.away, 2)
+        lay.addWidget(self.away, 1)  # (as tall as its rows need: fit_away)
         self.list.itemSelectionChanged.connect(lambda: self.list.selectedItems() and self.away.clearSelection())
         self.away_head.setVisible(False)
         self.away.setVisible(False)
@@ -240,7 +243,7 @@ class ProjectListPart:
             if all(w in tags.fold_search(" ".join([title, *(t.name for t in own)])) for w in words):
                 rows.append((project, title, urlparse(there).netloc, f"{there}/#{entry['f']}", own))
         self.away_head.setText(_("On your list, not here ({n})", n=len(every)))
-        self.away.setVisible(bool(every) and self.away_head.is_open())
+        self.away.setVisible(bool(every))
         shown = (shade(GREY), *((r[0], r[1], r[2], tuple(t.name for t in r[4]), tuple(t.colour for t in r[4])) for r in rows))
         if shown == self.away_rows:
             return
@@ -264,9 +267,14 @@ class ProjectListPart:
         if keep and not self.away.selectedItems():
             self.away_selected()
 
-    def open_away(self, on: bool) -> None:
-        set_app_pref("away_open", on)
-        self.refresh_away()
+    def fit_away(self) -> None:
+        """The projects to join take the height their rows need, up to half the side (the folders here
+        have the rest), or all of it when there are no folders here."""
+        if self.list.isHidden():
+            self.away.setMaximumHeight(16777215)  # (QWIDGETSIZE_MAX: no limit)
+            return
+        rows = sum(self.away.sizeHintForRow(i) for i in range(self.away.count())) or 2 * self.away.fontMetrics().height()
+        self.away.setMaximumHeight(rows + 2 * self.away.frameWidth() + 2)
 
     def away_current(self) -> tuple[str, str, str, str, tuple] | None:
         """The selected project you could join: (project, title, server, link, tags)."""

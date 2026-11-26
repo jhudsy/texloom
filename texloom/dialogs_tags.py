@@ -111,18 +111,22 @@ class ManageTagsDialog(Dialog):
         self.add_in.setMaxLength(tags.MAX_NAME)
         self.add_in.returnPressed.connect(self.add)
         add = QtWidgets.QPushButton(_("Add"))
+        add.setToolTip(_("Add a tag with this name"))
         add.setAutoDefault(False)
         add.clicked.connect(self.add)
         row.addWidget(self.add_in, 1)
         row.addWidget(add)
         lay.addLayout(row)
         row = QtWidgets.QHBoxLayout()
-        for text, act in ((_("Rename…"), self.rename), (_("Delete"), self.delete)):
+        for text, tip, act in ((_("Rename…"), _("Rename the selected tag, on every project that has it"), self.rename),
+                               (_("Delete"), _("Delete the selected tag, from every project that has it"), self.delete)):
             b = QtWidgets.QPushButton(text)
+            b.setToolTip(tip)
             b.setAutoDefault(False)
             b.clicked.connect(act)
             row.addWidget(b)
         self.colour_btn = QtWidgets.QPushButton(_("Colour"))
+        self.colour_btn.setToolTip(_("Change the selected tag’s colour"))
         self.colour_btn.setAutoDefault(False)
         self.colour_menu = QtWidgets.QMenu(self.colour_btn)
         self.colour_menu.aboutToShow.connect(self.fill_colours)

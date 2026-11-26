@@ -259,6 +259,7 @@ class ProjectListDialog(QtWidgets.QDialog):
 
         u.addSpacing(6)
         self.more_btn = Disclosure(_("More options"))
+        self.more_btn.setToolTip(_("Copies of the list on other servers, and stopping or starting over"))
         self.more_btn.opened.connect(self.show_more)
         u.addWidget(self.more_btn)
         self.more = QtWidgets.QWidget()

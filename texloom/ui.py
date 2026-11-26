@@ -108,6 +108,9 @@ class Disclosure(QtWidgets.QPushButton):
     def __init__(self, text: str = "", is_open: bool = False, bold: bool = False) -> None:
         super().__init__()
         self.setFlat(True)
+        # no padding of a button's own, so that it lines up with the headings and text around it (macOS pads a
+        # flat button as if it were framed)
+        self.setStyleSheet("QPushButton { border: none; padding: 2px 0px; text-align: left; }")
         self.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)  # at the left, as a heading
         self.setText(text)
         if bold:

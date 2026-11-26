@@ -98,6 +98,7 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.timer.start(1000)
         self.list_busy, self.list_at, self.list_folders, self.tags_dirty = False, 0.0, None, False
         self.row_shown: dict[str, tuple] = {}  # folder -> what its row last showed
+        self.had_folders = False  # (the last refresh had folders to show)
         self.list_timer = QtCore.QTimer(self)
         self.list_timer.timeout.connect(self.keep_list_updated)
         self.list_timer.timeout.connect(lambda: self.sorting == "changed" and self.scan_dates())
@@ -135,6 +136,8 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.a_new = a(_("New project from a folder…"), self.share_folder, "FolderNew", K.New)
         self.a_join = a(_("Join a project with a link…"), self.join, "InsertLink", "Ctrl+J")
         self.a_add = a(_("Add a TeXLoom folder from this computer…"), self.add_existing, "FolderOpen")
+        self.a_new.setToolTip(_("Turn a folder on this computer into a new project, to share with others"))
+        self.a_join.setToolTip(_("Join a project someone shared with you, from its link"))
         self.a_list = a(_("Project list…"), self.project_list)
         self.a_pause = a(_("Pause syncing"), self.toggle_pause, "MediaPlaybackPause")
         self.a_settings = a(_("Settings…"), self.settings_window, "DocumentProperties", K.Preferences, QtGui.QAction.PreferencesRole)
@@ -143,6 +146,9 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         self.a_open = a(_("Open folder"), self.open_folder, "FolderOpen", K.Open)
         self.a_web = a(_("Open in browser"), self.open_web, "GoNext", "Ctrl+B")
         self.a_share = a(_("Share…"), self.share_links, "MailSend")
+        self.a_open.setToolTip(_("Open the project’s folder on this computer"))
+        self.a_web.setToolTip(_("Open the project in your browser, to edit and compile it there"))
+        self.a_share.setToolTip(_("Make links that invite others to this project"))
         self.a_tags = a(_("Tags…"), self.edit_tags)
         self.a_copy = a(_("Make a copy…"), self.copy_project)
         self.a_store = a(_("Keep a copy on the server…"), self.keep_on_server)
@@ -183,11 +189,11 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
         if MAC:  # the size of the symbols in other Mac apps' toolbars
             tb.setIconSize(QtCore.QSize(20, 20))
         add = QtGui.QAction(theme_icon("ListAdd"), _("Add project"), self)
-        add.setMenu(self.add_menu)
         add.setToolTip(_("Make a new project from a folder, or join one with a link"))
         tb.addAction(add)
         add_btn = tb.widgetForAction(add)
-        add_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        # its menu opens on a click, below it, without the small arrow Qt draws on a button given a menu
+        add.triggered.connect(lambda: self.add_menu.exec(add_btn.mapToGlobal(QtCore.QPoint(0, add_btn.height()))))
         tb.addAction(self.a_pause)
         tb.addAction(self.a_update)  # only while a newer version is out
         spacer = QtWidgets.QWidget()
@@ -325,12 +331,20 @@ class Window(ProjectListPart, ProjectDetailPart, UpdatesPart, QtWidgets.QMainWin
             it.setIcon(dot(shade(colour)))
             it.setToolTip(str(d))
         self.refresh_away()
-        away = self.has_away and self.away_head.is_open()
+        away = self.has_away
+        self.away.blockSignals(True)
+        if not fs and self.away.count() and not self.away.selectedItems():  # nothing here: show the first to join
+            self.away.setCurrentRow(0)
+        elif fs and not self.had_folders:  # the first folder here (joined, or added): show it
+            self.away.clearSelection()
+        self.away.blockSignals(False)
+        self.had_folders = bool(fs)
         self.pages.setCurrentIndex(1 if every or self.has_away else 0)
         has_list = bool(listsync.saved_link())  # (the welcome: with a list, opening it is done)
         self.welcome_list.setVisible(not has_list)
         self.welcome_new.setVisible(not has_list)
         self.list.setVisible(bool(every))  # (only projects to join: they have the whole side)
+        self.fit_away()
         self.right.setVisible(bool(fs) or away)
         self.statusBar().setVisible(bool(every))
         if every:
