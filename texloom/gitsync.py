@@ -6,6 +6,12 @@ The folder is both the TeXLoom project (kept in sync by FolderSync) and a git cl
 - git -> TeXLoom: fetch every so often; new upstream commits are merged into the folder,
   and FolderSync shares the changed files with collaborators.
 
+The folder can be the whole repository, or one folder inside it (a paper in a repository that holds
+much else): then only that folder is the project. Its files are committed, and nothing else in the
+clone (what you have changed or staged elsewhere stays as it is); merging and pushing are of the
+whole branch, as `git pull` and `git push` would be. Paths in git's output are the repository's
+(`papers/p1/main.tex`); the project's are the folder's (`main.tex`).
+
 Only project files are committed (what the helper syncs: no build output, no .texloom).
 A merge that conflicts is aborted, leaving the project as it is: nothing with conflict
 markers ever reaches collaborators. Git uses your own credentials and configuration; the
@@ -64,9 +70,22 @@ class GitError(Exception):
     pass
 
 
+def exactly(path: str) -> str:
+    """A pathspec naming one repository path as it is: from the top, and not a pattern (a file may be called a[1].tex)."""
+    return f":(top,literal){path}"
+
+
+def repo_top(d: Path) -> Path | None:
+    """The top of the git repository the folder is in (itself, or a folder above it), or None."""
+    for at in (d, *d.parents):
+        if (at / ".git").exists():  # (a directory, or a file in a worktree or submodule)
+            return at
+    return None
+
+
 async def clone_of_link(root: Path, link: object) -> bool:
-    """Whether the folder is a git clone of the repository the project is linked to."""
-    if not isinstance(link, dict) or not isinstance(link.get("repo"), str) or not (root / ".git").exists():
+    """Whether the folder is in a git clone of the repository the project is linked to."""
+    if not isinstance(link, dict) or not isinstance(link.get("repo"), str) or repo_top(root.resolve()) is None:
         return False
     try:
         proc = await asyncio.create_subprocess_exec("git", "remote", "-v", cwd=root,
@@ -80,6 +99,8 @@ async def clone_of_link(root: Path, link: object) -> bool:
 class GitBridge:
     def __init__(self, root: Path, fs: FolderSync, opts: dict | None = None):
         self.root = root
+        self.top = root  # the top of the repository (check sets it): git runs there
+        self.sub = ""  # the folder within it ("papers/p1"), "" for all of it
         self.fs = fs
         self.r = fs.r
         o = {**DEFAULTS, **(opts or {})}
@@ -115,7 +136,7 @@ class GitBridge:
     async def git(self, *args: str, check: bool = True, timeout: float = 120) -> str:
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true", "LC_ALL": "C"}
         proc = await asyncio.create_subprocess_exec(
-            "git", *args, cwd=self.root, env=env,
+            "git", *args, cwd=self.top, env=env,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout)
@@ -135,10 +156,17 @@ class GitBridge:
     async def check(self) -> str | None:
         """None if the folder can be bridged, else why not."""
         try:
-            if (await self.git("rev-parse", "--show-toplevel")).strip() != str(self.root.resolve()):
-                return "the folder isn't the top of a git repository (run `git init` in it)"
+            self.top = self.root
+            top = Path((await self.git("rev-parse", "--show-toplevel")).strip()).resolve()
+            try:
+                sub = self.root.resolve().relative_to(top).as_posix()
+            except ValueError:
+                return "the folder isn't in a git repository (run `git init` in it)"
+            self.top, self.sub = top, "" if sub == "." else sub
             await self.git("symbolic-ref", "-q", "HEAD")
         except GitError as e:
+            if "not a git repository" in str(e):
+                return "the folder isn't in a git repository (run `git init` in it)"
             return f"not usable as a git repository ({e})" if "symbolic-ref" not in str(e) else "HEAD is detached: check out a branch"
         except FileNotFoundError:
             return "git isn't installed"
@@ -150,10 +178,26 @@ class GitBridge:
         except GitError:
             return None
 
+    # --- the repository's paths and the project's --------------------------------
+    def mine(self, path: str) -> str | None:
+        """A repository path's path in the project, or None if it's outside the folder."""
+        if not self.sub:
+            return path
+        return path[len(self.sub) + 1:] if path.startswith(self.sub + "/") else None
+
+    def project_file(self, path: str) -> bool:
+        """Whether a repository path is one of the project's files (one the helper syncs)."""
+        rel = self.mine(path)
+        return rel is not None and safe_rel(rel) and not self.fs.ignored(rel)
+
+    def here(self) -> list[str]:
+        """The pathspec limiting git to the folder (all of the repository when it's the top)."""
+        return [exactly(self.sub) if self.sub else ":/"]
+
     # --- TeXLoom -> git ---------------------------------------------------------
     async def changed_paths(self) -> list[str]:
-        """Project files that differ from HEAD (what the helper syncs; nothing else)."""
-        out = await self.git("status", "--porcelain=v1", "-z", "--untracked-files=all")
+        """Project files that differ from HEAD (what the helper syncs; nothing else), as repository paths."""
+        out = await self.git("status", "--porcelain=v1", "-z", "--untracked-files=all", "--", *self.here())
         items, paths = out.split("\0"), []
         i = 0
         while i < len(items):
@@ -165,22 +209,24 @@ class GitBridge:
             if code[0] in "RC" and i < len(items):  # rename/copy: the old name follows
                 old = items[i]
                 i += 1
-                if safe_rel(old) and not self.fs.ignored(old):
+                if self.project_file(old):
                     paths.append(old)
-            if safe_rel(path) and not self.fs.ignored(path):
+            if self.project_file(path):
                 paths.append(path)
         return paths
 
     async def commit(self, paths: list[str], why: str) -> bool:
         if not paths:
             return False
-        await self.git("add", "-A", "--", *paths)
-        if not (await self.git("diff", "--cached", "--name-only")).strip():
+        # only these paths: anything else staged in the clone (work of your own) stays staged, not committed
+        spec = [exactly(p) for p in paths]
+        await self.git("add", "-A", "--", *spec)
+        names = sorted({p for p in (await self.git("diff", "--cached", "--name-only", "-z", "--", *spec)).split("\0") if p})
+        if not names:
             return False
-        names = sorted({p for p in (await self.git("diff", "--cached", "--name-only", "-z")).split("\0") if p})
         shown = ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
         await self.git("commit", "-q", "-m", f"TeXLoom: {why} {shown}", "-m",
-                       "Committed by `texloom run --git` from the shared project.")
+                       "Committed by `texloom run --git` from the shared project.", "--", *spec)
         log.info("git: committed %s", shown)
         return True
 
@@ -213,7 +259,7 @@ class GitBridge:
                         "  cd ../texloom-merge && git merge %s     # resolve, then: git commit\n"
                         "  git push %s HEAD:%s\n"
                         "The merged version then comes into the project on the next fetch.",
-                        upstream, ", ".join(conflicted[:5]) or str(e)[:200], self.root, upstream, remote, branch)
+                        upstream, ", ".join(conflicted[:5]) or str(e)[:200], self.top, upstream, remote, branch)
             return False
         marked = await self.conflict_markers(before)
         if marked:  # someone pushed a "resolution" that still has conflict markers: don't share it
@@ -236,9 +282,12 @@ class GitBridge:
         items = (await self.git("diff", "--raw", "-z", "--no-renames", base, target)).split("\0")
         out = []
         for info, path in zip(items[0::2], items[1::2]):  # ":old-mode new-mode old-id new-id status", path
+            rel = self.mine(path)
+            if rel is None:  # outside the folder: not the project's, never shared
+                continue
             fields = info.split()
             mode = fields[1] if len(fields) > 1 else ""
-            if not safe_rel(path) or any(d in IGNORE_DIRS for d in path.split("/")[:-1]) or mode in ("120000", "160000"):
+            if not safe_rel(rel) or any(d in IGNORE_DIRS for d in rel.split("/")[:-1]) or mode in ("120000", "160000"):
                 out.append(path)
         return out
 
@@ -246,10 +295,10 @@ class GitBridge:
         """Project files changed since `before` that contain conflict markers."""
         out = []
         for p in (await self.git("diff", "--name-only", "-z", before, "HEAD", check=False)).split("\0"):
-            if not p or not safe_rel(p) or self.fs.ignored(p):
+            if not p or not self.project_file(p):
                 continue
             try:
-                if MARKER.search((self.root / p).read_text("utf-8", "replace")):
+                if MARKER.search((self.top / p).read_text("utf-8", "replace")):
                     out.append(p)
             except OSError:
                 continue
@@ -259,21 +308,22 @@ class GitBridge:
         """Point out lines that ask to run programs, newly brought in from git (as for collaborators)."""
         changed = (await self.git("diff", "--name-only", "-z", before, "HEAD", check=False)).split("\0")
         for p in changed:
-            if not p or not p.lower().endswith(SCANNED) or not safe_rel(p):
+            rel = self.mine(p) if p else None
+            if not rel or not rel.lower().endswith(SCANNED) or not safe_rel(rel):
                 continue
             old = await self.git("show", f"{before}:{p}", check=False)
             try:
-                new = (self.root / p).read_text("utf-8", "replace")
+                new = (self.top / p).read_text("utf-8", "replace")
             except OSError:
                 continue
-            for f in added(p, old or None, new):
+            for f in added(rel, old or None, new):
                 log.warning("⚠ %s (from git) — if you compile with your own LaTeX tools, check it first.", f.describe())
 
     # --- taking turns with browsers ---------------------------------------------------
     async def shared_link(self, upstream: str | None) -> dict | None:
         """The project's repository link, if this folder is a clone of that repository and branch."""
         link = self.r.meta.get("github")
-        if not isinstance(link, dict) or not upstream or link.get("dir"):
+        if not isinstance(link, dict) or not upstream or (link.get("dir") or "") != self.sub:  # (the same folder of it)
             return None
         remote, _, branch = upstream.partition("/")
         url = (await self.git("config", "--get", f"remote.{remote}.url", check=False)).strip()

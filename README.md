@@ -686,8 +686,8 @@ sees the rewritten files as your edits and shares them. (History can undo it.) S
 #### Automatically, from a computer that stays on (`--git`)
 
 Like Overleaf's GitHub sync, but continuous, and with any host (GitHub, GitLab, Bitbucket, your own): run the
-helper with `--git` on a folder that is also a git clone, on any computer that stays on (a desktop, a server, a
-Raspberry Pi).
+helper with `--git` on a folder that is also a git clone, or a folder inside one, on any computer that stays on
+(a desktop, a server, a Raspberry Pi).
 
 ```bash
 texloom run ~/papers/demo --git
@@ -702,6 +702,11 @@ texloom run ~/papers/demo --git
   stays as it is; the helper prints the commands to combine them in a separate worktree.
   A pushed "resolution" that still contains conflict markers is refused too, so they
   never reach collaborators.
+- **A folder inside a repository:** a paper in a repository that holds much else can be a project of
+  its own: make the project from that folder (`papers/2026-loom` in your clone). Only its files are
+  committed, and nothing else in the clone: what you have changed or staged elsewhere stays as it
+  is. Fetching, merging and pushing take the whole branch, as `git pull` and `git push` do. In the
+  browser, the same is a link with "Folder in the repository"; the two take turns.
 - **Credentials:** git uses your own setup (SSH key or credential helper). The TeXLoom
   server isn't involved, so the project stays end-to-end encrypted.
 - **Options:** `texloom settings <dir> 'git={"interval": 60, "quiet": 120, "push": true}'`.
@@ -979,7 +984,7 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 | `texloom/replica.py` | folder helper's replica: pycrdt document, outbox, peer handshake, blobs |
 | `texloom/folder.py` | two-way folder ⇄ CRDT sync, path safety, locked-down latexmk |
 | `texloom/folderrules.py` | the folder sync's rules: which files are the project's, text, merging, line endings, renames (as `web/src/foldersync.ts`) |
-| `texloom/gitsync.py` | `--git`: a synced folder's git repository kept in step, taking turns with browsers |
+| `texloom/gitsync.py` | `--git`: a synced folder's git repository (all of it, or the folder's part of it) kept in step, taking turns with browsers |
 | `texloom/cli.py` | command line |
 | `texloom/config.py` | a synced folder's own settings and project link, and the folders on this computer's list |
 | `texloom/mcp.py` | MCP server (stdio JSON-RPC): tools, presence, comments and suggestions |
@@ -1051,6 +1056,7 @@ uv run --with hypothesis python scripts/check_props.py          # random texts a
 uv run --with mypy python scripts/check_textpos.py              # character, byte and UTF-16 positions can't be mixed up (texloom/textpos.py)
 uv run --with hypothesis python scripts/check_folder_model.py   # the desktop's folder sync through random steps: saves, refused writes, restarts, stale copies
 uv run python scripts/check_folder_regressions.py               # folder-sync mistakes that must not come back: a deleted file reappearing, a half-saved file shared, a renamed folder's files left behind
+uv run python scripts/check_gitsync.py                          # the git bridge (--git) against real git: the whole repository or a folder in it; only the project's files committed, a co-author's push merged and shared, nothing unsafe brought in
 ```
 
 Security:

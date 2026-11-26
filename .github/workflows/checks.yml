@@ -34,6 +34,7 @@ jobs:
       - name: folder-rules.json is what make_folder_rules.py writes
         run: uv run python scripts/make_folder_rules.py --check
       - run: uv run python scripts/check_folder_regressions.py
+      - run: uv run python scripts/check_gitsync.py
       - name: A folder's settings that run programs live in this user's settings, never in the folder (security review)
         run: uv run python scripts/check_settings.py
       - name: Comment authors can't fake the verified mark (security review)

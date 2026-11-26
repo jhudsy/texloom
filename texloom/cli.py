@@ -7,7 +7,7 @@
   texloom start                                   sync every folder on this computer's list, in one process
   texloom autostart on|off                        run `texloom start` at login
   texloom list | add <dir> | leave <dir>          the folder list (clone and new add to it)
-  texloom run   <dir> --git                       also keep the folder's git repository in step (any host)
+  texloom run   <dir> --git                       also keep the folder's git repository in step (any host; the folder may be inside a clone)
   texloom allow <dir>                             review lines that run programs; allow them with --shell-escape
   texloom settings <dir> [KEY=VALUE ...]          this computer's settings for a folder (compile, engine, …)
   texloom mcp   <dir|link> [--name NAME] [--suggest-only]  MCP server: an agent edits/comments as a collaborator

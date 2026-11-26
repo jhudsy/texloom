@@ -20,6 +20,7 @@ from .confine import unsandboxed
 from .config import DEFAULT_CONFIG, browser_link, load_config, update_config
 from .dialogs import CopyFolderDialog, ProgramsDialog
 from .dialogs_share import ask_code
+from .gitsync import repo_top
 from .i18n import _, ngettext
 from .paths import state_dir, write_json
 from .ui import GREY, ICON, Disclosure, ask, choose, describe, heading, inform, move_refusal_text, note, open_path, project_name, red, shade, short_path, usage_text, warn
@@ -352,7 +353,7 @@ class ProjectDetailPart:
         self.c_git.setToolTip(_("Commit the project’s changes and push them to the repository’s upstream, and merge in commits made there"))
         self.c_git.clicked.connect(lambda on: self.set_option("git", on))
         o.addWidget(self.c_git)
-        self.git_note = note(_("This folder isn’t a git repository. Run “git init” in it first to use this."))
+        self.git_note = note("")  # why it can't be used, or what it covers
         o.addWidget(self.git_note)
         lay.addWidget(self.options)
         lay.addSpacing(10)
@@ -476,10 +477,15 @@ class ProjectDetailPart:
         mode = cfg.get("shell_escape")
         self.p_mode.setCurrentIndex(2 if mode in (True, "unrestricted") else 1 if mode == "restricted" else 0)
         self.p_review.setEnabled(mode in (True, "unrestricted"))
-        is_git = (d / ".git").exists()
-        self.c_git.setEnabled(is_git)
-        self.c_git.setChecked(bool(cfg.get("git")) and is_git)
-        self.git_note.setVisible(not is_git)
+        top = repo_top(d)  # the folder itself, a folder above it (the project is part of a repository), or none
+        self.c_git.setEnabled(top is not None)
+        self.c_git.setChecked(bool(cfg.get("git")) and top is not None)
+        self.git_note.setText(
+            _("This folder isn’t in a git repository. Run “git init” in it first to use this.") if top is None else
+            "" if top == d else
+            _("This folder is part of the git repository in {top}. Only its files are committed; pulling and pushing take the whole branch, as git pull and git push do.",
+              top=short_path(top)))
+        self.git_note.setVisible(bool(self.git_note.text()))
         text = "\n".join(self.activity.lines.get(str(d), []))
         if text != self.log.toPlainText():
             self.log.setPlainText(text)
