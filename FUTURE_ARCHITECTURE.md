@@ -220,6 +220,28 @@ rehearsal (below) is there to measure them.
 | The front door lists a dead relay | DNS with several addresses: a client may try the dead one first and wait for its connect timeout | A connect to a dead address can take tens of seconds before the next one is tried | Health-checked DNS (a TTL of 30–60 s) or a load balancer removes it. How traffic reaches the machines is the operator's to arrange, as now. |
 | A planned restart (deploys) | Not a failure | None noticeable: a relay stops accepting new connections and closes its own connections, spread over a minute, and they move to the others. | — |
 
+**Measured in the lab** (`scripts/rehearse_relays.py`, Docker on one computer, Patroni's and Sentinel's default
+timings; seconds from the break):
+
+| What broke | Back after |
+|---|---|
+| PostgreSQL primary killed / frozen / cut off | writes through the multi-host address work again after 26 / 29 / 25 s. A cut-off primary demotes itself after 14 s, so there were never two. The new timeline shows within 2 s of writes resuming. |
+| Valkey primary killed / frozen / cut off | a replica is promoted and takes writes after 7 / 7.5 / 7.5 s. The old one, once mended, still takes writes for about 10 s, and loses them when it rejoins (soft state only, so harmless). |
+| A whole machine (holding both primaries) | Valkey after 7–8 s, PostgreSQL after 24–27 s; etcd keeps its majority. |
+| A relay, seen through nginx (`least_conn`, `max_fails=1`, `fail_timeout=5s`) | nginx leaves a killed relay out after 3–8 s, a frozen one after 10 s, a cut-off one after 11–19 s. No request through nginx failed. |
+
+Found by the lab:
+- **nginx's WebSocket read timeout must be short** (60 s, not 1 h). With 1 h, a third of the apps sent to a
+  frozen relay never connected (nginx never counted it as failed); with 60 s, one waited a minute and went
+  elsewhere. A healthy WebSocket is never idle that long: the server pings every 30 s. The apps also need a
+  timeout on connecting.
+- **A change sent while the database is unreachable is dropped** by today's relay: the error is logged and
+  nothing is answered or passed on, and the app doesn't send it again until it reconnects. Its collaborators
+  miss everything it does meanwhile. The design's answer (pass it on live, `q: 0`, as for a refusal, with an
+  error the app retries on) is still to be built.
+- **Patroni keeps a primary that is cut off from its standbys and clients but still reaches its own machine's
+  etcd member** (an early version of the cut): there was no failover. Cutting the whole machine works.
+
 Two smaller points:
 
 - **After a long outage, reconnecting can lag.** **Built:** apps now back off to at most 15 s (it was 30 s),
