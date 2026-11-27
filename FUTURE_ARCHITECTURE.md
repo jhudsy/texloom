@@ -237,9 +237,9 @@ later; seconds from the break until every app has every change):
 | What broke | Stored project (all also stored) | Sync-only project |
 |---|---|---|
 | a relay killed | 5.5 | 5.5 |
-| a relay frozen | 31 (its apps notice, by their keep-alive, in up to 20 s) | 5.4 |
+| a relay frozen | 24 (its apps notice by their keep-alive in 10 s; nginx then sends one back to the frozen relay first, 10 s more, until the front door has active health checks) | 5.3 |
 | a relay cut off | 23 | 5.5 |
-| the Valkey primary killed | 6.3 | 29.5 |
+| the Valkey primary killed | 5.9 | 6.5 (29 with 0.4.40 apps: see below) |
 | the PostgreSQL primary killed | 35 (Patroni's 30 s leader key) | 5.5 |
 | a whole machine, holding both primaries, killed / cut off | 52 / 35 | 29.5 |
 
@@ -247,8 +247,12 @@ After mending, every change made reaches every app within 0.2 s, and a newcomer 
 gets every change. Three fixes came from this: the relay pings every connection every 5 s and nginx gives up on a
 WebSocket quiet for 10 s (a frozen relay otherwise kept getting new connections: nginx counted an app giving up
 first as the app's failure); database statements give up after 20 s rather than 120 s (a cut-off primary's
-connections hang rather than fail: it took two minutes to find the new one). Still slow: sync-only projects after
-a Valkey failover (30 s); worth a look.
+connections hang rather than fail: it took two minutes to find the new one). Traced afterwards (`collab` prints a
+timeline of each break): sync-only projects took 29 s after a Valkey failover although the bus was back and `resync`
+sent at 6.4 s, because each app answered a peer's request for what it lacks at most once per 30 s, and they had last
+exchanged moments before. Apps now answer small requests at once (only large ones wait), so 6.5 s; apps older than the
+release with this keep the 30 s. And apps on a frozen or cut-off relay noticed only after 20 s: the server's keep-alive
+is now 5 s, so 10 s. The rows above are with both. The other times in the table are from before them.
 
 Found by the lab:
 - **nginx's WebSocket read timeout must be short** (60 s, not 1 h). With 1 h, a third of the apps sent to a
