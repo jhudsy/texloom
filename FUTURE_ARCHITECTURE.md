@@ -293,9 +293,14 @@ doing whatever happens later.
    deletions, revocations and moves. Who is connected is on the bus (`c:<project>`), so "peers", the limit per
    project and "is it open anywhere" count every relay; each relay says it is alive every 3 s, and one unheard
    for 10 s is gone: the others tell their own apps its connections have left. Checked with two relays in one
-   process (`scripts/check_relays.py`). Gap tracking, and what follows a break in the bus or a failover, are next.
+   process (`scripts/check_relays.py`).
 6. **Gap tracking in the relay,** filling from the database, the periodic head check, and `resync`/`recheck`
    (with closing for older apps).
+   **Gap tracking is built** (`Relay._new`, `_fill`, `_check_heads`): a gap is filled from the database 0.5 s
+   after it shows, the heads of every stored project open here are read at once every minute (every second
+   while the bus is away), and a break in the bus is followed by a head check and `resync` for sync-only
+   projects. A gap that was compacted meanwhile can't be passed on as changes: its apps are asked to `recheck`.
+   What a database failover needs (Decided, below) is next.
    **The messages are built:** both apps say `rs: 1` in their hello and answer `resync` (their state vector)
    and `recheck` (their hello again); `Relay.ask` sends them, spread over a few seconds, and closes apps that
    don't say `rs` (`scripts/check_resync.py`). What calls `ask`, and gap tracking, come with the bus. The apps'

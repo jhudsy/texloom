@@ -78,6 +78,11 @@ class Bus:
         self.on_message: Handler = lambda channel, data: None
         self.on_break: Callable[[], None] = lambda: None
 
+    @property
+    def connected(self) -> bool:
+        """Whether messages can be heard just now (False between a break and on_break)."""
+        return True
+
     async def start(self, on_message: Handler, on_break: Callable[[], None]) -> None:
         """Connect, and check the bus can be used (BusError, saying why, if not)."""
         self.on_message, self.on_break = on_message, on_break
@@ -169,6 +174,10 @@ class MemoryBus(Bus):
         self.shared = shared
         self.channels: set[str] = set()
         self.broken = False
+
+    @property
+    def connected(self) -> bool:
+        return not self.broken
 
     def _ok(self) -> None:
         if self.broken:
@@ -366,6 +375,10 @@ class RespBus(Bus):
         self._pongs: collections.deque[asyncio.Future] = collections.deque()
         self._started = asyncio.Event()
         self._closed = False
+
+    @property
+    def connected(self) -> bool:
+        return self._sub is not None
 
     # where the primary is
     async def _address(self) -> tuple[str, int]:

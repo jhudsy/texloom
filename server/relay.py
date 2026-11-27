@@ -103,6 +103,15 @@ BEAT = 3.0
 GONE_AFTER = 10.0
 CONN_TTL = 60.0  # seconds a project's list of connections lasts on the bus unless a relay renews it
 RENEW = 20.0  # seconds between a relay's renewals of its own entries
+# Gaps. For each stored project someone has open here, a relay keeps the number up to which its connections have
+# had every change (Track.upto). A change from another relay numbered above the next leaves a gap; if what's
+# missing hasn't come through the bus within FILL_WAIT, it is read from the database. A periodic check of the
+# heads of every project open here (HEAD_CHECK; every second while the bus is away, so that changes stored
+# through other relays still arrive) catches the last change of a burst whose passing on was lost: nothing after
+# it would show the gap.
+FILL_WAIT = 0.5
+HEAD_CHECK = 60.0
+HEAD_CHECK_AWAY = 1.0
 NUMBERS = (1 << (53 - ID_BITS)) - 1  # relay numbers go round within 1 … NUMBERS
 
 
@@ -247,6 +256,15 @@ class Budget:
                 turn.set_result(None)
 
 
+class Track:
+    """A stored project's changes passed on to this relay's connections: every one up to `upto`, and those above."""
+
+    def __init__(self, upto: int):
+        self.upto = upto
+        self.above: set[int] = set()
+        self.filling: asyncio.Task | None = None
+
+
 class Relay:
     """The WebSocket protocol: a room of connections per project."""
 
@@ -270,6 +288,8 @@ class Relay:
         self._gone: set[int] = set()  # relays found gone, whose connections were said to have left
         self._beating: asyncio.Task | None = None  # the heartbeat (_beat)
         self._trouble_at = 0.0  # when trouble with the bus was last logged (_bus_trouble)
+        self.tracks: dict[str, Track] = {}  # per stored project open here: the changes passed on to its connections
+        self._checking: asyncio.Task | None = None  # the periodic head check (_check_heads)
 
     @property
     def store(self) -> Store:
@@ -465,7 +485,7 @@ class Relay:
             self.make_room(len(text) * len(peers))
         if peers:
             await asyncio.gather(*(self.send(ws, text) for ws in peers))
-        await self.pass_on(project, text, msg.get("t", ""), "s")
+        await self.pass_on(project, text, msg.get("t", ""), "s", q=msg.get("q", 0) if msg.get("t") == "up" else 0)
 
     # --- the bus ------------------------------------------------------------------------
     async def join_bus(self, bus: Bus) -> None:
@@ -476,11 +496,13 @@ class Relay:
 
         await self.bus.subscribe(f"r:{self.number}")  # (messages for one of this relay's connections)
         self._beating = asyncio.get_running_loop().create_task(self._beat())
+        self._checking = asyncio.get_running_loop().create_task(self._check_heads())
 
     async def leave_bus(self) -> None:
         """When the server stops: no more heartbeats, and the other relays told at once that it has gone."""
-        if self._beating:
-            self._beating.cancel()
+        for task in (self._beating, self._checking):
+            if task:
+                task.cancel()
         try:  # (marked long gone, so that the others tidy up anything of it left on the bus)
             await self.bus.hset("alive", str(self.number), b"0", ttl=GONE_AFTER * 30)
         except BusError:
@@ -497,8 +519,9 @@ class Relay:
     # relay with someone connected to it) or one relay's (r:<number>, for one of its connections). How to send:
     # "s" to everyone, cutting off one that isn't reading; "u" unsigned, skipped for a peer that is behind; "a"
     # presence, likewise with less room (see send and send_unsigned).
-    async def pass_on(self, project: str, text: str, t: str, kind: str, to: int | None = None, relay: int | None = None) -> None:
-        head = {"r": self.number, "p": project, "t": t, "k": kind, **({"to": to} if to is not None else {})}
+    async def pass_on(self, project: str, text: str, t: str, kind: str, to: int | None = None, relay: int | None = None,
+                      q: int = 0) -> None:
+        head = {"r": self.number, "p": project, "t": t, "k": kind, **({"to": to} if to is not None else {}), **({"q": q} if q else {})}
         try:
             await self.bus.publish(f"r:{relay}" if relay is not None else f"p:{project}",
                                    json.dumps(head, separators=(",", ":")).encode() + b"\n" + text.encode())
@@ -547,6 +570,8 @@ class Relay:
         if not peers:
             return
         t, kind = h.get("t"), h.get("k")
+        if t == "up" and h.get("q") and not self._new(project, h["q"]):
+            return  # passed on here already (through the bus, or read from the database)
         if t == "moved":  # what's stored and the limits changed: each connection told what it may see (see _move)
             for ws in peers:
                 if (c := self.conns.get(ws)) is not None:
@@ -565,12 +590,17 @@ class Relay:
     # Who is connected, on the bus. Each relay keeps its own entries, renews them, and removes them as they go.
     async def _joined(self, project: str, conn: Conn) -> None:
         await self._follow(project)
+        if project not in self.tracks and not await self.store.relay_only(project):
+            # (after subscribing: what is stored from now on comes through the bus, or is found by the head check)
+            self.tracks.setdefault(project, Track(await self.store.head(project)))
         try:
             await self.bus.hset(f"c:{project}", str(conn.id), str(self.number).encode(), ttl=CONN_TTL)
         except BusError as e:
             self._bus_trouble(e)
 
     async def _left(self, project: str, conn: Conn) -> None:
+        if project not in self.rooms and (t := self.tracks.pop(project, None)) and t.filling:
+            t.filling.cancel()
         await self._follow(project)
         try:
             await self.bus.hdel(f"c:{project}", str(conn.id))
@@ -646,6 +676,11 @@ class Relay:
     def _bus_broke(self) -> None:
         """The connection to the bus broke and is back: anything may have been missed meanwhile."""
         async def mend() -> None:
+            # what other relays passed on meanwhile was missed: stored projects read it from the database, and the
+            # apps of sync-only ones (nothing stored to read) catch up from each other
+            await self._check_heads(once=True)
+            sync_only = [ws for project, room in self.rooms.items() if project not in self.tracks for ws in room]
+            asyncio.get_running_loop().create_task(self.ask("resync", sync_only))
             await self._keep_number()
             await self._rewrite()  # (a bus that failed over may have lost them)
         task = asyncio.get_running_loop().create_task(mend())
@@ -657,6 +692,78 @@ class Relay:
         n = await self.bus.incr("relays", 0)
         if n < self.number:
             await self.bus.incr("relays", self.number - n)
+
+    def _new(self, project: str, q: int) -> bool:
+        """A stored change numbered `q` is about to be passed on to this relay's connections: False if it has been
+        already. Notes it, and if it leaves a gap, sets the gap to be filled from the database unless it closes."""
+        t = self.tracks.get(project)
+        if t is None:  # (not known yet: a room just made; its head check sets it)
+            return True
+        if q <= t.upto or q in t.above:
+            return False
+        if q == t.upto + 1:
+            t.upto = q
+            while t.upto + 1 in t.above:
+                t.above.discard(t.upto + 1)
+                t.upto += 1
+        else:
+            t.above.add(q)
+            if t.filling is None or t.filling.done():
+                t.filling = asyncio.get_running_loop().create_task(self._fill(project, FILL_WAIT))
+        return True
+
+    async def _fill(self, project: str, wait: float = 0.0, head: int | None = None) -> None:
+        """Pass on to this relay's connections the stored changes they haven't had, read from the database (all of
+        them up to the head, or up to `head`): a gap that didn't close, or what the head check found."""
+        if wait:
+            await asyncio.sleep(wait)
+        t = self.tracks.get(project)
+        if t is None or project not in self.rooms:
+            return
+        try:
+            while True:
+                entries, last, done = await self.store.since(project, t.upto, PAGE)
+                for e in entries:
+                    if head is not None and e["q"] > head:
+                        return
+                    if e["snap"]:
+                        # compacted meanwhile: a snapshot can't be passed on as a change; the apps catch up instead
+                        log.info("a gap in %s… was compacted: its apps catch up again", project[:8])
+                        await self.ask("recheck", list(self.rooms.get(project, ())))
+                        t.upto, t.above = max(t.upto, e["q"]), {q for q in t.above if q > e["q"]}
+                        continue
+                    if self._new(project, e["q"]):
+                        text = json.dumps({"t": "up", "q": e["q"], "d": e["d"], "s": e["s"]})
+                        await asyncio.gather(*(self.send(ws, text) for ws in list(self.rooms.get(project, ()))))
+                if done or not entries:
+                    return
+        except Exception as e:
+            if not unavailable(e):
+                raise
+            log.warning("couldn't fill a gap in %s… (the database: %s); the next head check will", project[:8], e)
+
+    async def _check_heads(self, once: bool = False) -> None:
+        """The heads of every stored project open here, read at once: any past what this relay has passed on is
+        filled. Every HEAD_CHECK seconds, every HEAD_CHECK_AWAY while the bus is away; or `once`."""
+        last = time.monotonic()
+        while True:
+            if not once:
+                await asyncio.sleep(HEAD_CHECK_AWAY)  # (looking every second whether the bus is away, or it's time)
+                if self.bus.connected and time.monotonic() - last < HEAD_CHECK:
+                    continue
+                last = time.monotonic()
+            projects = [p for p in self.tracks if p in self.rooms]
+            try:
+                heads = await self.store.heads(projects) if projects else {}
+                for project, head in heads.items():
+                    t = self.tracks.get(project)
+                    if t is not None and head > t.upto and (t.filling is None or t.filling.done()):
+                        t.filling = asyncio.get_running_loop().create_task(self._fill(project, head=head))
+            except Exception as e:
+                if not unavailable(e):
+                    log.exception("checking the heads of open projects")
+            if once:
+                return
 
     async def ask(self, t: str, sockets: list | None = None, spread: float = SPREAD) -> None:
         """Ask connections (all of this relay's, or `sockets`) to catch up again, spread over `spread` seconds:
@@ -748,8 +855,8 @@ class Relay:
             self.room_pace[project] = Pace(ROOM_RATE, ROOM_BURST)
         log.info("join %s… (%d peers)", project[:8], len(room))
         try:
-            await self._joined(project, conn)  # (subscribed to the project's channel before the catch-up reads the log)
             try:
+                await self._joined(project, conn)  # (subscribed to the project's channel before the catch-up reads the log)
                 await self.handle(project, ws, conn, "hello", first)
             except Exception as e:
                 if not unavailable(e):
@@ -964,6 +1071,7 @@ class Relay:
             await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
             await ws.send_json({"t": "err", "code": refused, "m": f"not stored: {refused}", "id": msg.get("id")})
             return
+        self._new(project, seq)  # (its own: passed on to its connections now)
         await self.broadcast(project, {"t": "up", "q": seq, "d": d, "s": s}, ws)
         await ws.send_json({"t": "ack", "q": seq, "id": msg.get("id")})
 

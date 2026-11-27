@@ -50,6 +50,8 @@ STATE = {
     # passing messages on from the bus, in order per project; its subscriptions; its heartbeat, and the relays it found gone
     "Relay._inbox": "connection", "Relay._draining": "connection", "Relay._subscribed": "connection",
     "Relay._beating": "per-server", "Relay._gone": "per-server", "Relay._trouble_at": "per-server",
+    # the changes passed on to this relay's connections, per stored project open here (gap tracking), and the head check
+    "Relay.tracks": "connection", "Track.*": "connection", "Relay._checking": "per-server",
     # connections on this relay
     "Relay.rooms": "connection", "Relay.conns": "connection", "Relay._next_id": "connection",
     "Conn.*": "connection", "Metered.*": "connection",

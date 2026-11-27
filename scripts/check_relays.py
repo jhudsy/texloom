@@ -8,8 +8,13 @@
 - who is connected is counted across relays (the catch-up's "peers", and the limit per project);
 - a relay that goes without a word (its heartbeat stops) is noticed by the other, whose apps hear that its
   connections have left;
+- gaps: a change whose passing on was lost is read from the database by the relay that missed it, soon after a
+  later one shows the gap, or at its next head check when nothing does; none is passed on twice;
+- the bus away from one relay: stored changes still reach its apps (its head check, every second meanwhile);
+  once it's back, what was missed is filled, and the apps of sync-only projects are asked to catch up from each
+  other ("resync");
 - the desktop helper's sync engine, on either relay: a stored project, and a sync-only one (nothing on the
-  server: the apps fill each other in, across the relays).
+  server: the apps fill each other in, across the relays); and a stored one while one relay's bus is away.
 
 The bus over Valkey is checked by scripts/check_bus.py, and real relays on separate machines by the lab
 (scripts/rehearse_relays.py).
@@ -41,7 +46,7 @@ from server.policy import CodeBook  # noqa: E402
 from texloom.crypto import Keys, b64e, revoke_msg  # noqa: E402
 from texloom.replica import Replica  # noqa: E402
 
-relay_mod.BEAT, relay_mod.GONE_AFTER = 0.2, 1.0  # (quicker than in use)
+relay_mod.BEAT, relay_mod.GONE_AFTER, relay_mod.HEAD_CHECK = 0.2, 1.0, 2.0  # (quicker than in use)
 relays: list = []
 _init = relay_mod.Relay.__init__
 
@@ -188,6 +193,71 @@ async def gone_relay(one: TestClient, two: TestClient) -> None:
     await b.close()
 
 
+def up(keys: Keys, text_: str, mid: str) -> dict:
+    data = text_.encode()
+    return {"t": "up", "id": mid, "d": b64e(data), "s": signed(keys, b"upd:", data)}
+
+
+async def gaps(one: TestClient, two: TestClient) -> None:
+    print("gaps, and the bus away:")
+    keys = Keys.generate()
+    a, b = App(one, keys, "AAAABBBBCCCC"), App(two, keys)  # (a code: the changes are stored)
+    await a.join()
+    await b.join()
+    second = next(r for r in relays if r.number == b.id >> 32)
+    dropped: set[int] = set()
+    heard = second._from_bus
+
+    def lossy(channel: str, data: bytes) -> None:  # (the bus loses the passing on of these changes)
+        head = json.loads(bytes(data).partition(b"\n")[0])
+        if head.get("t") == "up" and head.get("q") in dropped:
+            return
+        heard(channel, data)
+    second.bus.on_message = lossy
+
+    dropped.add(2)
+    for i in range(1, 4):
+        await a.send(up(keys, f"change {i}", str(i)))
+    await until(lambda: len(b.got("up")) >= 3, 5)
+    qs = [m["q"] for m in b.got("up")]
+    check("a change whose passing on was lost is read from the database once a later one shows the gap", sorted(qs) == [1, 2, 3], qs)
+
+    dropped.add(4)
+    await a.send(up(keys, "change 4", "4"))
+    t0 = time.monotonic()
+    got = await until(lambda: any(m["q"] == 4 for m in b.got("up")), relay_mod.HEAD_CHECK + 3)
+    check("the last of a burst, with nothing after it to show the gap, comes with the next head check", got,
+          f"{time.monotonic() - t0:.1f} s")
+    qs = [m["q"] for m in b.got("up")]
+    check("and nothing is passed on twice", len(qs) == len(set(qs)), qs)
+
+    second.bus.on_message = heard
+    second.bus.simulate_break()
+    await a.send(up(keys, "while away", "5"))
+    t0 = time.monotonic()
+    got = await until(lambda: any(m["q"] == 5 for m in b.got("up")), 5)
+    check("with the bus away from a relay, stored changes still reach its apps (its head check, every second)", got,
+          f"{time.monotonic() - t0:.1f} s")
+
+    sync = Keys.generate()
+    await second.store.set_mode(sync.project, True)
+    s1, s2 = App(one, sync), App(two, sync)
+    await s1.join()
+    await s2.join()  # (subscribed while the bus is away: made when it's back)
+    await a.send(up(keys, "missed", "6"))
+    second.bus.heal()
+    got = await until(lambda: any(m["q"] == 6 for m in b.got("up")), 5)
+    resync = await s2.heard_one("resync", 5)
+    check("once the bus is back, what was missed is filled, and sync-only projects' apps are asked to resync",
+          got and resync is not None, (got, resync))
+    await s1.send({"t": "aw", "d": "after"})
+    check("... and its subscriptions are in effect again", (await s2.heard_one("aw", d="after")) is not None)
+    qs = [m["q"] for m in b.got("up")]
+    check("still nothing passed on twice", len(qs) == len(set(qs)) and sorted(qs) == list(range(1, 7)), qs)
+    for x in (a, b, s1, s2):
+        await x.close()
+
+
 async def apps(one: TestClient, two: TestClient, tmp: Path, store) -> None:
     print("the desktop helper, on either relay:")
     for sync_only in (False, True):
@@ -208,6 +278,16 @@ async def apps(one: TestClient, two: TestClient, tmp: Path, store) -> None:
                                            for r in (r1, r2)), 15)
             check(f"{'a sync-only' if sync_only else 'a stored'} project: apps on different relays end with each other's changes",
                   both, (text(r1), text(r2)))
+            if not sync_only:
+                second = relays[1]
+                second.bus.simulate_break()
+                try:
+                    add_line(r1, "while the second relay's bus is away")
+                    got = await until(lambda: "while the second relay's bus is away" in text(r2), 10)
+                    check("a stored project, one relay's bus away: its app still gets the other's changes (from the database)", got,
+                          text(r2))
+                finally:
+                    second.bus.heal()
         finally:
             for t in tasks:
                 t.cancel()
@@ -230,6 +310,7 @@ async def main() -> int:
         async with TestClient(server("one")) as one, TestClient(server("two")) as two:
             await messages(one, two)
             await gone_relay(one, two)
+            await gaps(one, two)
             codes.write_text("default 10M\n")  # (the apps below have no code)
             for r in relays:
                 r.policy.codes.load()

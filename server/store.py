@@ -584,6 +584,16 @@ class Store:
     async def head(self, project: str, c=None) -> int:
         return await (c or self.db).fetchval("SELECT seq FROM head WHERE project=$1", project) or 0
 
+    async def heads(self, projects: list[str]) -> dict[str, int]:
+        """The heads of many projects at once (a relay's periodic check of the projects it has open)."""
+        out: dict[str, int] = {}
+        for i in range(0, len(projects), 500):
+            chunk = projects[i:i + 500]
+            marks = ",".join(f"${n + 1}" for n in range(len(chunk)))
+            for r in await self.db.fetch(f"SELECT project, seq FROM head WHERE project IN ({marks})", *chunk):
+                out[r["project"]] = int(r["seq"])
+        return out
+
     async def floor(self, project: str, c=None) -> int:
         """Entries up to this sequence number were dropped by eviction."""
         return await (c or self.db).fetchval("SELECT seq FROM floor WHERE project=$1", project) or 0
