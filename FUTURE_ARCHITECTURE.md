@@ -446,6 +446,47 @@ like `install.sh` and `rebuild-standby.py`, rather than a new tool to learn. It'
 machines first, then on real ones: a few hourly-billed VPSs for an afternoon, in two datacentres, are the
 rehearsal that Docker can't be (real networks and clocks, TLS, systemd, the provider's own failures).
 
+### The front door
+
+Whatever decides which relay a new connection reaches. It must not be a single point of failure itself, and it
+should send connections only to relays that are well (`/api/health`). In the Docker lab it is one nginx on a machine of
+its own: the simplest thing to rehearse with, and not how to deploy (if it fails, nothing is reached). The ways, from
+simplest:
+
+1. **nginx on every relay machine, and DNS naming all of them.** Each machine's nginx terminates TLS (the same
+   certificate on each, e.g. certbot with a DNS challenge) and sends to **every** relay, not only its own (`least_conn`,
+   `proxy_next_upstream error timeout http_503`, and the health watcher below), so DNS only has to reach *a* live nginx
+   and nginx does the balancing. Free, and no extra machine. DNS isn't health-aware: a dead machine's address stays until
+   it is taken out (by hand, or a script using the DNS provider's API, with a TTL of a minute or so). Apps and browsers
+   try the next address when one refuses or is unreachable, so a machine that is off costs little; a frozen one costs a
+   connect timeout (15 s) before the next address is tried. Good for two or three machines.
+2. **The provider's load balancer** (most offer one, for a few euros a month), in front of the same nginx on each
+   machine. It checks health itself (an HTTP check of `/api/health`), balances by connection count, and is kept
+   available by the provider: the best value while every machine is at one provider. It can't span providers.
+3. **A floating address with keepalived** (VRRP) between two door machines: one holds the address, the other takes it
+   when the first stops answering. Within one provider and datacentre only; more to run than (2).
+4. **A proxying CDN with load balancing**: spans providers, checks health, and absorbs abuse; usually paid, and it sees
+   every request (the content is end-to-end encrypted, so it learns only who connects to which project id, when).
+
+Whatever the outer layer, the nginx in front of the relays needs **active health checks**, which open-source nginx
+lacks: it learns a relay is down only by a request failing, and the lab showed it sending an app that was reconnecting
+straight back to a frozen relay first (10 s lost). **To do**: a small health watcher beside each nginx (part of the
+deploy tool) that polls every relay's `/api/health` every 2 s and marks those that fail twice `down` in nginx's
+upstream (a reload: graceful); or HAProxy in nginx's place for this one job (its health checks are built in).
+
+### Health checks and monitoring
+
+Two kinds, and a real deployment needs both. **Routing checks** steer traffic away from a broken part within seconds,
+by themselves: the front door's (above); Patroni (through etcd; its REST API's `/primary` and `/health` let anything
+find the primary); the Sentinels for Valkey; a relay's own `/api/health` (it refuses new connections while its bus or
+database is away). Underneath, systemd restarts any service that stops, and Patroni restarts PostgreSQL. **Monitoring**
+tells a person within minutes, because recovery by itself can hide a slow decline: a standby no longer copying, a
+Sentinel down (so the next failover would fail), a disk filling, a certificate expiring. What to watch: every relay's
+`/api/health`, Patroni's cluster (members, lag), etcd's and the Sentinels' health, disk space and certificates on every
+machine, backups (a ping when each finishes), and the site itself from outside; alerting by email when something stays
+wrong for a few minutes. **To do**, in the deploy tool: set both up with each machine, and a `status` command showing
+every part's health at once.
+
 ### Shared state the relays don't have yet
 
 - **Creation codes are files** (`--codes-file`), written by hand or by a sales service. Every relay must see the same
