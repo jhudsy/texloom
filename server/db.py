@@ -42,6 +42,12 @@ from typing import Any
 
 SQLITE_MIN = (3, 35)  # RETURNING
 POOL_MAX = 10  # PostgreSQL connections
+# Seconds a statement may take. A database that is cut off (its network silent, not refusing) leaves a statement
+# waiting for an answer that never comes: the relay must give up soon enough to find the new primary after a
+# failover (the lab: 120 s held the relays for two minutes). Whole-table reads (the daily recount, a first start)
+# say so and get LONG.
+COMMAND_TIMEOUT = 20
+LONG = 900
 START_LOCK = 7316  # PostgreSQL advisory lock taken while creating the tables (several servers starting at once)
 MAINTENANCE_LOCK = 7317  # held while a server does the upkeep that must run on one server at a time
 ALONE_LOCK = 7318  # held for as long as a server with no bus (one server alone) uses the database
@@ -182,7 +188,7 @@ class Database(abc.ABC):
         """Rows changed."""
 
     @abc.abstractmethod
-    async def fetch(self, sql: str, *args) -> list: ...
+    async def fetch(self, sql: str, *args, timeout: float | None = None) -> list: ...
 
     @abc.abstractmethod
     async def fetchrow(self, sql: str, *args): ...
@@ -240,8 +246,9 @@ class _PgCalls:
     async def executemany(self, sql: str, rows) -> None:
         await self._on.executemany(sql, rows)
 
-    async def fetch(self, sql: str, *args) -> list:
-        return await self._on.fetch(sql, *args)
+    async def fetch(self, sql: str, *args, timeout: float | None = None) -> list:
+        """`timeout`: seconds this statement may take, if not COMMAND_TIMEOUT (LONG for a whole table)."""
+        return await self._on.fetch(sql, *args, timeout=timeout)
 
     async def fetchrow(self, sql: str, *args):
         return await self._on.fetchrow(sql, *args)
@@ -277,7 +284,7 @@ class PostgreSQL(_PgCalls, Database):
     async def open(cls, url: str) -> PostgreSQL:
         import asyncpg
         try:
-            pool = await asyncpg.create_pool(url, min_size=1, max_size=POOL_MAX, command_timeout=120)
+            pool = await asyncpg.create_pool(url, min_size=1, max_size=POOL_MAX, command_timeout=COMMAND_TIMEOUT)
         except (OSError, asyncpg.PostgresError) as e:
             raise DatabaseError(f"can't reach the database {redact(url)}: {e}") from None
         try:
@@ -418,7 +425,7 @@ class _SqliteCalls:
     async def executemany(self, sql: str, rows) -> None:
         await self._run(lambda: self._db._con.executemany(_sqlite_sql(sql), rows))
 
-    async def fetch(self, sql: str, *args) -> list:
+    async def fetch(self, sql: str, *args, timeout: float | None = None) -> list:
         return await self._run(lambda: self._db._con.execute(_sqlite_sql(sql), args).fetchall())
 
     async def fetchrow(self, sql: str, *args):
@@ -484,7 +491,7 @@ class SQLite(Database):
     async def execute(self, sql: str, *args) -> int:
         return await self._one(self._calls.execute, sql, *args)
 
-    async def fetch(self, sql: str, *args) -> list:
+    async def fetch(self, sql: str, *args, timeout: float | None = None) -> list:
         return await self._one(self._calls.fetch, sql, *args)
 
     async def fetchrow(self, sql: str, *args):
@@ -492,6 +499,9 @@ class SQLite(Database):
 
     async def fetchval(self, sql: str, *args):
         return await self._one(self._calls.fetchval, sql, *args)
+
+    async def timeline(self) -> int:
+        return 1  # (no standby to fail over to)
 
     @contextlib.asynccontextmanager
     async def tx(self):

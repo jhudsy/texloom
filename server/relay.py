@@ -110,6 +110,17 @@ RENEW = 20.0  # seconds between a relay's renewals of its own entries
 # through other relays still arrive) catches the last change of a burst whose passing on was lost: nothing after
 # it would show the gap.
 FILL_WAIT = 0.5
+# Health (/api/health, and new connections): a relay whose bus has been away for BUS_GRACE seconds, or whose database
+# was unavailable at its last try, refuses new connections (503), so a front door sends them to another relay. The
+# connections it has stay: they still carry what works (stored changes reach them through the head check), and
+# closing them all would turn a bus or database failover, which every relay sees at once, into a storm of reconnects.
+BUS_GRACE = 5.0
+# Every WS_PING seconds the relay pings every connection (a WebSocket ping frame, which every client answers by
+# itself), so that a healthy connection is never quiet for long. A front door can then give up on a relay that
+# says nothing for a few seconds more (nginx: proxy_read_timeout 10 s on /ws/), which finds a frozen relay before
+# an app's own wait to connect (15 s) runs out: else the app gives up first, nginx counts it as the app's failure,
+# not the relay's, and keeps sending new connections there (the lab: collab:pause).
+WS_PING = 5.0
 HEAD_CHECK = 60.0
 HEAD_CHECK_AWAY = 1.0
 NUMBERS = (1 << (53 - ID_BITS)) - 1  # relay numbers go round within 1 … NUMBERS
@@ -291,7 +302,9 @@ class Relay:
         self.tracks: dict[str, Track] = {}  # per stored project open here: the changes passed on to its connections
         self.timeline = 0  # the database's timeline, as this relay last saw it (0: not read yet); see _failover
         self._db_trouble = False  # the database was unavailable lately: the head check looks every second until it's back
+        self._bus_away_since: float | None = None  # when the bus was found away (health)
         self._checking: asyncio.Task | None = None  # the periodic head check (_check_heads)
+        self._pinging: asyncio.Task | None = None  # pinging every connection (WS_PING)
 
     @property
     def store(self) -> Store:
@@ -502,16 +515,29 @@ class Relay:
         await self.bus.subscribe(f"r:{self.number}")  # (messages for one of this relay's connections)
         self._beating = asyncio.get_running_loop().create_task(self._beat())
         self._checking = asyncio.get_running_loop().create_task(self._check_heads())
+        self._pinging = asyncio.get_running_loop().create_task(self._ping_all())
 
     async def leave_bus(self) -> None:
         """When the server stops: no more heartbeats, and the other relays told at once that it has gone."""
-        for task in (self._beating, self._checking):
+        for task in (self._beating, self._checking, self._pinging):
             if task:
                 task.cancel()
         try:  # (marked long gone, so that the others tidy up anything of it left on the bus)
             await self.bus.hset("alive", str(self.number), b"0", ttl=GONE_AFTER * 30)
         except BusError:
             pass
+
+    async def _ping_all(self) -> None:
+        async def ping(ws) -> None:
+            try:
+                await asyncio.wait_for(ws.ping(), WS_PING)
+            except Exception:  # (one that is closing, or not reading: its own checks deal with it)
+                pass
+        while True:
+            await asyncio.sleep(WS_PING)
+            for ws in list(self.conns):
+                if not ws.closed:
+                    asyncio.get_running_loop().create_task(ping(ws))
 
     def _bus_trouble(self, e: Exception) -> None:
         """The bus couldn't be used for something: said once a minute at most (it is soft state, and the relay goes on)."""
@@ -639,6 +665,7 @@ class Relay:
         """Every BEAT seconds: say this relay is alive, renew its entries now and then, and find relays that have gone."""
         renewed = 0.0
         while True:
+            self._note_bus()
             try:
                 now = time.time()
                 await self.bus.hset("alive", str(self.number), str(now).encode(), ttl=GONE_AFTER * 30)
@@ -776,7 +803,8 @@ class Relay:
             except Exception as e:
                 if not unavailable(e):
                     log.exception("checking the heads of open projects")
-                self._db_trouble = True
+                else:
+                    self._db_trouble = True
             if once:
                 return
 
@@ -838,9 +866,33 @@ class Relay:
         for f in late:  # a client that doesn't answer: the shutdown that follows drops it
             f.cancel()
 
+    def _note_bus(self) -> None:
+        """When the bus was found away (by the heartbeat, every BEAT seconds, and when health is asked)."""
+        if self.bus.connected:
+            self._bus_away_since = None
+        elif self._bus_away_since is None:
+            self._bus_away_since = time.monotonic()
+
+    def unhealthy(self) -> str | None:
+        """Why this relay shouldn't take new connections just now (None: it should): see BUS_GRACE."""
+        self._note_bus()
+        if self._bus_away_since is not None and time.monotonic() - self._bus_away_since > BUS_GRACE:
+            return "the bus is away"
+        if self._db_trouble:
+            return "the database is unavailable"
+        return None
+
+    async def health(self, _request: web.Request) -> web.Response:
+        """For a front door or a monitor: 200 if this relay takes new connections, else 503 saying why."""
+        why = "stopping" if self.stopping else self.unhealthy()
+        return web.json_response({"ok": why is None, "relay": self.number, "connections": len(self.conns),
+                                  **({"why": why} if why else {})}, status=200 if why is None else 503)
+
     async def ws_handler(self, request: web.Request) -> web.WebSocketResponse:
         if self.stopping:
             raise web.HTTPServiceUnavailable(text="server restarting")
+        if why := self.unhealthy():
+            raise web.HTTPServiceUnavailable(text=why)
         project = request.match_info["project"]
         if not canonical_id(project):
             raise web.HTTPBadRequest(text="bad project id")

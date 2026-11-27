@@ -48,6 +48,10 @@ The scenarios (each on a lab of its own, built and removed again; `how` is kill,
                      (the desktop sync engine) storing changes through the front door. The PostgreSQL
                      primary is broken, and what today's code does is measured, not fixed: whether the relay
                      finds the new primary, how long it takes, and whether the apps' changes are stored.
+  collab[:how[:t]]   several relays at once: three apps on one stored project, each on a relay of its own, and two on a
+                     sync-only one, all editing while `t` is broken (a relay, default relay-a; valkey or pg, whichever is
+                     the primary; or a machine): timed until every app has every change and all of it is stored; then
+                     a newcomer catches up from the database alone
   up                 bring the lab up, say how to reach it, and wait (Ctrl-C takes it down)
   down               remove anything a rehearsal of relays left behind (after a hard stop)
 
@@ -1049,6 +1053,89 @@ async def scenario_spread(lab: Lab, how: str, target: str) -> None:
         lab.mend(victim)
 
 
+def everyone_has(apps: list, lines: list[str]) -> bool:
+    return all(a.r is not None and all(x in text(a.r) for x in lines) for a in apps)
+
+
+async def scenario_collab(lab: Lab, how: str, target: str) -> None:
+    """Several relays at once (FUTURE_ARCHITECTURE.md): three apps editing one stored project, each on a relay of its
+    own, and two on a sync-only project, through the front door. A part is broken (`target`: a relay, the default
+    relay-a; valkey or pg, whichever is the primary; or a whole machine) while every app goes on editing. Timed: how
+    long until every app has every change, and every stored change is acknowledged; then the same after mending, and
+    a newcomer catching up from the database alone."""
+    base = f"http://127.0.0.1:{lab.door_port}"
+    victim = {"": "relay-a", "valkey": lab.kv_primary(), "pg": (lab.leader() or {}).get("name", "pg-a")}.get(target, target)
+    stored, sync = Keys.generate(), Keys.generate()
+    check("(the sync-only project is set so)", lab.sql(f"INSERT INTO mode(project, relay) VALUES ('{sync.project}', true)", "texloom") is not None)
+    names = ["alice", "bob", "carol"]
+    writers = [App(lab.tmp / n, stored if n == "alice" else stored.personal(n.title())[2], base) for n in names]
+    pair = [App(lab.tmp / n, sync if n == "dave" else sync.personal(n.title())[2], base) for n in ("dave", "erin")]
+    everyone = writers + pair
+    try:
+        for a in everyone:  # (one after another: least_conn puts each on the relay with the fewest)
+            await a.start()
+        on = {n: ws_relay(lab, a) for n, a in zip(names + ["dave", "erin"], everyone)}
+        say("which relay each app reached: " + ", ".join(f"{n} {r}" for n, r in on.items()))
+        check("the three writers are on three different relays", len({on[n] for n in names}) == 3, on)
+        for n, a in zip(names, writers):
+            await a.edit(f"{n} before")
+        add_line(pair[0].r, "dave before")  # (the file made once, then both write to it)
+        await until(lambda: "dave before" in text(pair[1].r), 30)
+        add_line(pair[1].r, "erin before")
+        before = [f"{n} before" for n in names]
+        check("before: every writer has every change", await until(lambda: everyone_has(writers, before), 30))
+        check("before: the sync-only pair have each other's", await until(lambda: everyone_has(pair, ["dave before", "erin before"]), 30))
+
+        t0 = time.monotonic()
+        lab.break_(victim, how)
+        print(f"  ({victim} is {HOW[how]}; every app makes a change at once, and another 5 s later)", flush=True)
+        during = []
+        for n, a in zip(names + ["dave", "erin"], everyone):
+            add_line(a.r, f"{n} during")
+        await asyncio.sleep(5)
+        for n, a in zip(names + ["dave", "erin"], everyone):
+            add_line(a.r, f"{n} later")
+        during = [f"{n} {w}" for n in names for w in ("during", "later")]
+        sync_lines = [f"{n} {w}" for n in ("dave", "erin") for w in ("during", "later")]
+        writers_have = asyncio.create_task(timed(lambda: everyone_has(writers, during), t0, 180, 0.2))
+        pair_have = asyncio.create_task(timed(lambda: everyone_has(pair, sync_lines), t0, 180, 0.2))
+        stored_all = await timed(lambda: all(a.r is not None and not a.r.outbox for a in writers), t0, 180, 0.2)
+        w, s_ = await writers_have, await pair_have
+        check(f"with {victim} {HOW[how]}, every writer ends with every change made during the break", w is not None)
+        check(f"... and every one of them is stored (acknowledged)", stored_all is not None)
+        check(f"... and the sync-only pair end with each other's", s_ is not None)
+        took("every writer has every change made during the break", w)
+        took("every one of them is stored", stored_all)
+        took("the sync-only pair have each other's", s_)
+        say("which relay each app is on now: " + ", ".join(f"{n} {ws_relay(lab, a)}" for n, a in zip(names + ["dave", "erin"], everyone)))
+
+        lab.mend(victim)
+        t1 = time.monotonic()
+        for n, a in zip(names, writers):
+            add_line(a.r, f"{n} after")
+        after = [f"{n} after" for n in names]
+        w2 = await timed(lambda: everyone_has(writers, after), t1, 120, 0.2)
+        check(f"mended: changes made after reach every writer", w2 is not None)
+        took("after mending, every writer has a change each made", w2, "from the mend")
+        newcomer = App(lab.tmp / "newcomer", Keys(stored.project, stored.key, None), base)
+        try:
+            for a in writers:
+                await a.stop()  # (so the newcomer has only the database to catch up from)
+            nc = await newcomer.start()
+            want = before + during + after
+            got = await until(lambda: all(x in text(nc) for x in want), 30)
+            check("a newcomer, alone, gets every change from the database", got, [x for x in want if x not in text(nc)])
+        finally:
+            await newcomer.stop()
+        for r in lab.live("relay"):
+            said = [x for x in log_summary(lab.logs(r, tail=400), t0_wall=time.time() - (time.monotonic() - t0) - 1)
+                    if any(k in x for k in ("failed over", "gone", "bus", "unavailable", "recheck"))]
+            if said:
+                print(f"  · {r} said: " + "; ".join(said[:6]), flush=True)
+    finally:
+        await asyncio.gather(*(a.stop() for a in everyone), return_exceptions=True)
+
+
 async def scenario_up(lab: Lab, how: str, target: str) -> None:
     print(f"""
   The lab is up. Its containers are named {lab.p}-<name>:
@@ -1062,8 +1149,9 @@ async def scenario_up(lab: Lab, how: str, target: str) -> None:
 
 
 SCENARIOS = {"pg": scenario_pg, "valkey": scenario_valkey, "door": scenario_door, "machine": scenario_machine,
-             "relay-pg": scenario_relay_pg, "spread": scenario_spread, "up": scenario_up}
-DEFAULT = [f"{s}:{h}" for s in ("pg", "valkey", "door", "machine") for h in HOW] + ["spread", "spread:kill", "spread:pause", "relay-pg:kill"]
+             "relay-pg": scenario_relay_pg, "spread": scenario_spread, "collab": scenario_collab, "up": scenario_up}
+DEFAULT = ([f"{s}:{h}" for s in ("pg", "valkey", "door", "machine") for h in HOW] + ["spread", "spread:kill", "spread:pause", "relay-pg:kill"]
+           + [f"collab:{h}:relay-a" for h in HOW] + ["collab:kill:valkey", "collab:kill:pg", "collab:kill:a", "collab:cut:a"])
 
 
 def build_images() -> bool:

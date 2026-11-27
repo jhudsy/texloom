@@ -230,6 +230,26 @@ timings; seconds from the break):
 | A whole machine (holding both primaries) | Valkey after 7–8 s, PostgreSQL after 24–27 s; etcd keeps its majority. |
 | A relay, seen through nginx (`least_conn`, `max_fails=1`, `fail_timeout=5s`) | nginx leaves a killed relay out after 3–8 s, a frozen one after 10 s, a cut-off one after 11–19 s. No request through nginx failed. |
 
+**Several relays at once, measured in the lab** (`collab`: three apps editing one stored project, each on a relay of
+its own, and two on a sync-only project, all through nginx; every app makes a change at the break and another 5 s
+later; seconds from the break until every app has every change):
+
+| What broke | Stored project (all also stored) | Sync-only project |
+|---|---|---|
+| a relay killed | 5.5 | 5.5 |
+| a relay frozen | 31 (its apps notice, by their keep-alive, in up to 20 s) | 5.4 |
+| a relay cut off | 23 | 5.5 |
+| the Valkey primary killed | 6.3 | 29.5 |
+| the PostgreSQL primary killed | 35 (Patroni's 30 s leader key) | 5.5 |
+| a whole machine, holding both primaries, killed / cut off | 52 / 35 | 29.5 |
+
+After mending, every change made reaches every app within 0.2 s, and a newcomer catching up from the database alone
+gets every change. Three fixes came from this: the relay pings every connection every 5 s and nginx gives up on a
+WebSocket quiet for 10 s (a frozen relay otherwise kept getting new connections: nginx counted an app giving up
+first as the app's failure); database statements give up after 20 s rather than 120 s (a cut-off primary's
+connections hang rather than fail: it took two minutes to find the new one). Still slow: sync-only projects after
+a Valkey failover (30 s); worth a look.
+
 Found by the lab:
 - **nginx's WebSocket read timeout must be short** (60 s, not 1 h). With 1 h, a third of the apps sent to a
   frozen relay never connected (nginx never counted it as failed); with 60 s, one waited a minute and went

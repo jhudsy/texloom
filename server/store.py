@@ -39,7 +39,7 @@ from pathlib import Path
 
 from texloom.crypto import b64e, canonical_pub
 
-from .db import Database, DatabaseError, connect, copy_tables
+from .db import LONG, Database, DatabaseError, connect, copy_tables
 from .files import Files, FilesError, FolderFiles
 
 log = logging.getLogger("texloom.relay")
@@ -241,7 +241,7 @@ class Store:
             for project, n in ledger:
                 self.usage[project] += int(n)
         else:  # first start with a ledger (or nothing stored): add it up once, and keep it from now on
-            for project, n in await c.fetch(USAGE.format(where="")):
+            for project, n in await c.fetch(USAGE.format(where=""), timeout=LONG):
                 self.usage[project] += int(n or 0)
             async with c.tx() as t:
                 await t.executemany("INSERT INTO usage(project, bytes) VALUES ($1,$2) ON CONFLICT (project) DO NOTHING",
@@ -545,7 +545,7 @@ class Store:
         of the ledger). Returns how many were wrong. Each one found is checked again, and recounted, under
         the project's lock, so a write meanwhile is neither undone nor reported."""
         truth: dict[str, int] = defaultdict(int)
-        for project, n in await self.db.fetch(USAGE.format(where="")):
+        for project, n in await self.db.fetch(USAGE.format(where=""), timeout=LONG):
             truth[project] += int(n or 0)
         ledger = {r["project"]: int(r["bytes"]) for r in await self.db.fetch("SELECT project, bytes FROM usage")}
         wrong = 0

@@ -55,6 +55,7 @@ STATE = {
     # the database's timeline as this relay last saw it, and whether it was unavailable lately (a failover); the store's
     # callback to the relay when its connection to the database is back
     "Relay.timeline": "per-server", "Relay._db_trouble": "per-server", "Store.on_back": "setting",
+    "Relay._bus_away_since": "per-server", "Relay._pinging": "per-server",  # (its health; pinging its connections)
     # connections on this relay
     "Relay.rooms": "connection", "Relay.conns": "connection", "Relay._next_id": "connection",
     "Conn.*": "connection", "Metered.*": "connection",

@@ -144,6 +144,8 @@ def make_app(s: Settings) -> web.Application:
         await bus.close()
         await held.aclose()
     app.cleanup_ctx.insert(0, bus_open)
+    if not s.failover:  # (with failover, its own /api/health says which server is the primary)
+        app.router.add_get("/api/health", relay.health)
     if s.admin_token:
         from .admin import Admin
         app.router.add_get("/admin", Admin(relay, s.admin_token, s.evict_days, s.purge_days, panels).page)

@@ -13,6 +13,9 @@
 - the bus away from one relay: stored changes still reach its apps (its head check, every second meanwhile);
   once it's back, what was missed is filled, and the apps of sync-only projects are asked to catch up from each
   other ("resync");
+- health: a relay whose bus has been away a few seconds, or whose database is unavailable, says so (/api/health:
+  503) and refuses new connections, so a front door sends them elsewhere; the connections it has stay; once
+  it's well again it takes them;
 - the desktop helper's sync engine, on either relay: a stored project, and a sync-only one (nothing on the
   server: the apps fill each other in, across the relays); and a stored one while one relay's bus is away.
 
@@ -46,7 +49,7 @@ from server.policy import CodeBook  # noqa: E402
 from texloom.crypto import Keys, b64e, revoke_msg  # noqa: E402
 from texloom.replica import Replica  # noqa: E402
 
-relay_mod.BEAT, relay_mod.GONE_AFTER, relay_mod.HEAD_CHECK = 0.2, 1.0, 2.0  # (quicker than in use)
+relay_mod.BEAT, relay_mod.GONE_AFTER, relay_mod.HEAD_CHECK, relay_mod.BUS_GRACE = 0.2, 1.0, 2.0, 0.5  # (quicker than in use)
 relays: list = []
 _init = relay_mod.Relay.__init__
 
@@ -232,6 +235,11 @@ async def gaps(one: TestClient, two: TestClient) -> None:
     check("and nothing is passed on twice", len(qs) == len(set(qs)), qs)
 
     second.bus.on_message = heard
+    sync = Keys.generate()  # (a sync-only project, its apps on both relays before the bus goes: a relay whose bus is
+    await second.store.set_mode(sync.project, True)  # away a while takes no new connections)
+    s1, s2 = App(one, sync), App(two, sync)
+    await s1.join()
+    await s2.join()
     second.bus.simulate_break()
     await a.send(up(keys, "while away", "5"))
     t0 = time.monotonic()
@@ -239,11 +247,6 @@ async def gaps(one: TestClient, two: TestClient) -> None:
     check("with the bus away from a relay, stored changes still reach its apps (its head check, every second)", got,
           f"{time.monotonic() - t0:.1f} s")
 
-    sync = Keys.generate()
-    await second.store.set_mode(sync.project, True)
-    s1, s2 = App(one, sync), App(two, sync)
-    await s1.join()
-    await s2.join()  # (subscribed while the bus is away: made when it's back)
     await a.send(up(keys, "missed", "6"))
     second.bus.heal()
     got = await until(lambda: any(m["q"] == 6 for m in b.got("up")), 5)
@@ -255,6 +258,44 @@ async def gaps(one: TestClient, two: TestClient) -> None:
     qs = [m["q"] for m in b.got("up")]
     check("still nothing passed on twice", len(qs) == len(set(qs)) and sorted(qs) == list(range(1, 7)), qs)
     for x in (a, b, s1, s2):
+        await x.close()
+
+
+async def health(one: TestClient, two: TestClient) -> None:
+    print("health:")
+    second = relays[1]
+    client = one if relays[0].number == second.number else two
+    r = await client.get("/api/health")
+    check("a relay that is well says so (200)", r.status == 200 and (await r.json())["ok"], r.status)
+    keys = Keys.generate()
+    a = App(client, keys)
+    await a.join()
+    second.bus.simulate_break()
+    try:
+        await asyncio.sleep(relay_mod.BUS_GRACE + 0.3)
+        r = await client.get("/api/health")
+        body = await r.json()
+        check("its bus away for a few seconds: it says so (503, why)", r.status == 503 and "bus" in body.get("why", ""), body)
+        refused = False
+        try:
+            await App(client, keys).join()
+        except Exception:
+            refused = True
+        check("and refuses new connections (a front door sends them to another relay)", refused)
+        await a.send({"t": "ping"})
+        check("the connections it has stay", (await a.heard_one("pong", 3)) is not None and not a.closed)
+    finally:
+        second.bus.heal()
+    await asyncio.sleep(0.2)
+    r = await client.get("/api/health")
+    check("once the bus is back, it is well again", r.status == 200, r.status)
+    second._db_trouble = True
+    r = await client.get("/api/health")
+    check("a database that was unavailable at its last try: unwell too", r.status == 503 and "database" in (await r.json()).get("why", ""))
+    await until(lambda: not second._db_trouble, 5)  # (its head check finds the database answering)
+    b = App(client, keys)
+    check("and well again once its head check reaches the database: it takes connections", await b.join() is not None)
+    for x in (a, b):
         await x.close()
 
 
@@ -311,6 +352,7 @@ async def main() -> int:
             await messages(one, two)
             await gone_relay(one, two)
             await gaps(one, two)
+            await health(one, two)
             codes.write_text("default 10M\n")  # (the apps below have no code)
             for r in relays:
                 r.policy.codes.load()

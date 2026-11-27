@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_restore import add_line, text  # noqa: E402
 from checklib import check, summary, until  # noqa: E402
 
-from aiohttp import WSMsgType  # noqa: E402
+from aiohttp import WSMsgType, WSServerHandshakeError  # noqa: E402
 from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 
 import texloom.replica as replica_mod  # noqa: E402
@@ -56,7 +56,8 @@ def failing(name: str, error: Exception):
 # as asyncpg raises them: a refused connection, and (what the lab saw, a primary's name gone) a name that doesn't resolve
 for _name, _error in (("touch", ConnectionRefusedError(111, "Connect call failed")),
                       ("catch_up_start", ConnectionRefusedError(111, "Connect call failed")),
-                      ("duplicate", socket.gaierror(-2, "Name or service not known"))):
+                      ("duplicate", socket.gaierror(-2, "Name or service not known")),
+                      ("heads", ConnectionRefusedError(111, "Connect call failed"))):
     setattr(Store, _name, failing(_name, _error))
 
 
@@ -94,12 +95,17 @@ async def relay_side(c: TestClient) -> None:
           heard is not None and heard.get("q") == 0, heard)
     closed = await until_type(a, "ack")
     check("and its sender isn't told it's stored, but asked to try again (closed, 1013)", closed == {"t": "closed", "code": 1013}, closed)
-    late = await raw(c, keys.project)
-    answer = await until_type(late, "log")
-    check("a new connection whose hello can't be answered is asked to try again too", answer == {"t": "closed", "code": 1013}, answer)
+    try:  # (refused at once, 503, once the relay knows the database is away; else its hello is answered with 1013)
+        late = await raw(c, keys.project)
+        answer = await until_type(late, "log")
+    except WSServerHandshakeError as e:
+        late, answer = None, {"t": "refused", "status": e.status}
+    check("a new connection is asked to try again too (refused, 503, or its hello closed, 1013)",
+          answer in ({"t": "closed", "code": 1013}, {"t": "refused", "status": 503}), answer)
     away = False
     for ws in (b, late):
-        await ws.close()
+        if ws is not None:
+            await ws.close()
 
 
 async def desktop(c: TestClient, tmp: Path) -> None:
