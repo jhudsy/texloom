@@ -479,7 +479,7 @@ class Relay:
             if conn.rs:
                 await self.send(ws, json.dumps({"t": t}))
             else:
-                # compat(app 0.4.66): apps that don't say "rs" in their hello (0.4.66 and older) are closed instead: they connect
+                # compat(app 0.4.67): apps that don't say "rs" in their hello (0.4.67 and older) are closed instead: they connect
                 # again and do the same. (Set VERSION to the release that first sends "rs" when the stateless-relays branch is merged.)
                 asyncio.create_task(self.close_or_cut(ws, b"catch up again"))
             await asyncio.sleep(gap)

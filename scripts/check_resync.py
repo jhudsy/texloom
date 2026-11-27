@@ -13,7 +13,7 @@ Checked against a throwaway server, with the desktop helper's sync engine and th
 - on "resync" it sends its state vector; on "recheck" its hello, staying connected;
 - after a recheck once the server has lost the app's last change, the app sends it again: a newcomer
   catching up from the server alone gets every change;
-- an app that doesn't say "rs" (0.4.66 and older) is closed instead, and so connects again.
+- an app that doesn't say "rs" (0.4.67 and older) is closed instead, and so connects again.
 
     cd web && npm run build && cd ..
     uv run --extra server --with playwright python scripts/check_resync.py
