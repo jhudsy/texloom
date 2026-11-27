@@ -65,6 +65,8 @@ jobs:
         run: uv run python scripts/check_rebuild_standby.py
       - name: "Automatic failover between two real servers: a lost primary, one cut off from the bucket (throwaway PostgreSQL, a stand-in bucket)"
         run: uv run --extra server python scripts/check_failover.py
+      - name: "The database away for a while: changes passed on live and sent again, apps asked to try again; a server that never answers given up on"
+        run: uv run --extra server python scripts/check_db_away.py
       - name: What an outsider could do to the server (revocations off the budget, TeX Live paths; security review)
         run: uv run --extra server python scripts/check_server_abuse.py
       - name: Moving a project to another creation code (a real server)

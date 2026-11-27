@@ -20,6 +20,7 @@ from aiohttp import WSCloseCode, WSMsgType, web
 from texloom.crypto import b64e, canonical_pub, revoke_msg, signer
 
 from .policy import KiB, MiB, Policy
+from .db import unavailable
 from .store import Store
 from .wire import b64d, canonical_id, client_address, verify, version_tuple
 
@@ -336,6 +337,14 @@ class Relay:
         else:
             asyncio.create_task(ws.close(code=1008, message=b"too slow"))
 
+    async def try_again(self, ws: web.WebSocketResponse) -> None:
+        """The database is unavailable just now: close the connection saying so (1013, "try again later"). Every app
+        connects again after a close, with a growing wait, and sends again what wasn't acknowledged."""
+        try:
+            await asyncio.wait_for(ws.close(code=1013, message=b"database unavailable: try again"), 5)
+        except (asyncio.TimeoutError, ConnectionError, RuntimeError):
+            self.cut_off(ws, "didn't take its close")
+
     async def close_or_cut(self, ws: web.WebSocketResponse, why: bytes) -> None:
         """Close politely, or cut off a peer that doesn't let us."""
         try:
@@ -487,7 +496,14 @@ class Relay:
             self.room_pace[project] = Pace(ROOM_RATE, ROOM_BURST)
         log.info("join %s… (%d peers)", project[:8], len(room))
         try:
-            await self.handle(project, ws, conn, "hello", first)
+            try:
+                await self.handle(project, ws, conn, "hello", first)
+            except Exception as e:
+                if not unavailable(e):
+                    raise
+                log.warning("couldn't answer a hello, the database being unavailable (%s): asking the app to try again", e)
+                await self.try_again(ws)
+                return
             async for raw in ws:
                 self.settle(conn)
                 if raw.type != WSMsgType.TEXT:
@@ -518,10 +534,16 @@ class Relay:
                         continue
                     await self.handle(project, ws, conn, t, msg)
                 except ConnectionError:  # it went while its message was handled (an answer had nowhere to go)
+                    if not ws.closed:  # (no: the database's connection failed)
+                        await self.try_again(ws)
                     break
                 except (BadMessage, ValueError, TypeError, KeyError, OverflowError, RecursionError) as e:  # (binascii.Error is a ValueError)
                     await ws.send_json({"t": "err", "m": f"bad message: {e}"[:200]})
-                except Exception:
+                except Exception as e:
+                    if unavailable(e):
+                        log.warning("the database is unavailable (%s): asking the app to try again", e)
+                        await self.try_again(ws)
+                        break
                     log.exception("error handling message")
                 finally:
                     self.give_memory(conn, cost)
@@ -660,17 +682,22 @@ class Relay:
             await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
             return
         n = len(data) + len(sig)
-        async with self.store.lock(project):
-            dup = await self.store.duplicate(project, data)
-            # counted from when it's allowed (may_store), so that writes to other projects under the
-            # same code meanwhile see it
-            refused = None if dup is not None else await self.policy.may_store(project, n, conn.code, reserve=True)
-            seq = None
-            if dup is None and not refused:
-                try:
-                    seq = await self.store.append(project, data, sig)
-                finally:
-                    self.store.unreserve(project, n)
+        try:
+            async with self.store.lock(project):
+                dup = await self.store.duplicate(project, data)
+                # counted from when it's allowed (may_store), so that writes to other projects under the
+                # same code meanwhile see it
+                refused = None if dup is not None else await self.policy.may_store(project, n, conn.code, reserve=True)
+                seq = None
+                if dup is None and not refused:
+                    try:
+                        seq = await self.store.append(project, data, sig)
+                    finally:
+                        self.store.unreserve(project, n)
+        except Exception as e:
+            if unavailable(e):  # not stored: collaborators online still get it, and the app is told to try again
+                await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
+            raise
         if dup is not None:  # a replay of something already stored (or compacted): acknowledge, keep nothing
             await ws.send_json({"t": "ack", "q": dup, "id": msg.get("id")})
             return

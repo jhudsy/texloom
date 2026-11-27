@@ -50,6 +50,20 @@ NOTIFY_MAX = 7000  # bytes: PostgreSQL's limit on a notification is 8000
 log = logging.getLogger("texloom.db")
 
 
+def unavailable(e: BaseException) -> bool:
+    """Whether an error means the database can't be used just now: unreachable, restarting, or failed over (this
+    server now a standby, or its name pointing elsewhere). What was asked will work again soon, so the answer is
+    "try again", not a failure. Not a mistake in what was asked."""
+    if isinstance(e, (OSError, TimeoutError)):  # (refused, reset, a name that doesn't resolve)
+        return True
+    try:
+        import asyncpg
+    except ImportError:
+        return False
+    return isinstance(e, (asyncpg.PostgresConnectionError, asyncpg.InterfaceError, asyncpg.exceptions.CannotConnectNowError,
+                          asyncpg.exceptions.OperatorInterventionError, asyncpg.exceptions.ReadOnlySQLTransactionError))
+
+
 class DatabaseError(Exception):
     pass
 
