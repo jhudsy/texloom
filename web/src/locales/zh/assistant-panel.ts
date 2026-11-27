@@ -143,6 +143,7 @@ const zh: Catalog = {
   'A full address, or just a server and port, such as gpu-box:11434 or localhost:1234': '完整地址，或只写服务器和端口，例如 gpu-box:11434 或 localhost:1234',
   'That isn’t an address.': '这不是一个地址。',
   'Will use {{address}}': '将使用 {{address}}',
+  '{{provider}}: not answering (⟳ to try again)': '{{provider}}：无响应（⟳ 重试）',
 }
 
 export default zh

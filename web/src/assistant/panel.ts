@@ -164,6 +164,9 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   const historyBtn = h('button', { onclick: () => historyDialog() }, t('Past conversations')) as HTMLButtonElement
 
   const setUpNow = () => PROVIDERS.filter((id) => aiPrefs.setUp(id))
+  /** Providers that didn't answer when last asked, with why: their models are shown, but can't be picked
+   *  (a server that's off, a key that's no longer good) until ⟳ reaches them again. */
+  const unavailable = new Map<string, string>()
   function renderPicker() {
     const ids = setUpNow()
     picker.hidden = refreshBtn.hidden = gearBtn.hidden = !ids.length // (until then, Set up the assistant… is the way in)
@@ -174,8 +177,9 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       ...ids.map((id) => {
         const c = aiPrefs.get(id)
         const models = !c.model || c.models.includes(c.model) ? c.models : [c.model, ...c.models]
-        return h('optgroup', { label: c.label }, ...(models.length
-          ? models.map((m) => h('option', { value: `${id}\n${m}` }, m))
+        const why = unavailable.get(id)
+        return h('optgroup', { label: why ? t('{{provider}}: not answering (⟳ to try again)', { provider: c.label }) : c.label }, ...(models.length
+          ? models.map((m) => h('option', { value: `${id}\n${m}`, ...(why ? { disabled: true, title: why } : {}) }, m))
           : [h('option', { value: `${id}\n`, disabled: true }, t('no models listed yet (⟳)'))]))
       }))
     picker.value = chosen
@@ -200,10 +204,12 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
       const c = aiPrefs.get(id)
       try {
         aiPrefs.save(id, { models: await listModels(c) })
+        unavailable.delete(id)
         said.push(`${c.label}: ${tn(aiPrefs.get(id).models.length, '{{n}} model found', '{{n}} models found')}`)
       } catch (e) {
+        unavailable.set(id, explainError(e, c))
         if (loud) said.push(`${c.label}: ${explainError(e, c)}`)
-        else quiet('a provider’s models weren’t listed: ⟳ says why', e)
+        else quiet('a provider’s models weren’t listed: they can’t be picked, and ⟳ says why', e)
       }
     }))
     cfg = aiPrefs.get(providerId)

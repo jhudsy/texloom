@@ -143,6 +143,7 @@ const es: Catalog = {
   'A full address, or just a server and port, such as gpu-box:11434 or localhost:1234': 'Una dirección completa, o solo servidor y puerto, como gpu-box:11434 o localhost:1234',
   'That isn’t an address.': 'Eso no es una dirección.',
   'Will use {{address}}': 'Se usará {{address}}',
+  '{{provider}}: not answering (⟳ to try again)': '{{provider}}: no responde (⟳ para reintentar)',
 }
 
 export default es
