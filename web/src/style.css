@@ -473,7 +473,7 @@ dialog.dlg .taglist label { display: flex; flex-direction: row; align-items: cen
 .problems li.clickable:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
 .problems .sev { flex: none; width: 1em; }
 .problems .error .sev { color: var(--err); } .problems .warning .sev { color: var(--warn); } .problems .box .sev { color: var(--muted); }
-.problems .msg { flex: 1; overflow-wrap: anywhere; }
+.problems .msg { flex: 1; overflow-wrap: anywhere; cursor: text; user-select: text; }
 .problems .loc { flex: none; color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
 .log[hidden] { display: none; }
 .psummary { font-size: 12px; padding: 1px 8px; border-radius: 999px; color: var(--warn); }

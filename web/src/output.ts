@@ -173,7 +173,8 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
     problemList.replaceChildren(...(problems.length ? problems.map((p) => h('li', {
       class: `${p.severity} ${p.file ? 'clickable' : ''}`,
       title: p.file ? t('Go to this line') : '',
-      onclick: () => { if (p.file) goto(p.file, p.line ?? 1) },
+      // (not when text in it was being selected, to copy the message: that click ends a selection)
+      onclick: () => { if (p.file && !window.getSelection()?.toString()) goto(p.file, p.line ?? 1) },
     }, h('span', { class: 'sev' }, p.severity === 'error' ? '✗' : p.severity === 'warning' ? '⚠' : '▭'),
       h('span', { class: 'msg' }, p.message),
       p.file ? h('span', { class: 'loc' }, `${p.file}${p.line ? `:${p.line}` : ''}`) : null))
