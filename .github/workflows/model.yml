@@ -1,7 +1,8 @@
-# The failover model (models/failover, scripts/check_model.py, issue 8): the TLA+ model checker over
-# the lease, the standby and the apps' hello check. Half a minute, so it runs when the model or its
-# runner changes, and every week (the pinned checker is fetched and verified each time).
-name: Failover model
+# The TLA+ models (scripts/check_model.py): failover (models/failover, issue 8: the lease, the standby and
+# the apps' hello check) and stateless relays (models/relays: relays dying, breaks in the bus, a database
+# failover). About two minutes, so it runs when a model or its runner changes, and every week (the pinned
+# checker is fetched and verified each time).
+name: Models
 on:
   push:
     branches: [main]

@@ -278,7 +278,9 @@ doing whatever happens later.
    passing on).
 8. **A model:** extend `models/` to check that no stored change is lost and that every collaborator ends up
    with every change, across relay deaths, bus breaks and a database failover. The failover model found the
-   need for the hello check; this one should look for what the new message order might miss.
+   need for the hello check; this one should look for what the new message order might miss. **Built:**
+   `models/relays` (`scripts/check_model.py relays`). It found two holes around a database failover, now
+   rules in "Decided" below: store again before acknowledging, and the timeline on the bus.
 9. **A rehearsal in Docker:** three relays, PostgreSQL with Patroni and etcd, Redis with Sentinel, an S3
    store, and a front door. Kill each part and measure the times in the table above (as
    `scripts/rehearse_failover.py` does for Way 2). Add a load test that spreads one project's people over
@@ -308,6 +310,15 @@ doing whatever happens later.
   (issue 16's asking of one peer, then others). These travel on the target relay's channel (`r:<relay>`),
   never the project's, so they cross the bus once. Measure what they cost Redis in the rehearsal. If it
   matters, a relay could pass large pieces directly to the target relay over HTTP instead.
+- **After a failover, a relay stores again what it stored before it** (found by `models/relays`). A change
+  stored but not yet acknowledged when the relay notices a failover is put through the transaction again
+  (found, or added) and acknowledged with its new number. Otherwise its acknowledgement can arrive after the
+  app's recheck, and the app forgets a change the database lost; by then its number may belong to another
+  app's change, so a second recheck doesn't catch it either.
+- **Changes on the bus say which timeline numbered them** (found by `models/relays`). A relay doesn't move
+  its `upto` for a number from an older timeline (it now belongs to another change), and one that hears of
+  a newer timeline this way deals with the failover (recheck, storing again, `upto` from the new head)
+  before passing anything on.
 - **Telling a database failover from a blip** uses PostgreSQL's own record of promotions. Health checks
   answer "is this the primary now?": `target_session_attrs=primary` in the URL makes the driver connect only
   to the primary, `SELECT pg_is_in_recovery()` answers it for a connection, and Patroni serves the same as
