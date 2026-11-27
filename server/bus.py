@@ -28,7 +28,7 @@ The contract. Anything used as the bus must keep it; scripts/check_bus.py checks
    connection is back (and on_break then covers it), until unsubscribed.
 5. Soft state: keys with an expiry (set, get, delete), counters (incr: atomic across instances; its
    expiry is set only when the key is created, so it counts over a fixed window), and hashes (hset,
-   hdel, hgetall, hlen; hset with a ttl renews the whole hash's expiry). Soft state may be lost
+   hget, hdel, hgetall, hlen; hset with a ttl renews the whole hash's expiry). Soft state may be lost
    (a Redis failover can drop recent writes): nothing whose loss matters is kept here.
 6. Channels and keys are names of TeXLoom's own: the implementation puts them under a prefix
    ("texloom:" unless the address says otherwise), so that a Redis access list can confine the
@@ -58,7 +58,7 @@ RETRY_MIN, RETRY_MAX = 0.2, 5.0  # seconds between tries to connect again (doubl
 MIN_VERSION = (7, 0)  # EXPIRE … NX (incr's window)
 # What the relays send: an access list allowing only these (on the prefix) is enough
 COMMANDS = ("hello", "ping", "publish", "subscribe", "unsubscribe", "get", "set", "del", "incrby", "pexpire",
-            "hset", "hdel", "hgetall", "hlen", "multi", "exec")
+            "hset", "hget", "hdel", "hgetall", "hlen", "multi", "exec")
 
 Handler = Callable[[str, bytes], None]
 
@@ -102,6 +102,9 @@ class Bus:
         raise NotImplementedError
 
     async def hset(self, key: str, field: str, value: bytes, ttl: float | None = None) -> None:
+        raise NotImplementedError
+
+    async def hget(self, key: str, field: str) -> bytes | None:
         raise NotImplementedError
 
     async def hdel(self, key: str, *fields: str) -> None:
@@ -215,6 +218,9 @@ class MemoryBus(Bus):
         h = v[0] if v and isinstance(v[0], dict) else {}
         h[field] = bytes(value)
         self.hub.keys[key] = (h, time.monotonic() + ttl if ttl else (v[1] if v else None))
+
+    async def hget(self, key: str, field: str) -> bytes | None:
+        return (await self.hgetall(key)).get(field)
 
     async def hdel(self, key: str, *fields: str) -> None:
         self._ok()
@@ -491,6 +497,9 @@ class RespBus(Bus):
             await self._call(("HSET", self._k(key), field, value))
         else:
             await self._transaction(("HSET", self._k(key), field, value), ("PEXPIRE", self._k(key), self._ms(ttl)))
+
+    async def hget(self, key: str, field: str) -> bytes | None:
+        return await self._call(("HGET", self._k(key), field))
 
     async def hdel(self, key: str, *fields: str) -> None:
         if fields:

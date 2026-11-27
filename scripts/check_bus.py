@@ -135,7 +135,7 @@ async def contract(kind: str, make: Callable[[], Bus]) -> None:
     await a.hset("conns:p", "1", b"relay-a")
     await b.hset("conns:p", "2", b"relay-b")
     check("a hash written by two instances holds both", await a.hgetall("conns:p") == {"1": b"relay-a", "2": b"relay-b"}
-          and await b.hlen("conns:p") == 2)
+          and await b.hlen("conns:p") == 2 and await b.hget("conns:p", "1") == b"relay-a" and await b.hget("conns:p", "3") is None)
     await a.hdel("conns:p", "1", "9")
     check("a field removed", await b.hgetall("conns:p") == {"2": b"relay-b"})
     await a.hdel("conns:p", "2")
@@ -190,7 +190,7 @@ def valkey(name: str, port: int, *extra: str):
              f"relay on >{PASSWORD} resetkeys ~texloom:* resetchannels &texloom:* -@all " + " ".join(f"+{c}" for c in COMMANDS),
              "default off"]
     acl = [w for u in users for w in ("--user", *u.split())]  # (each word its own argument, as in a config file)
-    docker("rm", "-f", name, check_=False)
+    docker("rm", "-f", "-v", name, check_=False)  # (-v: and its data volume)
     docker("network", "create", NAME, check_=False)  # (the replica reaches the primary by name on it)
     docker("run", "-d", "--rm", "--name", name, "--network", NAME, "-p", f"127.0.0.1:{port}:6379", VALKEY, "valkey-server",
            "--save", "", "--appendonly", "no", *acl, *extra)
@@ -202,7 +202,7 @@ def valkey(name: str, port: int, *extra: str):
             time.sleep(0.1)
         yield
     finally:
-        docker("rm", "-f", name, check_=False)
+        docker("rm", "-f", "-v", name, check_=False)  # (-v: and its data volume)
         if name == NAME:
             docker("network", "rm", NAME, check_=False)
 

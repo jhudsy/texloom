@@ -162,7 +162,7 @@ class Cluster:
     def down(self) -> None:
         names = docker("ps", "-a", "--filter", f"name={self.p}-", "--format", "{{.Names}}", check_=False).stdout.split()
         if names:
-            docker("rm", "-f", *names, check_=False)
+            docker("rm", "-f", "-v", *names, check_=False)  # (-v: and their data volumes, or each run leaves them)
         docker("volume", "rm", "-f", self.n("pgb"), check_=False)
         for net in ("net", "s3a", "s3b"):
             docker("network", "rm", self.n(net), check_=False)
