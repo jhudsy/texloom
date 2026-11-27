@@ -1,0 +1,10 @@
+# Today's relay, built from this checkout, for scripts/rehearse_relays.py (as scripts/rehearse_failover.py
+# builds it). The script copies pyproject.toml, README.md, server/ and texloom/ next to this file first.
+FROM python:3.12.16-slim
+WORKDIR /src
+COPY pyproject.toml README.md ./
+COPY server ./server
+COPY texloom ./texloom
+RUN pip install --no-cache-dir ".[server]" && useradd -r -d /data relay && mkdir /data && chown relay /data
+USER relay
+ENTRYPOINT ["texloom-server"]

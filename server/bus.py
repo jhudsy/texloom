@@ -590,6 +590,11 @@ class RespBus(Bus):
         with contextlib.suppress(OSError, asyncio.IncompleteReadError, ConnectionError):
             while True:
                 m = await _read(c.r)
+                if m == "PONG" and self._pongs:  # (a ping's answer while subscribed to nothing: subscribed, ["pong", ""])
+                    f = self._pongs.popleft()
+                    if not f.done():
+                        f.set_result(None)
+                    continue
                 if not isinstance(m, list) or not m:
                     continue
                 kind = m[0].decode() if isinstance(m[0], bytes) else m[0]

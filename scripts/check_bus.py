@@ -207,6 +207,19 @@ def valkey(name: str, port: int, *extra: str):
             docker("network", "rm", NAME, check_=False)
 
 
+async def valkey_idle(url: str) -> None:
+    print("\n== Valkey: quiet")
+    a = RespBus(url)
+    ea = await started(a)
+    await asyncio.sleep(16)  # (more than its pings' interval and wait, twice)
+    check("a bus with no subscriptions isn't taken as broken (its pings are answered too)", ea.breaks == 0, ea.breaks)
+    await a.subscribe("p:quiet")
+    await a.unsubscribe("p:quiet")
+    await asyncio.sleep(12)
+    check("nor once its last subscription has gone", ea.breaks == 0, ea.breaks)
+    await a.close()
+
+
 async def valkey_breaks(url: str) -> None:
     print("\n== Valkey: breaks")
     a, b = RespBus(url), RespBus(url)
@@ -328,6 +341,7 @@ async def main() -> int:
     with valkey(NAME, port):
         url = f"redis://relay:{PASSWORD}@127.0.0.1:{port}"
         await contract("Valkey", lambda: RespBus(url))
+        await valkey_idle(url)
         await valkey_breaks(url)
         await valkey_refusals(port)
     return summary("bus")

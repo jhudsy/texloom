@@ -1,0 +1,14 @@
+# PostgreSQL kept available by Patroni, for scripts/rehearse_relays.py (a rehearsal in Docker, not for
+# production). Patroni has no official image, so this adds a pinned Patroni to the pinned PostgreSQL
+# image the other rehearsal uses. The same image, started with a shell, is the lab's probe: it has psql
+# and Python for asking Patroni and the relays how they are.
+FROM postgres:16.6
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3-venv \
+ && rm -rf /var/lib/apt/lists/* \
+ && python3 -m venv /opt/patroni \
+ && /opt/patroni/bin/pip install --no-cache-dir "patroni[etcd3,psycopg3]==4.1.5" "psycopg[binary]==3.3.9"
+COPY patroni.yml /etc/patroni.yml
+ENV PATH=/opt/patroni/bin:$PATH
+USER postgres
+ENTRYPOINT ["patroni", "/etc/patroni.yml"]

@@ -1,0 +1,48 @@
+# Patroni's settings for scripts/rehearse_relays.py (a rehearsal in Docker, not for production).
+# What differs between the nodes comes from the environment, set by the script:
+#   PATRONI_NAME, PATRONI_RESTAPI_CONNECT_ADDRESS, PATRONI_POSTGRESQL_CONNECT_ADDRESS,
+#   PATRONI_ETCD3_HOSTS, and the passwords (PATRONI_SUPERUSER_PASSWORD, PATRONI_REPLICATION_PASSWORD).
+# The timings are Patroni's own defaults, which FUTURE_ARCHITECTURE.md's table quotes: the leader key
+# lives 30 s, so a primary that dies without a word is replaced within about 30-40 s. The script can
+# shorten them for a quicker run (REHEARSE_PATRONI_TTL).
+scope: texloom
+namespace: /service/
+
+restapi:
+  listen: 0.0.0.0:8008
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+      parameters:
+        wal_level: replica
+        hot_standby: "on"
+        wal_log_hints: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+        max_connections: 200
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - local all all trust
+    - host replication replicator all scram-sha-256
+    - host all all all scram-sha-256
+
+postgresql:
+  listen: 0.0.0.0:5432
+  data_dir: /var/lib/postgresql/data/pgdata
+  bin_dir: /usr/lib/postgresql/16/bin
+  pgpass: /tmp/pgpass
+  authentication:
+    superuser:
+      username: postgres
+    replication:
+      username: replicator
+  parameters:
+    unix_socket_directories: /var/run/postgresql
