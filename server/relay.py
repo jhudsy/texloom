@@ -90,6 +90,7 @@ SLOW = 30  # seconds a recipient that didn't take an unsigned message in SEND_TI
 # signed changes can replay them, so older ones aren't passed on, and those that are count against the
 # sender's pace, as unsigned messages do.
 REPUBLISH_RECENT = 1000
+SPREAD = 3.0  # seconds over which connections are asked to resync or recheck (ask), so they don't all at once
 
 
 class Pace:
@@ -125,6 +126,7 @@ class Conn:
         self.held = 0  # bytes received and not yet finished with (see Metered)
         self.aware = False  # has sent awareness, so others must hear when it goes
         self.ka = False  # its app keeps the connection alive (hello "ka"): sent "wait" while left unread
+        self.rs = False  # its app understands "resync" and "recheck" (hello "rs"); others are closed instead (see ask)
         self.pace = Pace(UNSIGNED_RATE, UNSIGNED_BURST)  # unsigned messages relayed (see UNSIGNED_RATE)
         self.aw_pace = Pace(AW_RATE, AW_BURST)
         self.pause = 0.0  # seconds to leave it unread before its next message (its pace)
@@ -425,6 +427,27 @@ class Relay:
         if peers:
             await asyncio.gather(*(self.send(ws, text) for ws in peers))
 
+    async def ask(self, t: str, sockets: list | None = None, spread: float = SPREAD) -> None:
+        """Ask connections (all of this relay's, or `sockets`) to catch up again, spread over `spread` seconds:
+        - "resync": catch up from their peers (they send their state vector, as after connecting). For sync-only
+          projects, after this relay may have missed messages from the others (a break in the bus).
+        - "recheck": check that the server's log is still the one they saw (they send their hello again, whose
+          "last" finds out). After the database failed over, which can lose changes it had acknowledged.
+        FUTURE_ARCHITECTURE.md, "Messages"."""
+        sockets = list(self.conns) if sockets is None else sockets
+        gap = spread / max(len(sockets), 1)
+        for ws in sockets:
+            conn = self.conns.get(ws)
+            if conn is None or ws.closed:
+                continue
+            if conn.rs:
+                await self.send(ws, json.dumps({"t": t}))
+            else:
+                # compat(app 0.4.66): apps that don't say "rs" in their hello (0.4.66 and older) are closed instead: they connect
+                # again and do the same. (Set VERSION to the release that first sends "rs" when the stateless-relays branch is merged.)
+                asyncio.create_task(self.close_or_cut(ws, b"catch up again"))
+            await asyncio.sleep(gap)
+
     async def close_all(self, _app: web.Application | None = None) -> None:
         """When the server stops, close every connection at once ("going away"), so clients start
         reconnecting straight away and the process exits in seconds rather than waiting on each."""
@@ -611,6 +634,7 @@ class Relay:
             conn.counted = True
             await self.policy.note_client(msg.get("app"), msg.get("v"))
         conn.ka = msg.get("ka") == 1
+        conn.rs = msg.get("rs") == 1
         if self.policy.too_old(msg.get("v")):
             await ws.send_json({"t": "err", "denied": True, **self.policy.update_needed()})
             if version_tuple(msg.get("v")) is None:

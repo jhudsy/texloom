@@ -962,12 +962,17 @@ class Replica:
         self._resync = 0 if self._resync == 1 else self._resync
         self._ka, self._ping_at, self._heard_at = 0.0, 0.0, time.monotonic()
         self.connected.set()
-        hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__, "pages": 1, "ka": 1}  # (--min-version)
+        await ws.send_json(self._hello())
+
+    def _hello(self) -> dict:
+        """What says who we are and where we are up to: on connecting, and again when the server asks ("recheck").
+        "rs": this app understands "resync" and "recheck" (servers close older apps' connections instead)."""
+        hello = {"t": "hello", "since": self.since, "app": "desktop", "v": __version__, "pages": 1, "ka": 1, "rs": 1}  # (--min-version)
         if self.last:
             hello["last"] = list(self.last)
         if self.create_code:
             hello["code"] = self.create_code
-        await ws.send_json(hello)
+        return hello
 
     async def _keep_alive(self, ws) -> None:
         """While connected to a server that offers it: a "ping" when nothing has been heard for `_ka`
@@ -1100,6 +1105,12 @@ class Replica:
                 if ref:
                     self.refs[upto] = ref
                 await self._drop_refs(upto, ref)
+        elif t == "resync":  # the server may have missed what peers sent (its link to the other servers broke): catch up from them
+            if self._caught_up:
+                await self.p2p({"k": "sv1", "sv": b64e(self.doc.get_state())})
+        elif t == "recheck":  # the server's database failed over: is its log still the one this copy saw? (the hello's "last")
+            if self.ws is not None:
+                await self.ws.send_json(self._hello())
         elif t == "left":
             self._peers.discard(m.get("from"))
         elif t == "p2p":

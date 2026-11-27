@@ -265,6 +265,10 @@ doing whatever happens later.
    relay doesn't use it yet.
 6. **Gap tracking in the relay,** filling from the database, the periodic head check, and `resync`/`recheck`
    (with closing for older apps).
+   **The messages are built:** both apps say `rs: 1` in their hello and answer `resync` (their state vector)
+   and `recheck` (their hello again); `Relay.ask` sends them, spread over a few seconds, and closes apps that
+   don't say `rs` (`scripts/check_resync.py`). What calls `ask`, and gap tracking, come with the bus. The apps'
+   side ships in the release that merges this branch (its compat marker names 0.4.66 until then).
 7. **The Redis implementations:** relay heartbeats, the connection hashes, the per-relay channels, and
    behaviour while the bus is away (checking heads every second) or the database is away (live-only
    passing on).

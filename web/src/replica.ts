@@ -407,8 +407,14 @@ export class Replica {
     this.logPending = null
     this.peerConns.clear() // (connection numbers are per connection to the server)
     this.missing.clear() // (this catch-up finds them again if they're still missing)
-    ws.send(JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ka: 1, ...(this.last ? { last: this.last } : {}),
-      ...(code ? { code } : {}) }))
+    ws.send(this.hello(code))
+  }
+
+  /** What says who we are and where we are up to: on connecting, and again when the server asks ("recheck").
+   * "rs": this app understands "resync" and "recheck" (servers close older apps' connections instead). */
+  private hello(code = this.creationCode()): string {
+    return JSON.stringify({ t: 'hello', since: this.since, app: 'web', v: APP_VERSION, pages: 1, ka: 1, rs: 1, ...(this.last ? { last: this.last } : {}),
+      ...(code ? { code } : {}) })
   }
 
   /** The connection closed (check-replica.mjs calls this too). */
@@ -487,6 +493,12 @@ export class Replica {
         if (this.resync === 1) { await this.catchUpAgain(); break }
         if (m.q) this.markSeen(m.q)
         this.holdForMissing()
+        break
+      case 'resync': // the server may have missed what peers sent (its link to the other servers broke): catch up from them
+        if (this.synced) await this.p2p({ k: 'sv1', sv: b64e(Y.encodeStateVector(this.doc)) })
+        break
+      case 'recheck': // the server's database failed over: is its log still the one this copy saw? (the hello's "last")
+        this.ws?.send(this.hello())
         break
       case 'snapped': // the server took our snapshot: what it replaced can go
         if (this.snapRef && this.snapRef.upto === m.upto) {

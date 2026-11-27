@@ -13,6 +13,7 @@ on:
       - 'scripts/webcheck.py'
       - 'scripts/check_web_*.py'
       - 'scripts/check_keepalive.py'
+      - 'scripts/check_resync.py'
       - 'texloom/listsync.py'
       - 'texloom/replica.py'
       - 'scripts/fakeforge.py'
@@ -29,6 +30,7 @@ on:
       - 'scripts/webcheck.py'
       - 'scripts/check_web_*.py'
       - 'scripts/check_keepalive.py'
+      - 'scripts/check_resync.py'
       - 'texloom/listsync.py'
       - 'texloom/replica.py'
       - 'scripts/fakeforge.py'
@@ -73,6 +75,9 @@ jobs:
       - name: A server that stops answering is noticed (keep-alive), by the web app and the desktop helper
         if: (success() || failure()) && steps.chromium.outcome == 'success'
         run: uv run --extra server --with playwright python scripts/check_keepalive.py
+      - name: Asked to catch up again ("resync", "recheck"), by the web app and the desktop helper; older apps closed instead
+        if: (success() || failure()) && steps.chromium.outcome == 'success'
+        run: uv run --extra server --with playwright python scripts/check_resync.py
       - name: The project list keeps when a project was opened
         if: (success() || failure()) && steps.chromium.outcome == 'success'
         run: uv run --extra server --with playwright python scripts/check_web_listsync.py
