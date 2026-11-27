@@ -234,6 +234,11 @@ class _PgCalls:
     async def fetchval(self, sql: str, *args):
         return await self._on.fetchval(sql, *args)
 
+    async def xlock(self, key: int) -> None:
+        """In a transaction: wait for `key` (Store.key) and hold it until the transaction ends, so
+        servers sharing this database take turns at it."""
+        await self._on.execute("SELECT pg_advisory_xact_lock($1)", key)
+
 
 class PostgreSQL(_PgCalls, Database):
     kind = "postgresql"
@@ -401,6 +406,9 @@ class _SqliteCalls:
     async def fetchval(self, sql: str, *args):
         row = await self.fetchrow(sql, *args)
         return None if row is None else row[0]
+
+    async def xlock(self, key: int) -> None:
+        """Nothing to do: a transaction holds the whole database (BEGIN IMMEDIATE), and one server at most uses it."""
 
 
 class SQLite(Database):

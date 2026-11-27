@@ -10,7 +10,12 @@ first because it is safe with one server and checked here with two sharing a Pos
 - two stores on one database: when one changes a project (its owner, evicts it, deletes it) the other,
   which remembered the old, takes the new (its totals too), ignores what it said itself, and ignores what isn't
   one of ours;
-- upkeep runs on one server at a time, on a standby (no database open) does nothing, and on SQLite runs.
+- upkeep runs on one server at a time, on a standby (no database open) does nothing, and on SQLite runs;
+- checks made in one transaction holding the project (Store.locked; FUTURE_ARCHITECTURE.md, "Building it",
+  step 1), with writes racing through two servers: the same change is stored once; a creation code's
+  allowance, and a project's limit, are never passed together; an upload under way through one server
+  counts for the other, until it is stored or its reservation runs out; project lists count too; and a
+  transaction that fails leaves the server's memory as it was.
 
     uv run --extra server python scripts/check_groundwork.py        # needs PostgreSQL's programs for the second half
 """
@@ -32,6 +37,8 @@ from checklib import check, summary  # noqa: E402
 from server.app import upkeep  # noqa: E402
 from server.db import MAINTENANCE_LOCK, DatabaseError, connect  # noqa: E402
 from server.files import FolderFiles  # noqa: E402
+from server.lists import Lists  # noqa: E402
+from server.policy import CodeBook, Limits, Policy  # noqa: E402
 from server.store import Store  # noqa: E402
 
 
@@ -168,6 +175,106 @@ async def stores(url: str, tmp: Path) -> None:
     await sb.close()
 
 
+async def up(store: Store, policy: Policy, project: str, data: bytes, code: str | None) -> int | str | None:
+    """A change as relay._up stores it: its seq (a replay: the first copy's), or why it was refused. It pauses
+    between checking and storing, as a busy server might, so that racing writes overlap there."""
+    async with store.locked(project) as c:
+        dup = await store.duplicate(project, data, c)
+        if dup is not None:
+            return dup
+        refused = await policy.may_store(project, len(data) + 64, code, c)
+        if refused:
+            return refused
+        await asyncio.sleep(0.02)
+        return await store.append(project, data, b"s" * 64, c)
+
+
+async def races(url: str, tmp: Path) -> None:
+    print("\n== checks that hold through two servers at once")
+    codes = tmp / "codes.txt"
+    # allowances of 10,000 bytes; "default" can't store
+    codes.write_text("default 0\nAAAABBBBCCCC 10000 one\nDDDDEEEEFFFF 10000 two\nGGGGHHHHJJJJ 10000 three\n"
+                     "KKKKMMMMNNNN 1000000 four\n")
+    files = FolderFiles(tmp / "files-r")
+    sa = await Store.open(url, files, tmp / "d-ra", serving=True)
+    sb = await Store.open(url, files, tmp / "d-rb", serving=True)
+    limits = Limits(min_free=0, project_max=10**9)  # (one shared object: the project limit is set for its own check)
+    pa, pb = Policy(sa, CodeBook(codes), limits), Policy(sb, CodeBook(codes), limits)
+    for pol in (pa, pb):
+        pol.codes.load()
+    both = [(sa, pa), (sb, pb)]
+
+    # the same change, sent through both at once many times (a resend after a reconnect, say)
+    p = pid(20)
+    change = b"c" * 300
+    got = await asyncio.gather(*[up(st, pol, p, change, "AAAABBBBCCCC") for _ in range(10) for st, pol in both])
+    rows = await sa.db.fetchval("SELECT COUNT(*) FROM log WHERE project=$1", p)
+    check("the same change sent through two servers at once is stored once, and each copy is told its number",
+          rows == 1 and set(got) == {1}, (rows, set(got)))
+
+    # one code's allowance, written to through both servers and five of its projects at once
+    ps = [pid(30 + k) for k in range(5)]
+    size = 1000 + 64
+    got = await asyncio.gather(*[up(both[i // 5 % 2][0], both[i // 5 % 2][1], ps[i % 5], bytes([i]) * 1000, "DDDDEEEEFFFF")
+                                 for i in range(50)])
+    stored = sum(isinstance(g, int) for g in got)
+    used = await sa.owner_total("DDDDEEEEFFFF", sa.db)
+    check("writes racing through two servers never pass a code's allowance together",
+          stored == 10000 // size and used == stored * size and all(isinstance(g, int) or g == "quota-full" for g in got),
+          (stored, used, got))
+    p1 = ps[0]
+
+    # one project's limit (5,000 here), likewise
+    p3 = pid(23)
+    limits.project_max = 5000
+    got = await asyncio.gather(*[up(both[i % 2][0], both[i % 2][1], p3, bytes([i]) * 1000, "KKKKMMMMNNNN") for i in range(12)])
+    n = await sa.db.fetchval("SELECT bytes FROM usage WHERE project=$1", p3)
+    check("... nor a project's limit", n == 4 * size and got.count("project-full") == 8, (n, got))
+    limits.project_max = 10**9
+
+    # an upload under way through one server counts for the other
+    p4, p5 = pid(24), pid(25)
+    async with sa.locked(p4) as c:
+        ok = await pa.may_store(p4, 8000, "GGGGHHHHJJJJ", c) is None
+        rid = await sa.reserve_upload(p4, 8000, c)
+    refused = await up(sb, pb, p5, b"u" * 3000, "GGGGHHHHJJJJ")
+    check("an upload allowed through one server counts at once for the other (its code is then full)",
+          ok and refused == "quota-full" and sa.pending.get(p4) == 8000, (ok, refused, sa.pending.get(p4)))
+    await sa.put_blob(p4, "1" * 32, b"f" * 8000, "file", rid)
+    after = await sa.owner_total("GGGGHHHHJJJJ", sa.db)
+    check("once stored it counts as stored, not twice, and the reservation is gone",
+          after == 8000 and await sa.db.fetchval("SELECT COUNT(*) FROM reserved") == 0 and not sa.pending.get(p4),
+          (after, sa.pending))
+    await sa.db.execute("INSERT INTO reserved(id, project, owner, bytes, until) VALUES ('old', $1, 'GGGGHHHHJJJJ', 1000, $2)",
+                        p4, time.time() - 1)
+    check("a reservation a stopped server left behind stops counting when it runs out",
+          await sa.owner_total("GGGGHHHHJJJJ", sa.db) == 8000)
+    await sb.read_total()
+    check("and is cleared out (with the server's total read again from the database)",
+          await sa.db.fetchval("SELECT COUNT(*) FROM reserved") == 0 and sb.total == await sa.db.fetchval(
+              "SELECT (SELECT SUM(bytes) FROM usage) + COALESCE((SELECT SUM(octet_length(data)) FROM lists), 0)"), sb.total)
+
+    # project lists count against the code too
+    lists = Lists(sb.db, sb.lists_grew)
+    async with sb.owner_locked("GGGGHHHHJJJJ") as c:
+        await lists.put("L" * 43, 1, b"l" * 1500, "GGGGHHHHJJJJ", c)
+    check("a project list counts against its code, through any server",
+          await sa.owner_total("GGGGHHHHJJJJ", sa.db) == 9500 and await up(sa, pa, p5, b"v" * 600, "GGGGHHHHJJJJ") == "quota-full")
+
+    # a transaction that fails: the database and this server's memory are as they were
+    before = (dict(sa.usage), sa.total)
+    try:
+        async with sa.locked(p1) as c:
+            await sa.append(p1, b"w" * 500, b"s" * 64, c)
+            raise RuntimeError("stop")
+    except RuntimeError:
+        pass
+    check("a transaction that fails changes neither the database nor the server's memory",
+          (dict(sa.usage), sa.total) == before and await sa.db.fetchval("SELECT COUNT(*) FROM log WHERE project=$1 AND data=$2", p1, b"w" * 500) == 0)
+    await sa.close()
+    await sb.close()
+
+
 async def upkeeps(url: str, tmp: Path) -> None:
     print("\n== upkeep")
     sql_db = await connect(f"sqlite:{tmp / 'u.db'}")
@@ -210,6 +317,7 @@ async def main() -> int:
         with pg.running() as url:
             await database(url)
             await stores(url, tmp)
+            await races(url, tmp)
             await upkeeps(url, tmp)
     return summary("groundwork")
 

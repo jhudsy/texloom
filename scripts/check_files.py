@@ -98,7 +98,8 @@ async def cases(make_files, tmp: Path, db: str) -> None:
     ids = [bid() for _ in range(5)]
     for i in ids:
         await store.put_blob(q, i, secrets.token_bytes(10_000))
-    await store._drop_files(q)
+    async with store.locked(q) as tx:
+        await store._trash_files(q, tx)
     check("a dropped project's files stop counting at once", store.usage[q] == 0 and all([await store.blob_size(q, i) is None for i in ids + [c]]))
     keep = ids[0]
     again = await store.put_blob(q, keep, b"new copy of the same content")
@@ -115,7 +116,8 @@ async def cases(make_files, tmp: Path, db: str) -> None:
     for i in ids:
         await store.put_blob(r_, i, b"x" * 100)
     store._reaper = asyncio.get_running_loop().create_future()  # nothing erases: as if it stopped first
-    await store._drop_files(r_)
+    async with store.locked(r_) as tx:
+        await store._trash_files(r_, tx)
     store._reaper.set_result(None)
     await store.close()
     store = await Store.open(db, make_files(), tmp)

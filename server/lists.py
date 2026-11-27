@@ -19,6 +19,7 @@ import time
 from collections.abc import Callable
 
 from .db import Database
+from .store import Tx
 
 MAX_LIST = 256 * 1024  # bytes per entry: thousands of projects
 MAX_PER_OWNER = 32  # entries per creation code (a list, and the passkeys that unlock it)
@@ -56,22 +57,28 @@ class Lists:
         row = await self.db.fetchrow("SELECT seq, owner, octet_length(data) AS n FROM lists WHERE id=$1", lid)
         return (row["seq"], row["owner"], row["n"]) if row else None
 
-    async def put(self, lid: str, seq: int, data: bytes, owner: str) -> bool:
+    async def put(self, lid: str, seq: int, data: bytes, owner: str, c=None) -> bool:
         """Store version `seq`, if the entry is still at seq - 1 (or new, for 1). False if someone
-        else's update got there first."""
+        else's update got there first. In `c`, a transaction holding the owner (Store.owner_locked),
+        when its allowance was checked: the count in memory follows once it commits."""
+        if c is None:
+            async with self.db.tx() as calls:
+                c = Tx(calls)
+                done = await self.put(lid, seq, data, owner, c)
+            await c.done()
+            return done
         if seq == 1:
-            if await self.db.execute("INSERT INTO lists(id, seq, data, owner, seen) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
-                                     lid, seq, data, owner, time.time()) != 1:
+            if await c.execute("INSERT INTO lists(id, seq, data, owner, seen) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+                               lid, seq, data, owner, time.time()) != 1:
                 return False
-            self.grew(owner, len(data))
+            c.later.append(lambda: self.grew(owner, len(data)))
             return True
-        async with self.db.tx() as c:
-            old = await c.fetchrow("SELECT owner, octet_length(data) AS n FROM lists WHERE id=$1 AND seq=$2", lid, seq - 1)
-            # (still at seq - 1 when it's changed: a write in between makes this change nothing)
-            if old is None or await c.execute("UPDATE lists SET seq=$1, data=$2, seen=$3 WHERE id=$4 AND seq=$5",
-                                              seq, data, time.time(), lid, seq - 1) != 1:
-                return False
-        self.grew(old["owner"], len(data) - old["n"])
+        old = await c.fetchrow("SELECT owner, octet_length(data) AS n FROM lists WHERE id=$1 AND seq=$2", lid, seq - 1)
+        # (still at seq - 1 when it's changed: a write in between makes this change nothing)
+        if old is None or await c.execute("UPDATE lists SET seq=$1, data=$2, seen=$3 WHERE id=$4 AND seq=$5",
+                                          seq, data, time.time(), lid, seq - 1) != 1:
+            return False
+        c.later.append(lambda: self.grew(old["owner"], len(data) - old["n"]))
         return True
 
     async def retire(self, lid: str) -> None:
@@ -89,17 +96,18 @@ class Lists:
     async def count(self, owner: str) -> int:
         return await self.db.fetchval("SELECT COUNT(*) FROM lists WHERE owner=$1 AND seq<>$2", owner, RETIRED)
 
-    async def room_for(self, owner: str) -> bool:
+    async def room_for(self, owner: str, c=None) -> bool:
         """Whether `owner` may create a new list: its entries, and the retired ids it has left, and
         everyone's, are under the limits."""
-        r = await self.db.fetchrow("SELECT COUNT(*) FILTER (WHERE seq<>$1) AS live, COUNT(*) FILTER (WHERE seq=$1) AS retired"
+        c = c or self.db
+        r = await c.fetchrow("SELECT COUNT(*) FILTER (WHERE seq<>$1) AS live, COUNT(*) FILTER (WHERE seq=$1) AS retired"
                                    " FROM lists", RETIRED)
         if r["live"] >= MAX_TOTAL or r["retired"] >= MAX_RETIRED_TOTAL:
             return False
         if owner == "default":
             return True
-        r = await self.db.fetchrow("SELECT COUNT(*) FILTER (WHERE seq<>$1) AS live, COUNT(*) FILTER (WHERE seq=$1) AS retired"
-                                   " FROM lists WHERE owner=$2", RETIRED, owner)
+        r = await c.fetchrow("SELECT COUNT(*) FILTER (WHERE seq<>$1) AS live, COUNT(*) FILTER (WHERE seq=$1) AS retired"
+                             " FROM lists WHERE owner=$2", RETIRED, owner)
         return r["live"] < MAX_PER_OWNER and r["retired"] < MAX_RETIRED_PER_OWNER
 
     def _deleted(self, rows) -> int:

@@ -122,18 +122,23 @@ class Endpoints:
         if await self.store.relay_only(project):
             return web.Response(status=409, text="project is relay-only: blobs are exchanged peer to peer")
         kind = "output" if request.headers.get("X-Kind") == "output" else "file"
-        async with self.store.lock(project):  # the check and the reservation; not the (maybe slow) write
-            if await self.store.has_blob(project, bid):
+        async with self.store.locked(project) as c:  # the check and the reservation; not the (maybe slow) write
+            had, reservation = await self.store.has_blob(project, bid, c), None
+            if had:
                 if kind == "file":
-                    await self.store.mark_file(project, bid)
-                return web.Response(status=200)
-            refused = await self.policy.may_store(project, len(data), self.policy.codes.check(request.headers.get("X-Create-Code")),
-                                                  reserve=True)  # counted from here (put_blob gives it back)
-            if refused:
-                status = {"needs-code": 403, "code-expired": 403, "quota-full": 507, "project-full": 413, "server-full": 507}[refused]
-                return web.json_response({"code": refused}, status=status)
+                    await self.store.mark_file(project, bid, c)
+                refused = None
+            else:
+                refused = await self.policy.may_store(project, len(data), self.policy.codes.check(request.headers.get("X-Create-Code")), c)
+                if not refused:  # counted from here, through any server (put_blob ends it)
+                    reservation = await self.store.reserve_upload(project, len(data), c)
+        if had:
+            return web.Response(status=200)
+        if refused:
+            status = {"needs-code": 403, "code-expired": 403, "quota-full": 507, "project-full": 413, "server-full": 507}[refused]
+            return web.json_response({"code": refused}, status=status)
         try:
-            stored = await self.store.put_blob(project, bid, data, kind, reserved=True)
+            stored = await self.store.put_blob(project, bid, data, kind, reservation)
         except (FilesError, OSError):
             log.exception("storing a file")
             return web.json_response({"code": "store-failed"}, status=503)
@@ -237,12 +242,16 @@ class Endpoints:
             return web.json_response({"code": "code-expired" if codes.lapsed(owner) else "needs-code"}, status=403)
         more = len(data) - (row[2] if row else 0)  # what this version adds
         allowance = codes.allowance(owner)
-        if allowance != UNLIMITED and more > 0 and self.store.owner_usage(owner) + more > allowance:
+        if self.store.free_disk() - len(data) < limits.min_free or self.store.total + more > limits.max_bytes:
             return web.json_response({"code": "list-full"}, status=507)  # (the apps know this one)
-        if (self.store.free_disk() - len(data) < limits.min_free or self.store.total + more > limits.max_bytes
-                or (not row and not await lists.room_for(owner))):
-            return web.json_response({"code": "list-full"}, status=507)
-        if not await lists.put(lid, seq, data, owner):  # another update got there first (another server, say)
+        # checked and stored holding the owner, so writes under it through any server can't together pass it
+        async with self.store.owner_locked(owner) as c:
+            if allowance != UNLIMITED and more > 0 and await self.store.owner_total(owner, c) + more > allowance:
+                return web.json_response({"code": "list-full"}, status=507)
+            if not row and not await lists.room_for(owner, c):
+                return web.json_response({"code": "list-full"}, status=507)
+            stored = await lists.put(lid, seq, data, owner, c)
+        if not stored:  # another update got there first (another server, say)
             now = await lists.meta(lid)
             return web.json_response({"seq": now[0] if now else 0}, status=409)
         return web.json_response({"seq": seq})

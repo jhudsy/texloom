@@ -60,9 +60,13 @@ STATE = {
     # per project
     "Store.usage": "project", "Store.owners": "project", "Store.seen": "project", "Store.evicted": "project", "Store.pending": "project",
     "Store._facts": "project", "Store._revoked": "project", "Recent.*": "project",
-    "Store._locks": "project",  # one project's steps in order: needs all its writes on one relay
-    # across projects: into the database for several relays
-    "Store.total": "shared", "Store.owner_bytes": "shared", "Store.list_bytes": "shared",
+    # this relay's tasks queue for a project here; the transaction's lock in the database (Store.locked) does the rest
+    "Store._locks": "per-server",
+    "Tx.*": "setting",  # a transaction's calls, and what to do once it commits
+    # across projects: shown from memory; allowances are checked against the database (Store.owner_total),
+    # and the server's total is this relay's count, read again from the database (TOTALS_EVERY)
+    "Store.total": "per-server", "Store.owner_bytes": "per-server", "Store.list_bytes": "per-server",
+    "Store._totals": "per-server",
     # background work
     "Store._reaper": "maintenance",
 }

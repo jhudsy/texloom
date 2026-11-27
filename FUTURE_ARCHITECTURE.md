@@ -108,7 +108,8 @@ How each tier grows past stage 3:
 | State | Goes to | How |
 |---|---|---|
 | "Is this change already stored?" and the append | Database | Both inside the append transaction, after `pg_advisory_xact_lock` on the project. Today the in-process `asyncio.Lock` (`store.lock`) does this. SQLite's single writer already serialises it. |
-| An owner's storage total and its limit | Database | A row per owner, checked and added to in the same transaction (`UPDATE … SET bytes = bytes + $n WHERE owner = $1 AND bytes + $n <= $limit`). One owner's writes queue on that row, which is cheap. |
+| An owner's storage total and its limit | Database | **Built.** Added up in the same transaction, holding the owner (`pg_advisory_xact_lock`): its projects' `usage` rows, its project lists, and uploads under way (`reserved`, rows that stop counting after 15 minutes, so a relay that dies mid-upload counts too much for a while, never too little). Only owners with a limit are added up or held; one owner's writes queue on its lock. If owners with very many projects make the sum slow, a row per owner kept in step is the next step. |
+| The server's total (`--max-bytes`) | Each relay, read again from the database every minute | **Built.** Several relays together can pass it by what they accept in that minute: it is a guard against filling the machine, and an exact one would put every write in the server on one row. |
 | Usage per project, storage mode, revocations, registration | Database (as now) | Relays cache them. Changes are announced on the bus (today: LISTEN/NOTIFY), and a relay that has missed announcements reads again. |
 | Connection ids (`you`, `from`, `to`) | Nowhere shared | The relay's number (taken from a counter in the bus at start-up) times 2³², plus a counter of its own. Still an integer below 2⁵³, so JavaScript and old apps take it as they are. |
 | Who is connected to a project, and on which relay | Bus, soft | A hash per project of connection id → relay. A relay renews its own entries and removes them when its connections close. |
@@ -245,7 +246,8 @@ Each step is useful and safe on one machine, so the work can stop at any point. 
 doing whatever happens later.
 
 1. **Exact checks into the transaction:** the duplicate check under a transaction-level lock, and the
-   owner's total checked and added to in the database.
+   owner's total checked and added to in the database. **Built** (`Store.locked`, `Policy.may_store`), and
+   checked with two stores racing on one PostgreSQL in `scripts/check_groundwork.py`.
 2. **Store, publish, then acknowledge, and publish duplicates again,** for stored and sync-only changes.
 3. **App-level keep-alive** in the web app and the desktop helper. **Built:** `ping`/`pong`/`wait` and `ka`
    in the sync protocol (DESIGN.md), checked by `scripts/check_keepalive.py`.

@@ -22,10 +22,11 @@ from typing import TYPE_CHECKING
 from texloom import __version__
 
 from .lists import Lists
+from .store import key
 from .wire import APPS, version_tuple
 
 if TYPE_CHECKING:
-    from .store import Store
+    from .store import Store, Tx
 
 log = logging.getLogger("texloom.relay")
 
@@ -363,12 +364,14 @@ class Policy:
         return {"code": "update-needed", "min": m, "m": f"this server needs TeXLoom {m} or later"}
 
     # --- storage policy ------------------------------------------------------------
-    async def may_store(self, project: str, nbytes: int, code: str | None, reserve: bool = False) -> str | None:
+    async def may_store(self, project: str, nbytes: int, code: str | None, c: Tx) -> str | None:
         """None if this write (signed: checked already) may be stored, else a reason code for the
-        client. With `reserve`, the bytes are counted (Store.reserve) as soon as they're allowed,
-        before anything else can run, so writes under way at once under one code can't together
-        pass its allowance: the caller then gives them back (Store.unreserve, or put_blob)."""
-        owner = self.store.owner(project)
+        client. In `c`, a transaction holding the project (Store.locked), which then stores it: a
+        limited owner's allowance is checked against what the database says it stores, holding the
+        owner too, so writes to its projects through any server can't together pass it. The
+        server's total is this server's count (see store.py)."""
+        registered = await self.store.owner_of(project, c)
+        owner = registered
         claim = self.private and code is not None and owner == "default"
         if claim:  # a private server: the first signed write with a code binds a project made without one
             owner = code
@@ -376,45 +379,48 @@ class Policy:
             owner = code or "default"
             if self.codes.allowance(owner) <= 0:
                 return "needs-code" if owner == "default" else "quota-full"
-        elif self.codes.lapsed(owner) and nbytes > 0 and self.codes.allowance(owner) <= self.store.owner_usage(owner) + nbytes:
-            return "code-expired"
         allowance = self.codes.allowance(owner)
         if nbytes > 0:
-            if self.store.owner_usage(owner) + nbytes > allowance:
-                return "quota-full" if self.store.owner(project) or owner != "default" else "needs-code"
-            if allowance != UNLIMITED and self.store.usage[project] + nbytes > self.limits.project_max:
-                return "project-full"
+            if allowance != UNLIMITED:  # (an unlimited owner's total isn't needed: none is added up)
+                await c.xlock(key("owner", owner))
+                used = await self.store.owner_total(owner, c)
+                if registered is not None and self.codes.lapsed(owner) and allowance <= used + nbytes:
+                    return "code-expired"
+                if used + nbytes > allowance:
+                    return "quota-full" if registered or owner != "default" else "needs-code"
+                if await self.store.project_total(project, c) + nbytes > self.limits.project_max:
+                    return "project-full"
             if self.store.total + nbytes > self.limits.max_bytes or self.store.free_disk() - nbytes < self.limits.min_free:
                 return "server-full"
-            if reserve:
-                self.store.reserve(project, nbytes)
-        if self.store.owner(project) is None:
-            await self.store.register(project, owner, self.codes.label(owner) if code else "default")
+        if registered is None:
+            await self.store.register(project, owner, self.codes.label(owner) if code else "default", c)
         elif claim:
-            await self.store.claim(project, owner)
+            await self.store.claim(project, owner, c)
         return None
 
     async def move(self, project: str, code: str) -> dict | None:
         """Move a stored project to another creation code (its owner asked; see `move` in relay.py).
         None if done, else the refusal to send: the code isn't valid (or has lapsed), or hasn't room."""
-        owner = self.store.owner(project)
-        if owner is None:
-            return {"code": "move-not-stored", "m": "the server doesn't store this project"}
-        new = self.codes.check(code)
-        if not new:
-            return {"code": "move-bad-code", "m": "that code isn't valid on this server"}
-        if new == owner:
-            return None
-        need, allowance = self.store.usage.get(project, 0), self.codes.allowance(new)
-        if allowance != UNLIMITED:
-            if need > self.limits.project_max:
-                return {"code": "move-too-big", "m": "the project is larger than a project may be with that code",
-                        "need": need, "max": self.limits.project_max}
-            free = allowance - self.store.owner_usage(new)
-            if need > free:
-                return {"code": "move-no-room", "m": "that code hasn't room for this project", "need": need, "free": max(0, int(free))}
-        async with self.store.lock(project):
-            await self.store.claim(project, new)
+        async with self.store.locked(project) as c:
+            owner = await self.store.owner_of(project, c)
+            if owner is None:
+                return {"code": "move-not-stored", "m": "the server doesn't store this project"}
+            new = self.codes.check(code)
+            if not new:
+                return {"code": "move-bad-code", "m": "that code isn't valid on this server"}
+            if new == owner:
+                return None
+            allowance = self.codes.allowance(new)
+            if allowance != UNLIMITED:
+                need = await self.store.project_total(project, c)
+                if need > self.limits.project_max:
+                    return {"code": "move-too-big", "m": "the project is larger than a project may be with that code",
+                            "need": need, "max": self.limits.project_max}
+                await c.xlock(key("owner", new))
+                free = allowance - await self.store.owner_total(new, c)
+                if need > free:
+                    return {"code": "move-no-room", "m": "that code hasn't room for this project", "need": need, "free": max(0, int(free))}
+            await self.store.claim(project, new, c)
         log.info("project %s… moved to another creation code (%s)", project[:8], self.codes.label(new))
         return None
 

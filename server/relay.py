@@ -659,18 +659,13 @@ class Relay:
             await ws.send_json({"t": "ack", "q": 0, "id": msg.get("id")})
             await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
             return
-        n = len(data) + len(sig)
-        async with self.store.lock(project):
-            dup = await self.store.duplicate(project, data)
-            # counted from when it's allowed (may_store), so that writes to other projects under the
-            # same code meanwhile see it
-            refused = None if dup is not None else await self.policy.may_store(project, n, conn.code, reserve=True)
+        # one transaction holding the project: is it a replay, may it be stored, store it
+        async with self.store.locked(project) as c:
+            dup = await self.store.duplicate(project, data, c)
+            refused = None if dup is not None else await self.policy.may_store(project, len(data) + len(sig), conn.code, c)
             seq = None
             if dup is None and not refused:
-                try:
-                    seq = await self.store.append(project, data, sig)
-                finally:
-                    self.store.unreserve(project, n)
+                seq = await self.store.append(project, data, sig, c)
         if dup is not None:  # a replay of something already stored (or compacted): acknowledge, keep nothing
             await ws.send_json({"t": "ack", "q": dup, "id": msg.get("id")})
             return
@@ -691,20 +686,19 @@ class Relay:
                 verify, project, f"snap:{upto}:".encode() + data, sig, await self.store.revoked(project)):
             await ws.send_json({"t": "err", "m": "rejected snapshot"})
             return
-        async with self.store.lock(project):
+        async with self.store.locked(project) as c:
             # A snapshot must replace part of the log: after the previous snapshot (and anything
             # evicted), up to head.
-            after = max(await self.store.last_snapshot(project), await self.store.floor(project))
-            if not (after < upto <= await self.store.head(project)):
-                await ws.send_json({"t": "err", "m": "rejected snapshot"})
-                return
-            delta = await self.store.snapshot_delta(project, upto, len(data) + len(sig))
-            if await self.policy.may_store(project, delta, conn.code, reserve=True):
-                return  # over a limit: skip compaction; the log stays as it is
-            try:
-                await self.store.snapshot(project, upto, data, sig)
-            finally:
-                self.store.unreserve(project, max(0, delta))
+            after = max(await self.store.last_snapshot(project, c), await self.store.floor(project, c))
+            fits = after < upto <= await self.store.head(project, c)
+            if fits:
+                delta = await self.store.snapshot_delta(project, upto, len(data) + len(sig), c)
+                if await self.policy.may_store(project, delta, conn.code, c):
+                    return  # over a limit: skip compaction; the log stays as it is
+                await self.store.snapshot(project, upto, data, sig, c)
+        if not fits:
+            await ws.send_json({"t": "err", "m": "rejected snapshot"})
+            return
         log.info("compacted %s… up to %d", project[:8], upto)
         # the sender may now delete what the snapshot replaced (changes it kept as uploads)
         await ws.send_json({"t": "snapped", "upto": upto})
@@ -779,8 +773,7 @@ class Relay:
         if not await self._may_add(project):
             await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
             return
-        async with self.store.lock(project):
-            await self.store.set_mode(project, mode == "relay")
+        await self.store.set_mode(project, mode == "relay")
         log.info("project %s… storage mode -> %s", project[:8], mode)
         await self.broadcast(project, {"t": "mode", "m": mode})
 
@@ -815,8 +808,7 @@ class Relay:
         if not await self._may_add(project, logged=True):
             await ws.send_json({"t": "err", "code": "mode-busy", "m": "server busy: try again later"})
             return
-        async with self.store.lock(project):
-            gone = await self.store.delete_project(project, sig, ts)
+        gone = await self.store.delete_project(project, sig, ts)
         log.info("project %s… deleted for everyone by its owner", project[:8])
         room = list(self.rooms.get(project, ()))
         await self.broadcast(project, gone)  # including the owner

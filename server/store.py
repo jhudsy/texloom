@@ -7,14 +7,19 @@ which files are stored (their content is in a file store, files.py), and, for a 
 for everyone, the owner's signed tombstone. The server can read none of the projects' content.
 
 Edits to one project are numbered in the database (`head`, updated and read back in the same
-transaction as the log row), so the numbering stays right with several servers. Within this
-server, `lock(project)` keeps one project's check-then-write steps (is it a replay? may it be
-stored? store it) from interleaving.
+transaction as the log row), so the numbering stays right with several servers. A project's
+check-then-write steps (is it a replay? may it be stored? store it) run in one transaction that
+holds the project (`locked`: a PostgreSQL advisory lock, so servers sharing the database take
+turns; SQLite has one writer anyway). An owner's allowance is checked in that transaction too,
+against what the database says the owner stores, holding the owner, so writes through several
+servers can't together pass it (FUTURE_ARCHITECTURE.md, "Where each piece of state goes").
 
-Some things are also kept in memory, because they're consulted on every message: how much each
-project and owner stores, owners, deletions, last-seen times, storage modes and revocations.
-They're right for one server (an SQLite database allows no more); several at once need them
-shared (see ROADMAP.md).
+Some things are also kept in memory, because they're consulted often: how much each project and
+owner stores, owners, deletions, last-seen times, storage modes and revocations. They follow the
+database once a transaction has committed, and are what's shown (the admin page, "used"); the
+limits that must hold are checked against the database. The server's total is the exception: it
+is checked against this server's count, read again from the database every TOTALS_EVERY seconds,
+so with several servers it can be passed by what they accept in that time.
 """
 
 from __future__ import annotations
@@ -57,6 +62,11 @@ FACTS_KEPT = 20_000  # projects whose deletion and storage mode are kept in memo
 CHANNEL = "texloom_project"  # what servers sharing a database tell each other: "this project changed" (see Store._told)
 RECONCILE_EVERY = 86400  # seconds between recounts of the usage ledger against the stored data (see Store.reconcile)
 REVOKED_KEPT = 10_000  # projects whose revocations are kept in memory
+# An upload's reservation counts from when it's allowed until it's stored, and at most this long
+# (more than an upload may take, endpoints.UPLOAD_TIME), so a server that stops mid-upload leaves
+# nothing counted for good.
+RESERVE_TIME = 900
+TOTALS_EVERY = 60  # seconds between readings of the server's total from the database (see the module docstring)
 ENTRY_BYTES = "octet_length(data) + octet_length(sig)"  # what a log entry stores
 # What projects' data counts for, as (project, bytes) rows to add up: the log, stored files, and
 # remembered edits (GONE_COST each). `where` narrows it, to one project say.
@@ -111,6 +121,15 @@ CREATE INDEX IF NOT EXISTS lists_seen ON lists (seen);
 -- that a server starting, or another server sharing this database, reads it rather than adding up the
 -- log. Only projects with something stored have a row. Store.reconcile checks it against a recount.
 CREATE TABLE IF NOT EXISTS usage (project text PRIMARY KEY, bytes bigint NOT NULL);
+-- Uploads under way (Store.reserve_upload): counted against their project and owner from when they're
+-- allowed until they're stored, so that writes through any server meanwhile see them. Rows a stopped
+-- server leaves behind stop counting at `until` (RESERVE_TIME) and are cleared out.
+CREATE TABLE IF NOT EXISTS reserved (
+  id text PRIMARY KEY, project text NOT NULL, owner text NOT NULL, bytes bigint NOT NULL, until double precision NOT NULL);
+CREATE INDEX IF NOT EXISTS reserved_owner ON reserved (owner);
+CREATE INDEX IF NOT EXISTS reserved_project ON reserved (project);
+-- what an owner stores is added up from its projects (Store.owner_total)
+CREATE INDEX IF NOT EXISTS projects_owner ON projects (owner);
 """
 SCHEMA_POSTGRESQL = """
 -- ciphertext doesn't compress: store it as it is, out of line, without trying
@@ -120,7 +139,7 @@ ALTER TABLE log ALTER COLUMN data SET STORAGE EXTERNAL;
 TABLES = {"log": ("project", "seq"), "head": ("project",), "mode": ("project",), "stored": ("project", "id"),
           "trash": ("project", "id"), "revoked": ("project", "pub"), "projects": ("project",), "gone": ("project", "h"),
           "kept": ("project", "h"), "floor": ("project",), "deleted": ("project",), "clients": ("app", "version"), "lists": ("id",),
-          "usage": ("project",)}
+          "usage": ("project",), "reserved": ("id",)}
 BOOLEANS = frozenset({"snap", "relay"})
 
 
@@ -146,6 +165,29 @@ class Recent:
 
     def drop(self, key: str) -> None:
         self.items.pop(key, None)
+
+
+def key(kind: str, name: str) -> int:
+    """The number a project ("project") or an owner ("owner") is locked by in the database (db.py, xlock)."""
+    return int.from_bytes(hashlib.sha256(f"{kind}:{name}".encode()).digest()[:8], "big", signed=True)
+
+
+class Tx:
+    """A transaction's calls (db.py), and what to do once it has committed: `later` holds functions (or
+    coroutine functions) that bring this server's memory into step with what the transaction wrote, so
+    that a transaction that fails leaves memory as it was."""
+
+    def __init__(self, calls):
+        self._calls = calls
+        self.later: list = []
+
+    def __getattr__(self, name: str):
+        return getattr(self._calls, name)
+
+    async def done(self) -> None:
+        for fn in self.later:
+            if asyncio.iscoroutine(r := fn()):
+                await r
 
 
 class Store:
@@ -175,6 +217,7 @@ class Store:
         self._locks: dict[str, list] = {}  # key -> [lock, users]
         self.node = secrets.token_hex(4)  # this server's name in what it tells the others (it ignores its own)
         self._refreshing: set[asyncio.Task] = set()  # looking again at projects the others changed
+        self._totals: asyncio.Task | None = None  # reading the server's total again (TOTALS_EVERY)
 
     @classmethod
     async def open(cls, url: str, files: Files | None = None, data: Path = Path("data"), serving: bool = False) -> Store:
@@ -219,15 +262,18 @@ class Store:
         await self.files.check()
         log.info("stored files: %s", self.files.name)
         await self.db.listen(CHANNEL, self._heard)
+        self._totals = asyncio.get_running_loop().create_task(self._keep_totals())
         left = await self.db.fetch("SELECT DISTINCT project FROM stored WHERE project IN "
                                      "(SELECT project FROM deleted UNION SELECT project FROM mode WHERE relay)")
         for (project,) in left:
-            await self._drop_files(project)
+            async with self.locked(project) as c:
+                await self._trash_files(project, c)
         self._kick_reaper()
 
     async def close(self) -> None:
-        if self._reaper and not self._reaper.done():
-            self._reaper.cancel()
+        for task in (self._reaper, self._totals):
+            if task and not task.done():
+                task.cancel()
         await self.files.close()
         await self.db.close()
 
@@ -249,37 +295,78 @@ class Store:
                 del self._locks[key]
 
     def lock(self, project: str):
-        """Hold while checking and then changing what's stored for a project, so that another
-        message for it can't change things in between."""
+        """Among this server's tasks, one at a time per project (see `locked`, which holds it)."""
         return self._holding(f"project:{project}")
+
+    @contextlib.asynccontextmanager
+    async def locked(self, project: str):
+        """A transaction holding a project, for checking and then changing what's stored for it, so that
+        nothing else (on this server or another sharing the database) changes it in between:
+        `async with store.locked(project) as c:`, then only `c`'s calls. This server's tasks queue here
+        rather than in the database, each holding a connection. Memory follows once it commits (Tx)."""
+        async with self._holding(f"project:{project}"):
+            async with self.tx() as calls:
+                await calls.xlock(key("project", project))
+                c = Tx(calls)
+                yield c
+            await c.done()
+
+    @contextlib.asynccontextmanager
+    async def owner_locked(self, owner: str):
+        """A transaction holding an owner, for checking its allowance and then storing (project lists).
+        Taken after a project's lock, never before, so two can't wait for each other."""
+        async with self.tx() as calls:
+            await calls.xlock(key("owner", owner))
+            c = Tx(calls)
+            yield c
+        await c.done()
+
+    async def owner_of(self, project: str, c) -> str | None:
+        """Who owns a project, as the database says now (memory: `owner`)."""
+        return await c.fetchval("SELECT owner FROM projects WHERE project=$1", project)
+
+    async def owner_total(self, owner: str, c) -> int:
+        """What an owner stores, as the database says now: its projects, its project lists, and uploads
+        to its projects under way. Exact when `c` holds the owner (Policy.may_store)."""
+        return int(await c.fetchval(
+            "SELECT COALESCE((SELECT SUM(u.bytes) FROM usage u JOIN projects p ON p.project=u.project WHERE p.owner=$1), 0)"
+            " + COALESCE((SELECT SUM(octet_length(data)) FROM lists WHERE owner=$1), 0)"
+            " + COALESCE((SELECT SUM(bytes) FROM reserved WHERE owner=$1 AND until>$2), 0)", owner, time.time()))
+
+    async def project_total(self, project: str, c) -> int:
+        """What a project stores, as the database says now, uploads under way included."""
+        return int(await c.fetchval(
+            "SELECT COALESCE((SELECT bytes FROM usage WHERE project=$1), 0)"
+            " + COALESCE((SELECT SUM(bytes) FROM reserved WHERE project=$1 AND until>$2), 0)", project, time.time()))
 
     # --- registration & accounting -------------------------------------------
     def owner(self, project: str) -> str | None:
         return self.owners.get(project)
 
-    async def register(self, project: str, owner: str, label: str) -> None:
-        # counted against its owner at once, before anything else runs (a write reserved for it
-        # then counts for the owner: see Policy.may_store)
-        was = self.owners.get(project)
-        self._own(project, owner)
-        await self.db.execute("INSERT INTO projects(project, created, owner) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
-                                project, time.time(), owner)
-        # deleted meanwhile (a delete between a request's check and this, or seen by another server
-        # sharing the database): the project stays unregistered
-        if await self.db.execute("DELETE FROM projects WHERE project=$1 AND EXISTS (SELECT 1 FROM deleted WHERE project=$1)", project):
-            if was is not None:
-                self._own(project, was)
-            elif self.owners.pop(project, None) is not None:
-                self.owner_bytes[owner] -= self.usage.get(project, 0)
+    async def register(self, project: str, owner: str, label: str, c: Tx | None = None) -> None:
+        if c is None:
+            async with self.locked(project) as c:
+                return await self.register(project, owner, label, c)
+        await c.execute("INSERT INTO projects(project, created, owner) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+                        project, time.time(), owner)
+        # deleted meanwhile (a delete between a request's check and this): the project stays unregistered
+        if await c.execute("DELETE FROM projects WHERE project=$1 AND EXISTS (SELECT 1 FROM deleted WHERE project=$1)", project):
             return
-        log.info("registered project %s… (%s)", project[:8], label)
+        owner = await self.owner_of(project, c)  # (registered already, by another server, if it was)
 
-    async def claim(self, project: str, owner: str) -> None:
-        """Move a project created without a code to `owner` (a private server's re-registration)."""
-        await self.db.execute("UPDATE projects SET owner=$1 WHERE project=$2", owner, project)
-        self._own(project, owner)
-        log.info("project %s… now belongs to a creation code", project[:8])
-        await self._told(project)
+        def registered() -> None:
+            self._own(project, owner)
+            log.info("registered project %s… (%s)", project[:8], label)
+        c.later.append(registered)
+
+    async def claim(self, project: str, owner: str, c: Tx | None = None) -> None:
+        """Move a project to `owner` (a private server's re-registration, or its owner's `move`)."""
+        if c is None:
+            async with self.locked(project) as c:
+                return await self.claim(project, owner, c)
+        await c.execute("UPDATE projects SET owner=$1 WHERE project=$2", owner, project)
+        c.later.append(lambda: self._own(project, owner))
+        c.later.append(lambda: self._told(project))
 
     def _own(self, project: str, owner: str) -> None:
         n = self.usage.get(project, 0)
@@ -401,12 +488,12 @@ class Store:
         Sequence numbers keep counting (so old entries can't be replayed into the gap);
         `floor` tells clients that everything up to it is gone."""
         freed = self.usage.get(project, 0)
-        async with self.lock(project), self.tx() as c:
+        async with self.locked(project) as c:
             await self._forget_log(c, project)
             await c.execute("UPDATE projects SET evicted=$1 WHERE project=$2", time.time(), project)
-        await self._drop_files(project)
-        self.evicted.add(project)
-        await self._told(project)
+            await self._trash_files(project, c)
+            c.later.append(lambda: self.evicted.add(project))
+            c.later.append(lambda: self._told(project))
         return freed - self.usage.get(project, 0)  # (what's remembered of it stays)
 
     @staticmethod
@@ -438,19 +525,16 @@ class Store:
         """Projects registered to this owner that have something stored."""
         return [p for p, o in self.owners.items() if o == owner and self.usage.get(p, 0) > 0 and p not in self.evicted]
 
-    async def _recount(self, project: str) -> None:
-        """Add up what a project's data counts for, from the tables: the ledger is set to it, and this server's
-        count (which also holds uploads under way, as `pending`) follows."""
-        n = int(await self.db.fetchval(f"SELECT COALESCE(SUM(n), 0) FROM ({USAGE.format(where='WHERE project=$1')}) u", project))
-        await self._ledger(project, n)
-        self._grew(project, n + self.pending.get(project, 0) - self.usage[project])
-
-    async def _ledger(self, project: str, n: int) -> None:
+    async def _recount(self, project: str, c: Tx) -> None:
+        """In `c`, holding the project: add up what its data counts for, from the tables. The ledger is set to
+        it, and this server's count (which also holds its uploads under way, as `pending`) follows."""
+        n = int(await c.fetchval(f"SELECT COALESCE(SUM(n), 0) FROM ({USAGE.format(where='WHERE project=$1')}) u", project))
         if n:
-            await self.db.execute("INSERT INTO usage(project, bytes) VALUES ($1,$2) "
-                                  "ON CONFLICT (project) DO UPDATE SET bytes = excluded.bytes", project, n)
+            await c.execute("INSERT INTO usage(project, bytes) VALUES ($1,$2) "
+                            "ON CONFLICT (project) DO UPDATE SET bytes = excluded.bytes", project, n)
         else:
-            await self.db.execute("DELETE FROM usage WHERE project=$1", project)
+            await c.execute("DELETE FROM usage WHERE project=$1", project)
+        c.later.append(lambda: self._grew(project, n + self.pending.get(project, 0) - self.usage[project]))
 
     async def reconcile(self) -> int:
         """Check the usage ledger (and this server's counts) against the stored data, project by project,
@@ -465,12 +549,12 @@ class Store:
         for project in sorted(set(truth) | set(ledger)):
             if truth.get(project, 0) == ledger.get(project, 0) and truth.get(project, 0) == self.usage.get(project, 0) - self.pending.get(project, 0):
                 continue
-            async with self.lock(project):
-                now = int(await self.db.fetchval(f"SELECT COALESCE(SUM(n), 0) FROM ({USAGE.format(where='WHERE project=$1')}) u", project))
-                led = int(await self.db.fetchval("SELECT bytes FROM usage WHERE project=$1", project) or 0)
+            async with self.locked(project) as c:
+                now = int(await c.fetchval(f"SELECT COALESCE(SUM(n), 0) FROM ({USAGE.format(where='WHERE project=$1')}) u", project))
+                led = int(await c.fetchval("SELECT bytes FROM usage WHERE project=$1", project) or 0)
                 mem = self.usage.get(project, 0) - self.pending.get(project, 0)
                 if now != led or now != mem:
-                    await self._recount(project)
+                    await self._recount(project, c)
                     wrong += 1
                     log.warning("usage of project %s… was %s in the ledger and %s counted here, but is %s: put right",
                                 project[:8], led, mem, now)
@@ -479,32 +563,52 @@ class Store:
     def free_disk(self) -> int:
         return shutil.disk_usage(self.dir).free
 
+    async def _keep_totals(self) -> None:
+        while True:
+            await asyncio.sleep(TOTALS_EVERY)
+            try:
+                await self.read_total()
+            except Exception:  # (a database away for a while: try again next time)
+                log.warning("couldn't read the server's total again", exc_info=True)
+
+    async def read_total(self) -> None:
+        """Read the server's total from the database (what every server sharing it stores), and clear out
+        reservations that have run out."""
+        now = time.time()
+        await self.db.execute("DELETE FROM reserved WHERE until<=$1", now)
+        self.total = int(await self.db.fetchval(
+            "SELECT COALESCE((SELECT SUM(bytes) FROM usage), 0) + COALESCE((SELECT SUM(octet_length(data)) FROM lists), 0)"
+            " + COALESCE((SELECT SUM(bytes) FROM reserved WHERE until>$1), 0)", now))
+
     # --- log ---------------------------------------------------------------------
-    async def head(self, project: str) -> int:
-        return await self.db.fetchval("SELECT seq FROM head WHERE project=$1", project) or 0
+    async def head(self, project: str, c=None) -> int:
+        return await (c or self.db).fetchval("SELECT seq FROM head WHERE project=$1", project) or 0
 
-    async def floor(self, project: str) -> int:
+    async def floor(self, project: str, c=None) -> int:
         """Entries up to this sequence number were dropped by eviction."""
-        return await self.db.fetchval("SELECT seq FROM floor WHERE project=$1", project) or 0
+        return await (c or self.db).fetchval("SELECT seq FROM floor WHERE project=$1", project) or 0
 
-    async def duplicate(self, project: str, data: bytes) -> int | None:
-        """A replay of an update already stored (its seq), or already compacted away (0)."""
+    async def duplicate(self, project: str, data: bytes, c=None) -> int | None:
+        """A replay of an update already stored (its seq), or already compacted away (0). Exact in a
+        transaction holding the project (`locked`), which then stores it or not."""
         h = hashlib.sha256(data).digest()
-        seq = await self.db.fetchval(
+        seq = await (c or self.db).fetchval(
             "SELECT COALESCE((SELECT seq FROM log WHERE project=$1 AND h=$2 LIMIT 1),"
             " (SELECT 0 FROM gone WHERE project=$1 AND h=$2), (SELECT 0 FROM kept WHERE project=$1 AND h=$2))", project, h)
         return None if seq is None else int(seq)
 
-    async def append(self, project: str, data: bytes, sig: bytes) -> int:
-        async with self.tx() as c:
-            seq = await c.fetchval("INSERT INTO head(project, seq) VALUES ($1, 1) "
-                                   "ON CONFLICT (project) DO UPDATE SET seq = head.seq + 1 RETURNING seq", project)
-            await c.execute("INSERT INTO log(project, seq, data, sig, h) VALUES ($1,$2,$3,$4,$5)",
-                            project, seq, data, sig, hashlib.sha256(data).digest())
-            await c.execute("INSERT INTO usage(project, bytes) VALUES ($1,$2) "
-                            "ON CONFLICT (project) DO UPDATE SET bytes = usage.bytes + excluded.bytes", project, len(data) + len(sig))
-        self._grew(project, len(data) + len(sig))
-        self.evicted.discard(project)
+    async def append(self, project: str, data: bytes, sig: bytes, c: Tx | None = None) -> int:
+        if c is None:
+            async with self.locked(project) as c:
+                return await self.append(project, data, sig, c)
+        seq = await c.fetchval("INSERT INTO head(project, seq) VALUES ($1, 1) "
+                               "ON CONFLICT (project) DO UPDATE SET seq = head.seq + 1 RETURNING seq", project)
+        await c.execute("INSERT INTO log(project, seq, data, sig, h) VALUES ($1,$2,$3,$4,$5)",
+                        project, seq, data, sig, hashlib.sha256(data).digest())
+        await c.execute("INSERT INTO usage(project, bytes) VALUES ($1,$2) "
+                        "ON CONFLICT (project) DO UPDATE SET bytes = usage.bytes + excluded.bytes", project, len(data) + len(sig))
+        c.later.append(lambda: self._grew(project, len(data) + len(sig)))
+        c.later.append(lambda: self.evicted.discard(project))
         return int(seq)
 
     async def same_entry(self, project: str, seq: int, h: bytes) -> bool | None:
@@ -517,30 +621,32 @@ class Store:
             return None
         return any(bytes(r["h"]) == h for r in rows)
 
-    async def last_snapshot(self, project: str) -> int:
-        return await self.db.fetchval("SELECT MAX(seq) FROM log WHERE project=$1 AND snap", project) or 0
+    async def last_snapshot(self, project: str, c=None) -> int:
+        return await (c or self.db).fetchval("SELECT MAX(seq) FROM log WHERE project=$1 AND snap", project) or 0
 
-    async def snapshot_delta(self, project: str, upto: int, size: int) -> int:
+    async def snapshot_delta(self, project: str, upto: int, size: int, c=None) -> int:
         """Bytes a snapshot would add (negative when it frees space)."""
-        r = await self.db.fetchrow(
+        r = await (c or self.db).fetchrow(
             f"SELECT COALESCE(SUM({ENTRY_BYTES}), 0) AS freed, COUNT(*) FILTER (WHERE NOT snap) AS remembered, "
             "COUNT(*) FILTER (WHERE NOT snap AND octet_length(data)>=$4) AS kept, "
             "(SELECT COUNT(*) FROM gone WHERE project=$1 AND seq<=$3) AS forgotten FROM log WHERE project=$1 AND seq<=$2",
             project, upto, upto - GONE_KEEP, KEEP_BIG)
         return size - int(r["freed"]) + (r["remembered"] + r["kept"] - r["forgotten"]) * GONE_COST
 
-    async def snapshot(self, project: str, upto: int, data: bytes, sig: bytes) -> None:
-        async with self.tx() as c:
-            # remember what the snapshot replaces, so those updates can't be stored again
-            await c.execute("INSERT INTO gone(project, h, seq) SELECT project, h, seq FROM log "
-                            "WHERE project=$1 AND seq<=$2 AND NOT snap ON CONFLICT DO NOTHING", project, upto)
-            await c.execute("INSERT INTO kept(project, h) SELECT project, h FROM log WHERE project=$1 AND seq<=$2 AND NOT snap "
-                            "AND octet_length(data)>=$3 ON CONFLICT DO NOTHING", project, upto, KEEP_BIG)
-            await c.execute("DELETE FROM gone WHERE project=$1 AND seq<=$2", project, upto - GONE_KEEP)
-            await c.execute("DELETE FROM log WHERE project=$1 AND seq<=$2", project, upto)
-            await c.execute("INSERT INTO log(project, seq, snap, data, sig, h) VALUES ($1,$2,true,$3,$4,$5)",
-                            project, upto, data, sig, hashlib.sha256(data).digest())
-        await self._recount(project)
+    async def snapshot(self, project: str, upto: int, data: bytes, sig: bytes, c: Tx | None = None) -> None:
+        if c is None:
+            async with self.locked(project) as c:
+                return await self.snapshot(project, upto, data, sig, c)
+        # remember what the snapshot replaces, so those updates can't be stored again
+        await c.execute("INSERT INTO gone(project, h, seq) SELECT project, h, seq FROM log "
+                        "WHERE project=$1 AND seq<=$2 AND NOT snap ON CONFLICT DO NOTHING", project, upto)
+        await c.execute("INSERT INTO kept(project, h) SELECT project, h FROM log WHERE project=$1 AND seq<=$2 AND NOT snap "
+                        "AND octet_length(data)>=$3 ON CONFLICT DO NOTHING", project, upto, KEEP_BIG)
+        await c.execute("DELETE FROM gone WHERE project=$1 AND seq<=$2", project, upto - GONE_KEEP)
+        await c.execute("DELETE FROM log WHERE project=$1 AND seq<=$2", project, upto)
+        await c.execute("INSERT INTO log(project, seq, snap, data, sig, h) VALUES ($1,$2,true,$3,$4,$5)",
+                        project, upto, data, sig, hashlib.sha256(data).digest())
+        await self._recount(project, c)
 
     async def catch_up_start(self, project: str, since: int) -> int:
         """Where a catch-up from `since` begins: before the last snapshot, if `since` is behind it
@@ -631,55 +737,58 @@ class Store:
     async def deleted_count(self) -> int:
         return await self.db.fetchval("SELECT COUNT(*) FROM deleted")
 
-    async def set_mode(self, project: str, relay_only: bool) -> None:
-        async with self.tx() as c:
-            await c.execute("INSERT INTO mode(project, relay) VALUES ($1,$2) "
-                            "ON CONFLICT (project) DO UPDATE SET relay=excluded.relay", project, relay_only)
-            if relay_only:  # forget everything we stored for this project, as eviction does
-                await self._forget_log(c, project)
-        self._facts.put(project, ((await self._fact(project))[0], relay_only))
-        if relay_only:
-            self.evicted.add(project)
-        if relay_only:
-            await self._drop_files(project)
+    async def set_mode(self, project: str, relay_only: bool, c: Tx | None = None) -> None:
+        if c is None:
+            async with self.locked(project) as c:
+                return await self.set_mode(project, relay_only, c)
+        await c.execute("INSERT INTO mode(project, relay) VALUES ($1,$2) "
+                        "ON CONFLICT (project) DO UPDATE SET relay=excluded.relay", project, relay_only)
+        if relay_only:  # forget everything we stored for this project, as eviction does
+            await self._forget_log(c, project)
+            await self._trash_files(project, c)
+            c.later.append(lambda: self.evicted.add(project))
         else:
-            await self._recount(project)
-        await self._told(project)
+            await self._recount(project, c)
+        c.later.append(lambda: self._facts.drop(project))  # (read again when asked)
+        c.later.append(lambda: self._told(project))
 
     # --- deleted for everyone ---------------------------------------------------------
     @staticmethod
     def _deleted_msg(at: float, ts: int, sig: bytes) -> dict:
         return {"t": "deleted", "at": int(at * 1000), "ts": ts, "s": b64e(sig)}
 
-    async def delete_project(self, project: str, sig: bytes, ts: int) -> dict:
+    async def delete_project(self, project: str, sig: bytes, ts: int, c: Tx | None = None) -> dict:
         """The owner deleted the project for everyone: forget what's stored and keep, for good, the
         fact (the owner's signature proves it), so that no copy can bring it back here."""
-        at = time.time()
-        async with self.tx() as c:
-            await c.execute("INSERT INTO deleted(project, at, sig, ts) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", project, at, sig, ts)
-            # the tombstone above is all that's kept: its registration (owner, dates) goes too
-            for table in ("log", "gone", "kept", "head", "floor", "mode", "projects", "usage"):
-                await c.execute(f"DELETE FROM {table} WHERE project=$1", project)
-        self._facts.drop(project)
-        msg = await self.deleted(project)  # the first deletion's, if there were two
-        assert msg is not None
-        await self._drop_files(project)
-        self.owners.pop(project, None)  # its bytes came off its owner in _recount
-        self.usage.pop(project, None)
-        self.seen.pop(project, None)
-        self.evicted.discard(project)
-        await self._told(project)
-        return msg
+        if c is None:
+            async with self.locked(project) as c:
+                return await self.delete_project(project, sig, ts, c)
+        await c.execute("INSERT INTO deleted(project, at, sig, ts) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
+                        project, time.time(), sig, ts)
+        # the tombstone above is all that's kept: its registration (owner, dates) goes too
+        for table in ("log", "gone", "kept", "head", "floor", "mode", "projects", "usage", "reserved"):
+            await c.execute(f"DELETE FROM {table} WHERE project=$1", project)
+        await self._trash_files(project, c)
+        r = await c.fetchrow("SELECT at, ts, sig FROM deleted WHERE project=$1", project)  # the first deletion's, if there were two
+
+        def forget() -> None:
+            self._facts.drop(project)
+            self.owners.pop(project, None)  # its bytes came off its owner in _recount (before this)
+            self.usage.pop(project, None)
+            self.seen.pop(project, None)
+            self.evicted.discard(project)
+        c.later.append(forget)
+        c.later.append(lambda: self._told(project))
+        return self._deleted_msg(r["at"], r["ts"], bytes(r["sig"]))
 
     # --- stored files ---------------------------------------------------------------
-    async def _drop_files(self, project: str) -> None:
-        """Erase a project's stored files: at once they no longer count or can be fetched, and their
-        content is erased in the background (see _reap)."""
-        async with self.tx() as c:
-            await c.execute("INSERT INTO trash(project, id) SELECT project, id FROM stored WHERE project=$1 ON CONFLICT DO NOTHING", project)
-            await c.execute("DELETE FROM stored WHERE project=$1", project)
-        await self._recount(project)
-        self._kick_reaper()
+    async def _trash_files(self, project: str, c: Tx) -> None:
+        """In `c`, holding the project: erase its stored files. Once it commits they no longer count or can be
+        fetched, and their content is erased in the background (see _reap)."""
+        await c.execute("INSERT INTO trash(project, id) SELECT project, id FROM stored WHERE project=$1 ON CONFLICT DO NOTHING", project)
+        await c.execute("DELETE FROM stored WHERE project=$1", project)
+        await self._recount(project, c)
+        c.later.append(self._kick_reaper)
 
     def _kick_reaper(self) -> None:
         if self._reaper is None or self._reaper.done():
@@ -709,34 +818,36 @@ class Store:
             await self._reaper
         await self._reap()
 
-    async def blob_size(self, project: str, bid: str) -> int | None:
+    async def blob_size(self, project: str, bid: str, c=None) -> int | None:
         """A stored file's size; None if it isn't stored (or is in the trash)."""
-        n = await self.db.fetchval("SELECT size FROM stored WHERE project=$1 AND id=$2", project, bid)
+        n = await (c or self.db).fetchval("SELECT size FROM stored WHERE project=$1 AND id=$2", project, bid)
         return None if n is None else int(n)
 
-    async def has_blob(self, project: str, bid: str) -> bool:
-        return await self.blob_size(project, bid) is not None
+    async def has_blob(self, project: str, bid: str, c=None) -> bool:
+        return await self.blob_size(project, bid, c) is not None
 
     def reserve(self, project: str, n: int) -> None:
-        """Count a write from the moment it's accepted, so writes under way at once can't together
-        pass a limit (put_blob takes the reservation back when it ends; others call unreserve)."""
+        """Count an upload in this server's memory while it's under way (`pending`; put_blob takes it back)."""
         self.pending[project] += n
         self._grew(project, n)
 
-    def unreserve(self, project: str, n: int) -> None:
-        """Take back a reservation (the write is now counted as stored, or didn't happen)."""
-        if not n:
-            return
-        self.pending[project] -= n
-        if not self.pending[project]:
-            del self.pending[project]
-        self._grew(project, -n)
+    async def reserve_upload(self, project: str, n: int, c: Tx) -> str:
+        """In `c`, holding the project, once the upload is allowed (Policy.may_store): count it against the
+        project and its owner until put_blob, given the returned id, has stored it (or RESERVE_TIME has passed),
+        so that writes through any server meanwhile see it."""
+        rid = secrets.token_hex(8)
+        owner = await self.owner_of(project, c) or "default"
+        await c.execute("INSERT INTO reserved(id, project, owner, bytes, until) VALUES ($1,$2,$3,$4,$5)",
+                        rid, project, owner, n, time.time() + RESERVE_TIME)
+        c.later.append(lambda: self.reserve(project, n))
+        return rid
 
-    async def put_blob(self, project: str, bid: str, data: bytes | memoryview, kind: str = "file", reserved: bool = False) -> bool:
-        """Store a file's content (counted from the start: see reserve). False if it was stored
-        already. FilesError if the file store failed."""
+    async def put_blob(self, project: str, bid: str, data: bytes | memoryview, kind: str = "file",
+                       reservation: str | None = None) -> bool:
+        """Store a file's content (counted from the start: with a `reservation` (reserve_upload), from when it
+        was allowed). False if it was stored already. FilesError if the file store failed."""
         n = len(data)
-        if not reserved:
+        if reservation is None:
             self.reserve(project, n)
         key = f"{project}/{bid}"
         try:
@@ -746,31 +857,34 @@ class Store:
                         await self.mark_file(project, bid)
                     return False
                 await self.files.put(key, data)
-                async with self.tx() as c:
+                async with self.locked(project) as c:
                     await c.execute("INSERT INTO stored(project, id, size, kind) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
                                     project, bid, n, kind)
                     await c.execute("DELETE FROM trash WHERE project=$1 AND id=$2", project, bid)  # not to be erased now
-                self.evicted.discard(project)
+                    c.later.append(lambda: self.evicted.discard(project))
                 return True
         finally:
             self.pending[project] -= n
             if not self.pending[project]:
                 del self.pending[project]
-            await self._recount(project)  # the stored size instead of the reservation (or nothing)
+            # the stored size instead of the reservation (or nothing), both at once
+            async with self.locked(project) as c:
+                if reservation is not None:
+                    await c.execute("DELETE FROM reserved WHERE id=$1", reservation)
+                await self._recount(project, c)
 
-    async def mark_file(self, project: str, bid: str) -> None:
+    async def mark_file(self, project: str, bid: str, c=None) -> None:
         """Content uploaded as a project file is a file, even if it was first stored as output."""
-        await self.db.execute("UPDATE stored SET kind='file' WHERE project=$1 AND id=$2 AND kind<>'file'", project, bid)
+        await (c or self.db).execute("UPDATE stored SET kind='file' WHERE project=$1 AND id=$2 AND kind<>'file'", project, bid)
 
     async def delete_blob(self, project: str, bid: str, any_kind: bool) -> bool:
-        async with self.tx() as c:
+        async with self.locked(project) as c:
             n = await c.execute("DELETE FROM stored WHERE project=$1 AND id=$2" + ("" if any_kind else " AND kind='output'"),
                                 project, bid)
             if n:
                 await c.execute("INSERT INTO trash(project, id) VALUES ($1,$2) ON CONFLICT DO NOTHING", project, bid)
-        if n:
-            await self._recount(project)
-            self._kick_reaper()
+                await self._recount(project, c)
+                c.later.append(self._kick_reaper)
         return bool(n)
 
     def read_blob(self, project: str, bid: str):
