@@ -65,6 +65,8 @@ jobs:
         run: uv run python scripts/check_rebuild_standby.py
       - name: "Automatic failover between two real servers: a lost primary, one cut off from the bucket (throwaway PostgreSQL, a stand-in bucket)"
         run: uv run --extra server python scripts/check_failover.py
+      - name: "The bus's contract: in-process, and a real Valkey (Docker) as a user allowed only what the relays send"
+        run: uv run --extra server python scripts/check_bus.py --valkey
       - name: What an outsider could do to the server (revocations off the budget, TeX Live paths; security review)
         run: uv run --extra server python scripts/check_server_abuse.py
       - name: Moving a project to another creation code (a real server)

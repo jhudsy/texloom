@@ -253,7 +253,10 @@ doing whatever happens later.
    in the sync protocol (DESIGN.md), checked by `scripts/check_keepalive.py`.
 4. **Connection ids that stay unique** across relays.
 5. **The bus and soft-state interfaces,** with in-process implementations. All passing on of messages goes
-   through them, even on one machine.
+   through them, even on one machine. **The contract and both implementations are built** (`server/bus.py`:
+   `MemoryBus`, and `RespBus`, the relay's own Redis-protocol client, so that every break is seen), checked by
+   `scripts/check_bus.py` against both, the Valkey one in Docker as a user allowed only `bus.COMMANDS`. The
+   relay doesn't use it yet.
 6. **Gap tracking in the relay,** filling from the database, the periodic head check, and `resync`/`recheck`
    (with closing for older apps).
 7. **The Redis implementations:** relay heartbeats, the connection hashes, the per-relay channels, and

@@ -43,6 +43,10 @@ STATE = {
     "Lists.*": "setting", "Admin.*": "setting", "CodeBook.*": "setting",
     "Database.*": "setting", "PostgreSQL.*": "setting", "SQLite.*": "setting", "_PgCalls.*": "setting",
     "_SqliteCalls.*": "setting", "FolderFiles.*": "setting", "S3Files.*": "setting",
+    # the bus (bus.py): connections to it, its subscriptions (this relay's), and the in-process one's state,
+    # which with several relays is the Redis server's
+    "Bus.*": "setting", "RespBus.*": "per-server", "_Conn.*": "per-server", "MemoryBus.*": "per-server",
+    "Hub.*": "per-server",
     # connections on this relay
     "Relay.rooms": "connection", "Relay.conns": "connection", "Relay._next_id": "connection",
     "Conn.*": "connection", "Metered.*": "connection",
