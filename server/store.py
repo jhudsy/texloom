@@ -34,6 +34,7 @@ import secrets
 import shutil
 import time
 from collections import OrderedDict, defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 from texloom.crypto import b64e, canonical_pub
@@ -217,6 +218,7 @@ class Store:
         self._locks: dict[str, list] = {}  # key -> [lock, users]
         self.node = secrets.token_hex(4)  # this server's name in what it tells the others (it ignores its own)
         self._refreshing: set[asyncio.Task] = set()  # looking again at projects the others changed
+        self.on_back: Callable[[], None] = lambda: None  # told when the database is back after its connection was lost
         self._totals: asyncio.Task | None = None  # reading the server's total again (TOTALS_EVERY)
 
     @classmethod
@@ -402,6 +404,7 @@ class Store:
                 return  # our own
             work = self.refresh_project(project)
         else:
+            self.on_back()  # (the relay checks whether the database failed over meanwhile)
             work = self.refresh_all()
         task = asyncio.get_running_loop().create_task(work)
         self._refreshing.add(task)

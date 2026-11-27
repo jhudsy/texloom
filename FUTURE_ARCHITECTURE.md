@@ -300,7 +300,12 @@ doing whatever happens later.
    after it shows, the heads of every stored project open here are read at once every minute (every second
    while the bus is away), and a break in the bus is followed by a head check and `resync` for sync-only
    projects. A gap that was compacted meanwhile can't be passed on as changes: its apps are asked to `recheck`.
-   What a database failover needs (Decided, below) is next.
+   **What a database failover needs is built** (Decided, below): a relay reads the timeline in every store
+   transaction, at every head check (every second after the database was unavailable) and as soon as the store's
+   listener is back; a later one means a failover (`Relay._failover`): every connection here is asked to recheck
+   at once, tracking starts afresh from the new heads, and a change stored before and not yet acknowledged is
+   stored again first. Changes on the bus carry their timeline. Checked with a real standby promoted
+   (`scripts/check_relays_failover.py`).
    **The messages are built:** both apps say `rs: 1` in their hello and answer `resync` (their state vector)
    and `recheck` (their hello again); `Relay.ask` sends them, spread over a few seconds, and closes apps that
    don't say `rs` (`scripts/check_resync.py`). What calls `ask`, and gap tracking, come with the bus. The apps'
@@ -351,6 +356,9 @@ doing whatever happens later.
   its `upto` for a number from an older timeline (it now belongs to another change), and one that hears of
   a newer timeline this way deals with the failover (recheck, storing again, `upto` from the new head)
   before passing anything on.
+- **The timeline is read from the WAL file being written** (`pg_walfile_name(pg_current_wal_lsn())`, its first
+  8 hex digits), not `pg_control_checkpoint()`: that one changes only at the next checkpoint, which the lab saw
+  lag a promotion by up to 2 s while writes already went to the new primary. Any user may read it.
 - **Telling a database failover from a blip** uses PostgreSQL's own record of promotions. Health checks
   answer "is this the primary now?": `target_session_attrs=primary` in the URL makes the driver connect only
   to the primary, `SELECT pg_is_in_recovery()` answers it for a connection, and Patroni serves the same as

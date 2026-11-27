@@ -254,6 +254,12 @@ class _PgCalls:
         servers sharing this database take turns at it."""
         await self._on.execute("SELECT pg_advisory_xact_lock($1)", key)
 
+    async def timeline(self) -> int:
+        """The database's timeline, which goes up by one at every promotion of a standby (a failover). Read from the
+        name of the WAL file being written, which follows a promotion at once: pg_control_checkpoint()'s lags it
+        until the next checkpoint (the lab saw 2 s, writes already going to the new primary). Any user may read it."""
+        return int(await self._on.fetchval("SELECT ('x' || substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8))::bit(32)::int"))
+
 
 class PostgreSQL(_PgCalls, Database):
     kind = "postgresql"
@@ -424,6 +430,10 @@ class _SqliteCalls:
 
     async def xlock(self, key: int) -> None:
         """Nothing to do: a transaction holds the whole database (BEGIN IMMEDIATE), and one server at most uses it."""
+
+    async def timeline(self) -> int:
+        """Always 1: SQLite has no standby to fail over to."""
+        return 1
 
 
 class SQLite(Database):

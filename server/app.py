@@ -113,6 +113,7 @@ def make_app(s: Settings) -> web.Application:
                 raise SystemExit(f"another server with no bus is using {redact(s.database)}: two servers sharing a "
                                  "database must both have the same `bus` (a Redis-compatible server)")
         policy.attach(store)
+        store.on_back = relay.db_back
         await store.start()
         opened.append(store)
 

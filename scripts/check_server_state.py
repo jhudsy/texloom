@@ -52,6 +52,9 @@ STATE = {
     "Relay._beating": "per-server", "Relay._gone": "per-server", "Relay._trouble_at": "per-server",
     # the changes passed on to this relay's connections, per stored project open here (gap tracking), and the head check
     "Relay.tracks": "connection", "Track.*": "connection", "Relay._checking": "per-server",
+    # the database's timeline as this relay last saw it, and whether it was unavailable lately (a failover); the store's
+    # callback to the relay when its connection to the database is back
+    "Relay.timeline": "per-server", "Relay._db_trouble": "per-server", "Store.on_back": "setting",
     # connections on this relay
     "Relay.rooms": "connection", "Relay.conns": "connection", "Relay._next_id": "connection",
     "Conn.*": "connection", "Metered.*": "connection",

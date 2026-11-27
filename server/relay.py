@@ -289,6 +289,8 @@ class Relay:
         self._beating: asyncio.Task | None = None  # the heartbeat (_beat)
         self._trouble_at = 0.0  # when trouble with the bus was last logged (_bus_trouble)
         self.tracks: dict[str, Track] = {}  # per stored project open here: the changes passed on to its connections
+        self.timeline = 0  # the database's timeline, as this relay last saw it (0: not read yet); see _failover
+        self._db_trouble = False  # the database was unavailable lately: the head check looks every second until it's back
         self._checking: asyncio.Task | None = None  # the periodic head check (_check_heads)
 
     @property
@@ -396,7 +398,9 @@ class Relay:
 
     async def try_again(self, ws: web.WebSocketResponse) -> None:
         """The database is unavailable just now: close the connection saying so (1013, "try again later"). Every app
-        connects again after a close, with a growing wait, and sends again what wasn't acknowledged."""
+        connects again after a close, with a growing wait, and sends again what wasn't acknowledged. Meanwhile the head
+        check reads the database's timeline every second, to notice a failover as soon as it answers."""
+        self._db_trouble = True
         try:
             await asyncio.wait_for(ws.close(code=1013, message=b"database unavailable: try again"), 5)
         except (asyncio.TimeoutError, ConnectionError, RuntimeError):
@@ -476,7 +480,7 @@ class Relay:
             if n > MiB:
                 self.cut_off(ws, "held too much unsent data")
 
-    async def broadcast(self, project: str, msg: dict, exclude=None) -> None:
+    async def broadcast(self, project: str, msg: dict, exclude=None, tl: int = 0) -> None:
         """To everyone connected to the project, here and on the other relays (but `exclude`), who must all have it:
         one not reading is cut off rather than skipped."""
         text = json.dumps(msg)
@@ -485,7 +489,8 @@ class Relay:
             self.make_room(len(text) * len(peers))
         if peers:
             await asyncio.gather(*(self.send(ws, text) for ws in peers))
-        await self.pass_on(project, text, msg.get("t", ""), "s", q=msg.get("q", 0) if msg.get("t") == "up" else 0)
+        q = msg.get("q", 0) if msg.get("t") == "up" else 0
+        await self.pass_on(project, text, msg.get("t", ""), "s", q=q, tl=(tl or self.timeline) if q else 0)
 
     # --- the bus ------------------------------------------------------------------------
     async def join_bus(self, bus: Bus) -> None:
@@ -520,8 +525,10 @@ class Relay:
     # "s" to everyone, cutting off one that isn't reading; "u" unsigned, skipped for a peer that is behind; "a"
     # presence, likewise with less room (see send and send_unsigned).
     async def pass_on(self, project: str, text: str, t: str, kind: str, to: int | None = None, relay: int | None = None,
-                      q: int = 0) -> None:
-        head = {"r": self.number, "p": project, "t": t, "k": kind, **({"to": to} if to is not None else {}), **({"q": q} if q else {})}
+                      q: int = 0, tl: int = 0) -> None:
+        """`q`, `tl`: a stored change's number, and the database's timeline that numbered it."""
+        head = {"r": self.number, "p": project, "t": t, "k": kind, **({"to": to} if to is not None else {}),
+                **({"q": q, "tl": tl} if q else {})}
         try:
             await self.bus.publish(f"r:{relay}" if relay is not None else f"p:{project}",
                                    json.dumps(head, separators=(",", ":")).encode() + b"\n" + text.encode())
@@ -570,8 +577,13 @@ class Relay:
         if not peers:
             return
         t, kind = h.get("t"), h.get("k")
-        if t == "up" and h.get("q") and not self._new(project, h["q"]):
-            return  # passed on here already (through the bus, or read from the database)
+        if t == "up" and h.get("q"):
+            tl = h.get("tl", 0)
+            if tl > self.timeline:  # numbered after a failover this relay hasn't noticed: it does first (models/relays)
+                await self._failover(tl)
+            if tl == self.timeline and not self._new(project, h["q"]):
+                return  # passed on here already (through the bus, or read from the database)
+            # (numbered by an older timeline: passed on, as any copy may be, but its number now means another change)
         if t == "moved":  # what's stored and the limits changed: each connection told what it may see (see _move)
             for ws in peers:
                 if (c := self.conns.get(ws)) is not None:
@@ -745,15 +757,17 @@ class Relay:
     async def _check_heads(self, once: bool = False) -> None:
         """The heads of every stored project open here, read at once: any past what this relay has passed on is
         filled. Every HEAD_CHECK seconds, every HEAD_CHECK_AWAY while the bus is away; or `once`."""
-        last = time.monotonic()
+        last = 0.0  # (the first check at once: it reads the database's timeline)
         while True:
             if not once:
                 await asyncio.sleep(HEAD_CHECK_AWAY)  # (looking every second whether the bus is away, or it's time)
-                if self.bus.connected and time.monotonic() - last < HEAD_CHECK:
+                if self.bus.connected and not self._db_trouble and time.monotonic() - last < HEAD_CHECK:
                     continue
                 last = time.monotonic()
             projects = [p for p in self.tracks if p in self.rooms]
             try:
+                await self._failover(await self.store.db.timeline())
+                self._db_trouble = False
                 heads = await self.store.heads(projects) if projects else {}
                 for project, head in heads.items():
                     t = self.tracks.get(project)
@@ -762,8 +776,33 @@ class Relay:
             except Exception as e:
                 if not unavailable(e):
                     log.exception("checking the heads of open projects")
+                self._db_trouble = True
             if once:
                 return
+
+    async def _failover(self, tl: int) -> None:
+        """The database's timeline is `tl`: if it went up, the database failed over, and may have lost changes it had
+        acknowledged, and numbers changes again from where its new primary's log ends. So this relay's connections are
+        asked to recheck (their hello's "last" finds what's lost, and they send it again), and what it tracks of each
+        project starts afresh from the new heads. Changes it stored before and hasn't acknowledged are stored again
+        (_up). Decided before any wait, so that it happens once."""
+        if tl <= self.timeline:
+            return
+        before, self.timeline = self.timeline, tl
+        if not before:
+            return  # (the first reading)
+        log.warning("the database failed over (timeline %d -> %d): asking every connection here to recheck", before, tl)
+        # recheck first, at once, before this relay passes anything else on (models/relays: no-timeline-on-bus)
+        await self.ask("recheck", spread=0)
+        heads = await self.store.heads(list(self.tracks))
+        for project, t in self.tracks.items():
+            t.upto, t.above = heads.get(project, 0), set()
+
+    def db_back(self) -> None:
+        """The database is back after a connection to it was lost (the store's listener says so): it may have failed
+        over meanwhile, so its timeline is read now."""
+        self._db_trouble = True
+        asyncio.get_running_loop().create_task(self._check_heads(once=True))
 
     async def ask(self, t: str, sockets: list | None = None, spread: float = SPREAD) -> None:
         """Ask connections (all of this relay's, or `sockets`) to catch up again, spread over `spread` seconds:
@@ -1046,34 +1085,40 @@ class Relay:
             await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
             await ws.send_json({"t": "ack", "q": 0, "id": msg.get("id")})
             return
-        # one transaction holding the project: is it a replay, may it be stored, store it
-        try:
-            async with self.store.locked(project) as c:
-                dup = await self.store.duplicate(project, data, c)
-                refused = None if dup is not None else await self.policy.may_store(project, len(data) + len(sig), conn.code, c)
-                seq = None
-                if dup is None and not refused:
-                    seq = await self.store.append(project, data, sig, c)
-                recent = dup is not None and dup > 0 and dup > await self.store.head(project, c) - REPUBLISH_RECENT
-        except Exception as e:
-            if unavailable(e):  # not stored: collaborators online still get it, and the app is told to try again
+        # One transaction holding the project: is it a replay, may it be stored, store it. If the database failed over
+        # between storing it and acknowledging it (this relay noticed meanwhile), the new primary may not have it: it
+        # is stored again, and acknowledged with the number it has there (models/relays: no-store-again).
+        for _ in range(3):
+            try:
+                async with self.store.locked(project) as c:
+                    dup = await self.store.duplicate(project, data, c)
+                    refused = None if dup is not None else await self.policy.may_store(project, len(data) + len(sig), conn.code, c)
+                    seq = None
+                    if dup is None and not refused:
+                        seq = await self.store.append(project, data, sig, c)
+                    recent = dup is not None and dup > 0 and dup > await self.store.head(project, c) - REPUBLISH_RECENT
+                    tl = await c.timeline()
+            except Exception as e:
+                if unavailable(e):  # not stored: collaborators online still get it, and the app is told to try again
+                    await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
+                raise
+            await self._failover(tl)  # (a later timeline than this relay knew: it failed over before this was stored)
+            if refused:
+                # Collaborators online still get it; the sender keeps it (no ack) and retries later.
                 await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
-            raise
-        if dup is not None:  # stored already (or compacted): kept once, but a recent one is passed on again
-            if recent:
+                await ws.send_json({"t": "err", "code": refused, "m": f"not stored: {refused}", "id": msg.get("id")})
+                return
+            q = seq if dup is None else dup
+            if dup is None:
+                self._new(project, seq)  # (its own: passed on to its connections now)
+                await self.broadcast(project, {"t": "up", "q": seq, "d": d, "s": s}, ws, tl=tl)
+            elif recent:  # stored already: kept once, but a recent one is passed on again
                 peers = len(self.rooms.get(project, ())) - 1
                 conn.pause = max(conn.pause, conn.pace.take(len(d) * max(peers, 0)))
-                await self.broadcast(project, {"t": "up", "q": dup, "d": d, "s": s}, ws)
-            await ws.send_json({"t": "ack", "q": dup, "id": msg.get("id")})
-            return
-        if refused:
-            # Collaborators online still get it; the sender keeps it (no ack) and retries later.
-            await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
-            await ws.send_json({"t": "err", "code": refused, "m": f"not stored: {refused}", "id": msg.get("id")})
-            return
-        self._new(project, seq)  # (its own: passed on to its connections now)
-        await self.broadcast(project, {"t": "up", "q": seq, "d": d, "s": s}, ws)
-        await ws.send_json({"t": "ack", "q": seq, "id": msg.get("id")})
+                await self.broadcast(project, {"t": "up", "q": dup, "d": d, "s": s}, ws, tl=tl)
+            if tl == self.timeline:
+                break
+        await ws.send_json({"t": "ack", "q": q, "id": msg.get("id")})
 
     async def _snap(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
         upto = field(msg, "upto", int)
