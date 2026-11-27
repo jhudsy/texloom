@@ -124,6 +124,10 @@ def parser() -> argparse.ArgumentParser:
                    help="delete the stored copies of every project created with this code (expired or removed "
                         "codes only), then exit. Prefer --purge-expired-after, which does it inside the server")
     p.add_argument("--list-codes", action="store_true", help="list codes, allowances, expiry and usage, then exit")
+    p.add_argument("--forget-codes-file", metavar="FILE",
+                   help="with several servers sharing a database (each copies its codes files there, and takes every "
+                        "server's): take a codes file no server uses any more out of it, so its codes stop counting "
+                        "everywhere, then exit. (A server still using that file puts it back when the file next changes.)")
     p.add_argument("--files-for-backup", type=Path, metavar="DIR",
                    help="print the folder that holds the stored files, for a backup to include, then exit. With "
                         "a bucket, first make DIR a copy of it (copying only what's new), and print DIR")
@@ -207,9 +211,22 @@ async def _files_command(a: argparse.Namespace, files: Files) -> None:
         await store.close()
 
 
+async def _forget_codes(a: argparse.Namespace, files: Files) -> None:
+    store = await Store.open(a.database, files, a.data)
+    try:
+        sources = {r[0] for r in await store.all_codes()}
+        if a.forget_codes_file not in sources:
+            sys.exit(f"no codes file named {a.forget_codes_file} in the database (it has: {', '.join(sorted(sources)) or 'none'})")
+        await store.put_codes(a.forget_codes_file, [])
+        print(f"{a.forget_codes_file}: its codes no longer count on any server (within seconds)")
+    finally:
+        await store.close()
+
+
 async def _codes_command(a: argparse.Namespace, codes: CodeBook, files: Files) -> None:
     """--list-codes and --purge-code: they read (and purge) the store."""
     store = await Store.open(a.database, files, a.data)
+    codes.set_shared(await store.all_codes())  # (other servers' codes files too)
     try:
         if a.purge_code is not None:
             c = CodeBook.normalize(a.purge_code)
@@ -294,6 +311,9 @@ def main() -> None:
     codes = CodeBook(a.codes_file or None)
     if a.until and a.months:
         sys.exit("give --until or --months, not both")
+    if a.forget_codes_file:
+        asyncio.run(_forget_codes(a, files))
+        return
     if any(x is not None for x in (a.add_code, a.renew_code, a.purge_code)) or a.list_codes:
         if not a.codes_file:
             sys.exit("--codes-file is required")

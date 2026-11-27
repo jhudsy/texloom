@@ -444,7 +444,22 @@ url = "s3://bucket"
 
 It would install and configure each part (Patroni and etcd for PostgreSQL, Valkey and Sentinel, the relays with the
 same settings file, nginx with every relay as an upstream: `least_conn`, `proxy_next_upstream … http_503`), the
-private network between machines (WireGuard), TLS and access lists between the parts, and the firewall. Commands:
+private network between machines, access lists between the parts, and the firewall.
+
+**Between machines: WireGuard, and a firewall of three rules.** The parts talk unencrypted (the relays to PostgreSQL,
+Valkey and each other through nginx; Patroni to etcd), and each has ports of its own (8787, 5432, 8008, 2379/2380, 6379,
+26379). With firewall rules alone, each port needs its list of machines allowed, and the traffic crosses the network
+in the clear: acceptable on a provider's private network in one datacentre, not between datacentres or providers.
+WireGuard gives every machine a private, encrypted address that works the same wherever the machines are; every
+part listens only on it, and the firewall is: SSH, HTTP and HTTPS from anywhere; everything that comes through
+WireGuard; nothing else. (TLS on each part instead means five certificate set-ups rather than one tunnel; Tailscale is
+WireGuard with no configuration, at the price of its coordination service.) The tool makes each machine's key pair
+and its list of peers from the settings file.
+
+**One machine stays as simple as it is.** With no `bus` setting a relay uses the in-process bus, and SQLite is still
+the default database: nothing of Valkey, Patroni, etcd or a front door is needed, and `install.sh` works as before. The
+new code runs there too (heartbeats, pings, `/api/health`, the codes copied into its own database), cheaply, and
+most of the checks exercise exactly that path. Before merging: `install.sh` on a fresh machine as well. Commands:
 `plan` (what would change), `apply`, `add relay <machine>`, `status` (every part's health). A Python script over SSH,
 like `install.sh` and `rebuild-standby.py`, rather than a new tool to learn. It's tested on the Docker lab's
 machines first, then on real ones: a few hourly-billed VPSs for an afternoon, in two datacentres, are the
@@ -493,9 +508,13 @@ every part's health at once.
 
 ### Shared state the relays don't have yet
 
-- **Creation codes are files** (`--codes-file`), written by hand or by a sales service. Every relay must see the same
-  codes, so they need one home every relay reads: **to do**, a table in the database (or a file in the bucket), with
-  the sales service writing there.
+- **Creation codes are files** (`--codes-file`), written by hand or by a sales service, and every relay must see the
+  same codes. **Built:** each relay copies its codes files into the database (`codes`: source file, code, size, label,
+  until) when they change (looking every 5 s), tells the others (`texloom_codes`), and takes every relay's: its own
+  files first, then the others' by name. So a code written on one machine (a sale, `--add-code`) counts on every relay
+  within seconds, and the files and the sales service stay as they are. A file with the same path on two machines must
+  be the same file. A file no relay uses any more: `texloom-server --forget-codes-file FILE`. Checked in
+  `scripts/check_relays.py`.
 - **Limits per address** (connections, rates) are counted per relay, so several relays together allow that many
   times more. The front door's limits (nginx's, per address) still hold. Sharing them (counters on the bus) is
   possible if it matters.

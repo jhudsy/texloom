@@ -60,6 +60,7 @@ KEEP_BIG = 64 * 1024  # an edit at least this big is remembered for good
 # so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
 META_RATE, META_BURST = 1.0, 600
 FACTS_KEPT = 20_000  # projects whose deletion and storage mode are kept in memory (see Store._facts)
+CODES_CHANNEL = "texloom_codes"  # what servers sharing a database tell each other: "the codes changed" (Policy.share_codes)
 CHANNEL = "texloom_project"  # what servers sharing a database tell each other: "this project changed" (see Store._told)
 RECONCILE_EVERY = 86400  # seconds between recounts of the usage ledger against the stored data (see Store.reconcile)
 REVOKED_KEPT = 10_000  # projects whose revocations are kept in memory
@@ -131,6 +132,11 @@ CREATE INDEX IF NOT EXISTS reserved_owner ON reserved (owner);
 CREATE INDEX IF NOT EXISTS reserved_project ON reserved (project);
 -- what an owner stores is added up from its projects (Store.owner_total)
 CREATE INDEX IF NOT EXISTS projects_owner ON projects (owner);
+-- Creation codes, for every server sharing the database: each server copies its codes files here when they change
+-- (source: the file's path; code "default" for the default line; size as written: "2G", "unlimited"), and takes all.
+CREATE TABLE IF NOT EXISTS codes (
+  source text NOT NULL, code text NOT NULL, size text NOT NULL, label text NOT NULL, until text NOT NULL,
+  PRIMARY KEY (source, code));
 """
 SCHEMA_POSTGRESQL = """
 -- ciphertext doesn't compress: store it as it is, out of line, without trying
@@ -140,7 +146,7 @@ ALTER TABLE log ALTER COLUMN data SET STORAGE EXTERNAL;
 TABLES = {"log": ("project", "seq"), "head": ("project",), "mode": ("project",), "stored": ("project", "id"),
           "trash": ("project", "id"), "revoked": ("project", "pub"), "projects": ("project",), "gone": ("project", "h"),
           "kept": ("project", "h"), "floor": ("project",), "deleted": ("project",), "clients": ("app", "version"), "lists": ("id",),
-          "usage": ("project",), "reserved": ("id",)}
+          "usage": ("project",), "reserved": ("id",), "codes": ("source", "code")}
 BOOLEANS = frozenset({"snap", "relay"})
 
 
@@ -586,6 +592,21 @@ class Store:
     # --- log ---------------------------------------------------------------------
     async def head(self, project: str, c=None) -> int:
         return await (c or self.db).fetchval("SELECT seq FROM head WHERE project=$1", project) or 0
+
+    async def put_codes(self, source: str, rows: list[tuple[str, str, str, str]]) -> None:
+        """One codes file's lines ((code, size, label, until) rows) in place of what it had before, and the others told."""
+        async with self.tx() as c:
+            await c.execute("DELETE FROM codes WHERE source=$1", source)
+            if rows:
+                await c.executemany("INSERT INTO codes(source, code, size, label, until) VALUES ($1,$2,$3,$4,$5) "
+                                    "ON CONFLICT (source, code) DO NOTHING", [(source, *r) for r in rows])
+        try:
+            await self.db.notify(CODES_CHANNEL, "")
+        except (DatabaseError, OSError) as e:
+            log.warning("couldn't tell the other servers the codes changed: %s", e)
+
+    async def all_codes(self) -> list[tuple[str, str, str, str, str]]:
+        return [tuple(r) for r in await self.db.fetch("SELECT source, code, size, label, until FROM codes")]
 
     async def heads(self, projects: list[str]) -> dict[str, int]:
         """The heads of many projects at once (a relay's periodic check of the projects it has open)."""

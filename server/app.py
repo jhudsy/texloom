@@ -98,6 +98,7 @@ def make_app(s: Settings) -> web.Application:
     app = web.Application(middlewares=[headers], client_max_size=MAX_BODY)
 
     opened: list[Store] = []
+    sharing: list[asyncio.Task] = []  # keeping the creation codes shared (Policy.keep_codes)
     bus = open_bus(s.bus)
     held = contextlib.AsyncExitStack()  # the database's ALONE_LOCK, while it's held
 
@@ -115,6 +116,8 @@ def make_app(s: Settings) -> web.Application:
         policy.attach(store)
         store.on_back = relay.db_back
         await store.start()
+        await policy.share_codes()  # (before serving: the codes every server has)
+        sharing.append(asyncio.get_running_loop().create_task(policy.keep_codes()))
         opened.append(store)
 
     panels: list = []  # sections added to the admin page by parts that are on (failover)
@@ -140,6 +143,8 @@ def make_app(s: Settings) -> web.Application:
         await relay.join_bus(bus)
         log.info("bus: %s (this relay is number %d)", bus.name, relay.number)
         yield
+        for task in sharing:
+            task.cancel()
         await relay.leave_bus()
         await bus.close()
         await held.aclose()

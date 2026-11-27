@@ -16,6 +16,8 @@
 - health: a relay whose bus has been away a few seconds, or whose database is unavailable, says so (/api/health:
   503) and refuses new connections, so a front door sends them elsewhere; the connections it has stay; once
   it's well again it takes them;
+- creation codes: a relay with no codes file takes another's, through the database, within seconds of the file
+  changing (a code added, one removed, the default);
 - the desktop helper's sync engine, on either relay: a stored project, and a sync-only one (nothing on the
   server: the apps fill each other in, across the relays); and a stored one while one relay's bus is away.
 
@@ -30,12 +32,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+ROOT = Path(__file__).resolve().parent.parent
 import pg  # noqa: E402
 from check_restore import add_line, text  # noqa: E402
 from checklib import check, summary, until  # noqa: E402
@@ -189,9 +193,17 @@ async def gone_relay(one: TestClient, two: TestClient) -> None:
     took = time.monotonic() - t0
     check("its connections are said to have left, by the other relay, once its heartbeat is late",
           left is not None and took < relay_mod.GONE_AFTER + 2, f"{took:.1f} s")
+    other = next(r for r in relays if r is not first)
+    kept = await other.bus.hget(f"c:{keys.project}", str(a.id))
+    check("while it is taken for gone, its entries stay on the list (ignored), so it is reachable the moment it's back:"
+          " taking them off raced with its writing them again", kept is not None and await other.relay_of(keys.project, a.id) is None,
+          kept)
     first._beating = asyncio.create_task(first._beat())  # (back, as a frozen machine that wakes would be)
     await asyncio.sleep(0.5)
     check("and it is heard from again", first.number not in next(r for r in relays if r is not first)._gone)
+    await b.send({"t": "p2p", "d": "to one, after", "to": a.id})
+    check("a message to one of its connections reaches it at once (its entry wasn't taken off the list meanwhile)",
+          (await a.heard_one("p2p", 3, d="to one, after")) is not None)
     await a.close()
     await b.close()
 
@@ -299,6 +311,50 @@ async def health(one: TestClient, two: TestClient) -> None:
         await x.close()
 
 
+async def shared_codes(url: str, tmp: Path) -> None:
+    print("creation codes, shared:")
+    import asyncpg
+    c = await asyncpg.connect(url)
+    await c.execute("CREATE DATABASE codes")  # (a database of its own: the servers above shared theirs)
+    await c.close()
+    url = url.rsplit("/", 1)[0] + "/codes"
+    codes = tmp / "shared-codes.txt"
+    codes.write_text("default 0\nAAAABBBBCCCC 10M one\n")
+    with_file = TestServer(make_app(Settings(database=url, bus="memory:codes", data=tmp / "c1", codes=CodeBook(codes))))
+    without = TestServer(make_app(Settings(database=url, bus="memory:codes", data=tmp / "c2")))
+    async with TestClient(with_file) as one, TestClient(without) as two:
+        async def valid(c: TestClient, code: str) -> bool:
+            r = await c.post("/api/code", json={"code": code})
+            return r.status == 200 and (await r.json()).get("ok") is True
+        check("a relay with no codes file takes another's codes", await valid(two, "AAAA-BBBB-CCCC"))
+        r = await two.get("/api/info")
+        info = await r.json()
+        check("and its default (here: no storage without a code)", info.get("creation") == "code" and info.get("defaultAllowance") == 0, info)
+        codes.write_text("default 0\nAAAABBBBCCCC 10M one\nDDDDEEEEFFFF 1G two\n")
+        t0 = time.monotonic()
+        added = False
+        while time.monotonic() - t0 < 15 and not added:
+            added = await valid(two, "DDDD-EEEE-FFFF")
+            await asyncio.sleep(0.3)
+        check("a code added to the file is valid on the other relay within seconds", added, f"{time.monotonic() - t0:.1f} s")
+        codes.write_text("default 0\nDDDDEEEEFFFF 1G two\n")
+        t0 = time.monotonic()
+        gone = False
+        while time.monotonic() - t0 < 15 and not gone:
+            gone = not await valid(two, "AAAA-BBBB-CCCC")
+            await asyncio.sleep(0.3)
+        check("and one removed is refused there too", gone, f"{time.monotonic() - t0:.1f} s")
+        forget = subprocess.run([sys.executable, "-m", "server.cli", "--database", url, "--data", str(tmp / "c3"),
+                                 "--forget-codes-file", str(codes)], capture_output=True, text=True, cwd=ROOT)
+        t0 = time.monotonic()
+        dropped = False
+        while time.monotonic() - t0 < 15 and not dropped:
+            dropped = not await valid(two, "DDDD-EEEE-FFFF")
+            await asyncio.sleep(0.3)
+        check("a codes file forgotten (--forget-codes-file): its codes stop counting on the other relay too",
+              forget.returncode == 0 and dropped, forget.stdout + forget.stderr)
+
+
 async def apps(one: TestClient, two: TestClient, tmp: Path, store) -> None:
     print("the desktop helper, on either relay:")
     for sync_only in (False, True):
@@ -367,6 +423,7 @@ async def main() -> int:
             for r in relays:
                 r.policy.codes.load()
             await apps(one, two, tmp, relays[0].store)
+        await shared_codes(url, tmp)
     return summary("relays")
 
 

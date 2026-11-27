@@ -562,13 +562,13 @@ class Relay:
             self._bus_trouble(e)
 
     async def relay_of(self, project: str, conn_id: int) -> int | None:
-        """The relay holding a connection, by the bus's list."""
+        """The relay holding a connection, by the bus's list (None: none, or one taken for gone)."""
         try:
             r = await self.bus.hget(f"c:{project}", str(conn_id))
         except BusError as e:
             self._bus_trouble(e)
             return None
-        return None if r is None else int(r)
+        return None if r is None or int(r) in self._gone else int(r)
 
     def _from_bus(self, channel: str, data: bytes) -> None:
         """A message from another relay (a callback in the event loop): queued, and passed on in order, per project."""
@@ -579,6 +579,7 @@ class Relay:
         except (ValueError, KeyError, TypeError):
             log.warning("ignoring a message on the bus that isn't one of ours: %r", bytes(data[:80]))
             return
+        self._gone.discard(h.get("r"))  # (a message from a relay taken for gone: it's back, and its connections reachable)
         if h.get("r") == self.number or project not in self.rooms:
             return  # its own (it was passed on here first), or nobody here for it
         self._inbox.setdefault(project, deque()).append((h, body.decode()))
@@ -680,7 +681,8 @@ class Relay:
                     self._gone |= new
                     await self._said_left(new)
                 stale = [r for r, at in alive.items() if now - float(at) > GONE_AFTER * 20]
-                if stale:  # (long gone: every relay has had time to notice)
+                if stale:  # (long gone: every relay has had time to notice, and none is coming back)
+                    await self._tidy({int(r) for r in stale})
                     await self.bus.hdel("alive", *stale)
             except BusError as e:
                 self._bus_trouble(e)
@@ -697,14 +699,15 @@ class Relay:
 
     async def _said_left(self, gone: set[int]) -> None:
         """Relays have gone without a word: their connections to projects someone here has open have left. Each relay
-        tells its own connections (so nothing needs passing on), and takes the entries off the list."""
+        tells its own connections (so nothing needs passing on). Their entries stay on the list, ignored while they are
+        taken for gone (`_gone`): a relay that was only cut off from the bus for a while comes back to find them, and
+        is reached at once. (Taking them off raced with its writing them again, and left its connections unreachable
+        by messages to one of them until its next renewal: the lab found it.) Long-gone ones are tidied (_tidy)."""
         log.info("relay(s) %s gone: telling the connections here", ", ".join(map(str, sorted(gone))))
         for project in list(self.rooms):
             try:
                 entries = await self.bus.hgetall(f"c:{project}")
                 ids = [cid for cid, r in entries.items() if int(r) in gone]
-                if ids:
-                    await self.bus.hdel(f"c:{project}", *ids)
             except BusError as e:
                 self._bus_trouble(e)
                 return
@@ -712,18 +715,28 @@ class Relay:
                 text = json.dumps({"t": "left", "from": int(cid)})
                 await asyncio.gather(*(self.send(ws, text) for ws in list(self.rooms.get(project, ()))))
 
+    async def _tidy(self, gone: set[int]) -> None:
+        """Take long-gone relays' entries off the lists of the projects open here."""
+        for project in list(self.rooms):
+            entries = await self.bus.hgetall(f"c:{project}")
+            if ids := [cid for cid, r in entries.items() if int(r) in gone]:
+                await self.bus.hdel(f"c:{project}", *ids)
+
     def _bus_broke(self) -> None:
         """The connection to the bus broke and is back: anything may have been missed meanwhile."""
         log.info("after a break in the bus: checking the heads of stored projects, asking sync-only ones to resync")
 
         async def mend() -> None:
-            # what other relays passed on meanwhile was missed: stored projects read it from the database, and the
-            # apps of sync-only ones (nothing stored to read) catch up from each other
+            # first this relay's entries and heartbeat (a bus that failed over may have lost them, and the others may
+            # have taken it for gone), so that the answers to what follows can reach its connections; then what other
+            # relays passed on meanwhile, which was missed: stored projects read it from the database, and the apps of
+            # sync-only ones (nothing stored to read) catch up from each other
+            await self.bus.hset("alive", str(self.number), str(time.time()).encode(), ttl=GONE_AFTER * 30)
+            await self._keep_number()
+            await self._rewrite()
             await self._check_heads(once=True)
             sync_only = [ws for project, room in self.rooms.items() if project not in self.tracks for ws in room]
             asyncio.get_running_loop().create_task(self.ask("resync", sync_only))
-            await self._keep_number()
-            await self._rewrite()  # (a bus that failed over may have lost them)
         task = asyncio.get_running_loop().create_task(mend())
         task.add_done_callback(lambda t: t.cancelled() or not t.exception() or log.warning("after a break in the bus: %s", t.exception()))
 
