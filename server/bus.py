@@ -5,6 +5,8 @@ subscribers. Several relays share a Redis-compatible server (Valkey, Redis, or a
 chosen by the `bus` setting's address:
 
     ""  or  memory:                                in-process (the default)
+    memory:NAME                                    in-process, shared by the servers in this process that name it
+                                                   (for checks: several relays in one process)
     redis://[user:password@]host[:port][?prefix=texloom:]
     rediss://…                                     the same over TLS
     redis+sentinel://[user:password@]s1:26379,s2:26379/<primary name>[?prefix=…]
@@ -124,6 +126,8 @@ def open_bus(url: str) -> Bus:
     """The bus an address names (the module docstring lists them). ValueError for one that isn't."""
     if url in ("", "memory:"):
         return MemoryBus()
+    if url.startswith("memory:"):
+        return MemoryBus(_hubs.setdefault(url[len("memory:"):], Hub()), shared=True)
     scheme = urlsplit(url).scheme
     if scheme in ("redis", "rediss", "redis+sentinel"):
         return RespBus(url)
@@ -150,14 +154,19 @@ class Hub:
         return v
 
 
+_hubs: dict[str, Hub] = {}  # the shared in-process buses, by name (memory:NAME)
+
+
 class MemoryBus(Bus):
-    """In this process. It never loses anything, except when a check breaks it (simulate_break)."""
+    """In this process. It never loses anything, except when a check breaks it (simulate_break). `shared`: other
+    servers in this process use it too (memory:NAME), so it isn't one server alone."""
 
     name = "in-process"
 
-    def __init__(self, hub: Hub | None = None):
+    def __init__(self, hub: Hub | None = None, shared: bool = False):
         super().__init__()
         self.hub = hub or Hub()
+        self.shared = shared
         self.channels: set[str] = set()
         self.broken = False
 

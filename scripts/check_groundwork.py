@@ -299,27 +299,13 @@ async def alone(url: str, tmp: Path) -> None:
     await again.start_server()
     check("once the first has stopped, another starts", again.started)
     await again.close()
-    # (a bus that isn't in-process lets several share it: the lock isn't taken; checked here with the shape of
-    # one, a Valkey being for check_bus.py)
-    import server.app as app_mod
-    from server.bus import Bus
-    real = app_mod.open_bus
-
-    class Shared(Bus):  # (stands in for a real bus: not the in-process one)
-        name = "shared"
-
-        async def incr(self, key: str, by: int = 1, ttl: float | None = None) -> int:
-            return 1
-    app_mod.open_bus = lambda u: Shared() if u else real(u)
-    try:
-        a, b = server("four", "shared"), server("five", "shared")
-        await a.start_server()
-        await b.start_server()
-        check("two servers with a bus share the database", a.started and b.started)
-        await a.close()
-        await b.close()
-    finally:
-        app_mod.open_bus = real
+    # a bus shared by several servers lets them share the database: the lock isn't taken
+    a, b = server("four", "memory:groundwork"), server("five", "memory:groundwork")
+    await a.start_server()
+    await b.start_server()
+    check("two servers with a bus share the database", a.started and b.started)
+    await a.close()
+    await b.close()
 
 
 async def upkeeps(url: str, tmp: Path) -> None:

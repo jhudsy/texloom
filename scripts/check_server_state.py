@@ -46,7 +46,10 @@ STATE = {
     # the bus (bus.py): connections to it, its subscriptions (this relay's), and the in-process one's state,
     # which with several relays is the Redis server's
     "Bus.*": "setting", "RespBus.*": "per-server", "_Conn.*": "per-server", "MemoryBus.*": "per-server",
-    "Hub.*": "per-server",
+    "Hub.*": "per-server", "module:bus._hubs": "per-server",  # (shared buses in one process: for checks)
+    # passing messages on from the bus, in order per project; its subscriptions; its heartbeat, and the relays it found gone
+    "Relay._inbox": "connection", "Relay._draining": "connection", "Relay._subscribed": "connection",
+    "Relay._beating": "per-server", "Relay._gone": "per-server", "Relay._trouble_at": "per-server",
     # connections on this relay
     "Relay.rooms": "connection", "Relay.conns": "connection", "Relay._next_id": "connection",
     "Conn.*": "connection", "Metered.*": "connection",

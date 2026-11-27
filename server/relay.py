@@ -19,7 +19,7 @@ from aiohttp import WSCloseCode, WSMsgType, web
 
 from texloom.crypto import b64e, canonical_pub, revoke_msg, signer
 
-from .bus import Bus, MemoryBus
+from .bus import Bus, BusError, MemoryBus
 from .policy import KiB, MiB, Policy
 from .db import unavailable
 from .store import Store
@@ -95,6 +95,14 @@ SPREAD = 3.0  # seconds over which connections are asked to resync or recheck (a
 # A connection's id is its relay's number (from the bus, so every relay's differs) times 2^32 plus a count of
 # the relay's own: unique across relays, and still an integer below 2^53, as JavaScript (and older apps) take it.
 ID_BITS = 32
+# Who is connected to a project, and on which relay, is kept on the bus (c:<project>: connection id -> relay
+# number), and each relay says it is alive there ("alive": relay number -> when, by its clock), every BEAT
+# seconds. One not heard from for GONE_AFTER seconds is gone: every other relay tells its own connections to
+# the projects it shared that the gone relay's connections have left. (The relays' clocks must roughly agree.)
+BEAT = 3.0
+GONE_AFTER = 10.0
+CONN_TTL = 60.0  # seconds a project's list of connections lasts on the bus unless a relay renews it
+RENEW = 20.0  # seconds between a relay's renewals of its own entries
 NUMBERS = (1 << (53 - ID_BITS)) - 1  # relay numbers go round within 1 … NUMBERS
 
 
@@ -256,14 +264,29 @@ class Relay:
         self.address_memory: dict[str, Budget] = {}  # each address's share of `memory` (ADDRESS_MEMORY)
         self.bus: Bus = MemoryBus()  # how relays pass messages to each other (bus.py): set when the server starts
         self.number = 1  # this relay's number on the bus (join_bus): the top bits of its connections' ids
+        self._inbox: dict[str, deque] = {}  # per project, messages from other relays waiting to be passed on, in order
+        self._draining: dict[str, asyncio.Task] = {}  # per project, the task passing them on
+        self._subscribed: set[str] = set()  # projects whose channel this relay is subscribed to
+        self._gone: set[int] = set()  # relays found gone, whose connections were said to have left
+        self._beating: asyncio.Task | None = None  # the heartbeat (_beat)
+        self._trouble_at = 0.0  # when trouble with the bus was last logged (_bus_trouble)
 
     @property
     def store(self) -> Store:
         return self.policy.store
 
-    def has_peers(self, project: str) -> bool:
+    async def has_peers(self, project: str) -> bool:
         """Someone has the project open here."""
-        return bool(self.rooms.get(project))
+        return bool(self.rooms.get(project)) or await self.connected(project) > 0
+
+    async def connected(self, project: str) -> int:
+        """How many connections the project has, on every relay (the bus's list; this relay's own if it can't be read)."""
+        try:
+            entries = await self.bus.hgetall(f"c:{project}")
+        except BusError as e:
+            self._bus_trouble(e)
+            return len(self.rooms.get(project, ()))
+        return max(len(self.rooms.get(project, ())), sum(1 for r in entries.values() if int(r) not in self._gone))
 
     # --- memory for big work: the server's budget, and each address's share of it -----------
     async def take_memory(self, conn: Conn, n: int) -> None:
@@ -434,12 +457,15 @@ class Relay:
                 self.cut_off(ws, "held too much unsent data")
 
     async def broadcast(self, project: str, msg: dict, exclude=None) -> None:
+        """To everyone connected to the project, here and on the other relays (but `exclude`), who must all have it:
+        one not reading is cut off rather than skipped."""
         text = json.dumps(msg)
         peers = [ws for ws in self.rooms.get(project, ()) if ws is not exclude]
         if peers and len(text) > MiB:
             self.make_room(len(text) * len(peers))
         if peers:
             await asyncio.gather(*(self.send(ws, text) for ws in peers))
+        await self.pass_on(project, text, msg.get("t", ""), "s")
 
     # --- the bus ------------------------------------------------------------------------
     async def join_bus(self, bus: Bus) -> None:
@@ -448,12 +474,181 @@ class Relay:
         await bus.start(self._from_bus, self._bus_broke)
         self.number = (await bus.incr("relays") - 1) % NUMBERS + 1
 
+        await self.bus.subscribe(f"r:{self.number}")  # (messages for one of this relay's connections)
+        self._beating = asyncio.get_running_loop().create_task(self._beat())
+
+    async def leave_bus(self) -> None:
+        """When the server stops: no more heartbeats, and the other relays told at once that it has gone."""
+        if self._beating:
+            self._beating.cancel()
+        try:  # (marked long gone, so that the others tidy up anything of it left on the bus)
+            await self.bus.hset("alive", str(self.number), b"0", ttl=GONE_AFTER * 30)
+        except BusError:
+            pass
+
+    def _bus_trouble(self, e: Exception) -> None:
+        """The bus couldn't be used for something: said once a minute at most (it is soft state, and the relay goes on)."""
+        if time.monotonic() - self._trouble_at > 60:
+            self._trouble_at = time.monotonic()
+            log.warning("the bus: %s", e)
+
+    # Messages to other relays. A message is a header (JSON: the relay it's from, its type, how to send it, the
+    # one connection it's for, if just one) and the text to send, on the project's channel (p:<project>, every
+    # relay with someone connected to it) or one relay's (r:<number>, for one of its connections). How to send:
+    # "s" to everyone, cutting off one that isn't reading; "u" unsigned, skipped for a peer that is behind; "a"
+    # presence, likewise with less room (see send and send_unsigned).
+    async def pass_on(self, project: str, text: str, t: str, kind: str, to: int | None = None, relay: int | None = None) -> None:
+        head = {"r": self.number, "p": project, "t": t, "k": kind, **({"to": to} if to is not None else {})}
+        try:
+            await self.bus.publish(f"r:{relay}" if relay is not None else f"p:{project}",
+                                   json.dumps(head, separators=(",", ":")).encode() + b"\n" + text.encode())
+        except BusError as e:
+            self._bus_trouble(e)
+
+    async def relay_of(self, project: str, conn_id: int) -> int | None:
+        """The relay holding a connection, by the bus's list."""
+        try:
+            r = await self.bus.hget(f"c:{project}", str(conn_id))
+        except BusError as e:
+            self._bus_trouble(e)
+            return None
+        return None if r is None else int(r)
+
     def _from_bus(self, channel: str, data: bytes) -> None:
-        """A message from another relay (nothing is sent through the bus yet)."""
+        """A message from another relay (a callback in the event loop): queued, and passed on in order, per project."""
+        head, _, body = bytes(data).partition(b"\n")
+        try:
+            h = json.loads(head)
+            project = h["p"]
+        except (ValueError, KeyError, TypeError):
+            log.warning("ignoring a message on the bus that isn't one of ours: %r", bytes(data[:80]))
+            return
+        if h.get("r") == self.number or project not in self.rooms:
+            return  # its own (it was passed on here first), or nobody here for it
+        self._inbox.setdefault(project, deque()).append((h, body.decode()))
+        if project not in self._draining:
+            self._draining[project] = asyncio.get_running_loop().create_task(self._drain(project))
+
+    async def _drain(self, project: str) -> None:
+        try:
+            while box := self._inbox.get(project):
+                h, text = box.popleft()
+                try:
+                    await self._deliver(project, h, text)
+                except Exception:
+                    log.exception("passing on a message from another relay")
+        finally:
+            self._inbox.pop(project, None)
+            self._draining.pop(project, None)
+
+    async def _deliver(self, project: str, h: dict, text: str) -> None:
+        to = h.get("to")
+        peers = [ws for ws in self.rooms.get(project, ()) if to is None or (c := self.conns.get(ws)) is not None and c.id == to]
+        if not peers:
+            return
+        t, kind = h.get("t"), h.get("k")
+        if t == "moved":  # what's stored and the limits changed: each connection told what it may see (see _move)
+            for ws in peers:
+                if (c := self.conns.get(ws)) is not None:
+                    await self.send(ws, json.dumps({"t": "usage", "store": self.policy.store_status(project, c.code), "moved": True}))
+            return
+        if kind == "s":
+            if len(text) > MiB:
+                self.make_room(len(text) * len(peers))
+            await asyncio.gather(*(self.send(ws, text) for ws in peers))
+        else:
+            await asyncio.gather(*(self.send_unsigned(ws, text, AW_BACKLOG if kind == "a" else UNSIGNED_BACKLOG) for ws in peers))
+        if t == "deleted":  # the owner deleted it for everyone: those connected here are closed too
+            for ws in peers:
+                asyncio.create_task(self.close_or_cut(ws, b"deleted"))
+
+    # Who is connected, on the bus. Each relay keeps its own entries, renews them, and removes them as they go.
+    async def _joined(self, project: str, conn: Conn) -> None:
+        await self._follow(project)
+        try:
+            await self.bus.hset(f"c:{project}", str(conn.id), str(self.number).encode(), ttl=CONN_TTL)
+        except BusError as e:
+            self._bus_trouble(e)
+
+    async def _left(self, project: str, conn: Conn) -> None:
+        await self._follow(project)
+        try:
+            await self.bus.hdel(f"c:{project}", str(conn.id))
+        except BusError as e:
+            self._bus_trouble(e)
+
+    async def _follow(self, project: str) -> None:
+        """Subscribe to a project's channel while someone is connected to it here, and only then. (Decided on what
+        is so now, before any wait, so that a room emptied and filled again ends subscribed.)"""
+        want = project in self.rooms
+        if want == (project in self._subscribed):
+            return
+        try:
+            if want:
+                self._subscribed.add(project)
+                await self.bus.subscribe(f"p:{project}")
+            else:
+                self._subscribed.discard(project)
+                await self.bus.unsubscribe(f"p:{project}")
+        except BusError as e:  # (a subscription asked for while the bus is away is made when it's back)
+            self._bus_trouble(e)
+
+    async def _beat(self) -> None:
+        """Every BEAT seconds: say this relay is alive, renew its entries now and then, and find relays that have gone."""
+        renewed = 0.0
+        while True:
+            try:
+                now = time.time()
+                await self.bus.hset("alive", str(self.number), str(now).encode(), ttl=GONE_AFTER * 30)
+                if time.monotonic() - renewed > RENEW:
+                    renewed = time.monotonic()
+                    await self._rewrite()
+                alive = await self.bus.hgetall("alive")
+                gone = {int(r) for r, at in alive.items() if now - float(at) > GONE_AFTER} - {self.number}
+                back = self._gone - gone
+                self._gone -= back  # (heard from again: a relay that was frozen, say)
+                if new := gone - self._gone:
+                    self._gone |= new
+                    await self._said_left(new)
+                stale = [r for r, at in alive.items() if now - float(at) > GONE_AFTER * 20]
+                if stale:  # (long gone: every relay has had time to notice)
+                    await self.bus.hdel("alive", *stale)
+            except BusError as e:
+                self._bus_trouble(e)
+            except Exception:
+                log.exception("the relay's heartbeat")
+            await asyncio.sleep(BEAT)
+
+    async def _rewrite(self) -> None:
+        """Write this relay's entries again (renewing them, and after a bus that failed over and lost them)."""
+        for project, room in list(self.rooms.items()):
+            for ws in list(room):
+                if (c := self.conns.get(ws)) is not None:
+                    await self.bus.hset(f"c:{project}", str(c.id), str(self.number).encode(), ttl=CONN_TTL)
+
+    async def _said_left(self, gone: set[int]) -> None:
+        """Relays have gone without a word: their connections to projects someone here has open have left. Each relay
+        tells its own connections (so nothing needs passing on), and takes the entries off the list."""
+        log.info("relay(s) %s gone: telling the connections here", ", ".join(map(str, sorted(gone))))
+        for project in list(self.rooms):
+            try:
+                entries = await self.bus.hgetall(f"c:{project}")
+                ids = [cid for cid, r in entries.items() if int(r) in gone]
+                if ids:
+                    await self.bus.hdel(f"c:{project}", *ids)
+            except BusError as e:
+                self._bus_trouble(e)
+                return
+            for cid in ids:
+                text = json.dumps({"t": "left", "from": int(cid)})
+                await asyncio.gather(*(self.send(ws, text) for ws in list(self.rooms.get(project, ()))))
 
     def _bus_broke(self) -> None:
         """The connection to the bus broke and is back: anything may have been missed meanwhile."""
-        task = asyncio.get_running_loop().create_task(self._keep_number())
+        async def mend() -> None:
+            await self._keep_number()
+            await self._rewrite()  # (a bus that failed over may have lost them)
+        task = asyncio.get_running_loop().create_task(mend())
         task.add_done_callback(lambda t: t.cancelled() or not t.exception() or log.warning("after a break in the bus: %s", t.exception()))
 
     async def _keep_number(self) -> None:
@@ -508,7 +703,7 @@ class Relay:
         address = client_address(request)
         if address is not None and self.per_address[address] >= MAX_PER_ADDRESS:
             raise web.HTTPTooManyRequests(text="too many connections from this address")
-        if self.per_project[project] >= MAX_PER_PROJECT:
+        if self.per_project[project] >= MAX_PER_PROJECT or await self.connected(project) >= MAX_PER_PROJECT:
             raise web.HTTPServiceUnavailable(text="too many connections to this project")
         # no compression: what's sent is ciphertext, and compressed frames would let a client make
         # the server hold far more than it sent (Metered counts bytes as they arrive)
@@ -553,6 +748,7 @@ class Relay:
             self.room_pace[project] = Pace(ROOM_RATE, ROOM_BURST)
         log.info("join %s… (%d peers)", project[:8], len(room))
         try:
+            await self._joined(project, conn)  # (subscribed to the project's channel before the catch-up reads the log)
             try:
                 await self.handle(project, ws, conn, "hello", first)
             except Exception as e:
@@ -619,7 +815,8 @@ class Relay:
                 self.rooms.pop(project, None)
                 self.room_pace.pop(project, None)
             log.info("leave %s…", project[:8])
-            if conn.aware and not self.stopping:  # this also covers a crash or a lost connection, where a client can't say goodbye
+            await self._left(project, conn)
+            if conn.aware:  # this also covers a crash or a lost connection, where a client can't say goodbye (and a stop: other relays' apps hear it)
                 await self.broadcast(project, {"t": "left", "from": conn.id})
 
     # compat(refused 0.4.30): apps too old to say their version ("unknown" on the admin page): remove _hold and HOLD_UNVERSIONED
@@ -712,7 +909,7 @@ class Relay:
             head, floor, count = await self.store.log_state(project)
             await asyncio.wait_for(self.send_large(ws,
                 {"t": "log", "entries": entries, "head": head, "floor": floor, "count": count, "you": conn.id,
-                 "mode": "relay" if relay_only else "server", "peers": len(self.rooms[project]) - 1, "ka": KEEPALIVE,
+                 "mode": "relay" if relay_only else "server", "peers": await self.connected(project) - 1, "ka": KEEPALIVE,
                  "store": self.policy.store_status(project, conn.code),
                  "rv": [{"p": p, "s": b64e(sig)} for p, sig in (await self.store.revoked(project)).items()],
                  **({"lost": True} if lost else {}), **({} if done else {"more": True})}), CATCHUP_TIMEOUT)
@@ -804,16 +1001,22 @@ class Relay:
     async def _relay_unsigned(self, project: str, ws, conn: Conn, out: dict, to: int | None) -> None:
         """Pass on something unsigned (see UNSIGNED_RATE), and pace its sender."""
         peers = self._recipients(project, ws, to)
-        if not peers:
+        # to everyone: here, and the other relays (once, on the project's channel); to one: here, or its relay's channel
+        there = None if to is None or peers else await self.relay_of(project, to)
+        if to is not None and not peers and there is None:
             return
         text = json.dumps(out)
-        n = len(text) * len(peers)
+        n = len(text) * (len(peers) + (to is None or there is not None))  # (the other relays' copy counts once)
         room = self.room_pace.get(project) or Pace(ROOM_RATE, ROOM_BURST)
         if len(text) <= SMALL and room.wait(n) > 0:
             return  # the room is busy: something small is dropped rather than waited for
         if len(text) > MiB and self.out_waiting() + n > OUT_MAX:
             return  # the server holds a lot unsent already
         await asyncio.gather(*(self.send_unsigned(peer, text, UNSIGNED_BACKLOG) for peer in peers))
+        if to is None:
+            await self.pass_on(project, text, "p2p", "u")
+        elif there is not None:
+            await self.pass_on(project, text, "p2p", "u", to=to, relay=there)
         conn.pause = max(conn.pause, conn.pace.take(n), room.take(n))
 
     async def _aw(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
@@ -823,11 +1026,12 @@ class Relay:
         room = self.room_pace.get(project) or Pace(ROOM_RATE, ROOM_BURST)
         n = len(text) * len(peers)
         # presence is sent often and superseded by the next: past its pace, or its room's, dropped
-        if not peers or conn.aw_pace.wait(len(text)) > 0 or room.wait(n) > 0:
+        if conn.aw_pace.wait(len(text)) > 0 or room.wait(n) > 0:
             return
         conn.aw_pace.take(len(text))
         room.take(n)
         await asyncio.gather(*(self.send_unsigned(peer, text, AW_BACKLOG) for peer in peers))
+        await self.pass_on(project, text, "aw", "a")
 
     async def _p2p(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
         # Opaque peer-to-peer payload (state-vector sync, blob transfer). Never stored.
@@ -848,9 +1052,11 @@ class Relay:
             return
         if to is None:
             await self.broadcast(project, out, ws)
-        else:
-            for peer in self._recipients(project, ws, to):
+        elif peers := self._recipients(project, ws, to):
+            for peer in peers:
                 await self.send(peer, json.dumps(out))  # cut off, rather than waited on, if it isn't reading
+        elif (there := await self.relay_of(project, to)) is not None:
+            await self.pass_on(project, json.dumps(out), "p2p", "s", to=to, relay=there)
 
     async def _usage(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
         # the figures in the hello's reply, fresh (an app showing how much is used asks when it shows them)
@@ -891,6 +1097,7 @@ class Relay:
             c = self.conns.get(peer)
             if c is not None:
                 await self.send(peer, json.dumps({"t": "usage", "store": self.policy.store_status(project, c.code), "moved": True}))
+        await self.pass_on(project, "", "moved", "s")  # (the other relays tell theirs, each what it may see)
 
     async def _delete(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
         """The owner deletes the project for everyone."""

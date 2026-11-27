@@ -104,7 +104,7 @@ def make_app(s: Settings) -> web.Application:
     async def open_store() -> None:
         store = await Store.open(s.database, s.files, s.data, serving=True)
         log.info("database: %s", redact(s.database))
-        if isinstance(bus, MemoryBus) and store.db.kind == "postgresql":
+        if isinstance(bus, MemoryBus) and not bus.shared and store.db.kind == "postgresql":
             # With no bus, a second server on this database would split each project's people into rooms that
             # never hear each other: refuse it (SQLite allows one server anyway). A connection holds the lock.
             if not await held.enter_async_context(store.db.lock(ALONE_LOCK)):
@@ -139,6 +139,7 @@ def make_app(s: Settings) -> web.Application:
         await relay.join_bus(bus)
         log.info("bus: %s (this relay is number %d)", bus.name, relay.number)
         yield
+        await relay.leave_bus()
         await bus.close()
         await held.aclose()
     app.cleanup_ctx.insert(0, bus_open)

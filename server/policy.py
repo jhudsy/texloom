@@ -14,7 +14,7 @@ import math
 import os
 import re
 import secrets
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -295,19 +295,23 @@ class Policy:
 
     def __init__(self, store: Store | None, codes: CodeBook | None = None, limits: Limits | None = None,
                  private: bool = False, lists: bool = True, min_version: str = "",
-                 busy: Callable[[str], bool] = lambda project: False):
+                 busy: Callable[[str], Awaitable[bool]] | None = None):
         self.codes = codes or CodeBook(None)
         self.limits = limits or Limits()
         self.private = private  # only projects created with a valid creation code may use this server
         # the oldest app version allowed (--min-version): older ones, or apps too old to say, are
         # asked to update, so that support for older data and protocols can be dropped
         self.min_version = version_tuple(min_version) if min_version else None
-        self.busy = busy  # busy(project): someone has it open, so it isn't evicted or purged now
+        self.busy = busy or self._never_busy  # await busy(project): someone has it open (on any relay), so it isn't evicted or purged now
         self.want_lists = lists
         self.store: Store = store  # type: ignore[assignment]  # (attach, when the server starts)
         self.lists: Lists | None = None
         if store is not None:
             self.attach(store)
+
+    @staticmethod
+    async def _never_busy(project: str) -> bool:
+        return False
 
     def attach(self, store: Store) -> None:
         self.store = store
@@ -434,7 +438,7 @@ class Policy:
             await self.lists.purge_owner(owner)
         purged = freed = skipped = 0
         for p in self.store.stored_by(owner):
-            if self.busy(p):
+            if await self.busy(p):
                 skipped += 1
                 continue
             freed += await self.store.evict(p)
@@ -458,7 +462,7 @@ class Policy:
         """Drop the stored copies of projects nobody has opened for `days` (their writers upload
         them again), letting live editing through between projects."""
         for p in self.store.idle(days):
-            if self.busy(p):
+            if await self.busy(p):
                 continue  # someone is connected right now
             freed = await self.store.evict(p)
             log.info("evicted idle project %s… (%s, unopened for %g days)", p[:8], fmt_size(freed), days)

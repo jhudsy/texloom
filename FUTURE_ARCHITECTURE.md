@@ -287,8 +287,13 @@ doing whatever happens later.
 5. **The bus and soft-state interfaces,** with in-process implementations. All passing on of messages goes
    through them, even on one machine. **The contract and both implementations are built** (`server/bus.py`:
    `MemoryBus`, and `RespBus`, the relay's own Redis-protocol client, so that every break is seen), checked by
-   `scripts/check_bus.py` against both, the Valkey one in Docker as a user allowed only `bus.COMMANDS`. The
-   relay doesn't use it yet.
+   `scripts/check_bus.py` against both, the Valkey one in Docker as a user allowed only `bus.COMMANDS`.
+   **The relay passes everything on through it** (`Relay.broadcast`, `pass_on`, `_from_bus`): stored changes,
+   presence, peer-to-peer messages to everyone or to one connection on another relay (`r:<relay>`), `left`,
+   deletions, revocations and moves. Who is connected is on the bus (`c:<project>`), so "peers", the limit per
+   project and "is it open anywhere" count every relay; each relay says it is alive every 3 s, and one unheard
+   for 10 s is gone: the others tell their own apps its connections have left. Checked with two relays in one
+   process (`scripts/check_relays.py`). Gap tracking, and what follows a break in the bus or a failover, are next.
 6. **Gap tracking in the relay,** filling from the database, the periodic head check, and `resync`/`recheck`
    (with closing for older apps).
    **The messages are built:** both apps say `rs: 1` in their hello and answer `resync` (their state vector)

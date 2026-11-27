@@ -709,6 +709,7 @@ class Store:
         await self.db.execute("INSERT INTO revoked(project, pub, sig, at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
                                 project, pub, sig, time.time())
         self._revoked.drop(project)
+        await self._told(project)  # (the other servers drop what they knew of its revocations)
         return True
 
     async def _fact(self, project: str) -> tuple[dict | None, bool | None]:
