@@ -29,6 +29,7 @@ from .paths import replace_file, sweep_temp
 
 log = logging.getLogger("texloom")
 RETRY_MAX = 15  # seconds: the longest wait between tries to connect (see run)
+CONNECT_TIMEOUT = 15  # seconds a server has to accept a connection (see run)
 
 COMPACT_AFTER = 300  # log entries before a writer uploads a snapshot
 BLOB_RE = re.compile(r"^[0-9a-f]{32}$")  # blob ids are HMAC hex digests, never paths
@@ -146,6 +147,7 @@ class Replica:
         self.synced = asyncio.Event()  # first catch-up complete
         self._log_pending: tuple[int, int, bool] | None = None  # a catch-up whose later pages are still coming: (head, count, lost)
         self._caught_up = False  # this connection's log (and revocation list) has been applied
+        self._backoff = 1  # seconds before the next try to connect (see run)
         # Keeping the connection alive, with a server that offers it ("ka" in its catch-up, seconds): see
         # _keep_alive. 0: not offered. (aiohttp's own pings, every 30 s, stay for servers that don't.)
         self._ka = 0.0
@@ -918,17 +920,19 @@ class Replica:
     # --- connection loop -------------------------------------------------------
     async def run(self) -> None:
         ws_url = self.server.replace("http", "ws", 1) + f"/ws/{self.keys.project}"
-        backoff = 1
+        self._backoff = 1
         async with aiohttp.ClientSession(connector=tls.connector()) as http:
             self.http = http
             if self.deleted_at is not None:
                 self.synced.set()
             while self.deleted_at is None:  # a deleted project stays as it is: nothing to connect to
                 try:
-                    # (a close waits only briefly for the server's answer: one given up on gives none)
-                    async with http.ws_connect(ws_url, heartbeat=30, max_msg_size=64 * 1024 * 1024,
-                                               timeout=aiohttp.ClientWSTimeout(ws_close=3.0)) as ws:
-                        backoff = 1
+                    # (a close waits only briefly for the server's answer: one given up on gives none). A server that
+                    # accepts the connection but doesn't answer (hung, or its machine frozen) is given up on after
+                    # CONNECT_TIMEOUT, and tried again like any other failure.
+                    ws = await asyncio.wait_for(http.ws_connect(ws_url, heartbeat=30, max_msg_size=64 * 1024 * 1024,
+                                                                timeout=aiohttp.ClientWSTimeout(ws_close=3.0)), CONNECT_TIMEOUT)
+                    async with ws:
                         log.info("connected to %s", self.server)
                         await self._opened(ws)
                         keep = asyncio.create_task(self._keep_alive(ws))
@@ -945,14 +949,14 @@ class Replica:
                             keep.cancel()
                         log.info("disconnected (%s%s)", ws.close_code, f": {ws.exception()}" if ws.exception() else "")
                 except (aiohttp.ClientError, OSError) as e:
-                    log.info("offline (%s); retrying in at most %ds", e.__class__.__name__, backoff)
+                    log.info("offline (%s); retrying in at most %ds", e.__class__.__name__, self._backoff)
                 finally:
                     self._dropped()
                 if self.deleted_at is not None:
                     break
                 # between half the wait and all of it, at random: after an outage, not everyone back at once
-                await asyncio.sleep(backoff * (0.5 + random.random() / 2))
-                backoff = min(backoff * 2, RETRY_MAX)
+                await asyncio.sleep(self._backoff * (0.5 + random.random() / 2))
+                self._backoff = min(self._backoff * 2, RETRY_MAX)
 
     async def _opened(self, ws) -> None:
         """A connection to the server is open: start catching up (scripts/check_replica.py calls this too)."""
@@ -1034,6 +1038,8 @@ class Replica:
         if lost:
             self.save()  # (what it last had from the server is forgotten: not to be sent again)
         self._caught_up = True  # (before the outbox goes: _send_update waits for it)
+        # (only now: a server that accepts connections but can't serve them, its database away, is tried less and less often)
+        self._backoff = 1
         await self.flush_outbox()
         await self.p2p({"k": "sv1", "sv": b64e(self.doc.get_state())})
         self.synced.set()

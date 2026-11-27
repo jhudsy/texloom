@@ -112,6 +112,8 @@ async function sha(data: Uint8Array): Promise<string> {
 
 /** The longest wait between tries to connect, in ms (see lost()). */
 const RETRY_MAX = 15_000
+/** How long a server has to accept a connection, in ms (see connect()). */
+const CONNECT_TIMEOUT = 15_000
 
 export class Replica {
   // gc off: deleted text is kept, so past versions can be reconstructed (History)
@@ -360,7 +362,10 @@ export class Replica {
     this.status = 'connecting'; this.onStatus()
     const ws = new WebSocket(url)
     this.ws = ws
-    ws.onopen = () => this.opened(ws)
+    // a server that doesn't accept the connection in time (hung, or its machine frozen) is given up on, and
+    // tried again like any other failure (closing it now ends in onclose)
+    const giveUp = setTimeout(() => { if (ws.readyState === WebSocket.CONNECTING) ws.close() }, CONNECT_TIMEOUT)
+    ws.onopen = () => { clearTimeout(giveUp); this.opened(ws) }
     ws.onmessage = (ev) => {
       this.heardAt = Date.now()
       const m = JSON.parse(ev.data), run = () => this.handle(m)
@@ -408,7 +413,6 @@ export class Replica {
   /** A connection to the server is open: start catching up (check-replica.mjs calls this too). */
   private opened(ws: WebSocket) {
     this.ws = ws
-    this.backoff = 1000
     const code = this.creationCode()
     this.logPending = null
     this.peerConns.clear() // (connection numbers are per connection to the server)
@@ -437,6 +441,7 @@ export class Replica {
 
   /** The last page of a catch-up is in: what follows from being up to date. */
   private async onCaughtUp(head: number, count: number, lost: boolean) {
+    this.backoff = 1000 // (only now: a server that accepts connections but can't serve them, its database away, is tried less and less often)
     this.since = lost ? head : Math.max(this.since, head)
     this.holdForMissing()
     if (lost && this.keys.writable) await this.reseed()

@@ -256,7 +256,9 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
-        proxy_read_timeout 1h;
+        # a relay that doesn't answer for a minute is given up on (the server pings every connection every 30 s,
+        # so a healthy one is never that quiet); the app then connects again
+        proxy_read_timeout 60s;
         proxy_send_timeout 1h;
     }
     # encrypted file blobs (images, PDFs)
@@ -479,6 +481,13 @@ if csp:
 if site != before:
     open(path, "w").write(site)
     print("    nginx: limits per IPv6 /64, X-Real-IP on every proxied location, security headers in every location")
+# WebSockets: a relay that answers nothing for a minute is given up on (it pings every connection every 30 s), so an
+# app sent to a hung one connects again rather than waiting an hour
+ws = re.search(r"(\n    location /ws/ \{\n.*?\n    \}\n)", site, re.S)
+if ws and "proxy_read_timeout 1h;" in ws.group(1):
+    site = site.replace(ws.group(1), ws.group(1).replace("proxy_read_timeout 1h;", "proxy_read_timeout 60s;"), 1)
+    open(path, "w").write(site)
+    print("    nginx: WebSockets given up on after a minute without a word from the server")
 PY
 fi
 nginx -t -q && systemctl reload nginx || { cp "/root/texloom-backups/nginx-$DOMAIN.bak" "$SITE"; systemctl reload nginx; echo "nginx update failed: restored"; exit 1; }
