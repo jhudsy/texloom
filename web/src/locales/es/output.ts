@@ -62,6 +62,10 @@ const es: Catalog = {
   'Comment added on {{where}}.': 'Comentario añadido en {{where}}.',
   '{{name}} compiled {{file}} · Show it': '{{name}} compiló {{file}} · Mostrarlo',
   'Show the main document’s newest PDF in place of this one': 'Mostrar el PDF más reciente del documento principal en lugar de este',
+  'Ask the Assistant': 'Preguntar al asistente',
+  'Ask the Assistant to fix this: the message goes into its box, for you to add to and send': 'Pedir al asistente que lo arregle: el mensaje va a su cuadro, para que lo complete y lo envíe',
+  'Fix this problem from the compile log ({{where}}): {{message}}': 'Arregla este problema del registro de compilación ({{where}}): {{message}}',
+  'Fix this problem from the compile log: {{message}}': 'Arregla este problema del registro de compilación: {{message}}',
 }
 
 export default es

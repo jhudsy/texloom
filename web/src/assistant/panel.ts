@@ -77,6 +77,8 @@ export interface PanelHost {
   /** What the assistant is up to, for its tab to show while another is open: working, answered, or
    *  waiting for the person to apply or reject an edit (null: nothing to show). */
   status?: (s: AssistantStatus) => void
+  /** Gives a way to put a message in the box, for the person to add to and send (a compile problem). */
+  onAsk?: (ask: (text: string) => void) => void
 }
 export type AssistantStatus = 'busy' | 'done' | 'ask' | null
 
@@ -220,6 +222,12 @@ export function createAssistantPanel(host: PanelHost): HTMLElement {
   const refreshBtn = h('button', { class: 'ai-icon', title: t('Refresh the list of models'), 'aria-label': t('Refresh the list of models'), onclick: () => loadModels(true) }, '⟳') as HTMLButtonElement
   const refreshModels = () => { renderPicker(); void loadModels() }
   refreshModels()
+
+  host.onAsk?.((text) => {
+    input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${text}` : text // (after what was being written)
+    input.focus()
+    input.setSelectionRange(input.value.length, input.value.length)
+  })
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!abort) send() }

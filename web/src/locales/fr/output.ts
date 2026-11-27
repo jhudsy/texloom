@@ -62,5 +62,9 @@ const fr: Catalog = {
   'Comment added on {{where}}.': 'Commentaire ajouté à {{where}}.',
   '{{name}} compiled {{file}} · Show it': '{{name}} a compilé {{file}} · L’afficher',
   'Show the main document’s newest PDF in place of this one': 'Afficher le PDF le plus récent du document principal à la place de celui-ci',
+  'Ask the Assistant': 'Demander à l’assistant',
+  'Ask the Assistant to fix this: the message goes into its box, for you to add to and send': 'Demander à l’assistant de corriger ceci : le message va dans sa zone de saisie, à compléter puis envoyer',
+  'Fix this problem from the compile log ({{where}}): {{message}}': 'Corrige ce problème du journal de compilation ({{where}}) : {{message}}',
+  'Fix this problem from the compile log: {{message}}': 'Corrige ce problème du journal de compilation : {{message}}',
 }
 export default fr

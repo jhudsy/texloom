@@ -40,7 +40,8 @@ export interface Output {
 }
 
 export function createOutput(r: Replica, writable: boolean, device: () => Device, userName: () => string,
-  goto: (file: string, line: number, flash?: boolean) => void, selected: () => string | null): Output {
+  goto: (file: string, line: number, flash?: boolean) => void, selected: () => string | null,
+  ask?: (p: Problem) => void): Output {
   const pdfView = new PdfView()
   const pdfWindow = pdfWindowLink(r.keys.project, () => String(r.meta.get('name') ?? ''), (at) => pdfView.onPick?.(at.page, at.x, at.y),
     writable ? (sel) => commentTarget(sel) : null, () => renderLatest().catch(console.error))
@@ -177,7 +178,9 @@ export function createOutput(r: Replica, writable: boolean, device: () => Device
       onclick: () => { if (p.file && !window.getSelection()?.toString()) goto(p.file, p.line ?? 1) },
     }, h('span', { class: 'sev' }, p.severity === 'error' ? '✗' : p.severity === 'warning' ? '⚠' : '▭'),
       h('span', { class: 'msg' }, p.message),
-      p.file ? h('span', { class: 'loc' }, `${p.file}${p.line ? `:${p.line}` : ''}`) : null))
+      p.file ? h('span', { class: 'loc' }, `${p.file}${p.line ? `:${p.line}` : ''}`) : null,
+      ask ? h('button', { class: 'small ask', title: t('Ask the Assistant to fix this: the message goes into its box, for you to add to and send'),
+        onclick: (e: Event) => { e.stopPropagation(); ask(p) } }, t('Ask the Assistant')) : null))
       : [h('li', { class: 'muted' }, lastLog ? t('No errors or warnings.') : t('No compile log yet.'))]))
     for (const fn of onProblems) fn()
   }

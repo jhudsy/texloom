@@ -62,6 +62,10 @@ const zh: Catalog = {
   'Comment added on {{where}}.': '已在 {{where}} 添加评论。',
   '{{name}} compiled {{file}} · Show it': '{{name}} 编译了 {{file}} · 显示',
   'Show the main document’s newest PDF in place of this one': '显示主文档的最新 PDF，替换当前这个',
+  'Ask the Assistant': '询问助手',
+  'Ask the Assistant to fix this: the message goes into its box, for you to add to and send': '让助手修复它：消息会放进助手的输入框，你可以补充后发送',
+  'Fix this problem from the compile log ({{where}}): {{message}}': '修复编译日志中的这个问题（{{where}}）：{{message}}',
+  'Fix this problem from the compile log: {{message}}': '修复编译日志中的这个问题：{{message}}',
 }
 
 export default zh

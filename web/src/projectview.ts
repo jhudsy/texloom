@@ -1,5 +1,6 @@
 // A project, open: the editor, the PDF, the panels beside them, and keeping it in step.
 import { warmUp } from './compile'
+import type { Problem } from './latexlog'
 import { listenForShortcutsKey } from './shortcuts'
 import * as Y from 'yjs'
 import { Keys } from './crypto'
@@ -96,7 +97,16 @@ export async function openProject(keys: Keys, server: string) {
   // ---- components ----
   const index = new ProjectIndex(r)
   const gotoSource = (file: string, line: number, flash = false) => { layout.showEditor(); tree.open(file); setTimeout(() => editor.goto(line, 0, flash), 0) }
-  const output = createOutput(r, writable, () => device, () => me.name, gotoSource, () => tree.current())
+  // a compile problem, given to the Assistant: its box gets the problem, to add to and send
+  let askAssistant: ((text: string) => void) | null = null
+  const askAbout = (p: Problem) => {
+    layout.reveal('right')
+    showTab('ai')
+    const where = p.file ? (p.line ? `${p.file}:${p.line}` : p.file) : ''
+    askAssistant?.(where ? t('Fix this problem from the compile log ({{where}}): {{message}}', { where, message: p.message })
+      : t('Fix this problem from the compile log: {{message}}', { message: p.message }))
+  }
+  const output = createOutput(r, writable, () => device, () => me.name, gotoSource, () => tree.current(), askAbout)
   suggestMode.start(keys.project, writable, () => me.name) // before the editor, which reads it
   const editor = createEditorPane(r, writable, index, {
     onCompile: () => output.compile(),
@@ -237,6 +247,7 @@ export async function openProject(keys: Keys, server: string) {
       link: (write) => keys.link(server, write && writable),
       onContextChange: editor.onContextChange,
       status: (s) => { aiStatus = s; markAssistant() },
+      onAsk: (ask) => { askAssistant = ask },
     }),
     review: () => (reviewPanel = createReviewPanel({
       replica: r, writable, userName: () => me.name, selection: () => editor.selection(), suggesting: suggestMode,
