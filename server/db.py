@@ -44,6 +44,7 @@ SQLITE_MIN = (3, 35)  # RETURNING
 POOL_MAX = 10  # PostgreSQL connections
 START_LOCK = 7316  # PostgreSQL advisory lock taken while creating the tables (several servers starting at once)
 MAINTENANCE_LOCK = 7317  # held while a server does the upkeep that must run on one server at a time
+ALONE_LOCK = 7318  # held for as long as a server with no bus (one server alone) uses the database
 NOTIFY_MAX = 7000  # bytes: PostgreSQL's limit on a notification is 8000
 
 

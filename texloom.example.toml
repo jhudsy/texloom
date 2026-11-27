@@ -16,6 +16,12 @@
 # "postgresql://texloom:PASSWORD@db.example.org:5432/texloom?sslmode=require". To move from one to
 # the other: texloom-server --copy-database-from (INSTALL.md, "The database").
 database = "sqlite:///var/lib/texloom/texloom.db"
+# The bus, for several servers (relays) sharing the database: how they pass messages to each other.
+# Leave it unset for one server. Several need a Redis-compatible server (Valkey, Redis, or a managed one):
+# "redis://texloom:PASSWORD@bus.example.org:6379", "rediss://…" over TLS, or
+# "redis+sentinel://s1,s2,s3/texloom" to ask Sentinels where the primary is. A server with no bus and a
+# PostgreSQL database refuses to start while another such server uses that database.
+# bus = "redis://texloom:PASSWORD@127.0.0.1:6379"
 # This server's own folder: uploads are spooled here, min_free is kept free here, and stored files
 # go in data/files unless "files" says otherwise.
 data = "/var/lib/texloom"

@@ -481,6 +481,55 @@ async def replays(tmp: Path) -> None:
         await store.close()
 
 
+async def resends(tmp: Path) -> None:
+    """A change is passed on before it is acknowledged, and one sent again that is stored already is passed
+    on again if it is recent (a relay may have stopped between storing it and passing it on), not if it is
+    old (anyone hearing a project's changes could replay them)."""
+    sk, pid = keypair()
+    async with client(tmp) as c:
+        a, _ = await join(c, pid)
+        b, _ = await join(c, pid)
+        first = os.urandom(50)
+        passing_on = relay_mod.Relay.broadcast
+
+        async def slowly(self, *args, **kw):  # (passing on takes a while: the acknowledgement must wait for it)
+            await asyncio.sleep(0.5)
+            await passing_on(self, *args, **kw)
+        relay_mod.Relay.broadcast = slowly
+        try:
+            t0 = time.monotonic()
+            await a.send_json(up(sk, first, "1"))
+            ack, _ = await until_type(a, "ack")
+            waited = time.monotonic() - t0
+        finally:
+            relay_mod.Relay.broadcast = passing_on
+        heard = await b.receive_json(timeout=1)
+        check("a change is passed on to the others before its sender is told it is stored",
+              ack and ack["q"] == 1 and waited >= 0.5 and heard["t"] == "up" and heard["q"] == 1, (ack, round(waited, 2), heard))
+        await a.send_json(up(sk, first, "2"))
+        ack, _ = await until_type(a, "ack")
+        again, _ = await until_type(b, "up", 3)
+        check("sent again, it is stored once and passed on again (its first number)", ack and ack["q"] == 1 and again and again["q"] == 1
+              and again["d"] == b64e(first), (ack, again))
+        with patched(relay_mod, REPUBLISH_RECENT=2):
+            for i in range(3):
+                await a.send_json(up(sk, os.urandom(20), f"n{i}"))
+                await until_type(a, "ack")
+                await until_type(b, "up")
+            await a.send_json(up(sk, first, "3"))
+            ack, _ = await until_type(a, "ack")
+            old, _ = await until_type(b, "up", 1)
+        check("an old one sent again is acknowledged, but not passed on again", ack and ack["q"] == 1 and old is None, (ack, old))
+        ts = int(time.time())
+        await a.send_json({"t": "mode", "m": "relay", "ts": ts, "s": b64e(sk.sign(f"mode:relay:{ts}".encode()))})
+        await until_type(b, "mode")
+        await a.send_json(up(sk, os.urandom(30), "r"))
+        ack, _ = await until_type(a, "ack")
+        heard = await b.receive_json(timeout=0.2)
+        check("in a sync-only project, passed on by the time its sender is told", ack and ack["q"] == 0 and heard["t"] == "up"
+              and heard["q"] == 0, (ack, heard))
+
+
 async def lists(tmp: Path) -> None:
     """Retired list ids are counted: past the limit, no new lists."""
     with patched(server.lists, MAX_RETIRED_TOTAL=3):
@@ -516,7 +565,7 @@ async def bodies(tmp: Path) -> None:
 async def main() -> int:
     for name, part in (("Revocations", revocations), ("TeX Live", texlive), ("TeX Live fetches", texlive_fetches), ("TeX Live, an older index", texlive_old_index), ("Ids", ids),
                        ("Connections", connections), ("Apps too old", too_old), ("Unsigned messages", unsigned), ("Memory", memory),
-                       ("Private servers", private), ("Allowances", quota), ("Replays", replays), ("Project lists", lists),
+                       ("Private servers", private), ("Allowances", quota), ("Replays", replays), ("Resends", resends), ("Project lists", lists),
                        ("Request bodies and headers", bodies)):
         print(f"{name}:", flush=True)
         with tempfile.TemporaryDirectory() as tmp:

@@ -15,7 +15,9 @@ first because it is safe with one server and checked here with two sharing a Pos
   step 1), with writes racing through two servers: the same change is stored once; a creation code's
   allowance, and a project's limit, are never passed together; an upload under way through one server
   counts for the other, until it is stored or its reservation runs out; project lists count too; and a
-  transaction that fails leaves the server's memory as it was.
+  transaction that fails leaves the server's memory as it was;
+- a second server with no bus on a database another such server uses refuses to start, saying why; once
+  the first has stopped it starts; and two with a bus may share it.
 
     uv run --extra server python scripts/check_groundwork.py        # needs PostgreSQL's programs for the second half
 """
@@ -275,6 +277,48 @@ async def races(url: str, tmp: Path) -> None:
     await sb.close()
 
 
+async def alone(url: str, tmp: Path) -> None:
+    print("\n== a server with no bus is alone on its database")
+    from aiohttp.test_utils import TestServer
+    from server.app import Settings, make_app
+
+    def server(name: str, bus: str = "") -> TestServer:
+        return TestServer(make_app(Settings(database=url, bus=bus, data=tmp / name)))
+    first = server("one")
+    await first.start_server()
+    second = server("two")
+    try:
+        await second.start_server()
+        why = ""
+    except SystemExit as e:
+        why = str(e)
+    check("a second server with no bus on the same database refuses to start, saying why", "no bus" in why, why)
+    await second.close()
+    await first.close()
+    again = server("three")
+    await again.start_server()
+    check("once the first has stopped, another starts", again.started)
+    await again.close()
+    # (a bus that isn't in-process lets several share it: the lock isn't taken; checked here with the shape of
+    # one, a Valkey being for check_bus.py)
+    import server.app as app_mod
+    from server.bus import Bus
+    real = app_mod.open_bus
+
+    class Shared(Bus):  # (stands in for a real bus: not the in-process one)
+        name = "shared"
+    app_mod.open_bus = lambda u: Shared() if u else real(u)
+    try:
+        a, b = server("four", "shared"), server("five", "shared")
+        await a.start_server()
+        await b.start_server()
+        check("two servers with a bus share the database", a.started and b.started)
+        await a.close()
+        await b.close()
+    finally:
+        app_mod.open_bus = real
+
+
 async def upkeeps(url: str, tmp: Path) -> None:
     print("\n== upkeep")
     sql_db = await connect(f"sqlite:{tmp / 'u.db'}")
@@ -318,6 +362,7 @@ async def main() -> int:
             await database(url)
             await stores(url, tmp)
             await races(url, tmp)
+            await alone(url, tmp)
             await upkeeps(url, tmp)
     return summary("groundwork")
 

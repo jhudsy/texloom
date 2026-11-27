@@ -74,7 +74,9 @@ files    = "s3://texloom"                                                 # defa
   service reads, as now.
 - **A relay refuses a combination that can't work, and says why.** A relay with an in-process bus, a SQLite
   database or a folder for files takes an exclusive lock on it at start-up; SQLite already refuses a second
-  relay. So a second relay started against one-machine settings stops, rather than splitting the project
+  relay. **Built for the bus and PostgreSQL:** a relay with no `bus` holds an advisory lock on the database
+  (`ALONE_LOCK`) and a second one refuses to start, saying why (`scripts/check_groundwork.py`). The `bus`
+  setting exists (`--bus`, `bus = …`) and the relay opens it at start, but doesn't pass messages through it yet. So a second relay started against one-machine settings stops, rather than splitting the project
   into two rooms that never hear each other. It also checks the bus and database meet their contracts
   (SCALING.md: `failover` already tests a bucket's conditional writes this way).
 
@@ -249,6 +251,10 @@ doing whatever happens later.
    owner's total checked and added to in the database. **Built** (`Store.locked`, `Policy.may_store`), and
    checked with two stores racing on one PostgreSQL in `scripts/check_groundwork.py`.
 2. **Store, publish, then acknowledge, and publish duplicates again,** for stored and sync-only changes.
+   **Built** (`Relay._up`; checked in `scripts/check_server_abuse.py`, "Resends"). A duplicate is passed on again
+   only if it is among the project's last `REPUBLISH_RECENT` (1000) changes, and counts against its sender's
+   pace: anyone who hears a project's signed changes can replay them, so old ones would only be a way to make
+   the relay repeat them to everyone.
 3. **App-level keep-alive** in the web app and the desktop helper. **Built:** `ping`/`pong`/`wait` and `ka`
    in the sync protocol (DESIGN.md), checked by `scripts/check_keepalive.py`.
 4. **Connection ids that stay unique** across relays.

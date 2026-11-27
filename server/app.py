@@ -6,6 +6,7 @@ rules in policy.py."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -13,7 +14,8 @@ from pathlib import Path
 
 from aiohttp import web
 
-from .db import MAINTENANCE_LOCK, redact
+from .bus import MemoryBus, open_bus
+from .db import ALONE_LOCK, MAINTENANCE_LOCK, redact
 from .endpoints import MAX_BODY, Endpoints, headers
 from .files import Files
 from .policy import GiB, CodeBook, Limits, Policy
@@ -47,6 +49,7 @@ class Settings:
     texlive_max: float = 4 * GiB
     texlive_mirrors: list[str] = field(default_factory=list)
     failover: object | None = None  # failover.FailoverSettings, when failing over to a standby (failover.py)
+    bus: str = ""  # how several servers pass messages to each other (bus.py); "": one server alone
 
 
 async def upkeep(policy: Policy, evict_days: float, purge_days: float | None) -> None:
@@ -95,10 +98,20 @@ def make_app(s: Settings) -> web.Application:
     app = web.Application(middlewares=[headers], client_max_size=MAX_BODY)
 
     opened: list[Store] = []
+    bus = open_bus(s.bus)
+    held = contextlib.AsyncExitStack()  # the database's ALONE_LOCK, while it's held
 
     async def open_store() -> None:
         store = await Store.open(s.database, s.files, s.data, serving=True)
         log.info("database: %s", redact(s.database))
+        if isinstance(bus, MemoryBus) and store.db.kind == "postgresql":
+            # With no bus, a second server on this database would split each project's people into rooms that
+            # never hear each other: refuse it (SQLite allows one server anyway). A connection holds the lock.
+            if not await held.enter_async_context(store.db.lock(ALONE_LOCK)):
+                await held.aclose()
+                await store.close()
+                raise SystemExit(f"another server with no bus is using {redact(s.database)}: two servers sharing a "
+                                 "database must both have the same `bus` (a Redis-compatible server)")
         policy.attach(store)
         await store.start()
         opened.append(store)
@@ -122,6 +135,14 @@ def make_app(s: Settings) -> web.Application:
             yield
             await opened[0].close()
         app.cleanup_ctx.append(database)
+    async def bus_open(_app: web.Application):
+        await bus.start(lambda channel, data: None, lambda: None)  # (the relay doesn't use it yet)
+        log.info("bus: %s", bus.name)
+        relay.bus = bus
+        yield
+        await bus.close()
+        await held.aclose()
+    app.cleanup_ctx.insert(0, bus_open)
     if s.admin_token:
         from .admin import Admin
         app.router.add_get("/admin", Admin(relay, s.admin_token, s.evict_days, s.purge_days, panels).page)

@@ -19,6 +19,7 @@ from aiohttp import WSCloseCode, WSMsgType, web
 
 from texloom.crypto import b64e, canonical_pub, revoke_msg, signer
 
+from .bus import Bus, MemoryBus
 from .policy import KiB, MiB, Policy
 from .store import Store
 from .wire import b64d, canonical_id, client_address, verify, version_tuple
@@ -84,6 +85,11 @@ MAX_PAUSE = 20  # seconds a connection is left unread at a time (its pings must 
 # (its pace), it's sent a "wait" every half of this instead, so it isn't taken for gone.
 KEEPALIVE = 10
 SLOW = 30  # seconds a recipient that didn't take an unsigned message in SEND_TIMEOUT gets no more of them
+# A change sent again that is already stored is passed on again (see _up) if it is among the project's
+# last this many: an app resends what wasn't acknowledged, which is recent. Anyone who can hear a project's
+# signed changes can replay them, so older ones aren't passed on, and those that are count against the
+# sender's pace, as unsigned messages do.
+REPUBLISH_RECENT = 1000
 
 
 class Pace:
@@ -241,6 +247,7 @@ class Relay:
         self.per_project: dict[str, int] = defaultdict(int)  # connections open, by project (MAX_PER_PROJECT)
         self.room_pace: dict[str, Pace] = {}  # per project with someone connected (ROOM_RATE)
         self.address_memory: dict[str, Budget] = {}  # each address's share of `memory` (ADDRESS_MEMORY)
+        self.bus: Bus = MemoryBus()  # how relays pass messages to each other (bus.py): set when the server starts
 
     @property
     def store(self) -> Store:
@@ -655,9 +662,12 @@ class Relay:
         if not ok:
             await ws.send_json({"t": "err", "m": "rejected update (bad signature, or this personal link was revoked)"})
             return
+        # A change is passed on to the others first and acknowledged after (FUTURE_ARCHITECTURE.md, "Messages"):
+        # a relay that stops in between hasn't acknowledged it, so its app sends it again, and then it is
+        # passed on (again: receivers ignore a copy they have).
         if relay_only:  # pass it on, but keep nothing
-            await ws.send_json({"t": "ack", "q": 0, "id": msg.get("id")})
             await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
+            await ws.send_json({"t": "ack", "q": 0, "id": msg.get("id")})
             return
         # one transaction holding the project: is it a replay, may it be stored, store it
         async with self.store.locked(project) as c:
@@ -666,16 +676,21 @@ class Relay:
             seq = None
             if dup is None and not refused:
                 seq = await self.store.append(project, data, sig, c)
-        if dup is not None:  # a replay of something already stored (or compacted): acknowledge, keep nothing
+            recent = dup is not None and dup > 0 and dup > await self.store.head(project, c) - REPUBLISH_RECENT
+        if dup is not None:  # stored already (or compacted): kept once, but a recent one is passed on again
+            if recent:
+                peers = len(self.rooms.get(project, ())) - 1
+                conn.pause = max(conn.pause, conn.pace.take(len(d) * max(peers, 0)))
+                await self.broadcast(project, {"t": "up", "q": dup, "d": d, "s": s}, ws)
             await ws.send_json({"t": "ack", "q": dup, "id": msg.get("id")})
             return
         if refused:
             # Collaborators online still get it; the sender keeps it (no ack) and retries later.
-            await ws.send_json({"t": "err", "code": refused, "m": f"not stored: {refused}", "id": msg.get("id")})
             await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
+            await ws.send_json({"t": "err", "code": refused, "m": f"not stored: {refused}", "id": msg.get("id")})
             return
-        await ws.send_json({"t": "ack", "q": seq, "id": msg.get("id")})
         await self.broadcast(project, {"t": "up", "q": seq, "d": d, "s": s}, ws)
+        await ws.send_json({"t": "ack", "q": seq, "id": msg.get("id")})
 
     async def _snap(self, project: str, ws, conn: Conn, msg: dict, relay_only: bool) -> None:
         upto = field(msg, "upto", int)

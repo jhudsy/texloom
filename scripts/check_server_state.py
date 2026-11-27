@@ -37,7 +37,7 @@ KINDS = {"setting", "connection", "per-server", "project", "shared", "maintenanc
 # "Class.attribute" (or "Class.*" for every attribute of a class, "module:NAME" for module level)
 STATE = {
     # settings and handles
-    "Relay.policy": "setting", "Endpoints.*": "setting",
+    "Relay.policy": "setting", "Relay.bus": "setting", "Endpoints.*": "setting",
     "Policy.*": "setting",  # the limits, the codes file (every relay needs the same one), handles to the store
     "Store.db": "setting", "Store.files": "setting", "Store.dir": "setting",
     "Lists.*": "setting", "Admin.*": "setting", "CodeBook.*": "setting",

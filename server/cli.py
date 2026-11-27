@@ -46,6 +46,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from .bus import open_bus
 from .files import Files, FilesError, open_files
 from .policy import (
     MEMORY,
@@ -82,6 +83,10 @@ def parser() -> argparse.ArgumentParser:
                         "server uses (default: sqlite:DIR/texloom.db, in --data; or e.g. sqlite:///var/lib/texloom/texloom.db), "
                         "or a PostgreSQL database, which several can share: postgresql:///texloom (this machine, as "
                         "this user) or postgresql://texloom:PASSWORD@db.example.org/texloom")
+    p.add_argument("--bus", default="", metavar="URL",
+                   help="how several servers sharing a PostgreSQL database pass messages to each other: a Redis-compatible "
+                        "server, redis://[USER:PASSWORD@]HOST[:PORT], rediss://… (TLS) or redis+sentinel://S1,S2,S3/NAME. "
+                        "Unset (one server): in-process")
     p.add_argument("--copy-database-from", metavar="URL",
                    help="copy everything from this database (the one the server used until now) into --database, "
                         "which must be new, then exit. Stop the server first")
@@ -328,6 +333,10 @@ def main() -> None:
         p.error("--codes-url must be an http:// or https:// address")
     if a.dropbox_app_key and not re.fullmatch(r"[a-z0-9]{8,32}", a.dropbox_app_key):
         p.error("--dropbox-app-key is the app key from the Dropbox App Console (letters and digits), not the secret")
+    try:
+        open_bus(a.bus)  # (only to check the address: the server opens it)
+    except ValueError as e:
+        p.error(str(e))
     failover = None
     if a.failover:
         from .db import sqlite_path
@@ -344,7 +353,7 @@ def main() -> None:
             p.error(str(e))
         failover = FailoverSettings(name=a.failover_name, ttl=a.failover_ttl, database=a.database)
     settings = Settings(
-        a.database, static=a.static, data=a.data, files=files, tex=a.tex_assets, limits=limits, codes=codes,
+        a.database, bus=a.bus, static=a.static, data=a.data, files=files, tex=a.tex_assets, limits=limits, codes=codes,
         private=a.private, min_version=a.min_version, codes_url=a.codes_url, dropbox_app_key=a.dropbox_app_key,
         lists=not a.no_project_lists, arxiv=not a.no_arxiv, admin_token=admin_token, evict_days=a.evict_idle_days,
         purge_days=a.purge_expired_after, texlive=a.texlive, texlive_max=a.texlive_max, texlive_mirrors=a.texlive_mirror, failover=failover)
