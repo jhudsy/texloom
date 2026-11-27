@@ -29,6 +29,10 @@ from .paths import replace_file, sweep_temp
 
 log = logging.getLogger("texloom")
 RETRY_MAX = 15  # seconds: the longest wait between tries to connect (see run)
+# ... when the server answered (an HTTP error, or "try again": a 1013 close, or a restart's 1001/1012): what's behind it
+# is coming back (its database, say), so it's worth trying more often than a server that can't be reached at all
+RETRY_ANSWERED = 4
+ANSWERED = (1001, 1012, 1013)
 CONNECT_TIMEOUT = 15  # seconds a server has to accept a connection (see run)
 
 COMPACT_AFTER = 300  # log entries before a writer uploads a snapshot
@@ -942,6 +946,7 @@ class Replica:
             if self.deleted_at is not None:
                 self.synced.set()
             while self.deleted_at is None:  # a deleted project stays as it is: nothing to connect to
+                answered = False
                 try:
                     # (a close waits only briefly for the server's answer: one given up on gives none). A server that
                     # accepts the connection but doesn't answer (hung, or its machine frozen) is given up on after
@@ -964,7 +969,9 @@ class Replica:
                         finally:
                             keep.cancel()
                         log.info("disconnected (%s%s)", ws.close_code, f": {ws.exception()}" if ws.exception() else "")
+                        answered = ws.close_code in ANSWERED
                 except (aiohttp.ClientError, OSError) as e:
+                    answered = isinstance(e, aiohttp.WSServerHandshakeError)
                     log.info("offline (%s); retrying in at most %ds", e.__class__.__name__, self._backoff)
                 finally:
                     self._dropped()
@@ -972,7 +979,7 @@ class Replica:
                     break
                 # between half the wait and all of it, at random: after an outage, not everyone back at once
                 await asyncio.sleep(self._backoff * (0.5 + random.random() / 2))
-                self._backoff = min(self._backoff * 2, RETRY_MAX)
+                self._backoff = min(self._backoff * 2, RETRY_ANSWERED if answered else RETRY_MAX)
 
     async def _opened(self, ws) -> None:
         """A connection to the server is open: start catching up (scripts/check_replica.py calls this too)."""

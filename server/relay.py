@@ -10,6 +10,7 @@ application (its addresses, database and background upkeep) in app.py, and the c
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -998,7 +999,7 @@ class Relay:
                     if t == "ping":  # (answered here, before anything that could wait on the database)
                         await ws.send_json({"t": "pong"})
                         continue
-                    await self.handle(project, ws, conn, t, msg)
+                    await self._patiently(ws, conn, self.handle(project, ws, conn, t, msg))
                 except ConnectionError:  # it went while its message was handled (an answer had nowhere to go)
                     if not ws.closed:  # (no: the database's connection failed)
                         await self.try_again(ws)
@@ -1033,6 +1034,24 @@ class Relay:
                 await self.broadcast(project, {"t": "left", "from": conn.id})
 
     # compat(refused 0.4.30): apps too old to say their version ("unknown" on the admin page): remove _hold and HOLD_UNVERSIONED
+    async def _patiently(self, ws, conn: Conn, work) -> None:
+        """Handle a message; while that takes long (the database slow, or away: a primary cut off leaves statements
+        waiting up to COMMAND_TIMEOUT), tell an app that keeps its connection alive to wait. Messages on a connection
+        are handled in turn, so its pings wait too, and without this every app whose change was waiting took its
+        relay for gone and connected again, all at once (the lab: collab:cut:a)."""
+        task = asyncio.ensure_future(work)
+        try:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=KEEPALIVE / 2)
+                if done:
+                    return task.result()
+                if conn.ka and not ws.closed:
+                    with contextlib.suppress(ConnectionError, RuntimeError):
+                        await ws.send_json({"t": "wait"})
+        finally:
+            if not task.done():
+                task.cancel()
+
     async def _hold(self, project: str, ws, conn: Conn) -> None:
         """Keep a refused app that's too old to say its version (before 0.4.30) connected, hearing
         nothing, for a while. It doesn't understand the refusal, and after a connection that opened it

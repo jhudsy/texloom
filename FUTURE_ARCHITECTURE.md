@@ -240,8 +240,8 @@ later; seconds from the break until every app has every change):
 | a relay frozen | 24 (its apps notice by their keep-alive in 10 s; nginx then sends one back to the frozen relay first, 10 s more, until the front door has active health checks) | 5.3 |
 | a relay cut off | 23 | 5.5 |
 | the Valkey primary killed | 5.9 | 6.5 (29 with 0.4.40 apps: see below) |
-| the PostgreSQL primary killed | 35 (Patroni's 30 s leader key) | 5.5 |
-| a whole machine, holding both primaries, killed / cut off | 52 / 35 | 29.5 |
+| the PostgreSQL primary killed | 33 (mostly Patroni's 30 s leader key: tunable) | 5.5 |
+| a whole machine, holding both primaries, killed / cut off | 40 / 35 | 12 / 7.7 |
 
 After mending, every change made reaches every app within 0.2 s, and a newcomer catching up from the database alone
 gets every change. Three fixes came from this: the relay pings every connection every 5 s and nginx gives up on a
@@ -252,7 +252,12 @@ timeline of each break): sync-only projects took 29 s after a Valkey failover al
 sent at 6.4 s, because each app answered a peer's request for what it lacks at most once per 30 s, and they had last
 exchanged moments before. Apps now answer small requests at once (only large ones wait), so 6.5 s; apps older than the
 release with this keep the 30 s. And apps on a frozen or cut-off relay noticed only after 20 s: the server's keep-alive
-is now 5 s, so 10 s. The rows above are with both. The other times in the table are from before them.
+is now 5 s, so 10 s. And a database cut off (its machine cut off: statements hang until COMMAND_TIMEOUT) made every
+app with a change waiting take its relay for gone, since a connection's messages are handled in turn and its pings
+waited behind the change: they all reconnected at once, nginx timed the reconnections out and took every relay for
+down, and the apps backed off to 15 s, long after the database was back (52 s). Now a relay tells an app whose message
+waits on the database to `wait` (no app reconnects but those on a broken relay), and apps whose server answered (an HTTP
+error, or a 1013 "try again" close) retry at most every 4 s: 35 s, most of it Patroni's own failover.
 
 Found by the lab:
 - **nginx's WebSocket read timeout must be short** (60 s, not 1 h). With 1 h, a third of the apps sent to a

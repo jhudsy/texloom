@@ -41,6 +41,7 @@ from texloom.crypto import Keys, b64e  # noqa: E402
 from texloom.replica import Replica  # noqa: E402
 
 away = False  # the database is unreachable while this is set
+slow = 0.0  # seconds each change's check waits on the database (a primary cut off: statements hang, then fail)
 
 
 def failing(name: str, error: Exception):
@@ -54,6 +55,17 @@ def failing(name: str, error: Exception):
 
 
 # as asyncpg raises them: a refused connection, and (what the lab saw, a primary's name gone) a name that doesn't resolve
+_duplicate = Store.duplicate
+
+
+async def _slow_duplicate(self, *a, **kw):
+    if slow:
+        await asyncio.sleep(slow)
+    return await _duplicate(self, *a, **kw)
+
+
+Store.duplicate = _slow_duplicate  # type: ignore[method-assign]
+
 for _name, _error in (("touch", ConnectionRefusedError(111, "Connect call failed")),
                       ("catch_up_start", ConnectionRefusedError(111, "Connect call failed")),
                       ("duplicate", socket.gaierror(-2, "Name or service not known")),
@@ -103,6 +115,33 @@ async def relay_side(c: TestClient) -> None:
     check("a new connection is asked to try again too (refused, 503, or its hello closed, 1013)",
           answer in ({"t": "closed", "code": 1013}, {"t": "refused", "status": 503}), answer)
     away = False
+    global slow
+    for _ in range(50):  # (the relay is well again once its head check reaches the database: a second at most)
+        if (await c.get("/api/health")).status == 200:
+            break
+        await asyncio.sleep(0.2)
+    slow = 6.0  # (more than the keep-alive's wait: an app hearing nothing for that long gives up)
+    c2 = await raw(c, keys.project)
+    await until_type(c2, "log")
+    data = b"a change while the database is slow"
+    await c2.send_json({"t": "up", "id": "2", "d": b64e(data), "s": b64e(keys.sign(b"upd:" + data))})
+    waits, ack = 0, None
+    end = time.monotonic() + 12
+    while time.monotonic() < end and ack is None:
+        try:
+            m = await c2.receive(timeout=end - time.monotonic())
+        except TimeoutError:
+            break
+        if m.type != WSMsgType.TEXT:
+            break
+        j = json.loads(m.data)
+        waits += j.get("t") == "wait"
+        if j.get("t") == "ack":
+            ack = j
+    slow = 0.0
+    check("a change waiting on a slow database: its app is told to wait meanwhile (so it doesn't give up), then acknowledged",
+          ack is not None and waits >= 1 and not c2.closed, (waits, ack))
+    await c2.close()
     for ws in (b, late):
         if ws is not None:
             await ws.close()

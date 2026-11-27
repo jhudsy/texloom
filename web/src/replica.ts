@@ -117,6 +117,9 @@ async function sha(data: Uint8Array): Promise<string> {
 
 /** The longest wait between tries to connect, in ms (see lost()). */
 const RETRY_MAX = 15_000
+/** ... when the server answered (the connection opened, then closed): what's behind it is coming back (its database,
+ * say), so it's worth trying more often. (A browser doesn't say why a connection failed to open.) */
+const RETRY_ANSWERED = 4_000
 /** How long a server has to accept a connection, in ms (see connect()). */
 const CONNECT_TIMEOUT = 15_000
 
@@ -370,7 +373,8 @@ export class Replica {
     // a server that doesn't accept the connection in time (hung, or its machine frozen) is given up on, and
     // tried again like any other failure (closing it now ends in onclose)
     const giveUp = setTimeout(() => { if (ws.readyState === WebSocket.CONNECTING) ws.close() }, CONNECT_TIMEOUT)
-    ws.onopen = () => { clearTimeout(giveUp); this.opened(ws) }
+    let answered = false
+    ws.onopen = () => { clearTimeout(giveUp); answered = true; this.opened(ws) }
     ws.onmessage = (ev) => {
       this.heardAt = Date.now()
       const m = JSON.parse(ev.data), run = () => this.handle(m)
@@ -378,17 +382,17 @@ export class Replica {
       const done = m.t === 'log' || m.t === 'logmore' ? (this.pages = this.pages.then(run, run)) : run()
       done.catch((e) => console.error(e))
     }
-    ws.onclose = () => this.lost()
+    ws.onclose = () => this.lost(answered)
   }
 
   /** The connection closed, or was given up: connect again (unless that's not wanted). */
-  private lost() {
+  private lost(answered = false) {
     this.dropped()
     if (this.closed || this.deletedAt || this.syncMode !== 'live') return
     // A refusal won't change in seconds; renewing a code or entering one calls reconnect(). Otherwise the wait
     // doubles up to RETRY_MAX, and is between half of it and all of it at random, so that after an outage
     // everyone doesn't come back at the same moment.
-    this.backoff = Math.min(this.backoff * 2, RETRY_MAX)
+    this.backoff = Math.min(this.backoff * 2, answered ? RETRY_ANSWERED : RETRY_MAX)
     this.retry = setTimeout(() => this.connect(), this.denied ? 5 * 60_000 : this.backoff * (0.5 + Math.random() / 2))
   }
 
