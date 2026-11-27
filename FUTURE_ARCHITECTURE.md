@@ -374,6 +374,80 @@ doing whatever happens later.
 - **The bus is on a private network,** with Redis ACLs (a user that may only publish, subscribe and use
   TeXLoom's keys) and TLS.
 
+## Rolling it out
+
+What's left between a branch that works and a live service on several machines. The live server's own pieces
+(the website, the storage plans service, backups, monitoring) and how to move them are in the private website
+repository's runbook, not here.
+
+### Older apps
+
+Every app version a server allows (`--min-version`, 0.4.40 on texloom.org) must keep working when relays become
+several. What changes for them, and why it's safe:
+
+- **Connection ids grow** (a relay's number × 2³² + a count), staying JSON integers below 2⁵³: the apps treat
+  them as opaque numbers.
+- **"resync" and "recheck" are never sent to them** (no `rs` in their hello): their connection is closed instead,
+  and they connect again and catch up, as after any drop.
+- **"Try again"** (a 1013 close, or 503 before connecting) is a drop to them: they connect again. Before 0.4.67
+  they reset their wait on connecting, so while a database is away they retry every second or two rather than
+  less and less often: more load, nothing wrong.
+- **Before 0.4.67 they have no timeout on connecting**: one sent to a frozen relay waits until nginx gives up
+  (60 s), then connects elsewhere.
+- **Store, publish, then acknowledge** is invisible to them; so is a change passed on again.
+
+Claimed, not yet shown: **to do**, a lab scenario running the desktop sync engine of the oldest allowed version
+(installed from its git tag) next to current apps, on different relays, through the same breaks as `collab`.
+
+### Deploying to machines
+
+`deploy/install.sh` sets up one machine. For several, **to do**: one command that reads a settings file listing the
+machines and what each runs, and sets them all up, again whenever the file changes (idempotent):
+
+```toml
+# cluster.toml: kept outside the repository (it names machines; secrets come from files beside it)
+[ssh]
+user = "root"
+key = "~/.ssh/texloom"
+[machines]
+a = { address = "10.0.0.1", runs = ["relay", "postgresql", "etcd", "valkey", "sentinel"] }
+b = { address = "10.0.0.2", runs = ["relay", "postgresql", "etcd", "valkey", "sentinel"] }
+c = { address = "10.0.0.3", runs = ["relay", "etcd", "sentinel"] }      # a witness, and a relay
+door = { address = "10.0.0.9", runs = ["front-door"], name = "app.example.org" }
+[bucket]
+url = "s3://bucket"
+```
+
+It would install and configure each part (Patroni and etcd for PostgreSQL, Valkey and Sentinel, the relays with the
+same settings file, nginx with every relay as an upstream: `least_conn`, `proxy_next_upstream … http_503`), the
+private network between machines (WireGuard), TLS and access lists between the parts, and the firewall. Commands:
+`plan` (what would change), `apply`, `add relay <machine>`, `status` (every part's health). A Python script over SSH,
+like `install.sh` and `rebuild-standby.py`, rather than a new tool to learn. It's tested on the Docker lab's
+machines first, then on real ones: a few hourly-billed VPSs for an afternoon, in two datacentres, are the
+rehearsal that Docker can't be (real networks and clocks, TLS, systemd, the provider's own failures).
+
+### Shared state the relays don't have yet
+
+- **Creation codes are files** (`--codes-file`), written by hand or by a sales service. Every relay must see the same
+  codes, so they need one home every relay reads: **to do**, a table in the database (or a file in the bucket), with
+  the sales service writing there.
+- **Limits per address** (connections, rates) are counted per relay, so several relays together allow that many
+  times more. The front door's limits (nginx's, per address) still hold. Sharing them (counters on the bus) is
+  possible if it matters.
+- **The admin page** shows one relay's view: **to do**, a summary across relays (the bus knows who is alive and
+  connected).
+
+### Growing and shrinking
+
+- **Relays** are interchangeable, so adding one is: a machine, the settings file, `add relay`, and the front door
+  told. Taking one away: its connections move to the others as it stops (spread over a minute). **To do** after
+  that: doing it by itself, from load (connections per relay, CPU) and from health (a relay unwell for minutes is
+  replaced), through the provider's API. Relays first, because they're the tier that grows with people.
+- **PostgreSQL** grows by adding standbys (more copies, and reads), and by a bigger machine for writes; past that,
+  the steps in "One machine to many". Changed by hand, rarely.
+- **Valkey**: one primary carries a lot (SCALING.md's limits are far below it); its replicas are for failover.
+- **Kubernetes** isn't needed for this: the tiers are few and each has its own way to stay available.
+
 ## Open questions
 
 - **Whether the bus keeps its contract under load:** a subscriber that falls behind is disconnected by
