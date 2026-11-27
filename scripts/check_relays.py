@@ -319,6 +319,16 @@ async def apps(one: TestClient, two: TestClient, tmp: Path, store) -> None:
                                            for r in (r1, r2)), 15)
             check(f"{'a sync-only' if sync_only else 'a stored'} project: apps on different relays end with each other's changes",
                   both, (text(r1), text(r2)))
+            if sync_only:  # a relay's link to the others lost while one app edits: once it's back, the other catches up at
+                second = relays[1]  # once (resync, answered without waiting: they last exchanged moments ago)
+                second.bus.simulate_break()
+                add_line(r1, "while the second relay's bus is away")
+                await asyncio.sleep(1)
+                second.bus.heal()
+                t0 = time.monotonic()
+                got = await until(lambda: "while the second relay's bus is away" in text(r2), 15)
+                check("a sync-only project, one relay's bus away a moment: once it's back, the other app has the change within seconds",
+                      got and time.monotonic() - t0 < 8, f"{time.monotonic() - t0:.1f} s")
             if not sync_only:
                 second = relays[1]
                 second.bus.simulate_break()

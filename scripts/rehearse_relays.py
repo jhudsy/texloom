@@ -52,6 +52,8 @@ The scenarios (each on a lab of its own, built and removed again; `how` is kill,
                      sync-only one, all editing while `t` is broken (a relay, default relay-a; valkey or pg, whichever is
                      the primary; or a machine): timed until every app has every change and all of it is stored; then
                      a newcomer catches up from the database alone
+  old[:how[:t]]      as collab, with apps of the oldest version a server allows (0.4.40; REHEARSE_OLD_VERSION) among
+                     them: bob, on a relay of his own, and erin, of the sync-only pair
   up                 bring the lab up, say how to reach it, and wait (Ctrl-C takes it down)
   down               remove anything a rehearsal of relays left behind (after a hard stop)
 
@@ -1053,11 +1055,172 @@ async def scenario_spread(lab: Lab, how: str, target: str) -> None:
         lab.mend(victim)
 
 
+# An app of an older version (the oldest a server allows): its sync engine, from that version's git tag, in an
+# environment of its own, driven over a pipe by OLD_DRIVER, which says how it stands every 0.2 s.
+OLD_VERSION = os.environ.get("REHEARSE_OLD_VERSION", "0.4.40")
+OLD_DRIVER = """
+import asyncio, json, sys
+from pathlib import Path
+from pycrdt import Text
+from texloom.crypto import Keys
+from texloom.replica import Replica
+
+async def main():
+    keys, server = Keys.from_link(sys.argv[1])
+    r = Replica(Path(sys.argv[2]), keys, server)
+    task = asyncio.create_task(r.run())
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader()
+    await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
+
+    async def say():
+        while True:
+            t = r.files.get("main.tex")
+            ws = r.ws if r.ws is not None and not r.ws.closed else None
+            resp = getattr(ws, "_response", None)
+            print(json.dumps({"text": str(t) if t is not None else "", "outbox": len(r.outbox), "synced": r.synced.is_set(),
+                              "relay": resp.headers.get("X-Relay", "") if resp is not None else ""}), flush=True)
+            await asyncio.sleep(0.2)
+    saying = asyncio.create_task(say())
+    while line := await reader.readline():
+        cmd, _, arg = line.decode().rstrip("\\n").partition(" ")
+        if cmd == "add":
+            def change(arg=arg):
+                if "main.tex" not in r.files:
+                    r.files["main.tex"] = Text()
+                t = r.files["main.tex"]
+                t.insert(len(t), arg + "\\n")
+            r.local_change(change)
+    task.cancel()
+    saying.cancel()
+
+asyncio.run(main())
+"""
+
+
+def old_app_python(tmp: Path) -> Path:
+    """A Python with the sync engine of OLD_VERSION (from its git tag) installed, built once per run."""
+    home = tmp / f"texloom-{OLD_VERSION}"
+    py = home / ".venv" / "bin" / "python"
+    if not py.exists():
+        src = home / "src"
+        src.mkdir(parents=True)
+        archive = subprocess.run(["git", "-C", str(ROOT), "archive", f"v{OLD_VERSION}"], capture_output=True, check=True).stdout
+        subprocess.run(["tar", "-x", "-C", str(src)], input=archive, check=True)
+        subprocess.run(["uv", "venv", "-q", "--python", "3.12", str(home / ".venv")], check=True)
+        subprocess.run(["uv", "pip", "install", "-q", "--python", str(py), str(src)], check=True)
+        (home / "driver.py").write_text(OLD_DRIVER)
+    return py
+
+
+class OldApp:
+    """An app of OLD_VERSION, in a process of its own, with the same few uses as App here."""
+
+    def __init__(self, folder: Path, keys: Keys, url: str, python: Path):
+        self.folder, self.link, self.python = folder, keys.link(url), python
+        self.state = {"text": "", "outbox": 0, "synced": False, "relay": ""}
+        self.proc: asyncio.subprocess.Process | None = None
+        self.reader: asyncio.Task | None = None
+
+    async def start(self) -> None:
+        self.proc = await asyncio.create_subprocess_exec(
+            str(self.python), str(self.python.parent.parent.parent / "driver.py"), self.link, str(self.folder),
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        self.reader = asyncio.create_task(self._read())
+        if not await until(lambda: self.state["synced"], 30):
+            raise TimeoutError(f"the {OLD_VERSION} app didn't connect")
+
+    async def _read(self) -> None:
+        assert self.proc and self.proc.stdout
+        while line := await self.proc.stdout.readline():
+            try:
+                self.state = json.loads(line)
+            except ValueError:
+                pass
+
+    def add(self, line: str) -> None:
+        assert self.proc and self.proc.stdin
+        self.proc.stdin.write(f"add {line}\n".encode())
+
+    async def edit(self, line: str) -> None:
+        self.add(line)
+        await asyncio.sleep(0.5)
+        assert await until(lambda: self.state["outbox"] == 0, 20), f"{line} wasn't stored"
+
+    async def stop(self) -> None:
+        if self.proc and self.proc.returncode is None:
+            self.proc.kill()
+            await self.proc.wait()
+        if self.reader:
+            self.reader.cancel()
+
+
+def nginx_errors(log: str, t0_wall: float) -> list[tuple[float, str]]:
+    """nginx's error log lines about relays (timed out, refused, none left), with seconds from t0_wall."""
+    out = []
+    for line in log.splitlines():
+        if not line[:4].isdigit() or not any(k in line for k in ("upstream", "no live")):
+            continue
+        try:
+            at = time.mktime(time.strptime(line[:19], "%Y/%m/%d %H:%M:%S")) - time.timezone
+        except ValueError:
+            continue
+        what = line[20:].split("[error]")[-1].split(", client:")[0].strip()
+        up = line.split("upstream: \"")[-1].split("\"")[0] if "upstream: \"" in line else ""
+        out.append((at - t0_wall, f"nginx: {what[:110]}" + (f" ({up.split('//')[-1].split('/')[0]})" if up else "")))
+    return out
+
+
+def timeline(lab: "Lab", heard: "Heard", moves: list[tuple[float, str]], t0: float, t0_wall: float, until_s: float) -> None:
+    """What happened after a break, in order: where each app was connected, what the apps logged, the relays' bus and
+    recovery, and nginx's errors."""
+    keys = ("bus", "gone", "failed over", "recheck", "resync", "unavailable", "subscriptions")
+    events: list[tuple[float, str]] = [(t - t0, f"(an app) {line}") for t, line in heard.lines
+                                       if t >= t0 and any(k in line for k in ("connect", "offline", "disconnect", "no answer"))]
+    events += [(t - t0, what) for t, what in moves]
+    for r in lab.of("relay"):
+        for x in log_summary(lab.logs(r, tail=600), t0_wall=t0_wall):
+            if any(k in x for k in keys):
+                try:
+                    events.append((float(x[:8].strip().split()[0]), f"{r}: {x[11:]}"))
+                except ValueError:
+                    pass
+    events += nginx_errors(docker("logs", lab.n("door"), check_=False).stderr, t0_wall)
+    print("  · what happened, in seconds from the break:", flush=True)
+    for at, what in sorted(e for e in events if -1 <= e[0] <= until_s):
+        print(f"      {at:+6.1f} s  {what[:200]}", flush=True)
+
+
+def content(a) -> str:
+    return a.state["text"] if isinstance(a, OldApp) else (text(a.r) if a.r is not None else "")
+
+
+def write(a, line: str) -> None:
+    a.add(line) if isinstance(a, OldApp) else add_line(a.r, line)
+
+
+def waiting(a) -> int:
+    return a.state["outbox"] if isinstance(a, OldApp) else (len(a.r.outbox) if a.r is not None else 1)
+
+
+def where(lab: "Lab", a) -> str:
+    if isinstance(a, OldApp):
+        tried = lab.relays_in(a.state["relay"])
+        return (tried[-1] if tried else "?") if a.state["relay"] else "not connected"
+    return ws_relay(lab, a)
+
+
 def everyone_has(apps: list, lines: list[str]) -> bool:
-    return all(a.r is not None and all(x in text(a.r) for x in lines) for a in apps)
+    return all(all(x in content(a) for x in lines) for a in apps)
 
 
-async def scenario_collab(lab: Lab, how: str, target: str) -> None:
+async def scenario_old(lab: Lab, how: str, target: str) -> None:
+    """As collab, with apps of the oldest version a server allows (OLD_VERSION, 0.4.40 unless REHEARSE_OLD_VERSION says
+    otherwise) among the current ones: bob, on a relay of his own, and erin, of the sync-only pair."""
+    await scenario_collab(lab, how, target, old=("bob", "erin"))
+
+
+async def scenario_collab(lab: Lab, how: str, target: str, old: tuple[str, ...] = ()) -> None:
     """Several relays at once (FUTURE_ARCHITECTURE.md): three apps editing one stored project, each on a relay of its
     own, and two on a sync-only project, through the front door. A part is broken (`target`: a relay, the default
     relay-a; valkey or pg, whichever is the primary; or a whole machine) while every app goes on editing. Timed: how
@@ -1068,38 +1231,64 @@ async def scenario_collab(lab: Lab, how: str, target: str) -> None:
     stored, sync = Keys.generate(), Keys.generate()
     check("(the sync-only project is set so)", lab.sql(f"INSERT INTO mode(project, relay) VALUES ('{sync.project}', true)", "texloom") is not None)
     names = ["alice", "bob", "carol"]
-    writers = [App(lab.tmp / n, stored if n == "alice" else stored.personal(n.title())[2], base) for n in names]
-    pair = [App(lab.tmp / n, sync if n == "dave" else sync.personal(n.title())[2], base) for n in ("dave", "erin")]
+    python = old_app_python(lab.tmp) if old else None
+    if old:
+        say(f"{', '.join(old)}: version {OLD_VERSION}; the others: this checkout's")
+
+    def app(n: str, keys: Keys, first: str):
+        k = keys if n == first else keys.personal(n.title())[2]
+        return OldApp(lab.tmp / n, k, base, python) if n in old else App(lab.tmp / n, k, base)
+    writers = [app(n, stored, "alice") for n in names]
+    pair = [app(n, sync, "dave") for n in ("dave", "erin")]
     everyone = writers + pair
+    heard = Heard()
+    logger = logging.getLogger("texloom")
+    level = logger.level
+    logger.addHandler(heard)
+    logger.setLevel(logging.INFO)
     try:
         for a in everyone:  # (one after another: least_conn puts each on the relay with the fewest)
             await a.start()
-        on = {n: ws_relay(lab, a) for n, a in zip(names + ["dave", "erin"], everyone)}
+        on = {n: where(lab, a) for n, a in zip(names + ["dave", "erin"], everyone)}
         say("which relay each app reached: " + ", ".join(f"{n} {r}" for n, r in on.items()))
         check("the three writers are on three different relays", len({on[n] for n in names}) == 3, on)
         for n, a in zip(names, writers):
             await a.edit(f"{n} before")
-        add_line(pair[0].r, "dave before")  # (the file made once, then both write to it)
-        await until(lambda: "dave before" in text(pair[1].r), 30)
-        add_line(pair[1].r, "erin before")
+        write(pair[0], "dave before")  # (the file made once, then both write to it)
+        await until(lambda: "dave before" in content(pair[1]), 30)
+        write(pair[1], "erin before")
         before = [f"{n} before" for n in names]
         check("before: every writer has every change", await until(lambda: everyone_has(writers, before), 30))
         check("before: the sync-only pair have each other's", await until(lambda: everyone_has(pair, ["dave before", "erin before"]), 30))
 
-        t0 = time.monotonic()
+        moves: list[tuple[float, str]] = []
+
+        async def follow() -> None:  # where each app is connected, every 0.2 s: each change noted
+            last: dict[str, str] = {}
+            while True:
+                for n, a in zip(names + ["dave", "erin"], everyone):
+                    now = where(lab, a)
+                    if last.get(n) != now:
+                        if n in last:
+                            moves.append((time.monotonic(), f"{n}: {now}"))
+                        last[n] = now
+                await asyncio.sleep(0.2)
+        following = asyncio.create_task(follow())
+        await asyncio.sleep(0.5)
+        t0, t0_wall = time.monotonic(), time.time()
         lab.break_(victim, how)
         print(f"  ({victim} is {HOW[how]}; every app makes a change at once, and another 5 s later)", flush=True)
         during = []
         for n, a in zip(names + ["dave", "erin"], everyone):
-            add_line(a.r, f"{n} during")
+            write(a, f"{n} during")
         await asyncio.sleep(5)
         for n, a in zip(names + ["dave", "erin"], everyone):
-            add_line(a.r, f"{n} later")
+            write(a, f"{n} later")
         during = [f"{n} {w}" for n in names for w in ("during", "later")]
         sync_lines = [f"{n} {w}" for n in ("dave", "erin") for w in ("during", "later")]
         writers_have = asyncio.create_task(timed(lambda: everyone_has(writers, during), t0, 180, 0.2))
         pair_have = asyncio.create_task(timed(lambda: everyone_has(pair, sync_lines), t0, 180, 0.2))
-        stored_all = await timed(lambda: all(a.r is not None and not a.r.outbox for a in writers), t0, 180, 0.2)
+        stored_all = await timed(lambda: all(waiting(a) == 0 for a in writers), t0, 180, 0.2)
         w, s_ = await writers_have, await pair_have
         check(f"with {victim} {HOW[how]}, every writer ends with every change made during the break", w is not None)
         check(f"... and every one of them is stored (acknowledged)", stored_all is not None)
@@ -1107,12 +1296,14 @@ async def scenario_collab(lab: Lab, how: str, target: str) -> None:
         took("every writer has every change made during the break", w)
         took("every one of them is stored", stored_all)
         took("the sync-only pair have each other's", s_)
-        say("which relay each app is on now: " + ", ".join(f"{n} {ws_relay(lab, a)}" for n, a in zip(names + ["dave", "erin"], everyone)))
+        say("which relay each app is on now: " + ", ".join(f"{n} {where(lab, a)}" for n, a in zip(names + ["dave", "erin"], everyone)))
+        following.cancel()
+        timeline(lab, heard, moves, t0, t0_wall, max(x or 0 for x in (w, s_, stored_all)) + 2)
 
         lab.mend(victim)
         t1 = time.monotonic()
         for n, a in zip(names, writers):
-            add_line(a.r, f"{n} after")
+            write(a, f"{n} after")
         after = [f"{n} after" for n in names]
         w2 = await timed(lambda: everyone_has(writers, after), t1, 120, 0.2)
         check(f"mended: changes made after reach every writer", w2 is not None)
@@ -1133,6 +1324,8 @@ async def scenario_collab(lab: Lab, how: str, target: str) -> None:
             if said:
                 print(f"  · {r} said: " + "; ".join(said[:6]), flush=True)
     finally:
+        logger.removeHandler(heard)
+        logger.setLevel(level)
         await asyncio.gather(*(a.stop() for a in everyone), return_exceptions=True)
 
 
@@ -1149,9 +1342,11 @@ async def scenario_up(lab: Lab, how: str, target: str) -> None:
 
 
 SCENARIOS = {"pg": scenario_pg, "valkey": scenario_valkey, "door": scenario_door, "machine": scenario_machine,
-             "relay-pg": scenario_relay_pg, "spread": scenario_spread, "collab": scenario_collab, "up": scenario_up}
+             "relay-pg": scenario_relay_pg, "spread": scenario_spread, "collab": scenario_collab, "old": scenario_old,
+             "up": scenario_up}
 DEFAULT = ([f"{s}:{h}" for s in ("pg", "valkey", "door", "machine") for h in HOW] + ["spread", "spread:kill", "spread:pause", "relay-pg:kill"]
-           + [f"collab:{h}:relay-a" for h in HOW] + ["collab:kill:valkey", "collab:kill:pg", "collab:kill:a", "collab:cut:a"])
+           + [f"collab:{h}:relay-a" for h in HOW] + ["collab:kill:valkey", "collab:kill:pg", "collab:kill:a", "collab:cut:a"]
+           + ["old:kill:relay-b", "old:pause:relay-b", "old:kill:valkey", "old:kill:pg"])
 
 
 def build_images() -> bool:

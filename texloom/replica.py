@@ -42,7 +42,12 @@ UPDATE_BATCH = 6 * 1024 * 1024  # pending changes are merged up to this much per
 # snapshot replaces them may delete them. See web/src/replica.ts.
 REF = b"\x00texloom-ref\x00"
 SIGNED_P2P = ("upd", "cack", "cerr")  # peer-to-peer messages that carry the sender's signature
-ANSWER_EVERY = 30.0  # seconds: how often one connection's request for what it lacks is answered (_on_p2p)
+ANSWER_EVERY = 30.0  # seconds: how often one connection's request for what it lacks is answered with much (_on_p2p)
+# An answer this small (what a peer missed in a short break: a dropped connection, a relay's link to the others
+# lost) goes at once, at most one every ANSWER_SOON seconds to a connection: only large ones wait for ANSWER_EVERY.
+# (Waiting for every answer left a peer that reconnected soon after the last exchange up to 30 s behind.)
+SMALL_ANSWER = 64 * 1024
+ANSWER_SOON = 2.0
 CREQ_FOR = 5 * 60_000  # ms: how old a compile request may be (it is signed with when it was made), and how
 CREQ_AHEAD = 60_000  # far ahead of this computer's clock; within that, each nonce is taken once
 # A file wanted from peers is asked of one at a time (issue 16): with many online, asking everyone makes each send it, and
@@ -707,9 +712,10 @@ class Replica:
 
     # Peers ask for what they lack (sv1/sv2: all of the document they don't have; breq: a file).
     # Anyone with the link can ask, a read-only one too, and a few bytes can ask for megabytes:
-    # each connection gets at most one answer of each kind per ANSWER_EVERY (a state vector asked
-    # for sooner is answered then, with the latest), answers go out one at a time, and apart
-    # from the receiving of messages, which they never hold up. As in web/src/replica.ts.
+    # each connection gets at most one large answer of each kind per ANSWER_EVERY (a state vector
+    # asked for sooner is answered then, with the latest), and one small one per ANSWER_SOON; answers
+    # go out one at a time, and apart from the receiving of messages, which they never hold up. As in
+    # web/src/replica.ts.
     def _may_answer(self, key: str) -> bool:
         now = time.monotonic()
         if len(self._answered) > 1000:
@@ -740,13 +746,23 @@ class Replica:
 
         async def send() -> None:
             want = self._state_wanted.pop(frm, None)
-            if want is None or not self._may_answer(str(frm)):
+            if want is None:
                 return
+            now = time.monotonic()
+            self._answered[str(frm)] = now  # (worked out: the next one not before ANSWER_SOON)
             diff = self.doc.get_update(b64d(want))
-            if len(diff) > 2:
-                await self.p2p({"k": "upd", "u": b64e(packed(diff))}, frm)
+            if len(diff) <= 2:
+                return
+            if len(diff) > SMALL_ANSWER:
+                big = self._answered.get(f"{frm}:big")
+                if big is not None and now - big < ANSWER_EVERY:  # (a large one lately: this one waits, and goes with the latest)
+                    self._state_wanted.setdefault(frm, want)
+                    self._answer(send, big + ANSWER_EVERY - now)
+                    return
+                self._answered[f"{frm}:big"] = now
+            await self.p2p({"k": "upd", "u": b64e(packed(diff))}, frm)
         last = self._answered.get(str(frm))
-        self._answer(send, 0.0 if last is None else max(0.0, last + ANSWER_EVERY - time.monotonic()))
+        self._answer(send, 0.0 if last is None else max(0.0, last + ANSWER_SOON - time.monotonic()))
 
     async def _on_p2p(self, m: dict) -> None:
         data = b64d(m["d"])

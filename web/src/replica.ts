@@ -34,7 +34,12 @@ const REF = enc.encode('\x00texloom-ref\x00')
 const isRef = (u: Uint8Array) => u.length > REF.length && REF.every((b, i) => u[i] === b)
 const refTo = (id: string) => { const j = enc.encode(JSON.stringify({ b: id })), u = new Uint8Array(REF.length + j.length); u.set(REF); u.set(j, REF.length); return u }
 const SIGNED_P2P = new Set(['upd', 'creq']) // peer-to-peer messages that carry the sender's signature (the desktop signs cack, cerr)
-const ANSWER_EVERY = 30_000 // ms: how often one connection's request for what it lacks is answered (onP2p)
+const ANSWER_EVERY = 30_000 // ms: how often one connection's request for what it lacks is answered with much (onP2p)
+// An answer this small (what a peer missed in a short break: a dropped connection, a relay's link to the others lost)
+// goes at once, at most one every ANSWER_SOON ms to a connection: only large ones wait for ANSWER_EVERY. (Waiting for
+// every answer left a peer that reconnected soon after the last exchange up to 30 s behind.)
+const SMALL_ANSWER = 64 * 1024
+const ANSWER_SOON = 2_000
 // A file wanted from peers is asked of one at a time (issue 16): with many online, asking everyone makes each send it, and
 // all but one copy is thrown away. A peer that has it answers; one that hasn't says so ("bno", from newer apps) or stays silent;
 // the next is asked after ASK_ONE ms (while pieces from it keep coming, it is still answering). After ASK_PEERS, everyone is asked.
@@ -879,8 +884,9 @@ export class Replica {
 
   // Peers ask for what they lack (sv1/sv2: all of the document they don't have; breq: a file).
   // Anyone with the link can ask, a read-only one too, and a few bytes can ask for megabytes:
-  // each connection gets at most one answer of each kind per ANSWER_EVERY (a state vector asked
-  // for sooner is answered then, with the latest), and answers go out one at a time.
+  // each connection gets at most one large answer of each kind per ANSWER_EVERY (a state vector asked
+  // for sooner is answered then, with the latest), and one small one per ANSWER_SOON; answers go out
+  // one at a time.
   private answered = new Map<string, number>() // what (connection, or connection:file) -> when
   private stateWanted = new Map<number, string>() // connection -> its latest state vector, to answer
   private answers: Promise<void> = Promise.resolve()
@@ -901,14 +907,27 @@ export class Replica {
     const waiting = this.stateWanted.has(from)
     this.stateWanted.set(from, sv)
     if (waiting) return
-    const wait = Math.max(0, (this.answered.get(`${from}`) ?? 0) + ANSWER_EVERY - Date.now())
-    setTimeout(() => this.answer(async () => {
+    const send = async (): Promise<void> => {
       const want = this.stateWanted.get(from)
       this.stateWanted.delete(from)
-      if (want === undefined || !this.mayAnswer(`${from}`)) return
+      if (want === undefined) return
+      const now = Date.now()
+      this.answered.set(`${from}`, now) // (worked out: the next one not before ANSWER_SOON)
       const diff = Y.encodeStateAsUpdate(this.doc, b64d(want))
-      if (diff.length > 2) await this.p2p({ k: 'upd', u: b64e(await packed(diff)) }, from)
-    }), wait)
+      if (diff.length <= 2) return
+      if (diff.length > SMALL_ANSWER) {
+        const big = this.answered.get(`${from}:big`)
+        if (big !== undefined && now - big < ANSWER_EVERY) { // a large one lately: this one waits, and goes with the latest
+          if (!this.stateWanted.has(from)) this.stateWanted.set(from, want)
+          setTimeout(() => this.answer(send), big + ANSWER_EVERY - now)
+          return
+        }
+        this.answered.set(`${from}:big`, now)
+      }
+      await this.p2p({ k: 'upd', u: b64e(await packed(diff)) }, from)
+    }
+    const last = this.answered.get(`${from}`)
+    setTimeout(() => this.answer(send), last === undefined ? 0 : Math.max(0, last + ANSWER_SOON - Date.now()))
   }
 
   private async onP2p(m: { d: string; s?: string; from: number }) {

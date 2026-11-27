@@ -84,7 +84,7 @@ MAX_PAUSE = 20  # seconds a connection is left unread at a time (its pings must 
 # back within as long again. A server that has stopped without closing its connections (its machine
 # or network gone, or hung) is noticed in at most twice this. While its connection is left unread
 # (its pace), it's sent a "wait" every half of this instead, so it isn't taken for gone.
-KEEPALIVE = 10
+KEEPALIVE = 5  # (10 until the lab showed an app on a frozen relay noticing only after 20 s)
 SLOW = 30  # seconds a recipient that didn't take an unsigned message in SEND_TIMEOUT gets no more of them
 # A change sent again that is already stored is passed on again (see _up) if it is among the project's
 # last this many: an app resends what wasn't acknowledged, which is recent. Anyone who can hear a project's
@@ -714,6 +714,8 @@ class Relay:
 
     def _bus_broke(self) -> None:
         """The connection to the bus broke and is back: anything may have been missed meanwhile."""
+        log.info("after a break in the bus: checking the heads of stored projects, asking sync-only ones to resync")
+
         async def mend() -> None:
             # what other relays passed on meanwhile was missed: stored projects read it from the database, and the
             # apps of sync-only ones (nothing stored to read) catch up from each other

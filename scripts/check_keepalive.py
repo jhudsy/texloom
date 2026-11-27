@@ -37,7 +37,7 @@ from texloom import __version__
 from texloom.crypto import Keys
 from texloom.replica import Replica
 
-KA = 2  # seconds (10 in use)
+KA = 2  # seconds (5 in use)
 
 
 def in_thread(s: webcheck.Session, what: str, coro) -> None:

@@ -375,6 +375,7 @@ class RespBus(Bus):
         self._pongs: collections.deque[asyncio.Future] = collections.deque()
         self._started = asyncio.Event()
         self._closed = False
+        self.at = ""
 
     @property
     def connected(self) -> bool:
@@ -406,6 +407,7 @@ class RespBus(Bus):
 
     async def _open(self) -> _Conn:
         host, port = await self._address()
+        self.at = f"{host}:{port}"  # (where it last connected, or tried to: for the logs)
         c, info = await _Conn.open(host, port, self.tls, self.user, self.password)
         role = info.get("role", b"")
         role = role.decode() if isinstance(role, bytes) else role
@@ -562,8 +564,7 @@ class RespBus(Bus):
             try:
                 c = await self._open()
             except BusError as e:
-                if not broke:
-                    log.warning("the bus is away: %s", e)
+                (log.info if broke else log.warning)("the bus is away: %s (trying again in %.1f s)", e, wait)
                 broke = True
                 self._started.set()
                 await asyncio.sleep(wait)
@@ -585,14 +586,15 @@ class RespBus(Bus):
                 self._sub = c
                 self._started.set()
                 if broke:
-                    log.info("the bus is back")
+                    log.info("the bus is back (its primary at %s)", self.at)
                     try:
                         self.on_break()
                     except Exception:
                         log.exception("after a break in the bus")
                 await asyncio.wait({reader, pinger}, return_when=asyncio.FIRST_COMPLETED)
-            except (TimeoutError, BusError, OSError):
-                pass
+                why = "a ping went unanswered" if pinger.done() else "it closed"
+            except (TimeoutError, BusError, OSError) as e:
+                why = f"subscribing again failed: {e or type(e).__name__}"
             finally:
                 self._sub = None
                 reader.cancel()
@@ -606,7 +608,7 @@ class RespBus(Bus):
                 self._pongs.clear()
             if not self._closed:
                 broke = True
-                log.warning("lost the subscriptions' connection to the bus: connecting again")
+                log.warning("lost the subscriptions' connection to the bus (%s): connecting again", why)
 
     async def _read_subs(self, c: _Conn) -> None:
         with contextlib.suppress(OSError, asyncio.IncompleteReadError, ConnectionError):
