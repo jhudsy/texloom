@@ -91,6 +91,10 @@ SLOW = 30  # seconds a recipient that didn't take an unsigned message in SEND_TI
 # sender's pace, as unsigned messages do.
 REPUBLISH_RECENT = 1000
 SPREAD = 3.0  # seconds over which connections are asked to resync or recheck (ask), so they don't all at once
+# A connection's id is its relay's number (from the bus, so every relay's differs) times 2^32 plus a count of
+# the relay's own: unique across relays, and still an integer below 2^53, as JavaScript (and older apps) take it.
+ID_BITS = 32
+NUMBERS = (1 << (53 - ID_BITS)) - 1  # relay numbers go round within 1 … NUMBERS
 
 
 class Pace:
@@ -250,6 +254,7 @@ class Relay:
         self.room_pace: dict[str, Pace] = {}  # per project with someone connected (ROOM_RATE)
         self.address_memory: dict[str, Budget] = {}  # each address's share of `memory` (ADDRESS_MEMORY)
         self.bus: Bus = MemoryBus()  # how relays pass messages to each other (bus.py): set when the server starts
+        self.number = 1  # this relay's number on the bus (join_bus): the top bits of its connections' ids
 
     @property
     def store(self) -> Store:
@@ -427,6 +432,28 @@ class Relay:
         if peers:
             await asyncio.gather(*(self.send(ws, text) for ws in peers))
 
+    # --- the bus ------------------------------------------------------------------------
+    async def join_bus(self, bus: Bus) -> None:
+        """Start using the bus (at start-up), and take this relay's number from its counter."""
+        self.bus = bus
+        await bus.start(self._from_bus, self._bus_broke)
+        self.number = (await bus.incr("relays") - 1) % NUMBERS + 1
+
+    def _from_bus(self, channel: str, data: bytes) -> None:
+        """A message from another relay (nothing is sent through the bus yet)."""
+
+    def _bus_broke(self) -> None:
+        """The connection to the bus broke and is back: anything may have been missed meanwhile."""
+        task = asyncio.get_running_loop().create_task(self._keep_number())
+        task.add_done_callback(lambda t: t.cancelled() or not t.exception() or log.warning("after a break in the bus: %s", t.exception()))
+
+    async def _keep_number(self) -> None:
+        """A bus that failed over can lose its counter's last additions (copying to a replica lags), and would then
+        give a relay starting now a number already in use. Every relay puts the counter back past its own."""
+        n = await self.bus.incr("relays", 0)
+        if n < self.number:
+            await self.bus.incr("relays", self.number - n)
+
     async def ask(self, t: str, sockets: list | None = None, spread: float = SPREAD) -> None:
         """Ask connections (all of this relay's, or `sockets`) to catch up again, spread over `spread` seconds:
         - "resync": catch up from their peers (they send their state vector, as after connecting). For sync-only
@@ -477,8 +504,8 @@ class Relay:
         # no compression: what's sent is ciphertext, and compressed frames would let a client make
         # the server hold far more than it sent (Metered counts bytes as they arrive)
         ws = web.WebSocketResponse(heartbeat=30, max_msg_size=MAX_FRAME, compress=False)
-        conn = Conn(self._next_id, address)
-        self._next_id += 1
+        conn = Conn(self.number << ID_BITS | self._next_id, address)
+        self._next_id = self._next_id % ((1 << ID_BITS) - 1) + 1
         if address is not None:
             self.per_address[address] += 1
         self.per_project[project] += 1

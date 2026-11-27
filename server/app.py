@@ -136,9 +136,8 @@ def make_app(s: Settings) -> web.Application:
             await opened[0].close()
         app.cleanup_ctx.append(database)
     async def bus_open(_app: web.Application):
-        await bus.start(lambda channel, data: None, lambda: None)  # (the relay doesn't use it yet)
-        log.info("bus: %s", bus.name)
-        relay.bus = bus
+        await relay.join_bus(bus)
+        log.info("bus: %s (this relay is number %d)", bus.name, relay.number)
         yield
         await bus.close()
         await held.aclose()

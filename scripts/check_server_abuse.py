@@ -241,6 +241,26 @@ async def ids(tmp: Path) -> None:
         check("and a project list", r.status == 400, r.status)
         r = await c.get(f"/api/list/{pid}")
         check("(the id clients use is fine)", r.status == 404, r.status)
+        _, log = await join(c, pid)
+        check("a connection's id is its relay's number times 2^32 plus a count: below 2^53 (JavaScript's integers)",
+              isinstance(log.get("you"), int) and 1 << 32 < log["you"] < 1 << 53, log.get("you"))
+
+    # relays sharing a bus take different numbers, so their connections' ids differ
+    from server.bus import Hub, MemoryBus
+    from server.policy import Policy
+    hub = Hub()
+    r1, r2 = relay_mod.Relay(Policy(None)), relay_mod.Relay(Policy(None))
+    await r1.join_bus(MemoryBus(hub))
+    await r2.join_bus(MemoryBus(hub))
+    check("relays sharing a bus take different numbers", r1.number != r2.number, (r1.number, r2.number))
+    await r1.bus.delete("relays")  # a bus that failed over and lost its counter
+    r1.bus.on_break()
+    r2.bus.on_break()
+    await asyncio.sleep(0.1)
+    r3 = relay_mod.Relay(Policy(None))
+    await r3.join_bus(MemoryBus(hub))
+    check("after a bus lost its counter, the relays put it back: one starting then takes a number not in use",
+          r3.number not in (r1.number, r2.number), (r1.number, r2.number, r3.number))
 
 
 async def connections(tmp: Path) -> None:

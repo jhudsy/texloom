@@ -28,6 +28,7 @@ from .packing import packed, unpack
 from .paths import replace_file, sweep_temp
 
 log = logging.getLogger("texloom")
+RETRY_MAX = 15  # seconds: the longest wait between tries to connect (see run)
 
 COMPACT_AFTER = 300  # log entries before a writer uploads a snapshot
 BLOB_RE = re.compile(r"^[0-9a-f]{32}$")  # blob ids are HMAC hex digests, never paths
@@ -944,13 +945,14 @@ class Replica:
                             keep.cancel()
                         log.info("disconnected (%s%s)", ws.close_code, f": {ws.exception()}" if ws.exception() else "")
                 except (aiohttp.ClientError, OSError) as e:
-                    log.info("offline (%s); retrying in %ds", e.__class__.__name__, backoff)
+                    log.info("offline (%s); retrying in at most %ds", e.__class__.__name__, backoff)
                 finally:
                     self._dropped()
                 if self.deleted_at is not None:
                     break
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 30)
+                # between half the wait and all of it, at random: after an outage, not everyone back at once
+                await asyncio.sleep(backoff * (0.5 + random.random() / 2))
+                backoff = min(backoff * 2, RETRY_MAX)
 
     async def _opened(self, ws) -> None:
         """A connection to the server is open: start catching up (scripts/check_replica.py calls this too)."""

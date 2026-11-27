@@ -110,6 +110,9 @@ async function sha(data: Uint8Array): Promise<string> {
   return b64e(new Uint8Array(await crypto.subtle.digest('SHA-256', data as BufferSource)))
 }
 
+/** The longest wait between tries to connect, in ms (see lost()). */
+const RETRY_MAX = 15_000
+
 export class Replica {
   // gc off: deleted text is kept, so past versions can be reconstructed (History)
   readonly doc = new Y.Doc({ gc: false })
@@ -372,8 +375,11 @@ export class Replica {
   private lost() {
     this.dropped()
     if (this.closed || this.deletedAt || this.syncMode !== 'live') return
-    // A refusal won't change in seconds; renewing a code or entering one calls reconnect().
-    this.retry = setTimeout(() => this.connect(), this.denied ? 5 * 60_000 : (this.backoff = Math.min(this.backoff * 2, 30000)))
+    // A refusal won't change in seconds; renewing a code or entering one calls reconnect(). Otherwise the wait
+    // doubles up to RETRY_MAX, and is between half of it and all of it at random, so that after an outage
+    // everyone doesn't come back at the same moment.
+    this.backoff = Math.min(this.backoff * 2, RETRY_MAX)
+    this.retry = setTimeout(() => this.connect(), this.denied ? 5 * 60_000 : this.backoff * (0.5 + Math.random() / 2))
   }
 
   /** Every second while a server that offers it is connected (and at once, with `now`): a ping when

@@ -307,6 +307,9 @@ async def alone(url: str, tmp: Path) -> None:
 
     class Shared(Bus):  # (stands in for a real bus: not the in-process one)
         name = "shared"
+
+        async def incr(self, key: str, by: int = 1, ttl: float | None = None) -> int:
+            return 1
     app_mod.open_bus = lambda u: Shared() if u else real(u)
     try:
         a, b = server("four", "shared"), server("five", "shared")

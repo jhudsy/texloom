@@ -222,9 +222,9 @@ rehearsal (below) is there to measure them.
 
 Two smaller points:
 
-- **After a long outage, reconnecting can lag by up to 30 s.** Apps back off to one try every 30 s, so
-  someone may wait up to 30 s after a single-machine relay comes back. Random variation in the back-off,
-  and a shorter cap once the server answers again, would help.
+- **After a long outage, reconnecting can lag.** **Built:** apps now back off to at most 15 s (it was 30 s),
+  and each wait is between half and all of it at random, so that after an outage everyone doesn't come back at
+  once.
 - **Mass reconnects need spreading.** When a relay closes many connections at once, the reconnects and
   catch-ups all land on the database together. Every close the relay starts is spread out, and catch-ups
   already go a page at a time.
@@ -257,7 +257,11 @@ doing whatever happens later.
    the relay repeat them to everyone.
 3. **App-level keep-alive** in the web app and the desktop helper. **Built:** `ping`/`pong`/`wait` and `ka`
    in the sync protocol (DESIGN.md), checked by `scripts/check_keepalive.py`.
-4. **Connection ids that stay unique** across relays.
+4. **Connection ids that stay unique** across relays. **Built** (`Relay.join_bus`): a relay's number comes from the
+   bus's counter `relays`; after a break in the bus every relay puts the counter back past its own number, since a
+   Redis failover can lose its last additions and would otherwise hand a starting relay a number in use (a
+   relay starting in the seconds before that can still be given one: rare, and harmless but for that relay's
+   connections sharing ids with another's). Checked in `scripts/check_server_abuse.py`, "Ids".
 5. **The bus and soft-state interfaces,** with in-process implementations. All passing on of messages goes
    through them, even on one machine. **The contract and both implementations are built** (`server/bus.py`:
    `MemoryBus`, and `RespBus`, the relay's own Redis-protocol client, so that every break is seen), checked by
