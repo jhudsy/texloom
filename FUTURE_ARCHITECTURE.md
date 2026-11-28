@@ -348,7 +348,9 @@ doing whatever happens later.
    rules in "Decided" below: store again before acknowledging, and the timeline on the bus.
 9. **A rehearsal in Docker:** three relays, PostgreSQL with Patroni and etcd, Redis with Sentinel, an S3
    store, and a front door. Kill each part and measure the times in the table above. Add a load test that spreads one project's people over
-   several relays.
+   several relays. **Built:** `scripts/loadtest.py spread spread-room p2p --relays 3` (results in "Load", below). It
+   found a lone relay pacing a large peer-to-peer message as if it went over the bus too (half speed for a file sent to
+   a peer, from this branch), now fixed: a large one goes over the bus only when someone in the project is elsewhere.
 10. **Retire Way 2's lease-based failover**, and update SCALING.md, STANDBY.md, INSTALL.md and the help page.
     **Done:** `server/failover.py`, its settings' effect, `--failover-check`, the bucket's conditional writes, the
     admin page's panel, `check_failover.py`, `rehearse_failover.py`, `models/failover` and `Caddyfile.failover` are
@@ -535,8 +537,45 @@ every part's health at once.
   replaced), through the provider's API. Relays first, because they're the tier that grows with people.
 - **PostgreSQL** grows by adding standbys (more copies, and reads), and by a bigger machine for writes; past that,
   the steps in "One machine to many". Changed by hand, rarely.
-- **Valkey**: one primary carries a lot (SCALING.md's limits are far below it); its replicas are for failover.
+- **Valkey**: one primary carries a lot (measured in "Load", below); its replicas are for failover. If it ever
+  needs more, in order: send less through it (the front door keeping a project's people on one relay, below); its
+  I/O threads (`io-threads`: the network, not its CPU, is what fills first); several independent Valkey groups,
+  each relay choosing one by a hash of the project id (nearly everything on the bus is per project; the relay-wide
+  parts, the heartbeat list, each relay's own channel and its numbering, would live on one group); Valkey Cluster's
+  sharded pub/sub does the same split, but the relay's own client would have to learn the cluster's redirects.
 - **Kubernetes** isn't needed for this: the tiers are few and each has its own way to stay available.
+
+### Load
+
+`scripts/loadtest.py` with `--relays 3`: relays on one machine (a laptop: 10 fast and 4 slow cores) sharing a
+throwaway PostgreSQL and a Valkey in Docker, simulated apps speaking the real protocol, each project's people put on
+different relays (the worst case: everything they send each other crosses the bus). An edit is "too slow" when the
+slowest 5% take over 200 ms to arrive. All on PostgreSQL.
+
+| | one relay | three relays, people spread | three relays, each project on one |
+|---|---|---|---|
+| edits a second before too slow (3 people a project, 2 typing) | 800 (1,600 fails: CPU 100%) | 2,600 (busiest relay 90%, p95 10 ms) | 2,600 (busiest 86%, p95 7 ms) |
+| CPU at 800 edits a second, all relays | 56% | 120% | 102% |
+| Valkey at 2,600 edits a second | | 16% of a core, 5.1 MB/s out | 13%, 1.7 MB/s |
+| one project, 100 people typing (200 edits/s, 19,800 deliveries/s) | 78%, p95 17 ms | busiest 40%, p95 8 ms | (one relay) |
+| large peer-to-peer pieces (4 MiB) between people on different relays, while others edit | 64 MB/s, edits p95 47 ms | 64 MB/s (Valkey sending 171 MB/s), edits p95 102 ms; at 96 MB/s offered edits slow to 563 ms | (none cross) |
+
+Every change reached everyone in every row that wasn't too slow. What it says:
+
+- **Several relays carry more, but not in proportion**: three carried about twice what one did. Each edit costs
+  more CPU in all: one relay alone using the bus (Valkey) took 75% at 800 edits a second against 56% without it
+  (every message is published, and Valkey sends it back to the relay that published it too), and the rest is three
+  relays, PostgreSQL, Valkey and the simulated apps sharing one laptop. On separate machines the second part goes.
+- **The relays fill before Valkey does**: at 2,600 edits a second the busiest relay was at 90% and Valkey at 16%.
+  Valkey's cost doesn't grow with the number of relays: a project's messages go only to the relays with someone in
+  it. What fills first is its network, with large peer-to-peer transfers (files in sync-only projects): at 64 MB/s
+  of them it sent 171 MB/s, and other people's edits slowed (head-of-line: one connection per relay carries both).
+- **Keeping each project's people on one relay** (nginx `hash $request_uri consistent` for `/ws/`, instead of
+  `least_conn`) cut the bus's traffic to a third and edits' p95 from 10 to 7 ms, with little CPU saved. It costs
+  balance (a busy project loads one relay) and moves a dead relay's projects as a group. `least_conn` stays the
+  default; hashing is the first thing to try if the bus's bandwidth ever matters.
+- **A lone relay on macOS** refused some of 1,200 connections opened at once (the listen queue: macOS allows 128);
+  Linux allows thousands, so a server doesn't.
 
 ## Open questions
 

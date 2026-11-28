@@ -10,9 +10,18 @@ the server you plan to use.
   uv run python scripts/loadtest.py rooms files  # just these
   uv run python scripts/loadtest.py browser --people 30 --seconds 180
                                                  # a crowded project for a real browser to join
+
+Several relays (needs Docker and PostgreSQL's programs): relays on this machine sharing a throwaway PostgreSQL and
+a Valkey in Docker, each project's people spread over them, so that everything they send each other crosses the
+bus. The spread scenarios compare one relay alone with --relays of them, at the same load:
+
+  uv run --extra server python scripts/loadtest.py spread spread-room p2p --relays 3
+
+LOADTEST_PROFILE=DIR runs the (first) relay under cProfile, writing its profile into DIR when it stops.
 """
 import argparse
 import asyncio
+import contextlib
 import json
 import multiprocessing as mp
 import os
@@ -84,6 +93,8 @@ class Stats:
         self.logs: list[float] = []  # when catch-up replies arrived
         self.joins: list[float] = []
         self.transfer = 0.0
+        self.p2p: list[float] = []  # how long a peer-to-peer piece took to arrive
+        self.p2p_bytes = 0  # bytes of it that arrived in the measured window
 
     def sample(self, into: list[float], ms: float) -> None:
         if len(into) < MAX_SAMPLES:
@@ -113,6 +124,11 @@ async def reader(ws, spec: dict, c: dict, st: Stats, pending: dict) -> None:
             sent = stamp_of(msg["d"])
             if frm <= sent < to:
                 st.sample(st.quiet, (now - sent) * 1e3)
+        elif kind == "p2p":
+            sent = stamp_of(msg["d"])
+            if frm <= sent < to:
+                st.p2p_bytes += len(msg["d"]) * 3 // 4
+                st.sample(st.p2p, (now - sent) * 1e3)
         elif kind == "err":
             st.refused += 1
     if time.monotonic() < spec["stop"]:
@@ -136,7 +152,7 @@ async def client(http, spec: dict, c: dict, st: Stats) -> None:
     ws, wait = None, 0.5
     while ws is None:  # as the web app does when a connection attempt fails
         try:
-            ws = await http.ws_connect(f"{spec['url']}/ws/{c['project']}", max_msg_size=32 * MiB)
+            ws = await http.ws_connect(f"{c.get('url') or spec['url']}/ws/{c['project']}", max_msg_size=32 * MiB)
             await ws.send_json({"t": "hello", "since": 0})
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
             ws = None
@@ -162,6 +178,9 @@ async def client(http, spec: dict, c: dict, st: Stats) -> None:
     async def cursor():
         await ws.send_json({"t": "aw", "d": b64e(stamped(60))})
 
+    async def piece():  # a large peer-to-peer message to the room (as an app sends a file, a piece at a time)
+        await ws.send_str(json.dumps({"t": "p2p", "d": b64e(stamped(c["p2p"]))}))
+
     jobs = [asyncio.create_task(reader(ws, spec, c, st, pending))]
     try:
         senders = []
@@ -169,6 +188,8 @@ async def client(http, spec: dict, c: dict, st: Stats) -> None:
             senders.append(paced(c["edits"], spec, edit))
         if c.get("cursors"):
             senders.append(paced(c["cursors"], spec, cursor))
+        if c.get("p2p"):
+            senders.append(paced(c["p2p_rate"], spec, piece))
         await asyncio.gather(*senders)
         await asyncio.sleep(max(0, spec["stop"] - time.monotonic()))
     except (ConnectionError, aiohttp.ClientError, RuntimeError):
@@ -277,18 +298,29 @@ def worker(spec: dict, results) -> None:
 # the server under test
 # ---------------------------------------------------------------------------------------
 class Server:
-    def __init__(self, port: int, static: Path | None = None):
+    """One relay, or several (`relays`) on consecutive ports sharing a PostgreSQL and the bus `bus`."""
+
+    def __init__(self, port: int, static: Path | None = None, relays: int = 1, bus: "Valkey | None" = None,
+                 postgresql: bool = False, grouped: bool = False):
         self.dir = Path(tempfile.mkdtemp(prefix="texloom-loadtest-"))
         self.port, self.static = port, static
+        self.relays, self.bus = relays, bus
+        self.grouped = grouped  # each project's people on one relay (as a front door hashing the project would send them)
+        self.kind = "postgresql" if bus or postgresql else testdb.KIND
         self.database = ""  # a throwaway database in self.dir/db (scripts/testdb.py), started by db()
         (self.dir / "codes.txt").write_text("default unlimited\n")
-        self.proc: subprocess.Popen | None = None
-        self.url = f"http://127.0.0.1:{port}"
+        self.procs: list[subprocess.Popen] = []
+        self.urls = [f"http://127.0.0.1:{port + i}" for i in range(relays)]
+        self.url = self.urls[0]
+
+    @property
+    def proc(self) -> subprocess.Popen | None:
+        return self.procs[0] if self.procs else None
 
     def db(self) -> str:
-        """The server's database (started on first use)."""
+        """The server's database (started on first use): PostgreSQL for several relays."""
         if not self.database:
-            self.database = testdb.start(self.dir / "db")
+            self.database = testdb.start(self.dir / "db", self.kind)
         return self.database
 
     def sql(self, query: str, *args):
@@ -321,43 +353,63 @@ class Server:
         asyncio.run(fill())
 
     def start(self) -> float:
-        """Returns how long the server took to come up."""
+        """Returns how long the server (every relay) took to come up."""
         exe = Path(sys.executable).parent / "texloom-server"
-        args = [str(exe), "--host", "127.0.0.1", "--port", str(self.port), "--database", self.db(), "--data", str(self.dir),
-                "--codes-file", str(self.dir / "codes.txt"), "--min-free", "0", "--project-max-bytes", "unlimited"]
-        if self.static:
-            args += ["--static", str(self.static)]
+        if self.bus:
+            self.bus.flush()  # (nothing left from the last server)
         t0 = time.monotonic()
-        self.proc = subprocess.Popen(args, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=(self.dir / "server.log").open("ab"))
-        while time.monotonic() - t0 < 120:
-            try:
-                urllib.request.urlopen(f"{self.url}/api/info", timeout=1).read()
-                return time.monotonic() - t0
-            except OSError:
-                time.sleep(0.02)
-        raise RuntimeError("the server didn't start: see " + str(self.dir / "server.log"))
+        for i, url in enumerate(self.urls):
+            data = self.dir / f"relay{i}" if self.relays > 1 else self.dir
+            data.mkdir(exist_ok=True)
+            prof = os.environ.get("LOADTEST_PROFILE")  # a folder: relay 0 runs under cProfile, its profile written there at exit
+            run = [sys.executable, "-m", "cProfile", "-o", f"{prof}/relay-{time.time():.0f}.prof", "-m", "server.cli"] if prof and i == 0 else [str(exe)]
+            args = [*run, "--config", "/dev/null", "--host", "127.0.0.1", "--port", str(self.port + i), "--database", self.db(),
+                    "--data", str(data), "--files", str(self.dir / "files"), "--codes-file", str(self.dir / "codes.txt"),
+                    "--min-free", "0", "--project-max-bytes", "unlimited", *(["--bus", self.bus.url] if self.bus else [])]
+            if self.static:
+                args += ["--static", str(self.static)]
+            self.procs.append(subprocess.Popen(args, cwd=ROOT, stdout=subprocess.DEVNULL,
+                                               stderr=(self.dir / f"server{i}.log").open("ab")))
+            while True:
+                if time.monotonic() - t0 > 120:
+                    raise RuntimeError("the server didn't start: see " + str(self.dir / f"server{i}.log"))
+                try:
+                    urllib.request.urlopen(f"{url}/api/health", timeout=1).read()
+                    break
+                except OSError:
+                    time.sleep(0.02)
+        return time.monotonic() - t0
 
     def stop(self) -> float:
-        """Returns how long the server took to exit."""
+        """Returns how long the server (every relay) took to exit."""
         t0 = time.monotonic()
-        if self.proc:
-            self.proc.terminate()
+        for proc in self.procs:
+            proc.terminate()
+        for proc in self.procs:
             try:
-                self.proc.wait(100)
+                proc.wait(100)
             except subprocess.TimeoutExpired:
-                self.proc.kill()
-            self.proc = None
+                proc.kill()
+        self.procs = []
         return time.monotonic() - t0
 
     def close(self) -> None:
         self.stop()
         if self.database:
-            testdb.stop(self.dir / "db")
+            testdb.stop(self.dir / "db", self.kind)
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def usage(self) -> tuple[float, float]:
-        """CPU seconds so far, and memory in MB."""
-        pid = self.proc.pid
+        """CPU seconds so far, and memory in MB, of every relay together."""
+        each = self.usage_each()
+        return sum(c for c, _ in each), sum(m for _, m in each)
+
+    def usage_each(self) -> list[tuple[float, float]]:
+        return [self._usage(p.pid) for p in self.procs]
+
+    @staticmethod
+    def _usage(pid: int) -> tuple[float, float]:
+        """CPU seconds so far, and memory in MB, of one process."""
         if Path(f"/proc/{pid}/stat").exists():
             fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
             tick = os.sysconf("SC_CLK_TCK")
@@ -370,35 +422,78 @@ class Server:
 
 
 class Watch(threading.Thread):
-    """Samples the server's CPU over the measured window, and its peak memory."""
+    """Samples the server's CPU over the measured window (all relays', and the busiest one's), its peak memory, and
+    what the bus did meanwhile."""
 
     def __init__(self, server: Server, frm: float, to: float):
         super().__init__(daemon=True)
         self.server, self.frm, self.to = server, frm, to
-        self.peak, self.cpu, self.start_mb = 0.0, float("nan"), float("nan")
+        self.peak, self.cpu, self.cpu_max, self.start_mb = 0.0, float("nan"), float("nan"), float("nan")
+        self.bus_cpu = self.bus_mbps = float("nan")
         self.done = threading.Event()
 
     def run(self):
         at_start = None
         while not self.done.is_set():
             try:
-                cpu, rss = self.server.usage()
+                each = self.server.usage_each()
             except (IndexError, ValueError, OSError, AttributeError):
                 break
             now = time.monotonic()
+            rss = sum(m for _, m in each)
             self.peak = max(self.peak, rss)
             if at_start is None and now >= self.frm:
-                at_start = (cpu, now)
+                at_start = ([c for c, _ in each], now, self.server.bus.stats() if self.server.bus else None)
                 self.start_mb = rss
             if at_start and now >= self.to and self.cpu != self.cpu:
-                self.cpu = (cpu - at_start[0]) / (now - at_start[1]) * 100
+                secs = now - at_start[1]
+                used = [(c - c0) / secs * 100 for (c, _), c0 in zip(each, at_start[0])]
+                self.cpu, self.cpu_max = sum(used), max(used)
+                if at_start[2]:
+                    cpu, out = self.server.bus.stats()
+                    self.bus_cpu = (cpu - at_start[2][0]) / secs * 100
+                    self.bus_mbps = (out - at_start[2][1]) / secs / MiB
             time.sleep(0.2)
+
+
+class Valkey:
+    """A throwaway Valkey in Docker for the relays' bus (scripts/check_bus.py starts it: a user allowed only what
+    the relays send)."""
+
+    def __enter__(self) -> "Valkey":
+        import check_bus
+        from pg import free_port
+        self._cb = check_bus
+        if not check_bus.docker_ready():
+            raise SystemExit("several relays need Docker, for Valkey")
+        port = free_port()
+        self._ctx = check_bus.valkey(check_bus.NAME, port)
+        self._ctx.__enter__()
+        self.url = f"redis://relay:{check_bus.PASSWORD}@127.0.0.1:{port}"
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._ctx.__exit__(None, None, None)
+
+    def flush(self) -> None:
+        self._cb.cli(self._cb.NAME, "flushall")
+
+    def stats(self) -> tuple[float, int]:
+        """CPU seconds Valkey has used, and the bytes it has sent (to its subscribers, mostly)."""
+        info = dict(line.split(":", 1) for line in self._cb.cli(self._cb.NAME, "info", "all").splitlines() if ":" in line)
+        return float(info["used_cpu_sys"]) + float(info["used_cpu_user"]), int(info["total_net_output_bytes"])
 
 
 def step(server: Server, a, label: str, clients: list[dict], warm=3.0, dur=8.0, connect=None, extra: dict | None = None) -> dict:
     """Connects `clients`, measures for `dur` seconds and returns one row of results."""
     probe_room = new_project()
-    probe = [dict(probe_room, probe=True, cursors=20, others=1), dict(probe_room, probe=True, others=1)]
+    probe = [dict(probe_room, probe=True, cursors=20, others=1, url=server.urls[0]),
+             dict(probe_room, probe=True, others=1, url=server.urls[-1])]  # (across the bus, with several relays)
+    room, at = None, -1
+    for i, c in enumerate(clients):  # each project's people spread over the relays (rooms_of lists them together),
+        if c["project"] != room:     # starting at the next relay for each project (its first people are the typists)
+            room, at = c["project"], at + 1
+        c["url"] = server.urls[(at if server.grouped else i + at) % len(server.urls)]
     connect = connect if connect is not None else 6 + len(clients) / 100
     now = time.monotonic()
     spec = {"url": server.url, "start": now + connect, "from": now + connect + warm, "to": now + connect + warm + dur}
@@ -431,7 +526,9 @@ def step(server: Server, a, label: str, clients: list[dict], warm=3.0, dur=8.0, 
         "deliveries_per_s": round(delivered / dur), "delivered_pct": round(100 * delivered / sent, 1) if sent else None,
         "edit_p50": percentile(pick("edit"), 0.5), "edit_p95": percentile(pick("edit"), 0.95), "edit_p99": percentile(pick("edit"), 0.99),
         "ack_p95": percentile(pick("ack"), 0.95), "quiet_p95": percentile(pick("quiet"), 0.95),
-        "quiet_max": max(pick("quiet"), default=float("nan")), "cpu_pct": watch.cpu, "start_mb": watch.start_mb, "peak_mb": watch.peak, "after_mb": after_mb,
+        "quiet_max": max(pick("quiet"), default=float("nan")), "cpu_pct": watch.cpu, "cpu_max": watch.cpu_max,
+        "bus_cpu": watch.bus_cpu, "bus_mbps": watch.bus_mbps, "relays": len(server.urls),
+        "p2p_p95": percentile(pick("p2p"), 0.95), "p2p_mbps": total("p2p_bytes") / dur / MiB, "start_mb": watch.start_mb, "peak_mb": watch.peak, "after_mb": after_mb,
         "errors": total("errors"), "dropped": total("dropped"), "refused": total("refused"),
         "client_busy": max(o["busy"] for o in out[:-1]) if len(out) > 1 else 0,
         "joins_p95": percentile(pick("joins"), 0.95), "joins_max": max(pick("joins"), default=float("nan")),
@@ -448,7 +545,7 @@ def failed(r: dict) -> bool:
 
 COLUMNS = [("step", "step", "{}"), ("connections", "conns", "{}"), ("edits_out", "edits/s", "{}"), ("deliveries_per_s", "deliv/s", "{}"), ("delivered_pct", "deliv%", "{}"),
            ("edit_p50", "p50ms", "{:.1f}"), ("edit_p95", "p95ms", "{:.1f}"), ("edit_p99", "p99ms", "{:.1f}"), ("ack_p95", "ack95", "{:.1f}"),
-           ("quiet_p95", "quiet95", "{:.1f}"), ("quiet_max", "quietmax", "{:.0f}"), ("cpu_pct", "cpu%", "{:.0f}"), ("start_mb", "MBstart", "{:.0f}"), ("peak_mb", "MBpeak", "{:.0f}"), ("after_mb", "MBafter", "{:.0f}"),
+           ("quiet_p95", "quiet95", "{:.1f}"), ("quiet_max", "quietmax", "{:.0f}"), ("cpu_pct", "cpu%", "{:.0f}"), ("cpu_max", "cpu1%", "{:.0f}"), ("bus_cpu", "buscpu%", "{:.0f}"), ("bus_mbps", "busMB/s", "{:.1f}"), ("start_mb", "MBstart", "{:.0f}"), ("peak_mb", "MBpeak", "{:.0f}"), ("after_mb", "MBafter", "{:.0f}"),
            ("retried", "retried", "{}"), ("errors", "err", "{}"), ("dropped", "drop", "{}"), ("refused", "refused", "{}"), ("client_busy", "client", "{:.2f}")]
 
 
@@ -487,6 +584,7 @@ def scenario(name: str):
 
 
 SCENARIOS: dict = {}
+SEVERAL = {"spread", "spread-room", "p2p"}  # (not in "all": they need Docker and PostgreSQL)
 
 
 @scenario("idle")
@@ -692,6 +790,68 @@ def soak(a):
         s.close()
 
 
+def relay_counts(a):
+    """One relay alone (no bus), then --relays of them through Valkey, each project's people spread over them, and
+    then each project's on one of them (grouped): (how many, the bus or None, grouped). All on PostgreSQL."""
+    if a.relays < 2:
+        raise SystemExit("the spread scenarios compare one relay with several: --relays 2 or more")
+    if not hasattr(a, "valkey"):
+        a.valkey = a.stack.enter_context(Valkey())
+    return [(1, None, False), (a.relays, a.valkey, False), (a.relays, a.valkey, True)]
+
+
+@scenario("spread")
+def spread(a):
+    """Many small projects, each one's people on different relays: one relay alone, then several through the bus."""
+    for relays, bus, grouped in relay_counts(a):
+        for n, rate in [(100, 2), (200, 2), (400, 2), (650, 2), (650, 4), (650, 8), (650, 16)]:
+            s = Server(a.port, relays=relays, bus=bus, postgresql=True, grouped=grouped)
+            try:
+                s.start()
+                r = show(step(s, a, f"{relays} relay(s){' grouped' if grouped else ''}: {n} rooms x3, {rate}/s", rooms_of(n, 3, 2, rate, 2)), a)
+            finally:
+                s.close()
+            if failed(r):
+                break
+
+
+@scenario("spread-room")
+def spread_room(a):
+    """One project, its people spread over the relays, everyone typing; then mostly watching."""
+    for relays, bus, grouped in relay_counts(a):
+        if grouped:
+            continue  # (one project, or pairs: grouped, they'd be on one relay, as above)
+        for label, clients in [(f"{n} typing", rooms_of(1, n, n, 2, 2)) for n in (10, 20, 50, 100)] + \
+                              [("200 people, 3 typing", rooms_of(1, 200, 3, 2, 2))]:
+            s = Server(a.port, relays=relays, bus=bus, postgresql=True, grouped=grouped)
+            try:
+                s.start()
+                show(step(s, a, f"{relays} relay(s){' grouped' if grouped else ''}: {label}", clients), a)
+            finally:
+                s.close()
+
+
+@scenario("p2p")
+def p2p(a):
+    """Large peer-to-peer pieces (as an app sends a file or a big catch-up) between people on different relays,
+    while others edit: how fast they go, and what they do to everyone else's edits."""
+    for relays, bus, grouped in relay_counts(a):
+        if grouped:
+            continue  # (one project, or pairs: grouped, they'd be on one relay, as above)
+        for pairs, rate in [(1, 2), (4, 2), (8, 2), (8, 3)]:
+            pushers = []
+            for _ in range(pairs):  # (one sends, one receives, next to each other: on two relays)
+                room = new_project()
+                pushers += [dict(room, others=1, p2p=4 * MiB, p2p_rate=rate), dict(room, others=1)]
+            s = Server(a.port, relays=relays, bus=bus, postgresql=True, grouped=grouped)
+            try:
+                s.start()
+                r = step(s, a, f"{relays} relay(s){' grouped' if grouped else ''}: {pairs} x 4 MiB x {rate}/s", pushers + rooms_of(100, 3, 2, 1, 2), dur=12)
+                show(r, a, f"p2p={r['p2p_mbps']:.1f}MB/s of {pairs * rate * 4} p2p_p95={r['p2p_p95']:.0f}ms")
+            finally:
+                s.close()
+
+
 def browser(a):
     from texloom.crypto import Keys
     s = Server(a.port, ROOT / "web" / "dist")
@@ -716,15 +876,18 @@ def main():
     p.add_argument("--seconds", type=float, default=180, help="browser: how long")
     p.add_argument("--lead", type=float, default=20, help="browser: seconds to open the link first")
     p.add_argument("--rate", type=float, default=2, help="browser: edits and cursor updates per second, each")
+    p.add_argument("--relays", type=int, default=3, help="spread, spread-room, p2p: how many relays (compared with one)")
     a = p.parse_args()
     a.rows = []
+    a.stack = contextlib.ExitStack()
     if a.scenarios == ["browser"]:
         browser(a)
         return
-    names = list(SCENARIOS) if a.scenarios == ["all"] else a.scenarios
-    for n in names:
-        print(f"== {n}: {SCENARIOS[n].__doc__}", flush=True)
-        SCENARIOS[n](a)
+    names = [n for n in SCENARIOS if n not in SEVERAL] if a.scenarios == ["all"] else a.scenarios
+    with a.stack:
+        for n in names:
+            print(f"== {n}: {SCENARIOS[n].__doc__}", flush=True)
+            SCENARIOS[n](a)
     if a.out:
         a.out.write_text(json.dumps(a.rows, indent=1, default=str))
 

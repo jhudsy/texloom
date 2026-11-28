@@ -1245,14 +1245,25 @@ class Relay:
         if to is not None and not peers and there is None:
             return
         text = json.dumps(out)
-        n = len(text) * (len(peers) + (to is None or there is not None))  # (the other relays' copy counts once)
+        # The other relays' copy counts once, and is sent only when someone there is in the room: for a large message
+        # that's worth asking the bus (a file sent to someone on this relay then costs the bus, and its pace, nothing);
+        # a small one goes anyway, and counts as one copy at least, so that it's paced even with nobody here.
+        if to is not None:
+            elsewhere = there is not None
+        elif len(text) > SMALL:
+            elsewhere = await self.connected(project) > len(self.rooms.get(project, ()))
+        else:
+            elsewhere = True
+        if not peers and not elsewhere:
+            return
+        n = len(text) * (len(peers) + elsewhere)
         room = self.room_pace.get(project) or Pace(ROOM_RATE, ROOM_BURST)
         if len(text) <= SMALL and room.wait(n) > 0:
             return  # the room is busy: something small is dropped rather than waited for
         if len(text) > MiB and self.out_waiting() + n > OUT_MAX:
             return  # the server holds a lot unsent already
         await asyncio.gather(*(self.send_unsigned(peer, text, UNSIGNED_BACKLOG) for peer in peers))
-        if to is None:
+        if to is None and elsewhere:
             await self.pass_on(project, text, "p2p", "u")
         elif there is not None:
             await self.pass_on(project, text, "p2p", "u", to=to, relay=there)

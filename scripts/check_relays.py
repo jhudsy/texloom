@@ -135,6 +135,40 @@ async def messages(one: TestClient, two: TestClient) -> None:
     d = b"signed, to one"
     await a.send({"t": "p2p", "d": b64e(d), "s": signed(keys, b"p2p:", d), "to": b.id})
     check("signed, to one", (await b.heard_one("p2p", d=b64e(d))) is not None)
+    big = "x" * (100 * 1024)  # (larger than SMALL: whether anyone is elsewhere is asked)
+    await a.send({"t": "p2p", "d": big})
+    check("a large one to everyone too", (await b.heard_one("p2p", d=big)) is not None)
+
+    # everyone in a project on one relay: a large message to the room isn't sent over the bus, nor paced as if it were
+    lone = Keys.generate()
+    c, c2 = App(one, lone), App(one, lone)
+    await c.join()
+    await c2.join()
+    passed: list[str] = []
+    real = relay_mod.Relay.pass_on
+
+    async def watched(self, project, text, t, *args, **kw):
+        if project == lone.project:
+            passed.append(t)
+        await real(self, project, text, t, *args, **kw)
+    relay_mod.Relay.pass_on = watched  # type: ignore[method-assign]
+    here = next(r for r in relays if r.number == c.id >> 32)
+    pace = next(x.pace for x in here.conns.values() if x.id == c.id)
+    charged: list[int] = []
+    take = pace.take
+    pace.take = lambda n: charged.append(n) or take(n)  # type: ignore[method-assign]
+    try:
+        await c.send({"t": "p2p", "d": big})
+        heard = await c2.heard_one("p2p", d=big)
+        await until(lambda: bool(charged), 2)  # (it's paced just after it's sent on)
+    finally:
+        relay_mod.Relay.pass_on = real  # type: ignore[method-assign]
+    check("with the room all on one relay, a large message reaches it without crossing the bus",
+          heard is not None and "p2p" not in passed, passed)
+    check("and its sender is paced for the one copy it sent, not two", charged and len(big) < charged[0] < len(big) * 1.5,
+          (charged, len(big)))
+    await c.close()
+    await c2.close()
 
     pub = b64e(os.urandom(32))  # (a personal link's key: any 32 bytes do here)
     await a.send({"t": "revoke", "p": pub, "s": b64e(keys.sign(revoke_msg(pub)))})
