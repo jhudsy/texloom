@@ -355,6 +355,9 @@ doing whatever happens later.
     **Done:** `server/failover.py`, its settings' effect, `--failover-check`, the bucket's conditional writes, the
     admin page's panel, `check_failover.py`, `rehearse_failover.py`, `models/failover` and `Caddyfile.failover` are
     gone. Settings files that still say `failover` are accepted with a warning (a compat marker in `server/cli.py`).
+11. **The deploy tool** ("Deploying to machines"), then a rehearsal on real machines.
+12. **Monitoring** ("Health checks and monitoring"): the relay's `/metrics`, the dashboard and alert rules, and the
+    exporters, Prometheus and Grafana installed by the deploy tool.
 
 ## Decided
 
@@ -514,6 +517,44 @@ machine, backups (a ping when each finishes), and the site itself from outside; 
 wrong for a few minutes. **To do**, in the deploy tool: set both up with each machine, and a `status` command showing
 every part's health at once.
 
+**Dashboards: Prometheus and Grafana** (decided; free, self-hosted, and the parts already speak it). Today there are
+the admin page (one relay's view: codes, storage, projects, app versions), each relay's `/api/health`, and pings for
+the backups and the plans service: enough for one server, but no history (last night's CPU, a disk filling over a
+week), nothing on the machines, Patroni or Valkey, and no view across relays. Prometheus scrapes each part every 15 s
+and keeps the history; Grafana draws it and sends the alerts (email). What each part exposes:
+
+| part | exporter |
+|---|---|
+| each machine (CPU, memory, disk, network) | `node_exporter` (packaged in Debian and Ubuntu) |
+| PostgreSQL | `postgres_exporter` (packaged) |
+| Patroni (members, lag, who is primary) | Patroni's own `/metrics` |
+| Valkey and the Sentinels | `redis_exporter` (it works with Valkey) |
+| nginx | `nginx-prometheus-exporter`, from nginx's `stub_status` |
+| TeXLoom | **to build:** `/metrics` on each relay |
+
+- **The relay's `/metrics`** (Prometheus's text format, written by hand: a few counters and gauges need no library):
+  connections and projects open; messages a second by kind; stores, and how long they take; whether the bus and
+  database are away, and for how long; apps asked to resync or recheck; catch-up bytes sent; app versions connected;
+  storage used and the server's cap. Grafana adds them up across relays, which is the summary across relays the admin
+  page lacks. **No project ids or codes in it**: they'd say who works on what, and each would be a series of its own.
+  The admin page keeps per-project and per-code detail.
+- **Reachable only over WireGuard** (exporters and `/metrics` listen on the private address); on one machine without
+  WireGuard, `/metrics` needs the admin token.
+- **In the public repository:** the relay's `/metrics`, a Grafana dashboard (JSON) of TeXLoom's own numbers beside
+  the standard ones for the other parts, and the alert rules (a relay unhealthy or gone, a store's p95 slow, the bus or
+  database away for minutes, a standby's lag, a Sentinel or etcd member down, disk over 80%, a certificate within 14
+  days of expiring, no backup ping). The deploy tool installs the exporters with each part, and Prometheus and
+  Grafana where `cluster.toml` says (`runs = ["monitoring"]`). The real addresses, the email settings and Grafana's
+  password are private.
+- **Where it runs:** about 0.5 GB of memory for both. Best on a small machine outside the fleet, so that it still
+  reports when the fleet is in trouble; Grafana Cloud's free tier would do instead, but sends the numbers off-site.
+  Either way the outside checks stay (healthchecks.io for the backups and plans service, an uptime check of the site):
+  they're what notices when the monitoring itself is down.
+- **One machine:** the same, smaller (`node_exporter`, PostgreSQL's exporter if it's PostgreSQL, the relay's
+  `/metrics`, Prometheus and Grafana beside them), optional, and off by default in `install.sh`; the admin page and
+  the pings are enough to start with. (Netdata is easier on one box, but one way for one machine and many is less to
+  know.) Uptime Kuma (uptime checks and a status page) and Beszel (machine stats) could sit beside it, not replace it.
+
 ### Shared state the relays don't have yet
 
 - **Creation codes are files** (`--codes-file`), written by hand or by a sales service, and every relay must see the
@@ -526,8 +567,8 @@ every part's health at once.
 - **Limits per address** (connections, rates) are counted per relay, so several relays together allow that many
   times more. The front door's limits (nginx's, per address) still hold. Sharing them (counters on the bus) is
   possible if it matters.
-- **The admin page** shows one relay's view: **to do**, a summary across relays (the bus knows who is alive and
-  connected).
+- **The admin page** shows one relay's view: the summary across relays comes from the dashboards ("Health checks and
+  monitoring", above).
 
 ### Growing and shrinking
 
