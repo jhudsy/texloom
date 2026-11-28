@@ -5,6 +5,7 @@
 #   deploy/cluster.py plan  cluster.toml
 #   deploy/cluster.py apply cluster.toml
 #   deploy/cluster.py status cluster.toml
+#   deploy/cluster.py rotate cluster.toml   (every secret it made changed: after taking out a lost machine)
 #
 # Every machine runs Debian 13, reached over SSH as root. The machines reach each other on UDP port 51820
 # (WireGuard); people reach the doors on ports 80 and 443.

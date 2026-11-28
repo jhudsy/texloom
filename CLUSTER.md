@@ -218,8 +218,20 @@ made by hand to a file the tool writes are replaced at the next `apply`; change 
   `deploy/cluster.py retire cluster.toml ADDRESS` stops and disables what the cluster put on it, so that it can't come
   back and rejoin; its data is left in place (wipe it before reusing the machine).
 - **A machine lost** (dead, unreachable): nothing needs doing at once; the rest carry on, and `status` says what's
-  missing. If it was a door, take its address out of DNS ([when a door is down](#when-a-door-is-down)). If it comes back, `apply` takes it in again. If it won't, take it out (above): until then, etcd counts it,
-  so one more loss would stop the database failing over.
+  missing. If it was a door, take its address out of DNS ([when a door is down](#when-a-door-is-down)). If it comes
+  back, `apply` takes it in again. If it won't, take it out (above): until then, etcd counts it, so one more loss would
+  stop the database failing over. If it may be in someone else's hands (stolen, its provider account misused), change
+  the secrets too (next).
+- **Changing every secret** (`deploy/cluster.py rotate cluster.toml`): after taking out a machine that is lost or no
+  longer trusted, or now and then. It changes every secret the tool made (the database's and Valkey's passwords, the
+  admin token, the monitoring's, the backups' password) while everything runs: Valkey's users take the new passwords
+  beside the old until every part has them, PostgreSQL's roles change and their users follow at once, and the relays
+  restart one at a time (their apps reconnect to the others). Afterwards the old secrets work nowhere; keep a copy of
+  the new `secrets/`. If it stops partway, run it again: it carries on with the same new secrets. It can't change a
+  provider's keys (the bucket's, the backups' storage, a mail server's): make a new one there, put it in its file,
+  `apply`, and delete the old one there. A lost machine's WireGuard key stops working when it leaves the settings (the
+  others forget it); a lost door's certificate stays valid until it expires (90 days at most; Let's Encrypt can revoke
+  it from its account if you need that sooner).
 - **Backups**: [below](#backups).
 
 ## Backups
@@ -329,7 +341,8 @@ for a few minutes, because recovery by itself can hide a slow decline: a standby
 (so the next failover would fail), a certificate not renewing.
 
 Add `"monitoring"` to one machine's `runs` (best a small one of its own, so that it still reports when the others are
-in trouble; it needs about 0.5 GB of memory), and `[monitoring]` for email ([the example](deploy/cluster.example.toml)).
+in trouble; it needs about 0.5 GB of memory, and Grafana alone is a download of a few hundred MB and about a GB of
+disk; `[monitoring] grafana = false` leaves it out), and `[monitoring]` for email ([the example](deploy/cluster.example.toml)).
 `apply` then installs, from Debian's packages:
 
 - on every machine, **node_exporter** (CPU, memory, disk, network, and whether each of the cluster's services runs), and
@@ -426,8 +439,6 @@ relay is down only when a request to it fails, and would send a reconnecting app
 (HAProxy in nginx's place would do that one job itself.)
 
 ## Not done yet
-
-- **A command to change every secret** (`rotate`), so that a lost machine's passwords stop working.
 
 - **Other systems than Debian 13** for the cluster's machines (a server moving in from outside can run anything
   install.sh does).

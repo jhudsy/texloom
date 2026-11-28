@@ -28,11 +28,11 @@ running it on several machines, in [CLUSTER.md](CLUSTER.md). A standby switched 
    (`scripts/loadtest.py --relays 3`), the deploy tool (`deploy/cluster.py`, CLUSTER.md, rehearsed by
    `scripts/rehearse_deploy.py`) with a certificate on every door and a server moved in by copying it from a machine
    that stays outside, optional monitoring (the relay's `/metrics`, Prometheus and Grafana), and hourly backups that
-   work the same on one server and on several (`texloom-server --backup`, `deploy/texloom-backup`). Left: a command
-   that changes every secret (`rotate`, so that a lost machine's passwords stop working), a refactor and
-   simplification of the code (one way where one server and several differ needlessly: install.sh's certificate, the
-   codes files), a security audit, and a rehearsal on real machines (a few hourly-billed servers in two datacentres,
-   for what Docker can't show: real networks and clocks, TLS, systemd, a provider's own failures); then the merge.
+   work the same on one server and on several (`texloom-server --backup`, `deploy/texloom-backup`), and `rotate`,
+   changing every secret (so that a lost machine's passwords stop working). Left: a refactor and simplification of
+   the code (one way where one server and several differ needlessly: install.sh's certificate, the codes files), a
+   security audit, and a rehearsal on real machines (a few hourly-billed servers in two datacentres, for what Docker
+   can't show: real networks and clocks, TLS, systemd, a provider's own failures); then the merge.
 
 ## Later
 

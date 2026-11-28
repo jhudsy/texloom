@@ -28,7 +28,9 @@ with the strict firewall. In order:
 - machine a is lost: apps on the other doors carry on, `status` says what is missing, and Prometheus's alert for it
   starts; a comes back, `apply` takes it in again;
 - c is replaced by d (c killed, the settings changed, `apply`): etcd's members and the Sentinels follow, every part
-  is well; c is started again and `retire` stops what the cluster had put on it.
+  is well; c is started again and `retire` stops what the cluster had put on it;
+- `rotate` changes every secret while apps keep editing: the old ones work nowhere afterwards, and the relays, the
+  standby, the monitoring and the backups carry on with the new.
 
 Needs Docker (privileged containers: systemd, WireGuard), about 6 GB free, and the web app's dependencies
 (web/node_modules: install.sh builds it). Everything it makes is removed afterwards (--keep leaves it running).
@@ -40,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -474,6 +477,61 @@ async def rehearse(lab: Lab, outside: bool) -> None:
     check("c, started again, is retired: nothing of the cluster's runs on it", code == 0 and "active" not in still, out + str(still))
     code, out, _ = lab.tool("status")
     check("and the cluster, without it, is well", code == 0, out[-1500:])
+    await rotating(lab, keys, doors)
+
+
+async def rotating(lab: Lab, keys: Keys, doors: list[str]) -> None:
+    print("every secret changed (rotate):")
+    folder = lab.settings.parent / "secrets"
+    was = {f.name: f.read_text().strip() for f in folder.iterdir() if f.is_file()}
+    editing = [App(lab.tmp / f"rotating-{d}", keys, lab.url(d)) for d in doors[:2]]
+    for a in editing:
+        await a.start()
+    n = 0
+    code, out, secs = 0, "", 0.0
+    task = asyncio.create_task(asyncio.to_thread(lab.tool, "rotate"))
+    while not task.done():  # (an app on each of two doors keeps editing throughout)
+        for a in editing:
+            with contextlib.suppress(AssertionError):
+                await a.edit(f"while rotating {n}")
+        n += 1
+        await asyncio.sleep(1)
+    code, out, secs = task.result()
+    for a in editing:
+        await a.stop()
+    now = {f.name: f.read_text().strip() for f in folder.iterdir() if f.is_file()}
+    changed = [k for k in was if not k.endswith(".old") and k not in ("s3-secret", "backup-keys") and was[k] != now.get(k)]
+    check(f"`rotate` changes every secret the tool made ({len(changed)}), and every part is well after ({secs / 60:.1f} min)",
+          code == 0 and len(changed) >= 12 and not any(k.endswith(".old") for k in now), out[-2500:])
+    show(out, 25)
+    check("apps that kept editing meanwhile, through two doors, and a newcomer, all agree", await apps_agree(lab, keys, doors, "rotated"))
+    pg = "PGCONNECT_TIMEOUT=5 psql -h {h} -U texloom -d texloom -tAc 'SELECT 1' 2>&1"
+    a_wg = "$(ip -4 -o addr show texloom | awk '{print $4}' | cut -d/ -f1)"
+    old_pg = lab.on("a", f"PGPASSWORD={shlex.quote(was['pg-texloom'])} " + pg.format(h=a_wg)).stdout
+    new_pg = lab.on("a", f"PGPASSWORD={shlex.quote(now['pg-texloom'])} " + pg.format(h=a_wg)).stdout
+    old_bus = lab.on("a", f"REDISCLI_AUTH={shlex.quote(was['valkey-relay'])} valkey-cli --no-auth-warning --user relay -h 127.0.0.1 ping").stdout
+    check("the old passwords work nowhere: PostgreSQL's, Valkey's", "1" not in old_pg.split() and new_pg.strip() == "1"
+          and "PONG" not in old_bus, (old_pg, new_pg, old_bus))
+    code, out, _ = lab.tool("status")
+    check("the standby still copies the primary", "lag streaming" in out, out[-1200:])
+    up = []
+    for _ in range(20):  # (the machines in the settings: Prometheus remembers a retired one's last numbers for minutes)
+        up = [x for x in lab.prometheus("up") if x["metric"].get("machine") in doors]
+        if up and all(x["value"][1] == "1" for x in up):
+            break
+        time.sleep(3)
+    grafana = lab.on("b", f"curl -s -o /dev/null -w '%{{http_code}}' -u admin:{shlex.quote(now['grafana-admin'])} "
+                          "http://127.0.0.1:3000/api/search").stdout
+    check("monitoring carries on: every target up, Grafana's new password", up and all(x["value"][1] == "1" for x in up)
+          and grafana == "200", (grafana, [(x["metric"].get("machine"), x["metric"]["job"], x["value"][1]) for x in up]))
+    lab.on(doors[0], "set -a; . /etc/texloom/backup.env; set +a; restic snapshots --json > /tmp/before.json")
+    made = lab.on(doors[0], "EVERY_MINUTES=0 /usr/local/sbin/texloom-backup >/dev/null; set -a; . /etc/texloom/backup.env; set +a; "
+                            "python3 -c \"import json; print(len(json.load(open('/tmp/before.json'))))\"; restic snapshots --json "
+                            "| python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'").stdout.split()
+    old_restic = lab.on(doors[0], f"set -a; . /etc/texloom/backup.env; set +a; printf '%s\\n' {shlex.quote(was['restic-password'])} "
+                                  "> /tmp/old; RESTIC_PASSWORD_FILE=/tmp/old restic cat config >/dev/null 2>&1 && echo opens || echo refused").stdout
+    check("backups carry on with the new password, and the old one no longer opens them",
+          len(made) == 2 and made[0] != made[1] and "refused" in old_restic, (made, old_restic))
 
 
 def main() -> int:

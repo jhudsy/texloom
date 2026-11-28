@@ -4,6 +4,7 @@
     deploy/cluster.py plan   cluster.toml     # what would change (changes nothing)
     deploy/cluster.py apply  cluster.toml     # make it so; run again whenever the file (or this checkout) changes
     deploy/cluster.py status cluster.toml     # every part's health
+    deploy/cluster.py rotate cluster.toml     # every secret it made changed (after taking out a lost machine)
 
 deploy/cluster.example.toml says what the file holds. One machine needs none of this: deploy/install.sh sets it up.
 
@@ -539,17 +540,32 @@ WantedBy=multi-user.target
 """
 
 
-def valkey_users(c: Cluster) -> File:
-    s = c.secrets
+def valkey_users(c: Cluster, old: dict[str, str] | None = None) -> File:
+    """Valkey's users. `old`: their passwords before `rotate`, valid as well as the new ones meanwhile."""
+    def pw(user: str) -> str:
+        new, was = c.secrets[f"valkey-{user}"], (old or {}).get(f"valkey-{user}")
+        return f">{new}" + (f" >{was}" if was and was != new else "")
     relay = " ".join(f"+{x}" for x in RELAY_COMMANDS)
     return File("/etc/valkey/texloom-users.acl", "\n".join([
         "user default off",
-        f"user admin on >{s['valkey-admin']} ~* &* +@all",
-        f"user relay on >{s['valkey-relay']} resetkeys ~texloom:* resetchannels &texloom:* -@all {relay}",
-        f"user sentinel on >{s['valkey-sentinel']} -@all {SENTINEL_ACL}",
-        f"user replica on >{s['valkey-replica']} -@all {REPLICA_ACL}",
-        *([f"user metrics on >{s['valkey-metrics']} resetkeys resetchannels -@all {METRICS_ACL}"] if c.of("monitoring") else []),
+        f"user admin on {pw('admin')} ~* &* +@all",
+        f"user relay on {pw('relay')} resetkeys ~texloom:* resetchannels &texloom:* -@all {relay}",
+        f"user sentinel on {pw('sentinel')} -@all {SENTINEL_ACL}",
+        f"user replica on {pw('replica')} -@all {REPLICA_ACL}",
+        *([f"user metrics on {pw('metrics')} resetkeys resetchannels -@all {METRICS_ACL}"] if c.of("monitoring") else []),
         ""]), "640", "valkey:valkey")
+
+
+def vadmin(*passwords: str) -> str:
+    """Shell defining `v CMD…`: a command to this machine's Valkey as its admin, with the first of `passwords` it takes
+    (valkey-cli says nothing in its exit status of a refused login, or of an error reply: so each reply is checked),
+    the password passed in the environment (not on the command line, where `ps` shows it)."""
+    tries = " ".join(shlex.quote(p) for p in passwords)
+    return f"""
+for VPW in {tries}; do [ "$(REDISCLI_AUTH="$VPW" valkey-cli --no-auth-warning --user admin -h 127.0.0.1 ping 2>&1)" = PONG ] && break; VPW=; done
+[ -n "$VPW" ] || {{ echo "Valkey refused every admin password it was given" >&2; exit 1; }}
+v() {{ out=$(REDISCLI_AUTH="$VPW" valkey-cli --no-auth-warning --user admin -h 127.0.0.1 "$@" 2>&1); [ "$out" = OK ] || {{ echo "valkey $1: $out" >&2; exit 1; }}; }}
+"""
 
 
 def valkey_conf(c: Cluster, m: Machine, primary: Machine | None) -> File:
@@ -828,7 +844,7 @@ def step_valkey(c: Cluster, r: Remote, primary: Machine) -> None:
 systemctl daemon-reload
 systemctl enable -q texloom-valkey
 if systemctl is-active -q texloom-valkey; then
-  {"valkey-cli -h 127.0.0.1 --user admin --pass " + shlex.quote(c.secrets['valkey-admin']) + " --no-auth-warning acl load >/dev/null" if before != acl.sha else ":"}
+  {vadmin(c.secrets['valkey-admin']) + "v acl load" if before != acl.sha else ":"}
 else systemctl start texloom-valkey; fi
 """)
 
@@ -1556,6 +1572,101 @@ fi
     return bad
 
 
+ROTATED = SECRETS  # the secrets the tool made (a provider's keys are changed there: the bucket's, the backups', email)
+
+
+def rotate(c: Cluster, remotes: dict[str, Remote]) -> None:
+    """Every secret the tool made changed, so that one a lost (or once-trusted) machine had no longer works: take the
+    machine out first (`apply`), then this. Nothing stops meanwhile: Valkey's users take the new passwords beside the
+    old until every part has them; PostgreSQL's roles change and their users follow at once (the relays one at a time,
+    each back before the next). If it stops partway, run it again: it carries on with the same new secrets (the old
+    are kept as secrets/NAME.old until it ends)."""
+    if gone := [m.name for m in c.machines if m.facts.get("unreachable")]:
+        raise Problem(f"can't reach {', '.join(gone)}: take a lost machine out of the settings (and `apply`) before rotating")
+    d = c.secrets_dir
+    old: dict[str, str] = {}
+    for name in ROTATED:
+        f, was = d / name, d / f"{name}.old"
+        if not was.exists():  # (it exists when a rotation is being carried on)
+            was.write_text(f.read_text())
+            was.chmod(0o600)
+            f.write_text(secrets.token_urlsafe(24) + "\n")
+        old[name] = was.read_text().strip()
+        c.secrets[name] = f.read_text().strip()
+    restic = c.backup and "password_file" not in c.backup  # (the tool's own restic password: changed too)
+    if restic:
+        f, was = d / "restic-password", d / "restic-password.old"
+        if not was.exists():
+            was.write_text(f.read_text())
+            was.chmod(0o600)
+            f.write_text(secrets.token_urlsafe(32) + "\n")
+    q = shlex.quote
+    R = lambda ms: [remotes[m.name] for m in ms]  # noqa: E731
+
+    if c.of("valkey"):
+        say("== Valkey: the new passwords beside the old, the replicas and Sentinels given the new")
+        def valkey_both(r: Remote) -> None:
+            r.run(put_script([valkey_users(c, old)]) + vadmin(c.secrets["valkey-admin"], old["valkey-admin"]) + f"""
+v acl load
+v config set masterauth {q(c.secrets['valkey-replica'])}
+v config rewrite
+""")
+        parallel(valkey_both, R(c.of("valkey")))
+        parallel(lambda r: r.run(f"""out=$(valkey-cli -h 127.0.0.1 -p 26379 sentinel set texloom auth-pass {q(c.secrets['valkey-sentinel'])} 2>&1)
+[ "$out" = OK ] || {{ echo "sentinel set: $out" >&2; exit 1; }}
+"""), R(c.of("sentinel")))
+    say("== PostgreSQL: its roles' passwords, then Patroni's settings")
+    primary = primary_pg(c, remotes[c.of("postgresql")[0].name])
+    roles = {"postgres": "pg-superuser", "replicator": "pg-replicator", "texloom": "pg-texloom",
+             **({"metrics": "pg-metrics"} if c.of("monitoring") else {})}
+    remotes[primary.name].run("cd /tmp\n" + "".join(
+        f"runuser -u postgres -- psql -h /var/run/postgresql -qtAX -v ON_ERROR_STOP=1 -f - <<'SQL' >/dev/null\n"
+        f"ALTER ROLE {role} PASSWORD '{c.secrets[name].replace(chr(39), chr(39) * 2)}';\nSQL\n" for role, name in roles.items()))
+    parallel(lambda r: r.run(put_script([patroni_conf(c, r.m)]) + "systemctl reload texloom-patroni\n"), R(c.of("postgresql")))
+    say("== relays, one at a time (each well again before the next)")
+    for r in R(c.of("relay")):
+        files = [relay_settings(c, r.m), File("/etc/texloom/admin-token", c.secrets["admin-token"] + "\n", "640")]
+        r.run(put_script(files) + f"""chgrp texloom /etc/texloom/texloom.toml /etc/texloom/admin-token
+systemctl restart texloom
+for i in $(seq 60); do curl -sf --max-time 2 http://{r.m.wg}:8787/api/health >/dev/null && exit 0; sleep 1; done
+echo "the relay isn't well after its restart: journalctl -u texloom" >&2; exit 1
+""")
+        say(f"  {r.m.name}: well")
+    if c.of("monitoring"):
+        say("== monitoring")
+        parallel(lambda r: step_exporters(c, r), R(c.machines))
+        m = remotes[c.of("monitoring")[0].name]
+        if c.monitoring.get("grafana", True):
+            m.run(f"grafana cli --homepath /usr/share/grafana admin reset-admin-password {q(c.secrets['grafana-admin'])} "
+                  ">/dev/null 2>&1 || grafana-cli --homepath /usr/share/grafana admin reset-admin-password "
+                  f"{q(c.secrets['grafana-admin'])} >/dev/null")
+        step_monitoring(c, m)
+    if restic:
+        say("== backups: restic's repository opened by the new password, not the old")
+        new_pw, old_pw = (d / "restic-password").read_text().strip(), (d / "restic-password.old").read_text().strip()
+        r = R(c.of("relay"))[0]
+        r.run(f"""set -a; . /etc/texloom/backup.env; set +a
+umask 077; new=$(mktemp); was=$(mktemp); trap 'rm -f "$new" "$was"' EXIT
+printf '%s\\n' {q(new_pw)} > "$new"; printf '%s\\n' {q(old_pw)} > "$was"
+if ! RESTIC_PASSWORD_FILE="$new" restic cat config >/dev/null 2>&1; then
+  RESTIC_PASSWORD_FILE="$was" restic key add --new-password-file "$new" >/dev/null
+fi
+id=$(RESTIC_PASSWORD_FILE="$was" restic key list --json 2>/dev/null | python3 -c 'import json,sys; print(next(k["id"] for k in json.load(sys.stdin) if k["current"]))' 2>/dev/null || true)
+[ -z "$id" ] || RESTIC_PASSWORD_FILE="$new" restic key remove "$id" >/dev/null
+""")
+        parallel(lambda r: step_backup(c, r), R(c.of("relay")))
+    if c.of("valkey"):
+        say("== Valkey: the old passwords taken away")
+        parallel(lambda r: r.run(put_script([valkey_users(c)]) + vadmin(c.secrets["valkey-admin"]) + "v acl load\n"), R(c.of("valkey")))
+    for name in [*ROTATED, *(["restic-password"] if restic else [])]:
+        (d / f"{name}.old").unlink(missing_ok=True)
+    say("== done: the old secrets work nowhere now. Keep a copy of the new secrets/ (a password manager).")
+    say("   Not changed here (a provider's keys: make a new one there, put it in its file, `apply`, then delete the old "
+        "one there): the bucket's" + (", the backups' storage" if c.backup else "")
+        + (", the copy's bucket" if c.backup.get("bucket_copy") else "")
+        + (", the mail server's" if c.monitoring.get("smtp_password_file") else "") + ".")
+
+
 RETIRE = """
 for u in texloom-door-watch texloom-cert-metric.timer texloom texloom-sentinel texloom-valkey texloom-patroni etcd prometheus grafana-server \
          prometheus-alertmanager prometheus-node-exporter prometheus-postgres-exporter prometheus-redis-exporter wg-quick@texloom texloom-firewall; do
@@ -1579,7 +1690,7 @@ def retire(c: Cluster, target: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=("plan", "apply", "status", "retire"))
+    ap.add_argument("command", choices=("plan", "apply", "status", "retire", "rotate"))
     ap.add_argument("settings", type=Path, help="the cluster's settings file (see deploy/cluster.example.toml)")
     ap.add_argument("machine", nargs="?", help="retire: the machine taken out of the settings (its address, or host:port for SSH)")
     a = ap.parse_args()
@@ -1595,12 +1706,15 @@ def main() -> int:
             return 0
         # (SSH's control sockets: a short path, since macOS allows 104 bytes for one)
         with tempfile.TemporaryDirectory(prefix="tl-", dir="/tmp" if Path("/tmp").is_dir() else None) as control:
-            remotes = connect(c, Path(control), tolerate=a.command == "status")
+            remotes = connect(c, Path(control), tolerate=a.command in ("status", "rotate"))
             if a.command == "plan":
                 plan(c, remotes)
                 return 0
             if a.command == "apply":
                 apply(c, remotes)
+                return 1 if status(c, remotes) else 0
+            if a.command == "rotate":
+                rotate(c, remotes)
                 return 1 if status(c, remotes) else 0
             return 1 if status(c, remotes) else 0
     except Problem as e:
