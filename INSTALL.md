@@ -45,7 +45,7 @@ checksum, so allow a few GB of disk):
 | a `texloom` system user | |
 | the app and its Python environment | `/var/www/texloom` (`TEXLOOM_DIR=…` for elsewhere) |
 | the database (SQLite), stored files, TeX Live packages fetched on demand | `/var/lib/texloom` |
-| settings, creation codes, the admin password | `/etc/texloom/texloom.toml`, `codes.txt`, `admin-token` |
+| settings, the admin password | `/etc/texloom/texloom.toml`, `admin-token` (creation codes are in the database) |
 | a sandboxed systemd service on 127.0.0.1:8787, using at most 1 GB of memory (`MemoryMax`) | `texloom.service` |
 | an nginx site with rate limits and security headers, and a Let's Encrypt certificate | `/etc/nginx/sites-available/<domain>` |
 
@@ -143,7 +143,7 @@ the server doesn't know is an error, so a typo doesn't go unnoticed. After a cha
 ```toml
 database = "sqlite:///var/lib/texloom/texloom.db"
 data = "/var/lib/texloom"
-codes_file = ["/etc/texloom/codes.txt"]
+default_allowance = "0"
 admin_token_file = "/etc/texloom/admin-token"
 min_free = "2G"
 ```
@@ -155,7 +155,8 @@ min_free = "2G"
 | `files`, `[s3]` | `data/files` | where stored files go ([Stored files](#stored-files)) |
 | `host`, `port` | `127.0.0.1`, `8787` | where it listens |
 | `static`, `tex_assets` | `web/dist`, `tex-assets` | the built web app, and the in-browser TeX files |
-| `codes_file` | none | creation codes and allowances ([Creation codes](#creation-codes)); a list. `TEXLOOM_CODES_FILES` adds files to it |
+| `default_allowance` | unlimited (`0` in the install script's settings) | what a project created without a creation code may store ([Creation codes](#creation-codes)) |
+| `codes_file` | none | (servers before the database kept codes) codes from files, this server's only; a list. `TEXLOOM_CODES_FILES` adds files to it |
 | `min_free` | `2G` | refuse to store anything when the disk of `data` has less free |
 | `project_max_bytes` | `200M` | most one project may store (except with an unlimited allowance) |
 | `memory` | `512M` | memory for big work at once (catch-ups, large messages, uploads, arXiv imports); more waits its turn. The process needs about 500M on top, so raise `MemoryMax` in `texloom.service` with it |
@@ -243,62 +244,76 @@ checks a store of your own.
 ## Creation codes
 
 The server can't see what it stores, and making a project needs no account, so storage is governed
-by **allowances** in a small text file (`codes_file`):
-
-```
-# <code|default>  <allowance>  [until=YYYY-MM-DD]  [label]
-default          0                               # projects created without a code: not stored on the server
-A3F7-9KQ2-XM4P   unlimited                       owner
-K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
-```
-
-- A code's allowance is the total stored across all projects created with it. `default` covers
-  people without a code. `0` means "not stored on the server": those people can still create
-  projects, but only sync-only ones, whose copies live on their devices. The desktop app makes a
-  project sync-only by itself when it's created without a code, or when the server refuses to
-  store one; **Keep a copy on the server…** (Project menu) adds a code later.
-- Anyone with a project's link can open and edit it; codes only govern storage of new projects. A
-  code is entered once per browser (**Create project** asks, or ⚙ Settings → Sync & storage →
-  Creation code…). The folder helper takes `texloom new … --code`, or `create_code` in
-  `.texloom/config.json`.
-- The file is re-read when it changes. Deleting a line revokes a code: its projects stay stored,
-  but new changes then count against `default`.
-- `until=` (optional) is the last day, in UTC, that a code is valid. After that, new changes to its
-  projects aren't stored and it can't store new projects. Renewing (changing the date) restores
-  it, with no restart. Projects stay tied to the code they were created with, so renew a code
-  rather than issuing a new one.
-- `purge_expired_after` drops the stored copies of projects whose code expired more than that many
-  days ago (checked hourly; skipped while someone has the project open). The files stay on
-  people's devices and the projects carry on sync-only; renewing the code stores them again on
-  their next sync. `--purge-code CODE` does it at once for one expired or deleted code.
-- Several codes files can be combined (`codes_file` is a list, and `TEXLOOM_CODES_FILES` adds more,
-  separated by `:`), for example one kept by hand and one kept by a sales service. The first file
-  that sets `default` decides it; `--add-code` writes to the first; `--renew-code` finds the code
-  in whichever file lists it.
+by **allowances**, given by **creation codes**. They are kept in the server's database, so every server
+sharing it has the same codes, and a change counts everywhere within seconds. Change them with the server's
+command line, on any machine that has the settings file:
 
 ```bash
 texloom-server --add-code alice --allowance 2G --months 12          # prints a new code
 texloom-server --renew-code K7P2-QX4M-9H3D --months 12              # or --until 2028-01-31, --allowance 10G
-texloom-server --list-codes                                         # usage, expiry, deleted codes
+texloom-server --remove-code K7P2-QX4M-9H3D                          # its projects fall back to the default
+texloom-server --list-codes                                         # usage, expiry, removed codes
 texloom-server --purge-code K7P2-QX4M-9H3D
+texloom-server --export-codes codes.txt                             # every code, to a file (- for the screen)
+texloom-server --import-codes-file codes.txt                        # a file's codes into the database (new ones only)
 ```
 
-(These read the settings file like the server does: run them as described under Settings.) A renewal with `--months` counts
-from the later of today and the code's current expiry, so renewing early loses nothing.
-`--purge-code` refuses a code that is still valid; restart the server afterwards so its storage
-totals are current (`purge_expired_after`, inside the server, needs no restart).
+(These read the settings file like the server does: run them as described under Settings, as the server's user,
+`sudo -u texloom`, since the database is its.) The install script makes the owner's code (unlimited) on a first
+install and prints it.
 
-Without a codes file, every project may be stored. A change the server refuses to store is never
-lost: it still reaches everyone online, the sender keeps it and retries, and the editor says the
-project isn't saved on the server.
+- A code's allowance (`0`, a size such as `500M` or `5G`, or `unlimited`) is the total stored across all projects
+  created with it. **`default_allowance`** covers people without a code (`0` in the settings the install script
+  writes; unset, unlimited). `0` means "not stored on the server": those people can still create projects, but only
+  sync-only ones, whose copies live on their devices. The desktop app makes a project sync-only by itself when it's
+  created without a code, or when the server refuses to store one; **Keep a copy on the server…** (Project menu) adds
+  a code later.
+- Anyone with a project's link can open and edit it; codes only govern storage of new projects. A
+  code is entered once per browser (**Create project** asks, or ⚙ Settings → Sync & storage →
+  Creation code…). The folder helper takes `texloom new … --code`, or `create_code` in
+  `.texloom/config.json`.
+- Removing a code revokes it: its projects stay stored, but new changes then count against the default.
+- `--months` or `--until` (optional) sets the last day, in UTC, that a code is valid. After that, new changes to its
+  projects aren't stored and it can't store new projects. Renewing it restores it, with no restart. A renewal with
+  `--months` counts from the later of today and the code's current expiry, so renewing early loses nothing. Projects
+  stay tied to the code they were created with, so renew a code rather than issuing a new one.
+- `purge_expired_after` drops the stored copies of projects whose code expired more than that many
+  days ago (checked hourly; skipped while someone has the project open). The files stay on
+  people's devices and the projects carry on sync-only; renewing the code stores them again on
+  their next sync. `--purge-code CODE` does it at once for one expired or removed code; it refuses a code that is
+  still valid. Restart the server afterwards so its storage totals are current (`purge_expired_after`, inside the
+  server, needs no restart).
+
+A change the server refuses to store is never lost: it still reaches everyone online, the sender keeps it and
+retries, and the editor says the project isn't saved on the server.
+
+**Codes files** (servers set up before the database kept codes). Such a server's settings name a text file
+(`codes_file`), one code a line, which it reads again whenever it changes:
+
+```
+# <code|default>  <allowance>  [until=YYYY-MM-DD]  [label]
+default          0
+K7P2-QX4M-9H3D   2G         until=2027-11-07     alice
+```
+
+It keeps working, but a file's codes count only on the server that reads it. To move them into the database:
+
+```bash
+sudo -u texloom texloom-server --config /etc/texloom/texloom.toml --import-codes-file /etc/texloom/codes.txt
+```
+
+then take the file out of `codes_file` (and set `default_allowance` to its `default` line, which the import prints)
+and restart the server. Until then, the commands above change the database's codes, and a code in the file is
+renewed in the file. A program that runs `texloom-server --codes-file FILE --add-code …` with no database (a sales
+service, say) still writes that file.
 
 ## Private servers
 
 By default anyone who can reach your server can use it for live projects, though they can't read
-anyone else's. `private = true` keeps it for your own group (it needs a codes file):
+anyone else's. `private = true` keeps it for your own group (with [creation codes](#creation-codes)):
 
 - Only projects created with a valid creation code may connect, even without server storage. The
-  `default` line doesn't count.
+  default allowance doesn't count.
 - People with such a project's link need nothing else: give a code to whoever creates projects,
   and links to everyone else.
 - When a code expires or is removed, its projects stop syncing until it's renewed. Copies on

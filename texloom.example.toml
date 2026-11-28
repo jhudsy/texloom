@@ -31,7 +31,10 @@ tex_assets = "/var/www/texloom/tex-assets"    # in-browser TeX (busytex/)
 # port = 8787
 
 # --- who may store what --------------------------------------------------------------------
-codes_file = ["/etc/texloom/codes.txt"]  # creation codes and allowances (TEXLOOM_CODES_FILES adds more)
+default_allowance = "0"               # what a project created without a creation code may store (unset: unlimited);
+                                      # codes are kept in the database: texloom-server --add-code LABEL --allowance 2G
+# codes_file = ["/etc/texloom/codes.txt"]  # (servers before the database kept codes) codes from a file, this server's only:
+                                      # texloom-server --import-codes-file FILE moves them into the database
 # codes_url = "https://example.org/how-to-get-a-code"
 # dropbox_app_key = "abc123def456ghi"  # a Dropbox app for the web app's Dropbox integration (README → Dropbox)
 # private = false                     # only projects created with a creation code may connect

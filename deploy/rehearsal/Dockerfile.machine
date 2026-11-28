@@ -1,0 +1,12 @@
+# A Debian 13 "machine" for scripts/rehearse_deploy.py: systemd and SSH, nothing of TeXLoom's, so that
+# deploy/cluster.py sets it up as it would a new VPS (a rehearsal in Docker, not for production). The Debian image's
+# policy-rc.d (which stops packages starting their services) is removed: a VPS has none.
+FROM debian:13.2
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server ca-certificates iproute2 \
+ && rm -rf /var/lib/apt/lists/* /usr/sbin/policy-rc.d \
+ && mkdir -p /root/.ssh && chmod 700 /root/.ssh \
+ && systemctl enable ssh \
+ && systemctl mask getty@tty1.service console-getty.service systemd-firstboot.service
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

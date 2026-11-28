@@ -46,7 +46,7 @@ the server refuses to start on it, saying why.
    standby up.
 
 2. **On the standby**, install the server as for the primary, with the same settings
-   (`/etc/texloom`, including the creation codes file and the bucket), and stop it: `systemctl
+   (`/etc/texloom`, and the bucket; the creation codes are in the database, so the standby has them), and stop it: `systemctl
    disable --now texloom`. Then replace its PostgreSQL's data with a copy of the primary's (the
    paths are Debian's: change `17` to your version):
 

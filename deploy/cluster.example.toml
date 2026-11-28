@@ -1,0 +1,65 @@
+# Settings for deploy/cluster.py: TeXLoom on several machines. Copy it somewhere private (it names your machines),
+# and keep the `secrets/` folder the tool makes beside it private too. One machine needs none of this: use
+# deploy/install.sh.
+#
+#   deploy/cluster.py plan  cluster.toml
+#   deploy/cluster.py apply cluster.toml
+#   deploy/cluster.py status cluster.toml
+#
+# Every machine runs Debian 13, reached over SSH as root. The machines reach each other on UDP port 51820
+# (WireGuard); people reach the doors on ports 80 and 443.
+
+name = "app.example.org"   # the name people use: nginx's site on every door, and the certificate
+
+[ssh]
+user = "root"
+key = "~/.ssh/texloom"       # (optional) the key to log in with
+# options = ["-o", "StrictHostKeyChecking=accept-new"]
+
+[network]
+subnet = "10.77.0.0/24"      # the machines' private (WireGuard) addresses
+port = 51820                 # WireGuard's UDP port
+firewall = "ports"           # "ports": TeXLoom's own ports reachable only through WireGuard, the rest left alone;
+                             # "strict": nothing but SSH, HTTP(S) and WireGuard; "off"
+
+# What each machine runs:
+#   relay       the TeXLoom relay (as install.sh sets it up)
+#   door        nginx in front of every relay that is well (on a relay's machine)
+#   postgresql  PostgreSQL, kept available by Patroni
+#   etcd        where Patroni keeps its leader key: an odd number of members (three keeps working with one lost)
+#   valkey      the relays' bus (one primary, the rest replicas)
+#   sentinel    finds and replaces Valkey's primary: three keep working with one lost
+#
+# Three machines with everything keep working when any one of them is lost. A machine's `address` is where the
+# others reach it (a provider's private network if they share one, else its public address); `ssh` is where SSH
+# reaches it, if not there ("host:port").
+[machines.a]
+address = "203.0.113.1"
+runs = ["relay", "door", "postgresql", "etcd", "valkey", "sentinel"]
+
+[machines.b]
+address = "203.0.113.2"
+runs = ["relay", "door", "postgresql", "etcd", "valkey", "sentinel"]
+
+[machines.c]
+address = "203.0.113.3"
+runs = ["relay", "door", "etcd", "sentinel"]   # a smaller third: a relay, and the third vote for etcd and Sentinel
+
+# Stored files, shared by every relay (needed with more than one relay)
+[bucket]
+url = "s3://my-bucket"
+endpoint = "https://s3.example.org"
+region = "auto"
+key_id = "…"
+secret_file = "secrets/s3-secret"   # the secret key, in a file beside this one
+
+# Settings for every relay, as in texloom.example.toml (the tool sets database, bus, host, port, files and the admin
+# token itself)
+[relay]
+# min_version = "0.4.40"
+# default_allowance = "0"   # (the default) projects made without a creation code aren't stored; codes are kept in the
+#                           # database: texloom-server --config /etc/texloom/texloom.toml --add-code … on any relay
+# purge_expired_after = 90
+
+[tls]
+certbot = true   # a Let's Encrypt certificate for `name`, on the first door (several doors: see FUTURE_ARCHITECTURE.md)

@@ -5,17 +5,21 @@ sees keys or plaintext, and verifies Ed25519 signatures so read-only link holder
 can't write.
 
 Storage. The server can't see what it stores and making a project needs no account,
-so storage is governed by *allowances*:
+so storage is governed by *allowances*, given by creation codes kept in the database
+(every server sharing it has the same; they see a change within seconds):
 
-  --codes-file FILE   one rule per line:   <code|default>  <allowance>  [until=YYYY-MM-DD]  [label]
-                      (repeatable, or listed in TEXLOOM_CODES_FILES: codes are combined)
-                      allowance: 0 (store nothing), a size (500M, 5G) or "unlimited".
-                      A code's allowance is the total stored across every project
-                      created with it; "default" applies to projects created without
-                      a code (default 0 = such projects aren't stored on the server).
-                      until= is the last day (UTC) a code is valid; after it, the code
-                      counts as removed (its projects fall back to "default").
-                      The file is re-read whenever it changes.
+  --add-code LABEL --allowance SIZE [--months N | --until YYYY-MM-DD]
+                      a new code: an allowance is 0 (store nothing), a size (500M, 5G) or
+                      "unlimited", the total stored across every project created with it.
+                      After its last day (UTC) a code counts as removed: its projects fall
+                      back to the default allowance.
+  --default-allowance SIZE
+                      for projects created without a code (unset: unlimited; 0: such
+                      projects aren't stored on the server)
+  --codes-file FILE   (servers before the database kept codes) one rule per line:
+                      <code|default>  <allowance>  [until=YYYY-MM-DD]  [label]; re-read when it
+                      changes; its codes count on this server only. --import-codes-file
+                      moves them into the database.
   --purge-expired-after DAYS
                       delete the stored copies of projects whose code expired more
                       than DAYS days ago (default: never)
@@ -23,15 +27,16 @@ so storage is governed by *allowances*:
   --min-free          keep this much disk free                (default 2G)
   --project-max-bytes cap per project, except for unlimited allowances (default 200M)
 
-Without --codes-file every project may be stored (subject to the limits above). A
-refused write is still relayed live to collaborators online but not acknowledged, so
+A refused write is still relayed live to collaborators online but not acknowledged, so
 the sender keeps it and retries later: nobody loses work.
 
-Run:              texloom-server --port 8787 --data data --codes-file data/codes.txt
-Add a code:       texloom-server --codes-file data/codes.txt --add-code alice --allowance 2G [--months 12]
-Renew a code:     texloom-server --codes-file data/codes.txt --renew-code CODE --months 12 [--allowance 10G]
-List codes/usage: texloom-server --codes-file data/codes.txt --list-codes --data data
-Purge one code:   texloom-server --codes-file data/codes.txt --purge-code CODE --data data
+Run:              texloom-server --port 8787 --data data --default-allowance 0
+Add a code:       texloom-server --data data --add-code alice --allowance 2G [--months 12]
+Renew a code:     texloom-server --data data --renew-code CODE --months 12 [--allowance 10G]
+Remove a code:    texloom-server --data data --remove-code CODE
+List codes/usage: texloom-server --data data --list-codes
+Purge one code:   texloom-server --data data --purge-code CODE
+(With a settings file, --config FILE in place of --data: the commands use its database.)
 Move to Postgres: texloom-server --database postgresql:///texloom --copy-database-from sqlite:///…/texloom.db
 """
 
@@ -40,6 +45,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -108,9 +114,12 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--memory", type=parse_size, default=MEMORY,
                    help="memory for big work at once (catch-ups, large messages, uploads, arXiv imports; default 512M); "
                         "the process needs about 500M more, so keep systemd's MemoryMax that far above it")
+    p.add_argument("--default-allowance", metavar="SIZE",
+                   help="what projects created without a creation code may store: 0, a size, or unlimited "
+                        "(default: unlimited, or 0 with codes files)")
     p.add_argument("--codes-file", type=Path, action="append",
-                   help="storage allowances per creation code (see above); repeatable. TEXLOOM_CODES_FILES adds "
-                        "more (separated by ':'). --add-code writes to the first")
+                   help="(servers before the database kept codes) creation codes from a file (see above); repeatable. "
+                        "TEXLOOM_CODES_FILES adds more (separated by ':'). Its codes count on this server only")
     p.add_argument("--add-code", metavar="LABEL", help="create a creation code with this label, print it, exit")
     p.add_argument("--allowance", help="allowance for --add-code (default 1G) or --renew-code (default: unchanged): "
                                        "0, a size, or unlimited")
@@ -120,14 +129,19 @@ def parser() -> argparse.ArgumentParser:
                    help="for --add-code / --renew-code: valid for this many months (a renewal counts from the "
                         "later of today and the code's current expiry)")
     p.add_argument("--renew-code", metavar="CODE", help="change a code's expiry (--until/--months) and/or allowance, then exit")
+    p.add_argument("--remove-code", metavar="CODE",
+                   help="take a code away, then exit: its projects fall back to the default allowance (their stored "
+                        "copies stay until --purge-code or --purge-expired-after)")
     p.add_argument("--purge-code", metavar="CODE",
                    help="delete the stored copies of every project created with this code (expired or removed "
                         "codes only), then exit. Prefer --purge-expired-after, which does it inside the server")
     p.add_argument("--list-codes", action="store_true", help="list codes, allowances, expiry and usage, then exit")
-    p.add_argument("--forget-codes-file", metavar="FILE",
-                   help="with several servers sharing a database (each copies its codes files there, and takes every "
-                        "server's): take a codes file no server uses any more out of it, so its codes stop counting "
-                        "everywhere, then exit. (A server still using that file puts it back when the file next changes.)")
+    p.add_argument("--export-codes", metavar="FILE",
+                   help="write the database's creation codes to FILE (- for the screen) in the codes file format, which "
+                        "--import-codes-file reads, then exit: a copy of every code, or the way to move them elsewhere")
+    p.add_argument("--import-codes-file", type=Path, metavar="FILE",
+                   help="copy a codes file's codes into the database (those it hasn't already), then exit; then take "
+                        "the file out of codes_file. Its default line, if any, is printed: set default_allowance to it")
     p.add_argument("--files-for-backup", type=Path, metavar="DIR",
                    help="print the folder that holds the stored files, for a backup to include, then exit. With "
                         "a bucket, first make DIR a copy of it (copying only what's new), and print DIR")
@@ -196,14 +210,86 @@ async def _files_command(a: argparse.Namespace, files: Files) -> None:
         await store.close()
 
 
-async def _forget_codes(a: argparse.Namespace, files: Files) -> None:
-    store = await Store.open(a.database, files, a.data)
+async def _code_change(a: argparse.Namespace, codes: CodeBook) -> None:
+    """--add-code, --renew-code and --remove-code, in the database (its codes table alone)."""
+    from .store import CodeTable
+    store = await CodeTable.open(a.database)
     try:
-        sources = {r[0] for r in await store.all_codes()}
-        if a.forget_codes_file not in sources:
-            sys.exit(f"no codes file named {a.forget_codes_file} in the database (it has: {', '.join(sorted(sources)) or 'none'})")
-        await store.put_codes(a.forget_codes_file, [])
-        print(f"{a.forget_codes_file}: its codes no longer count on any server (within seconds)")
+        rows = {r[0]: r for r in await store.all()}
+        if a.add_code is not None:
+            code = CodeBook.new_code()
+            until = add_months(today(), a.months) if a.months else a.until
+            await store.put(CodeBook.normalize(code), a.allowance or "1G", a.add_code, until.isoformat() if until else "")
+            print(code)
+            return
+        if a.remove_code is not None:
+            c = CodeBook.normalize(a.remove_code)
+            if await store.remove(c):
+                print(f"{CodeBook.display(c)} removed: its projects fall back to the default allowance")
+                return
+            codes.load()
+            sys.exit(f"no such code: {a.remove_code}" + (" (it's in a codes file: delete its line there)" if c in codes.codes else ""))
+        c = CodeBook.normalize(a.renew_code)
+        row = rows.get(c)
+        if row is None:  # (perhaps in a codes file: renewed there)
+            if not codes.paths:
+                sys.exit(f"no such code: {a.renew_code}")
+            try:
+                label, until, size = codes.renew(a.renew_code, a.until, a.months, a.allowance)
+            except (KeyError, FileNotFoundError):
+                sys.exit(f"no such code: {a.renew_code}")
+        else:
+            _, size, label, until_text = row
+            until = CodeBook.renewed(parse_date(until_text) if until_text else None, a.until, a.months)
+            size = a.allowance or size
+            await store.put(c, size, label, until.isoformat() if until else "")
+        print(f"{label or a.renew_code}: {size}, {f'valid until {until}' if until else 'no expiry'}")
+    finally:
+        await store.close()
+
+
+async def _export_codes(a: argparse.Namespace) -> None:
+    """--export-codes: the database's codes, as lines of a codes file."""
+    from .store import CodeTable
+    store = await CodeTable.open(a.database)
+    try:
+        rows = sorted(await store.all(), key=lambda r: (r[2], r[0]))
+    finally:
+        await store.close()
+    lines = [f"# TeXLoom creation codes, exported {today().isoformat()}: <code> <allowance> [until=YYYY-MM-DD] [label]\n"]
+    for code, size, label, until in rows:
+        lines.append("  ".join([CodeBook.display(code), size, *([f"until={until}"] if until else []), *([label] if label else [])]) + "\n")
+    if a.export_codes == "-":
+        sys.stdout.writelines(lines)
+    else:
+        fd = os.open(a.export_codes, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # (codes are secrets)
+        with os.fdopen(fd, "w") as f:
+            f.writelines(lines)
+        print(f"{len(rows)} code(s) written to {a.export_codes}", file=sys.stderr)
+
+
+async def _import_codes(a: argparse.Namespace) -> None:
+    """--import-codes-file: a codes file's codes into the database."""
+    book = CodeBook(a.import_codes_file)
+    if not a.import_codes_file.is_file():
+        sys.exit(f"no such file: {a.import_codes_file}")
+    book.load()
+    from .store import CodeTable
+    store = await CodeTable.open(a.database)
+    try:
+        have = {r[0] for r in await store.all()}
+        added = kept = 0
+        for code, size, label, until in book.local:
+            if code == "default":
+                print(f"its default allowance is {size}: set default_allowance = \"{size}\" in the settings")
+            elif code in have:
+                kept += 1
+            else:
+                await store.put(code, size, label, until)
+                have.add(code)
+                added += 1
+        print(f"{added} code(s) copied into the database" + (f", {kept} it had already" if kept else "") +
+              f". Now take {a.import_codes_file} out of codes_file (the database's codes count on every server)")
     finally:
         await store.close()
 
@@ -211,13 +297,13 @@ async def _forget_codes(a: argparse.Namespace, files: Files) -> None:
 async def _codes_command(a: argparse.Namespace, codes: CodeBook, files: Files) -> None:
     """--list-codes and --purge-code: they read (and purge) the store."""
     store = await Store.open(a.database, files, a.data)
-    codes.set_shared(await store.all_codes())  # (other servers' codes files too)
+    codes.set_stored(await store.all_codes())
     try:
         if a.purge_code is not None:
             c = CodeBook.normalize(a.purge_code)
             if c in codes.codes and not codes.expired(c):
                 sys.exit(f"{a.purge_code} is still valid{f' (until {codes.until[c]})' if c in codes.until else ''}: "
-                         "let it expire, or delete its line, first")
+                         "let it expire, or remove it (--remove-code), first")
             n, freed, _ = await Policy(store, codes).purge(c)
             await store.empty_trash()
             print(f"purged {n} project(s), {fmt_size(freed)} freed. If the server is running, restart it so its "
@@ -260,6 +346,7 @@ def main() -> None:
     from .config import parse
     p = parser()
     a = parse(p)
+    in_files = bool(a.codes_file) and not a.database  # (a codes file named, no database: changes go to the file, as before)
     if not a.database:  # an SQLite file in the server's own folder
         a.database = f"sqlite:{(a.data / 'texloom.db').resolve()}"
     if a.copy_database_from:
@@ -268,6 +355,29 @@ def main() -> None:
             asyncio.run(_copy_command(a))
         except DatabaseError as e:
             sys.exit(str(e))
+        return
+    # (the creation codes' commands need the database alone: not the file store)
+    try:
+        codes = CodeBook(a.codes_file or None, a.default_allowance)
+    except ValueError as e:
+        p.error(f"--default-allowance: {e}")
+    if a.until and a.months:
+        sys.exit("give --until or --months, not both")
+    if a.import_codes_file:
+        asyncio.run(_import_codes(a))
+        return
+    if a.export_codes:
+        asyncio.run(_export_codes(a))
+        return
+    if (a.add_code is not None or a.renew_code is not None) and a.allowance:
+        try:
+            parse_size(a.allowance)
+        except ValueError as e:
+            sys.exit(f"--allowance: {e}")
+    if a.renew_code is not None and not (a.until or a.months or a.allowance):
+        sys.exit("--renew-code needs --until, --months and/or --allowance")
+    if not in_files and any(x is not None for x in (a.add_code, a.renew_code, a.remove_code)):
+        asyncio.run(_code_change(a, codes))
         return
     try:
         files = open_files(a.files, a.data / "files",
@@ -285,22 +395,13 @@ def main() -> None:
     if a.files_for_backup is not None or a.files_restore is not None:
         asyncio.run(_files_command(a, files))
         return
-    codes = CodeBook(a.codes_file or None)
-    if a.until and a.months:
-        sys.exit("give --until or --months, not both")
-    if a.forget_codes_file:
-        asyncio.run(_forget_codes(a, files))
-        return
     if any(x is not None for x in (a.add_code, a.renew_code, a.purge_code)) or a.list_codes:
-        if not a.codes_file:
-            sys.exit("--codes-file is required")
+        # (--add-code and --renew-code here: a codes file named and no database, as servers kept codes before)
         if a.add_code is not None:
             until = add_months(today(), a.months) if a.months else a.until
             print(codes.add(a.add_code, a.allowance or "1G", until))
             return
         if a.renew_code is not None:
-            if not (a.until or a.months or a.allowance):
-                sys.exit("--renew-code needs --until, --months and/or --allowance")
             try:
                 label, until, size = codes.renew(a.renew_code, a.until, a.months, a.allowance)
             except (KeyError, FileNotFoundError):
@@ -314,8 +415,6 @@ def main() -> None:
     admin_token = (a.admin_token_file.read_text().strip() if a.admin_token_file else a.admin_token.strip())
     if admin_token and len(admin_token) < 16:
         sys.exit("the admin token must be at least 16 characters")
-    if a.private and not codes.path:
-        sys.exit("--private needs --codes-file: it's the creation codes that decide who may use the server")
     limits = Limits(a.max_bytes, a.min_free, a.project_max_bytes, a.memory)
     if a.config:
         log.info("settings from %s", a.config)
@@ -323,7 +422,8 @@ def main() -> None:
         log.info("private server: only projects with a valid creation code may connect")
     log.info("limits: total %s, keep %s free, %s per project, %s of memory for big work; %s",
              fmt_size(limits.max_bytes), fmt_size(limits.min_free), fmt_size(limits.project_max), fmt_size(limits.memory),
-             f"allowances from {', '.join(map(str, a.codes_file))}" if codes.path else "no codes file: every project may be stored")
+             "creation codes in the database" + (f" and {', '.join(map(str, a.codes_file))}" if codes.path else "") +
+             f"; default allowance {fmt_size(codes.default)}")
     if a.min_version and not version_tuple(a.min_version):
         p.error("--min-version is a version such as 0.4.30")
     if a.codes_url and not re.match(r"https?://", a.codes_url, re.I):

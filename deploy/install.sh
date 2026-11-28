@@ -9,7 +9,7 @@
 # in /etc/texloom (texloom.toml, written once: edit it there), a systemd service on 127.0.0.1:8787
 # and an nginx site for the domain, plus a Let's Encrypt certificate via certbot. Other sites are
 # left alone. It keeps no backups: see INSTALL.md. Extra ssh options can be passed in SSH_OPTS;
-# set SKIP_CERT=1 to skip certbot. DATABASE=postgresql on the first install uses PostgreSQL (with a
+# set SKIP_CERT=1 to skip certbot, and SKIP_BUILD=1 to use the web app as last built. DATABASE=postgresql on the first install uses PostgreSQL (with a
 # `texloom` database) instead of SQLite; afterwards, the settings file says which it is, and a
 # `database` naming another machine (a hosted PostgreSQL) installs no PostgreSQL here.
 set -euo pipefail
@@ -32,12 +32,15 @@ esac
 [ -n "${BUSYTEX_SHA256:-}" ] || { echo "No checksum known for TeX assets v$BUSYTEX_VERSION: set BUSYTEX_SHA256"; exit 1; }
 ssh_() { ssh $SSH_OPTS "$TARGET" "$@"; }
 
-echo "==> Building the web app locally"
-(cd "$HERE/web" && npx tsc && npx vite build >/dev/null)
+if [ -z "${SKIP_BUILD:-}" ] || [ ! -f "$HERE/web/dist/index.html" ]; then
+  echo "==> Building the web app locally"
+  (cd "$HERE/web" && npx tsc && npx vite build >/dev/null)
+fi
 (cd "$HERE" && uv export --frozen --no-dev --extra server --no-emit-project --format requirements-txt -q -o deploy/.requirements.txt)
 
 echo "==> Copying code to $TARGET:$APP_DIR"
-ssh_ "mkdir -p '$APP_DIR'"
+# (a fresh machine may lack rsync, which the copy needs at both ends)
+ssh_ "mkdir -p '$APP_DIR' && { command -v rsync >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rsync >/dev/null; }; }"
 # Only what the server runs: the Python packages, the built web app and the deploy files
 # (not the desktop app build, the web sources, caches or CI files).
 # (Excluded paths are left alone on the server: its tex-assets and .venv stay.)
@@ -132,7 +135,9 @@ python3 deploy/patch-busytex.py tex-assets
 
 # settings: written once, then yours to edit (texloom-server --help lists every setting)
 install -d -o root -g texloom -m 750 /etc/texloom
+NEW_SETTINGS=
 if [ ! -f /etc/texloom/texloom.toml ]; then  # from texloom.example.toml, with this install's paths
+  NEW_SETTINGS=1
   sed -e "s#/var/www/texloom#$APP_DIR#g" texloom.example.toml > /etc/texloom/texloom.toml
   if [ "$DATABASE" = postgresql ]; then
     sed -i 's#^database = .*#database = "postgresql:///texloom?host=/var/run/postgresql"#' /etc/texloom/texloom.toml
@@ -143,11 +148,12 @@ if [ ! -f /etc/texloom/texloom.toml ]; then  # from texloom.example.toml, with t
 fi
 chown root:texloom /etc/texloom/texloom.toml && chmod 640 /etc/texloom/texloom.toml
 
-# storage allowances: without a code nothing is stored (default 0); print the owner's code
-if [ ! -s /etc/texloom/codes.txt ]; then
-  echo "    owner's creation code (unlimited): $(.venv/bin/texloom-server --config /etc/texloom/texloom.toml --add-code owner --allowance unlimited)"
+# storage allowances: without a code nothing is stored (default_allowance 0); on a first install, the owner's code
+# (in the database, as the server's own user: the database is its)
+if [ -n "$NEW_SETTINGS" ]; then
+  echo "    owner's creation code (unlimited): $(runuser -u texloom -- .venv/bin/texloom-server --config /etc/texloom/texloom.toml --add-code owner --allowance unlimited)"
 fi
-chown root:texloom /etc/texloom/codes.txt && chmod 640 /etc/texloom/codes.txt
+if [ -f /etc/texloom/codes.txt ]; then chown root:texloom /etc/texloom/codes.txt && chmod 640 /etc/texloom/codes.txt; fi
 # admin page (/admin, read-only usage): password in /etc/texloom/admin-token
 if [ ! -s /etc/texloom/admin-token ]; then
   head -c 24 /dev/urandom | base64 | tr -d '/+=' > /etc/texloom/admin-token
@@ -176,7 +182,8 @@ EnvironmentFile=-/etc/texloom/env
 # buffers over 1 MB (catch-ups, uploads) go back to the system when freed, rather than staying
 # in the heap, where MemoryMax would keep counting them
 Environment=MALLOC_MMAP_THRESHOLD_=1048576
-ExecStart=$APP_DIR/.venv/bin/texloom-server --config /etc/texloom/texloom.toml --host 127.0.0.1 --port 8787
+# (where it listens is the settings' host and port: 127.0.0.1:8787 unless they say otherwise)
+ExecStart=$APP_DIR/.venv/bin/texloom-server --config /etc/texloom/texloom.toml
 Restart=on-failure
 UMask=0077
 MemoryMax=1G
@@ -209,6 +216,17 @@ UNIT
 systemctl daemon-reload
 systemctl enable -q texloom
 systemctl restart texloom
+
+# Where nginx sends what reaches the relay: written once, as this machine's relay alone. With several relays,
+# deploy/cluster.py's health watcher (texloom-door-watch) keeps it, listing every relay that is well.
+if [ ! -f /etc/nginx/conf.d/texloom-relays.conf ]; then
+  cat > /etc/nginx/conf.d/texloom-relays.conf <<'UPSTREAM'
+# The relays nginx sends TeXLoom's requests to (deploy/install.sh writes this once, for this machine's relay)
+upstream texloom_relays {
+    server 127.0.0.1:8787;
+}
+UPSTREAM
+fi
 
 # nginx site. Static files are served by nginx; only /ws/ and /blob/ reach Python.
 # Written only on first install: certbot adds the TLS lines to this file afterwards.
@@ -250,7 +268,8 @@ server {
     # encrypted sync (WebSocket); connections are long-lived
     location /ws/ {
         limit_conn texloom_ws64 30;
-        proxy_pass http://127.0.0.1:8787;
+        proxy_pass http://texloom_relays;
+        proxy_next_upstream error timeout http_503;  # (a relay refusing new connections: the next one)
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -265,7 +284,7 @@ server {
     location /blob/ {
         limit_conn texloom_blob64 20;
         limit_req zone=texloom_upload64 burst=40;
-        proxy_pass http://127.0.0.1:8787;
+        proxy_pass http://texloom_relays;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         client_max_body_size 75m;
@@ -274,14 +293,14 @@ server {
     # server info and creation-code checks
     location = /api/code {
         limit_req zone=texloom_code64 burst=5 nodelay;
-        proxy_pass http://127.0.0.1:8787;
+        proxy_pass http://texloom_relays;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }
     # importing an arXiv paper's source: the relay fetches it (rate-limited there too)
     location /api/arxiv/ {
         limit_req zone=texloom_code64 burst=3 nodelay;
-        proxy_pass http://127.0.0.1:8787;
+        proxy_pass http://texloom_relays;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 120s;
@@ -289,19 +308,19 @@ server {
     # project lists: slows anyone trying passwords or creation codes
     location /api/list/ {
         limit_req zone=texloom_list64 burst=60 nodelay;
-        proxy_pass http://127.0.0.1:8787;
+        proxy_pass http://texloom_relays;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }
     location /api/ {
-        proxy_pass http://127.0.0.1:8787;
+        proxy_pass http://texloom_relays;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }
     # TeX Live files on demand (a package is fetched from a mirror the first time)
     location /texlive/ {
         limit_req zone=texloom_texlive64 burst=1000 delay=400;
-        proxy_pass http://127.0.0.1:8787;
+        proxy_pass http://texloom_relays;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 60s;
@@ -309,7 +328,7 @@ server {
     # read-only admin page (HTTP basic auth against /etc/texloom/admin-token)
     location = /admin {
         limit_req zone=texloom_code64 burst=5 nodelay;
-        proxy_pass http://127.0.0.1:8787;
+        proxy_pass http://texloom_relays;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }
@@ -488,9 +507,27 @@ if ws and re.search(r"proxy_read_timeout (1h|60s);", ws.group(1)):
     site = site.replace(ws.group(1), re.sub(r"proxy_read_timeout (1h|60s);", "proxy_read_timeout 10s;", ws.group(1)), 1)
     open(path, "w").write(site)
     print("    nginx: WebSockets given up on after 10 s without a word from the server")
+# the relays by the upstream's name (one, or several: /etc/nginx/conf.d/texloom-relays.conf), and a WebSocket a relay
+# refuses (it is unwell) tried on the next
+if "proxy_pass http://127.0.0.1:8787;" in site:
+    site = site.replace("proxy_pass http://127.0.0.1:8787;", "proxy_pass http://texloom_relays;")
+    ws = re.search(r"(\n    location /ws/ \{\n.*?\n    \}\n)", site, re.S)
+    if ws and "proxy_next_upstream" not in ws.group(1):
+        site = site.replace(ws.group(1), ws.group(1).replace(
+            "proxy_pass http://texloom_relays;\n", "proxy_pass http://texloom_relays;\n        proxy_next_upstream error timeout http_503;\n", 1), 1)
+    open(path, "w").write(site)
+    print("    nginx: the relays by name (texloom_relays)")
 PY
 fi
-nginx -t -q && systemctl reload nginx || { cp "/root/texloom-backups/nginx-$DOMAIN.bak" "$SITE"; systemctl reload nginx; echo "nginx update failed: restored"; exit 1; }
+# (started if it isn't running: a package's service isn't always started when it is installed)
+if ! nginx -t -q || ! systemctl reload-or-restart nginx; then
+  if [ -f "/root/texloom-backups/nginx-$DOMAIN.bak" ]; then
+    cp "/root/texloom-backups/nginx-$DOMAIN.bak" "$SITE"; systemctl reload-or-restart nginx; echo "nginx update failed: restored"
+  else
+    echo "nginx refused the site: nginx -t, and journalctl -u nginx"
+  fi
+  exit 1
+fi
 rm -rf /root/texloom-backups  # only needed until nginx accepted the change
 
 # TLS certificate (uses the server's existing Let's Encrypt account if there is one)

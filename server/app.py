@@ -96,7 +96,7 @@ def make_app(s: Settings) -> web.Application:
     app = web.Application(middlewares=[headers], client_max_size=MAX_BODY)
 
     opened: list[Store] = []
-    sharing: list[asyncio.Task] = []  # keeping the creation codes shared (Policy.keep_codes)
+    sharing: list[asyncio.Task] = []  # keeping the creation codes up to date (Policy.keep_codes)
     bus = open_bus(s.bus)
     held = contextlib.AsyncExitStack()  # the database's ALONE_LOCK, while it's held
 
@@ -114,7 +114,10 @@ def make_app(s: Settings) -> web.Application:
         policy.attach(store)
         store.on_back = relay.db_back
         await store.start()
-        await policy.share_codes()  # (before serving: the codes every server has)
+        await policy.load_codes()  # (before serving)
+        if s.codes.paths and not (isinstance(bus, MemoryBus) and not bus.shared):
+            log.warning("codes files count on this server only, not on the others sharing its database: move their codes "
+                        "into the database (texloom-server --import-codes-file FILE), then remove codes_file")
         sharing.append(asyncio.get_running_loop().create_task(policy.keep_codes()))
         opened.append(store)
 

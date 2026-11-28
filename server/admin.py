@@ -135,10 +135,10 @@ class Admin:
 <h2>Creation codes</h2>
 <table><tr><th>Label</th><th>Code</th><th>Valid until</th><th class=n>Allowance</th><th class=n>Used</th><th class=n>Projects</th></tr>{crow}</table>
 <p class=muted>Click a code to show it all. A code lets people store new projects here up to its allowance; it doesn't
-open anyone's project. To withdraw one, delete its line from the codes file or let it expire: its projects then fall back to
+open anyone's project. To withdraw one, remove it or let it expire: its projects then fall back to
 the default allowance. Purging expired codes' stored copies: {f"after {self.purge_days:g} days" if self.purge_days is not None else "off"}.</p>
-<p class=muted>Add a code: <code>texloom-server --codes-file … --add-code LABEL --allowance 1G --months 12</code>;
-renew one: <code>--renew-code CODE --months 12</code>.</p>
+<p class=muted>On any server, with its settings: add a code, <code>texloom-server --config … --add-code LABEL --allowance 1G --months 12</code>;
+renew one, <code>--renew-code CODE --months 12</code>; remove one, <code>--remove-code CODE</code>.</p>
 <h2>Apps connecting</h2>
 <table><tr><th>App</th><th>Version</th><th class=n>Connections</th><th>Last seen</th><th></th></tr>{arow or '<tr><td colspan=5 class=muted>none yet</td></tr>'}</table>
 <p class=muted>{f"Minimum version: <b>{e(mv)}</b>. Older apps (and those too old to say, shown as unknown) are asked to update." if mv else

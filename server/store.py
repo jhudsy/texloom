@@ -60,7 +60,7 @@ KEEP_BIG = 64 * 1024  # an edit at least this big is remembered for good
 # so they come out of a server-wide budget: a burst of META_BURST, then META_RATE per second.
 META_RATE, META_BURST = 1.0, 600
 FACTS_KEPT = 20_000  # projects whose deletion and storage mode are kept in memory (see Store._facts)
-CODES_CHANNEL = "texloom_codes"  # what servers sharing a database tell each other: "the codes changed" (Policy.share_codes)
+CODES_CHANNEL = "texloom_codes"  # what servers sharing a database tell each other: "the codes changed" (Policy.keep_codes)
 CHANNEL = "texloom_project"  # what servers sharing a database tell each other: "this project changed" (see Store._told)
 RECONCILE_EVERY = 86400  # seconds between recounts of the usage ledger against the stored data (see Store.reconcile)
 REVOKED_KEPT = 10_000  # projects whose revocations are kept in memory
@@ -132,11 +132,10 @@ CREATE INDEX IF NOT EXISTS reserved_owner ON reserved (owner);
 CREATE INDEX IF NOT EXISTS reserved_project ON reserved (project);
 -- what an owner stores is added up from its projects (Store.owner_total)
 CREATE INDEX IF NOT EXISTS projects_owner ON projects (owner);
--- Creation codes, for every server sharing the database: each server copies its codes files here when they change
--- (source: the file's path; code "default" for the default line; size as written: "2G", "unlimited"), and takes all.
+-- Creation codes, for every server sharing the database (CodeBook; the command line changes them): the code normalized,
+-- its allowance as written ("2G", "unlimited"), a label, and the last day it is valid ("": no expiry)
 CREATE TABLE IF NOT EXISTS codes (
-  source text NOT NULL, code text NOT NULL, size text NOT NULL, label text NOT NULL, until text NOT NULL,
-  PRIMARY KEY (source, code));
+  code text PRIMARY KEY, size text NOT NULL, label text NOT NULL, until text NOT NULL);
 """
 SCHEMA_POSTGRESQL = """
 -- ciphertext doesn't compress: store it as it is, out of line, without trying
@@ -146,7 +145,7 @@ ALTER TABLE log ALTER COLUMN data SET STORAGE EXTERNAL;
 TABLES = {"log": ("project", "seq"), "head": ("project",), "mode": ("project",), "stored": ("project", "id"),
           "trash": ("project", "id"), "revoked": ("project", "pub"), "projects": ("project",), "gone": ("project", "h"),
           "kept": ("project", "h"), "floor": ("project",), "deleted": ("project",), "clients": ("app", "version"), "lists": ("id",),
-          "usage": ("project",), "reserved": ("id",), "codes": ("source", "code")}
+          "usage": ("project",), "reserved": ("id",), "codes": ("code",)}
 BOOLEANS = frozenset({"snap", "relay"})
 
 
@@ -196,6 +195,57 @@ class Tx:
             if asyncio.iscoroutine(r := fn()):
                 await r
 
+
+
+class CodeTable:
+    """The creation codes in the database (CodeBook): every server sharing it has the same. Only the `codes` table is
+    used, so a program that changes codes (a sales service) can be given a database role allowed that table alone."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    @classmethod
+    async def open(cls, url: str) -> CodeTable:
+        """For the command line: the codes table, without the rest of the store (its tables are made if there are none,
+        as on a first install, before the server has run)."""
+        db = await connect(url)
+        try:
+            there = await db.fetchval("SELECT name FROM sqlite_master WHERE type='table' AND name='codes'" if db.kind == "sqlite"
+                                      else "SELECT to_regclass('codes') IS NOT NULL")
+        except BaseException:
+            await db.close()
+            raise
+        if not there:
+            await db.close()
+            db = await connect(url, SCHEMA, SCHEMA_POSTGRESQL)
+        return cls(db)
+
+    async def close(self) -> None:
+        await self.db.close()
+
+    async def all(self) -> list[tuple[str, str, str, str]]:
+        """Every code: (code, size, label, until) rows."""
+        return [tuple(r) for r in await self.db.fetch("SELECT code, size, label, until FROM codes")]
+
+    async def put(self, code: str, size: str, label: str, until: str) -> None:
+        """A code added, or changed (its allowance, label or expiry), and every server told."""
+        await self.db.execute("INSERT INTO codes(code, size, label, until) VALUES ($1,$2,$3,$4) ON CONFLICT (code) "
+                              "DO UPDATE SET size=excluded.size, label=excluded.label, until=excluded.until",
+                              code, size, label, until)
+        await self._changed()
+
+    async def remove(self, code: str) -> bool:
+        """A code taken away (its projects fall back to the default allowance); False if there was none."""
+        had = await self.db.fetchval("SELECT 1 FROM codes WHERE code=$1", code) is not None
+        await self.db.execute("DELETE FROM codes WHERE code=$1", code)
+        await self._changed()
+        return had
+
+    async def _changed(self) -> None:
+        try:
+            await self.db.notify(CODES_CHANNEL, "")
+        except (DatabaseError, OSError) as e:
+            log.warning("couldn't tell the servers the codes changed (they look again within seconds): %s", e)
 
 class Store:
     """Open with `await Store.open(url, ...)`; close with `await store.close()`."""
@@ -593,20 +643,15 @@ class Store:
     async def head(self, project: str, c=None) -> int:
         return await (c or self.db).fetchval("SELECT seq FROM head WHERE project=$1", project) or 0
 
-    async def put_codes(self, source: str, rows: list[tuple[str, str, str, str]]) -> None:
-        """One codes file's lines ((code, size, label, until) rows) in place of what it had before, and the others told."""
-        async with self.tx() as c:
-            await c.execute("DELETE FROM codes WHERE source=$1", source)
-            if rows:
-                await c.executemany("INSERT INTO codes(source, code, size, label, until) VALUES ($1,$2,$3,$4,$5) "
-                                    "ON CONFLICT (source, code) DO NOTHING", [(source, *r) for r in rows])
-        try:
-            await self.db.notify(CODES_CHANNEL, "")
-        except (DatabaseError, OSError) as e:
-            log.warning("couldn't tell the other servers the codes changed: %s", e)
+    # --- creation codes (CodeBook) -----------------------------------------------------
+    async def all_codes(self) -> list[tuple[str, str, str, str]]:
+        return await CodeTable(self.db).all()
 
-    async def all_codes(self) -> list[tuple[str, str, str, str, str]]:
-        return [tuple(r) for r in await self.db.fetch("SELECT source, code, size, label, until FROM codes")]
+    async def put_code(self, code: str, size: str, label: str, until: str) -> None:
+        await CodeTable(self.db).put(code, size, label, until)
+
+    async def remove_code(self, code: str) -> bool:
+        return await CodeTable(self.db).remove(code)
 
     async def heads(self, projects: list[str]) -> dict[str, int]:
         """The heads of many projects at once (a relay's periodic check of the projects it has open)."""

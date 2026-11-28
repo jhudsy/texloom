@@ -517,7 +517,8 @@ machine, backups (a ping when each finishes), and the site itself from outside; 
 wrong for a few minutes. **To do**, in the deploy tool: set both up with each machine, and a `status` command showing
 every part's health at once.
 
-**Dashboards: Prometheus and Grafana** (decided; free, self-hosted, and the parts already speak it). Today there are
+**Dashboards: Prometheus and Grafana** (decided; free, self-hosted, and the parts already speak it), **always optional**:
+nothing of it is installed unless asked, and one cheap VPS or a Raspberry Pi runs TeXLoom as well without it as before. Today there are
 the admin page (one relay's view: codes, storage, projects, app versions), each relay's `/api/health`, and pings for
 the backups and the plans service: enough for one server, but no history (last night's CPU, a disk filling over a
 week), nothing on the machines, Patroni or Valkey, and no view across relays. Prometheus scrapes each part every 15 s
@@ -557,13 +558,14 @@ and keeps the history; Grafana draws it and sends the alerts (email). What each 
 
 ### Shared state the relays don't have yet
 
-- **Creation codes are files** (`--codes-file`), written by hand or by a sales service, and every relay must see the
-  same codes. **Built:** each relay copies its codes files into the database (`codes`: source file, code, size, label,
-  until) when they change (looking every 5 s), tells the others (`texloom_codes`), and takes every relay's: its own
-  files first, then the others' by name. So a code written on one machine (a sale, `--add-code`) counts on every relay
-  within seconds, and the files and the sales service stay as they are. A file with the same path on two machines must
-  be the same file. A file no relay uses any more: `texloom-server --forget-codes-file FILE`. Checked in
-  `scripts/check_relays.py`.
+- **Creation codes were files** (`--codes-file`), and every relay must see the same codes. **Built:** they are kept
+  in the database (`codes`: code, size, label, until), changed with `--add-code`, `--renew-code` and `--remove-code`
+  from any machine with the settings, and every relay reads them again when told (`texloom_codes`) and every 5 s; the
+  default allowance is a setting (`default_allowance`). A server's codes files still work, counting on that server
+  only (a relay sharing its database warns), and `--import-codes-file` moves them into the database; a program that
+  names only a codes file (a sales service) still writes it. (First built as each relay sharing its files through the
+  database; dropped because a file belongs to one machine, and in a fleet every relay had one at the same path.)
+  Checked in `scripts/check_relays.py`.
 - **Limits per address** (connections, rates) are counted per relay, so several relays together allow that many
   times more. The front door's limits (nginx's, per address) still hold. Sharing them (counters on the bus) is
   possible if it matters.

@@ -308,7 +308,6 @@ class Server:
         self.grouped = grouped  # each project's people on one relay (as a front door hashing the project would send them)
         self.kind = "postgresql" if bus or postgresql else testdb.KIND
         self.database = ""  # a throwaway database in self.dir/db (scripts/testdb.py), started by db()
-        (self.dir / "codes.txt").write_text("default unlimited\n")
         self.procs: list[subprocess.Popen] = []
         self.urls = [f"http://127.0.0.1:{port + i}" for i in range(relays)]
         self.url = self.urls[0]
@@ -364,7 +363,7 @@ class Server:
             prof = os.environ.get("LOADTEST_PROFILE")  # a folder: relay 0 runs under cProfile, its profile written there at exit
             run = [sys.executable, "-m", "cProfile", "-o", f"{prof}/relay-{time.time():.0f}.prof", "-m", "server.cli"] if prof and i == 0 else [str(exe)]
             args = [*run, "--config", "/dev/null", "--host", "127.0.0.1", "--port", str(self.port + i), "--database", self.db(),
-                    "--data", str(data), "--files", str(self.dir / "files"), "--codes-file", str(self.dir / "codes.txt"),
+                    "--data", str(data), "--files", str(self.dir / "files"), "--default-allowance", "unlimited",
                     "--min-free", "0", "--project-max-bytes", "unlimited", *(["--bus", self.bus.url] if self.bus else [])]
             if self.static:
                 args += ["--static", str(self.static)]

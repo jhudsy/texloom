@@ -33,7 +33,7 @@ log = logging.getLogger("texloom.relay")
 
 KiB, MiB, GiB = 1 << 10, 1 << 20, 1 << 30
 UNLIMITED = math.inf
-CODES_EVERY = 5.0  # seconds between looks at the codes files, and at the other servers' (Policy.keep_codes)
+CODES_EVERY = 5.0  # seconds between looks at the codes (the database's, and any files), as well as when told (Policy.keep_codes)
 # Memory for big work at once, shared (see Budget): catch-up replies, large frames being handled,
 # uploads being checked and stored, arXiv imports. Work that doesn't fit waits its turn (a large
 # frame is answered "server busy" instead). With HELD_MAX, OUT_MAX, the arXiv cache and the
@@ -97,26 +97,28 @@ class Limits:
 
 
 class CodeBook:
-    """Storage allowances per creation code, from a text file (see module docstring)."""
+    """Storage allowances per creation code. The codes are kept in the database (Store.all_codes: every server sharing
+    it has the same), put there by the command line (--add-code, --renew-code, --remove-code). A server may also be
+    given codes files, as servers were before the database kept them: a file's codes count on that server only, and
+    `--import-codes-file` moves them into the database. The default allowance (projects made without a code) is the
+    `default_allowance` setting, or a codes file's "default" line; unset, it is unlimited without codes files and 0
+    with them (as it always was)."""
 
     ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-    def __init__(self, path: Path | list[Path] | None):
-        # Several files can be given (e.g. one kept by hand and one kept by a sales service):
-        # their codes are combined; "default" comes from the first file that sets it. New
-        # codes (--add-code) go into the first file.
+    def __init__(self, path: Path | list[Path] | None, default: str | None = None):
+        # Codes files (older servers'): several can be given (e.g. one kept by hand and one kept by a sales service);
+        # their codes are combined; "default" comes from the first file that sets it.
         self.paths: list[Path] = [] if path is None else list(path) if isinstance(path, list) else [path]
         self.path = self.paths[0] if self.paths else None
+        self.default_setting = parse_size(default) if default not in (None, "") else None  # default_allowance
         self._mtime: tuple[float, ...] = ()
         self.codes: dict[str, tuple[float, str]] = {}  # normalized code -> (allowance, label)
         self.until: dict[str, dt.date] = {}  # normalized code -> last day it is valid (if it expires)
-        self.default: float = UNLIMITED if self.path is None else 0
-        # With several servers, each one's files are copied into the database (Policy.share_codes) and every server
-        # takes all of them: its own files first, then the others' (`shared`: (source, code, size, label, until)
-        # rows, its own sources left out). `local`: this server's files, as rows to copy; `dirty`: changed since.
-        self.local: dict[str, list[tuple[str, str, str, str]]] = {}
-        self.shared: list[tuple[str, str, str, str, str]] = []
-        self.dirty = False
+        self.default: float = UNLIMITED
+        self.local: list[tuple[str, str, str, str]] = []  # the codes files' lines: (code, size, label, until)
+        self.stored: list[tuple[str, str, str, str]] = []  # the database's codes (set_stored), likewise
+        self._merge()
 
     @staticmethod
     def normalize(code: object) -> str:
@@ -135,8 +137,8 @@ class CodeBook:
 
     @property
     def has_codes(self) -> bool:
-        """Codes are in use: a codes file here, or another server's in the database."""
-        return bool(self.paths) or bool(self.shared)
+        """Codes are in use: in the database, or a codes file here."""
+        return bool(self.paths) or bool(self.stored)
 
     def load(self) -> None:
         if not self.path:
@@ -149,9 +151,8 @@ class CodeBook:
         mtimes = tuple(mtime(p) for p in self.paths)
         if mtimes == self._mtime:
             return
-        local: dict[str, list[tuple[str, str, str, str]]] = {}
+        local: list[tuple[str, str, str, str]] = []
         for path, m in zip(self.paths, mtimes, strict=True):
-            rows = local.setdefault(str(path), [])
             for n, line in enumerate(path.read_text().splitlines(), 1) if m >= 0 else ():
                 parts = line.split("#", 1)[0].split()
                 if not parts:
@@ -168,29 +169,27 @@ class CodeBook:
                         log.warning("%s line %d: %s (ignored: the code doesn't expire)", path, n, e)
                         until_text = None
                 code = "default" if parts[0].lower() == "default" else self.normalize(parts[0])
-                rows.append((code, size, " ".join(label), until_text or ""))
-        self.local, self._mtime, self.dirty = local, mtimes, True
+                local.append((code, size, " ".join(label), until_text or ""))
+        self.local, self._mtime = local, mtimes
         self._merge()
         expired = sum(1 for c in self.codes if self.expired(c))
         log.info("codes file: %d code(s)%s, default allowance %s", len(self.codes),
                  f" ({expired} expired)" if expired else "", fmt_size(self.default))
 
-    def set_shared(self, rows: list[tuple[str, str, str, str, str]]) -> None:
-        """Every server's codes, as the database has them ((source, code, size, label, until) rows): those of sources
-        that aren't this server's files are taken too, after its own."""
-        mine = set(self.local) | {str(p) for p in self.paths}
-        shared = sorted(r for r in rows if r[0] not in mine)
-        if shared != self.shared:
-            self.shared = shared
+    def set_stored(self, rows: list[tuple[str, str, str, str]]) -> None:
+        """The database's codes ((code, size, label, until) rows), as Store.all_codes gives them."""
+        rows = sorted(tuple(r) for r in rows)  # type: ignore[misc]
+        if rows != self.stored:
+            self.stored = rows
             self._merge()
 
     def _merge(self) -> None:
-        """The codes in force: this server's files in order, then the others' sources (by name). The first to list a
-        code decides it, and the first to set "default" decides that."""
+        """The codes in force: the codes files' in order, then the database's. The first to list a code decides it,
+        and the first file to set "default" decides that (else the default_allowance setting)."""
         codes: dict[str, tuple[float, str]] = {}
         until: dict[str, dt.date] = {}
         default = None
-        rows = [r for p in self.paths for r in self.local.get(str(p), [])] + [r[1:] for r in self.shared]
+        rows = self.local + self.stored
         for code, size, label, until_text in rows:
             try:
                 allowance = parse_size(size)
@@ -208,7 +207,9 @@ class CodeBook:
                 except ValueError:
                     pass
         self.codes, self.until = codes, until
-        self.default = (default or 0.0) if self.has_codes else UNLIMITED
+        if default is None:
+            default = self.default_setting
+        self.default = default if default is not None else 0.0 if self.paths else UNLIMITED
 
     def expired(self, code: str) -> bool:
         """True once a code's `until` day has passed. An expired code counts as removed: its
@@ -247,7 +248,7 @@ class CodeBook:
         self.load()
         if owner in self.codes and not self.expired(owner):
             return self.codes[owner][0]
-        # 'default' (unlimited without a codes file), or a code since removed or expired
+        # 'default', or a code since removed or expired
         return self.default
 
     def label(self, owner: str) -> str:
@@ -261,10 +262,23 @@ class CodeBook:
         """A normalized code as people see it: XXXX-XXXX-XXXX."""
         return f"{code[:4]}-{code[4:8]}-{code[8:]}"
 
+    @classmethod
+    def new_code(cls) -> str:
+        """A new code, as people see it."""
+        return cls.display("".join(secrets.choice(cls.ALPHABET) for _ in range(12)))  # 60 bits
+
+    @staticmethod
+    def renewed(current: dt.date | None, until: dt.date | None, months: int) -> dt.date | None:
+        """A code's expiry after a renewal: `until`, or `months` on from the later of today and `current`."""
+        if months:
+            return add_months(max(today(), current or today()), months)
+        return current if until is None else until
+
     def add(self, label: str, allowance: str, until: dt.date | None = None) -> str:
+        """A new code in the first codes file (servers that keep codes in files)."""
         assert self.path
         parse_size(allowance)
-        code = self.display("".join(secrets.choice(self.ALPHABET) for _ in range(12)))  # 60 bits
+        code = self.new_code()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         new = not self.path.exists()
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o640)
@@ -305,10 +319,7 @@ class CodeBook:
                 current = parse_date(until_text) if until_text else None
             except ValueError:
                 current = None
-            if months:
-                until = add_months(max(today(), current or today()), months)
-            elif until is None:
-                until = current
+            until = self.renewed(current, until, months)
             size = allowance or size
             new = "  ".join([parts[0], size, *([f"until={until.isoformat()}"] if until else []), *([" ".join(label)] if label else [])])
             lines[i] = new + (f"  {hash_}{comment}" if hash_ else "") + "\n"
@@ -353,24 +364,20 @@ class Policy:
     async def _never_busy(project: str) -> bool:
         return False
 
-    async def share_codes(self) -> None:
-        """Copy this server's codes files into the database if they changed, and take every server's from it."""
+    async def load_codes(self) -> None:
+        """The codes in force: the database's, and any codes files' (read again if they changed)."""
         self.codes.load()
-        if self.codes.dirty:
-            for source, rows in self.codes.local.items():
-                await self.store.put_codes(source, rows)
-            self.codes.dirty = False
-        self.codes.set_shared(await self.store.all_codes())
+        self.codes.set_stored(await self.store.all_codes())
 
     async def keep_codes(self) -> None:
-        """While the server runs: share_codes every CODES_EVERY seconds, and when another server says they changed."""
+        """While the server runs: load_codes every CODES_EVERY seconds, and when the database says they changed."""
         changed = asyncio.Event()
         await self.store.db.listen(CODES_CHANNEL, lambda _payload: changed.set())
         while True:
             try:
-                await self.share_codes()
+                await self.load_codes()
             except Exception as e:
-                log.warning("couldn't share the creation codes: %s", e)
+                log.warning("couldn't read the creation codes: %s", e)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(changed.wait(), CODES_EVERY)
             changed.clear()

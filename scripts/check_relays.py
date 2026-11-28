@@ -346,47 +346,101 @@ async def health(one: TestClient, two: TestClient) -> None:
 
 
 async def shared_codes(url: str, tmp: Path) -> None:
-    print("creation codes, shared:")
+    print("creation codes, in the database:")
     import asyncpg
     c = await asyncpg.connect(url)
     await c.execute("CREATE DATABASE codes")  # (a database of its own: the servers above shared theirs)
     await c.close()
     url = url.rsplit("/", 1)[0] + "/codes"
-    codes = tmp / "shared-codes.txt"
-    codes.write_text("default 0\nAAAABBBBCCCC 10M one\n")
-    with_file = TestServer(make_app(Settings(database=url, bus="memory:codes", data=tmp / "c1", codes=CodeBook(codes))))
-    without = TestServer(make_app(Settings(database=url, bus="memory:codes", data=tmp / "c2")))
-    async with TestClient(with_file) as one, TestClient(without) as two:
+
+    def cli(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, "-m", "server.cli", "--config", os.devnull, "--database", url, "--data",
+                               str(tmp / "cli"), *args], capture_output=True, text=True, cwd=ROOT)
+
+    old_file = tmp / "old-codes.txt"  # (a server from before the database kept codes)
+    old_file.write_text("default 0\nAAAABBBBCCCC 10M kept in a file\n")
+    one_srv = TestServer(make_app(Settings(database=url, bus="memory:codes", data=tmp / "c1", codes=CodeBook(old_file))))
+    two_srv = TestServer(make_app(Settings(database=url, bus="memory:codes", data=tmp / "c2", codes=CodeBook(None, "0"))))
+    async with TestClient(one_srv) as one, TestClient(two_srv) as two:
         async def valid(c: TestClient, code: str) -> bool:
             r = await c.post("/api/code", json={"code": code})
             return r.status == 200 and (await r.json()).get("ok") is True
-        check("a relay with no codes file takes another's codes", await valid(two, "AAAA-BBBB-CCCC"))
+
+        async def soon(cond, secs: float = 15) -> float | None:
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < secs:
+                if await cond():
+                    return time.monotonic() - t0
+                await asyncio.sleep(0.3)
+            return None
         r = await two.get("/api/info")
         info = await r.json()
-        check("and its default (here: no storage without a code)", info.get("creation") == "code" and info.get("defaultAllowance") == 0, info)
-        codes.write_text("default 0\nAAAABBBBCCCC 10M one\nDDDDEEEEFFFF 1G two\n")
-        t0 = time.monotonic()
-        added = False
-        while time.monotonic() - t0 < 15 and not added:
-            added = await valid(two, "DDDD-EEEE-FFFF")
-            await asyncio.sleep(0.3)
-        check("a code added to the file is valid on the other relay within seconds", added, f"{time.monotonic() - t0:.1f} s")
-        codes.write_text("default 0\nDDDDEEEEFFFF 1G two\n")
-        t0 = time.monotonic()
-        gone = False
-        while time.monotonic() - t0 < 15 and not gone:
-            gone = not await valid(two, "AAAA-BBBB-CCCC")
-            await asyncio.sleep(0.3)
-        check("and one removed is refused there too", gone, f"{time.monotonic() - t0:.1f} s")
-        forget = subprocess.run([sys.executable, "-m", "server.cli", "--database", url, "--data", str(tmp / "c3"),
-                                 "--forget-codes-file", str(codes)], capture_output=True, text=True, cwd=ROOT)
-        t0 = time.monotonic()
-        dropped = False
-        while time.monotonic() - t0 < 15 and not dropped:
-            dropped = not await valid(two, "DDDD-EEEE-FFFF")
-            await asyncio.sleep(0.3)
-        check("a codes file forgotten (--forget-codes-file): its codes stop counting on the other relay too",
-              forget.returncode == 0 and dropped, forget.stdout + forget.stderr)
+        check("default_allowance: no storage without a code", info.get("creation") == "code" and info.get("defaultAllowance") == 0, info)
+        added = cli("--add-code", "alice", "--allowance", "2G", "--months", "12")
+        code = added.stdout.strip()
+        took = await soon(lambda: _both(valid, (one, two), code))
+        check("a code added from the command line (into the database) is valid on every relay within seconds",
+              added.returncode == 0 and took is not None, (added.stdout + added.stderr, took))
+        listed = cli("--list-codes")
+        check("--list-codes lists it, with its label and expiry", code in listed.stdout and "alice" in listed.stdout and "until" in listed.stdout,
+              listed.stdout + listed.stderr)
+        renewed = cli("--renew-code", code, "--allowance", "5G")
+        rows = {r[0]: r for r in await relays[-1].store.all_codes()}
+        check("--renew-code changes it in the database", renewed.returncode == 0 and rows[CodeBook.normalize(code)][1] == "5G",
+              renewed.stdout + renewed.stderr)
+        removed = cli("--remove-code", code)
+        took = await soon(lambda: _neither(valid, (one, two), code))
+        check("--remove-code takes it away on every relay", removed.returncode == 0 and took is not None, removed.stdout + removed.stderr)
+        check("a codes file's code counts on its own relay only", await valid(one, "AAAA-BBBB-CCCC") and not await valid(two, "AAAA-BBBB-CCCC"))
+        imported = cli("--import-codes-file", str(old_file))
+        took = await soon(lambda: _both(valid, (one, two), "AAAA-BBBB-CCCC"))
+        check("--import-codes-file moves it into the database: then it counts on every relay, and the file's default is mentioned",
+              imported.returncode == 0 and took is not None and "default_allowance" in imported.stdout, imported.stdout + imported.stderr)
+        again = cli("--import-codes-file", str(old_file))
+        check("importing again copies nothing twice", again.returncode == 0 and "0 code(s) copied" in again.stdout, again.stdout)
+        dump = tmp / "exported-codes.txt"
+        exported = cli("--export-codes", str(dump))
+        fresh = f"sqlite:{tmp / 'fresh.db'}"
+        back = subprocess.run([sys.executable, "-m", "server.cli", "--config", os.devnull, "--database", fresh, "--data",
+                               str(tmp / "cli"), "--import-codes-file", str(dump)], capture_output=True, text=True, cwd=ROOT)
+        from server.store import CodeTable
+        before, after = await CodeTable.open(url), await CodeTable.open(fresh)
+        try:
+            same = sorted(await before.all()) == sorted(await after.all())
+        finally:
+            await before.close()
+            await after.close()
+        check("--export-codes writes every code (only its owner may read the file), and --import-codes-file brings them all "
+              "back into another database, the same", exported.returncode == 0 and back.returncode == 0 and same
+              and dump.stat().st_mode & 0o077 == 0, (exported.stderr, back.stdout + back.stderr))
+        # a sales service's own database role, allowed the codes table and nothing else
+        c = await asyncpg.connect(url)
+        await c.execute("CREATE ROLE sales LOGIN PASSWORD 'sales'; GRANT SELECT, INSERT, UPDATE, DELETE ON codes TO sales")
+        await c.close()
+        host = url.split("@", 1)[1]
+        sales = subprocess.run([sys.executable, "-m", "server.cli", "--config", os.devnull, "--data", str(tmp / "sales"),
+                                "--add-code", "polar:sub_1", "--allowance", "2G", "--months", "12"],
+                               capture_output=True, text=True, cwd=ROOT, env={**os.environ, "TEXLOOM_DATABASE": f"postgresql://sales:sales@{host}"})
+        sold = sales.stdout.strip()
+        took = await soon(lambda: _both(valid, (one, two), sold))
+        check("a role allowed the codes table alone (a sales service's) adds a code, valid on every relay",
+              sales.returncode == 0 and took is not None, sales.stdout + sales.stderr)
+        check("(and the command made nothing of the store's: no folder for files)", not (tmp / "sales" / "files").exists())
+    in_file = tmp / "file-only.txt"
+    in_file.write_text("default 0\n")
+    legacy = subprocess.run([sys.executable, "-m", "server.cli", "--config", os.devnull, "--codes-file", str(in_file),
+                             "--add-code", "from the plans service", "--allowance", "1G"], capture_output=True, text=True, cwd=ROOT)
+    check("with a codes file and no database named (as the plans service runs it), --add-code still writes the file",
+          legacy.returncode == 0 and CodeBook.normalize(legacy.stdout.strip()) in CodeBook.normalize(in_file.read_text()),
+          legacy.stdout + legacy.stderr)
+
+
+async def _both(valid, clients, code: str) -> bool:
+    return all([await valid(c, code) for c in clients])
+
+
+async def _neither(valid, clients, code: str) -> bool:
+    return not any([await valid(c, code) for c in clients])
 
 
 async def apps(one: TestClient, two: TestClient, tmp: Path, store) -> None:

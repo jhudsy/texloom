@@ -38,7 +38,7 @@ KINDS = {"setting", "connection", "per-server", "project", "shared", "maintenanc
 STATE = {
     # settings and handles
     "Relay.policy": "setting", "Relay.bus": "setting", "Relay.number": "per-server", "Endpoints.*": "setting",
-    "Policy.*": "setting",  # the limits, the codes file (every relay needs the same one), handles to the store
+    "Policy.*": "setting",  # the limits, the creation codes (the database's, the same for every relay), handles to the store
     "Store.db": "setting", "Store.files": "setting", "Store.dir": "setting",
     "Lists.*": "setting", "Admin.*": "setting", "CodeBook.*": "setting",
     "Database.*": "setting", "PostgreSQL.*": "setting", "SQLite.*": "setting", "_PgCalls.*": "setting",

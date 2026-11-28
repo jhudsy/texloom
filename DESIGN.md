@@ -234,8 +234,12 @@ lapsed is refused until it's renewed, and can't be taken over by another code. A
 minute. File uploads and downloads and new project lists follow the same rule.
 
 **Storage allowances.** The server can't inspect content and project ids are free to
-mint, so storage is governed by allowances in a codes file: `<code|default> <0|size|unlimited>
-[until=YYYY-MM-DD] [label]`. A line without an allowance is skipped, with a warning in the log.
+mint, so storage is governed by allowances given by creation codes: a code, its allowance (`0`, a size or
+`unlimited`), an optional last day and a label, kept in the database (the `codes` table: every server sharing it
+has the same, told of a change by a notification and looking again every few seconds), changed with the server's
+command line. Projects created without a code get `default_allowance`. (Servers from before the database kept codes
+read them from files, `<code|default> <0|size|unlimited> [until=YYYY-MM-DD] [label]`, which count on that server
+only; a line without an allowance is skipped, with a warning in the log.)
 - **Owner:** the first stored write to a project registers it to the creation code sent
   in `hello` or `X-Create-Code`, or to `default`.
 - **Allowance:** an owner's allowance is the sum over all its projects.
