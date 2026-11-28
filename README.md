@@ -383,8 +383,9 @@ A server is one small Python process, with an SQLite file (nothing to install) o
 its database. [INSTALL.md](INSTALL.md) covers installing one (a script does it on Ubuntu or
 Debian), its settings file, moving from one database to the other, stored files in a folder or an
 S3-compatible bucket, creation codes and storage allowances, private servers and backups.
-[STANDBY.md](STANDBY.md) adds a warm standby that can take over automatically. [SCALING.md](SCALING.md)
-says how far one server goes and what comes next.
+[STANDBY.md](STANDBY.md) adds a warm standby, switched by hand. [CLUSTER.md](CLUSTER.md) runs it on several
+machines (relays sharing a database kept available by Patroni and a message bus, set up by one command), which take
+over from each other by themselves. [SCALING.md](SCALING.md) says how far one server goes and what comes next.
 
 ## Working on a project as a folder
 
@@ -1022,7 +1023,7 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 | `web/src/sharing.ts`, `crypto.ts` | links, personal links, revocation, moving to new keys |
 | `web/src/foldersync.ts` | folder sync from the browser (File System Access API) |
 | `web/sw-template.js` | service worker (offline app) |
-| `deploy/` | install script (SQLite or PostgreSQL, nginx, certbot, systemd, settings file), a Caddy config, `rebuild-standby.py`, the relays' Docker rehearsal (`rehearsal/`) |
+| `deploy/` | install script (SQLite or PostgreSQL, nginx, certbot, systemd, settings file), the deploy tool for several machines (`cluster.py`, its example settings, and the doors' health watcher `door-watch.py`; [CLUSTER.md](CLUSTER.md)), a Caddy config, `rebuild-standby.py`, the Docker rehearsals' images (`rehearsal/`) |
 
 
 ### Checks
@@ -1094,6 +1095,7 @@ uv run --extra server python scripts/check_resync.py           # the apps' resyn
 uv run --extra server python scripts/check_db_away.py          # the database away, slow or stalled: changes passed on live, apps asked to wait or try again
 uv run python scripts/check_model.py                            # the relays' design in TLA+ (needs Java): relays dying, bus breaks, a database failover; some cases must fail
 uv run --extra server python scripts/rehearse_relays.py        # by hand, needs Docker: several relays with real parts (Patroni, Valkey and Sentinels, an S3 store, nginx), each broken in turn
+uv run --extra server python scripts/rehearse_deploy.py        # by hand, needs Docker: install.sh and deploy/cluster.py on new Debian machines; a server moved in, machines lost, replaced, retired
 ```
 
 Folders and comments, end to end:
@@ -1191,7 +1193,9 @@ What CI runs (`.github/workflows/`):
 | `conncheck.yml` | by hand | connect to a server the way the app does, on three systems |
 
 To see what a relay can take, `uv run --extra server python scripts/loadtest.py all` starts its own throwaway server
-and reports latency, CPU and memory for each scenario. Results depend on the machine.
+and reports latency, CPU and memory for each scenario. Results depend on the machine. `loadtest.py spread spread-room
+p2p --relays 3` compares one relay with several sharing a database and a Valkey (Docker), each project's people spread
+over them (FUTURE_ARCHITECTURE.md, "Load").
 
 ### Releasing the desktop app
 

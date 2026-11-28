@@ -4,8 +4,8 @@ A TeXLoom server is one Python process: it serves the web app and the in-browser
 relays and stores projects' encrypted changes. It can't read any project. It needs:
 
 - **a database** for the edit logs, project records and project lists: an SQLite file, which
-  needs nothing installed (the default), or PostgreSQL (14 or later) for a warm standby
-  ([The database](#the-database));
+  needs nothing installed (the default), or PostgreSQL (14 or later) for a warm standby or several
+  servers ([The database](#the-database));
 - **a place for stored files** (pictures, PDFs, uploads, all encrypted by the apps): a folder on
   the server, or an S3-compatible bucket;
 - **HTTPS** in front of it for anyone but yourself, because browsers only allow the encryption the
@@ -21,7 +21,7 @@ Settings live in one file, `/etc/texloom/texloom.toml` ([Settings](#settings)).
 - [Creation codes](#creation-codes) · [Private servers](#private-servers) ·
   [Retiring old app versions](#retiring-old-app-versions) · [Idle projects, admin page, arXiv import](#idle-projects-admin-page-arxiv-import)
 - [Backups](#backups) · [Updating](#updating)
-- [A standby server](#a-standby-server), in [STANDBY.md](STANDBY.md)
+- [A standby server](#a-standby-server), in [STANDBY.md](STANDBY.md); several machines, in [CLUSTER.md](CLUSTER.md)
 
 ## On an Ubuntu or Debian server
 
@@ -360,7 +360,7 @@ The install script keeps none. Back up, every night and somewhere else:
   folder (without its `.incoming`), or, with a bucket, DIR, which it first makes a copy of the
   bucket (copying only what's new since last time). Files are written once and never changed, so a
   copy taken while the server runs is consistent;
-- **settings**: `/etc/texloom`.
+- **settings**: `/etc/texloom` (creation codes are in the database, so its backup has them).
 
 To restore: install the server, stop it, put back the database (SQLite: copy the backup over
 `texloom.db`, owned by `texloom`, and delete any `texloom.db-wal` and `texloom.db-shm` beside it;
@@ -372,10 +372,11 @@ of their projects, so edits made since the backup come back as people reconnect.
 ## A standby server
 
 A second machine holding a nearly current copy of the database, so that losing the server means minutes
-rather than a restore from last night's backup, and optionally taking over by itself. It is optional:
+rather than a restore from last night's backup, switched over by hand. It is optional:
 a server with a nightly backup and a machine you could restore it on is a perfectly good setup. It needs
 PostgreSQL and stored files in a bucket. All of it is in [STANDBY.md](STANDBY.md): your own PostgreSQL or
-a hosted one, promoting, rebuilding the old primary, switching over by itself, and moving traffic.
+a hosted one, promoting, rebuilding the old primary, and moving traffic. For machines that take over from each
+other by themselves, see [CLUSTER.md](CLUSTER.md): several relays, set up by one command.
 
 ## Updating
 

@@ -28,9 +28,11 @@ How the pieces fit, and why (three ways to run it: one server; two with a standb
    relays"): any relay serves any connection; live messages (cursors, presence, sync-only projects) pass
    between relays through a bus (Redis); the database is kept available by a standard tool,
    Patroni. Built on the branch `stateless-relays` (FUTURE_ARCHITECTURE.md), merged once it is proven: the bus
-   (Valkey with Sentinels), quotas read from the database, creation codes shared through it, gaps and failovers
-   handled, a TLA+ model (`models/relays`) and a Docker rehearsal (`scripts/rehearse_relays.py`). Left: a load
-   test across relays, a deploy tool, and a rehearsal on real machines.
+   (Valkey with Sentinels), quotas read from the database, creation codes kept in it, gaps and failovers
+   handled, a TLA+ model (`models/relays`) and a Docker rehearsal (`scripts/rehearse_relays.py`). Also built: a load test
+   across relays (`scripts/loadtest.py --relays 3`) and a deploy tool (`deploy/cluster.py`, CLUSTER.md, rehearsed by
+   `scripts/rehearse_deploy.py`). Left: a certificate on every door, a rehearsal on real machines, then the merge;
+   afterwards, optional dashboards (Prometheus and Grafana, with the relay's own `/metrics`).
 
 ## Later
 

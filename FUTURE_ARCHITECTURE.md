@@ -1,6 +1,7 @@
 # Future architecture: stateless relays
 
-A proposal, not built, and not yet tracked in git. It describes where the server should go so that one
+The design built on the branch `stateless-relays` (merged once it is proven: "Building it" says what is built, and
+how it was tested). It describes where the server goes so that one
 design runs on one machine with no high availability and grows, a machine at a time, to as many people as
 needed, with high availability once there are enough machines. It replaces the three designs for "Way 3" in
 [SCALING.md](SCALING.md), and the lease-based failover of "Way 2" (now retired) as well. Read SCALING.md first:
@@ -355,7 +356,9 @@ doing whatever happens later.
     **Done:** `server/failover.py`, its settings' effect, `--failover-check`, the bucket's conditional writes, the
     admin page's panel, `check_failover.py`, `rehearse_failover.py`, `models/failover` and `Caddyfile.failover` are
     gone. Settings files that still say `failover` are accepted with a warning (a compat marker in `server/cli.py`).
-11. **The deploy tool** ("Deploying to machines"), then a rehearsal on real machines.
+11. **The deploy tool** ("Deploying to machines"), then a rehearsal on real machines. **Built:** `deploy/cluster.py`
+    (CLUSTER.md), rehearsed on Docker machines by `scripts/rehearse_deploy.py`. Left: a certificate on every door, a
+    move-in from a machine that stays outside, and the rehearsal on real machines.
 12. **Monitoring** ("Health checks and monitoring"): the relay's `/metrics`, the dashboard and alert rules, and the
     exporters, Prometheus and Grafana installed by the deploy tool.
 
@@ -431,13 +434,14 @@ several. What changes for them, and why it's safe:
   (60 s), then connects elsewhere.
 - **Store, publish, then acknowledge** is invisible to them; so is a change passed on again.
 
-Claimed, not yet shown: **to do**, a lab scenario running the desktop sync engine of the oldest allowed version
-(installed from its git tag) next to current apps, on different relays, through the same breaks as `collab`.
+Shown in the lab (`scripts/rehearse_relays.py old`): the desktop sync engine of the oldest allowed version (0.4.40,
+installed from its git tag) next to current apps, on different relays, through the same breaks as `collab`.
 
 ### Deploying to machines
 
-`deploy/install.sh` sets up one machine. For several, **to do**: one command that reads a settings file listing the
-machines and what each runs, and sets them all up, again whenever the file changes (idempotent):
+`deploy/install.sh` sets up one machine. For several, **built** (`deploy/cluster.py`; how to use it: CLUSTER.md):
+one command that reads a settings file listing the machines and what each runs, and sets them all up, again whenever
+the file changes (idempotent):
 
 ```toml
 # cluster.toml: kept outside the repository (it names machines; secrets come from files beside it)
@@ -500,9 +504,10 @@ simplest:
 
 Whatever the outer layer, the nginx in front of the relays needs **active health checks**, which open-source nginx
 lacks: it learns a relay is down only by a request failing, and the lab showed it sending an app that was reconnecting
-straight back to a frozen relay first (10 s lost). **To do**: a small health watcher beside each nginx (part of the
-deploy tool) that polls every relay's `/api/health` every 2 s and marks those that fail twice `down` in nginx's
-upstream (a reload: graceful); or HAProxy in nginx's place for this one job (its health checks are built in).
+straight back to a frozen relay first (10 s lost). **Built**: a small health watcher beside each nginx
+(`deploy/door-watch.py`, installed by the deploy tool) that polls every relay's `/api/health` every 2 s and marks
+those that fail twice `down` in nginx's upstream (a reload: graceful). (HAProxy in nginx's place would do this one job
+too: its health checks are built in.)
 
 ### Health checks and monitoring
 
@@ -514,8 +519,8 @@ tells a person within minutes, because recovery by itself can hide a slow declin
 Sentinel down (so the next failover would fail), a disk filling, a certificate expiring. What to watch: every relay's
 `/api/health`, Patroni's cluster (members, lag), etcd's and the Sentinels' health, disk space and certificates on every
 machine, backups (a ping when each finishes), and the site itself from outside; alerting by email when something stays
-wrong for a few minutes. **To do**, in the deploy tool: set both up with each machine, and a `status` command showing
-every part's health at once.
+wrong for a few minutes. **Built**, in the deploy tool: the routing checks set up with each part, and `status`,
+every part's health at once (failing when one is unwell, so that a timer can watch it). **To do**: the alerting.
 
 **Dashboards: Prometheus and Grafana** (decided; free, self-hosted, and the parts already speak it), **always optional**:
 nothing of it is installed unless asked, and one cheap VPS or a Raspberry Pi runs TeXLoom as well without it as before. Today there are
@@ -574,8 +579,9 @@ and keeps the history; Grafana draws it and sends the alerts (email). What each 
 
 ### Growing and shrinking
 
-- **Relays** are interchangeable, so adding one is: a machine, the settings file, `add relay`, and the front door
-  told. Taking one away: its connections move to the others as it stops (spread over a minute). **To do** after
+- **Relays** are interchangeable, so adding one is: a machine, the settings file and `apply` (every door is told).
+  So is adding or replacing any machine: etcd's members and the Sentinels follow the settings, and `retire` stops
+  what the cluster put on a machine taken out (CLUSTER.md, "Day to day"). Taking one away: its connections move to the others as it stops (spread over a minute). **To do** after
   that: doing it by itself, from load (connections per relay, CPU) and from health (a relay unwell for minutes is
   replaced), through the provider's API. Relays first, because they're the tier that grows with people.
 - **PostgreSQL** grows by adding standbys (more copies, and reads), and by a bigger machine for writes; past that,

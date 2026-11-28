@@ -157,6 +157,7 @@ For servers that take over from each other by themselves, run several relays: tw
 with a relay, sharing one database whose standby is promoted by Patroni when the primary is lost, and a bus
 (Valkey, with Sentinels to replace its primary), behind a front door that sends people to the relays that
 are up. Every relay serves at once, so losing one costs its apps a reconnect, and losing the database's
-primary about half a minute of waiting (most of it Patroni's own wait before it promotes, which can be tuned). [FUTURE_ARCHITECTURE.md](FUTURE_ARCHITECTURE.md) describes it and how it
-was tested. (An earlier way, two servers sharing a lease in the bucket, is retired: a settings file that
+primary about half a minute of waiting (most of it Patroni's own wait before it promotes, which can be tuned).
+[CLUSTER.md](CLUSTER.md) sets it up (one command, from a settings file listing the machines), and
+[FUTURE_ARCHITECTURE.md](FUTURE_ARCHITECTURE.md) describes the design and how it was tested. (An earlier way, two servers sharing a lease in the bucket, is retired: a settings file that
 still says `failover` gets a warning in the log and is otherwise unaffected.)

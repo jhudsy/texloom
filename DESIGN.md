@@ -113,7 +113,7 @@ while it shows the PDF tab or a popped-out window, and only the newest, and read
 
 | client → server | meaning |
 |---|---|
-| `{t:"hello", since, app, v, code?, last?, ka?}` | send me everything after sequence number `since` (a connection's first message, within 10 s, or it is closed); a long log comes in pages (below); `ka: 1` = this app keeps the connection alive (`ping`, below); `code` = a creation code, checked once per connection; `last` = `[q, sha256]`, the newest change (not a snapshot) this copy has from the server, received or acknowledged, with the SHA-256 of its `d` (base64url): the server answers `lost` if its log ends before `q` or holds another change there; `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes. Project lists check `X-TeXLoom: app/version` the same way (426). |
+| `{t:"hello", since, app, v, code?, last?, ka?, rs?}` | send me everything after sequence number `since` (a connection's first message, within 10 s, or it is closed); a long log comes in pages (below); `ka: 1` = this app keeps the connection alive (`ping`, below); `rs: 1` = it understands `resync` and `recheck` (below; an app without it is closed instead, and connects again); `code` = a creation code, checked once per connection; `last` = `[q, sha256]`, the newest change (not a snapshot) this copy has from the server, received or acknowledged, with the SHA-256 of its `d` (base64url): the server answers `lost` if its log ends before `q` or holds another change there; `app` (desktop, web) and `v` (its version) are counted for the admin page, and a server with `--min-version` answers an older one (or one without `v`) `{t:"err", denied, code:"update-needed", min}` and closes. Project lists check `X-TeXLoom: app/version` the same way (426). |
 | `{t:"up", d, s}` | encrypted Yjs update `d` with signature `s`; stored and broadcast |
 | `{t:"snap", upto, d, s}` | compaction: encrypted full state replacing log entries ≤ `upto`; `s` signs `"snap:<upto>:" ‖ d` |
 | `{t:"aw", d}` | ephemeral, encrypted awareness (cursors, names); relayed, never stored; past 32 KiB/s a connection's are dropped |
@@ -122,7 +122,7 @@ while it shows the PDF tab or a popped-out window, and only the newest, and read
 | `{t:"revoke", p, s}` | owner only: revoke personal key `p`; `s` signs `"revoke:" ‖ p` |
 | `{t:"usage"}` | ask for the project's storage figures again (what the reply to `hello` carries), fresh: an app showing how much is used asks when it shows them |
 | `{t:"move", c, ts, s}` | owner only: move the stored project to creation code `c`; `s` signs `"move:<c>:<ts>"`, valid for 10 min. The server checks the code is valid and not lapsed, has room for the project and that the project is within the size limit for it, then makes it the project's owner code and recounts both codes. Answered with `moved`, or an `err` whose code is `move-bad-code`, `move-no-room` (with `need`, `free`), `move-too-big` (`need`, `max`), `move-not-stored`, `move-rejected` or `move-busy` (after five wrong codes on one connection). On a private server, someone holding a valid code may connect to a project whose code lapsed, so that it can be moved |
-| `{t:"ping"}` | is the server still there? Sent by an app that asked for the keep-alive (`ka` in its hello) when it has heard nothing for `ka` seconds (the server's, from its `log` reply; 10); answered with `pong` at once, before anything that could wait on the database. If nothing at all comes back within as long again, the app gives the connection up, shows itself offline and connects again as after any drop. A server that stops without closing its connections (its machine or network gone, or hung; a computer woken on another network) is so noticed in at most 20 s; a browser sends no WebSocket pings of its own, so it was otherwise never noticed. Apps send none to a server whose `log` reply has no `ka` (older ones answer `ping` with an `err`); the desktop helper's WebSocket pings (every 30 s) stay for them |
+| `{t:"ping"}` | is the server still there? Sent by an app that asked for the keep-alive (`ka` in its hello) when it has heard nothing for `ka` seconds (the server's, from its `log` reply; 5); answered with `pong` at once, before anything that could wait on the database. If nothing at all comes back within as long again, the app gives the connection up, shows itself offline and connects again as after any drop. A server that stops without closing its connections (its machine or network gone, or hung; a computer woken on another network) is so noticed in at most 10 s; a browser sends no WebSocket pings of its own, so it was otherwise never noticed. Apps send none to a server whose `log` reply has no `ka` (older ones answer `ping` with an `err`); the desktop helper's WebSocket pings (every 30 s) stay for them |
 | `{t:"delete", ts, s}` | owner only: delete the project for everyone; `s` signs `"delete:<ts>"`, valid for 10 min. The server erases what it stores, keeps a tombstone (the `deleted` table, which purges never touch; its `projects` row goes) and from then on answers the project's connections with `deleted` and its file requests with 410 |
 
 | server → client | meaning |
@@ -134,7 +134,9 @@ while it shows the PDF tab or a popped-out window, and only the newest, and read
 | `{t:"snapped", upto}` | your `snap` was stored: its sender then deletes the uploads of the entries it replaced (Big changes as uploads, below) |
 | `{t:"err", code, m, …}` | a refusal or an error (an update that fails its signature check gets one with just `m`, and no `code`): `update-needed` (with `min`; the connection then closes); `needs-code`, `code-expired` (with `denied`, on a private server); for an `up`, with its `id`: `quota-full`, `project-full`, `server-full`, `code-expired`, `needs-code`; `mode-rejected`, `mode-busy`, `delete-rejected`; and the `move-*` codes above |
 | `{t:"pong"}` | the answer to a `ping` |
-| `{t:"wait"}` | to an app that asked for the keep-alive, every `ka`/2 seconds while the server leaves its connection unread (past its pace for unsigned messages: Per-connection limits, below), so that it isn't taken for gone; anything the server sends counts as an answer |
+| `{t:"wait"}` | to an app that asked for the keep-alive, every `ka`/2 seconds while the server leaves its connection unread (past its pace for unsigned messages: Per-connection limits, below), or while a message of its takes long to handle (the database slow or away), so that it isn't taken for gone; anything the server sends counts as an answer |
+| `{t:"resync"}` | catch up from your peers again (send your state vector, as after connecting): the server may have missed peer-to-peer messages for this project (with several relays, a break in their bus). Spread over a few seconds across connections |
+| `{t:"recheck"}` | check that the server's log is still the one you saw (send your hello again, whose `last` finds out, and anything it lacks is sent again): its database may have lost acknowledged changes (a failover to a standby that hadn't received them) |
 | `{t:"aw", d, from}` | someone's awareness |
 | `{t:"left", from}` | that connection closed: stop showing the awareness it sent |
 | `{t:"p2p", d, s?, from}` | a peer's payload |
@@ -160,7 +162,9 @@ once with 1001 ("going away"), waiting up to 5 s for them and then up to 10 s fo
 (an upload, say), so a restart takes seconds and clients start reconnecting straight away; peers
 aren't told each other has `left`, since everyone is going. It listens with a backlog of 2,048, so
 the burst of reconnections that follows isn't refused. Clients reconnect with backoff (first after
-1–2 s, doubling up to 30 s) and resume from their last sequence number, so nothing is lost.
+1–2 s, doubling up to 15 s, or up to 4 s when the server answered: an HTTP error, or a close saying it is restarting or
+to try again; each wait randomised, so a crowd spreads out; it starts again from the first only once the app has
+caught up) and resume from their last sequence number, so nothing is lost.
 
 **Compaction:** when the log grows past N entries, any writer uploads an encrypted
 full-state snapshot; the server drops the entries it replaces. (The server can't
@@ -180,8 +184,9 @@ with `{k:"upd", u}`, the update the newcomer lacks, signed with `"p2p:" ‖ ciph
 Every peer also replies with `{k:"sv2", sv}`, so the newcomer can send back whatever
 *they* lack. Read-only peers never send updates, and unsigned updates are ignored.
 Anyone with the link can ask, a read-only member too, and a few bytes ask for megabytes, so a
-writer answers each connection at most once every 30 s (a request sooner is answered then,
-with its latest state vector), and answers one request at a time; the same goes for a file
+writer answers each connection with a large reply (64 KiB or more) at most once every 30 s (a request sooner is
+answered then, with its latest state vector), with a small one at most every 2 s (so a peer that missed a little, after
+a reconnect, has it at once), and answers one request at a time; the same goes for a file
 asked for with `breq`. The desktop answers apart from receiving, so a flood can't stall it.
 **Compiled output** (PDF, log, SyncTeX) is uploaded with `X-Kind: output` and replaced by
 every compile. `DELETE /blob/<project>/<id>` with `X-Sig = sign("del:<id>")` erases stored

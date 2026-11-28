@@ -54,7 +54,8 @@ for, so a small server carries none of the rest.
 
 1. **One server** (the default, **built**).
 2. **Two servers, a standby switched by hand** (**built**; its automatic failover by a lease is **retired**, below).
-3. **Several relays** (**planned**): any number serve at once, sharing a database, a bucket and a message bus.
+3. **Several relays** (**built** on the branch `stateless-relays`: FUTURE_ARCHITECTURE.md, CLUSTER.md): any number
+   serve at once, sharing a database, a bucket and a message bus.
 
 ## Way 1: one server
 
@@ -96,7 +97,8 @@ a warning and is otherwise unaffected. Rebuilding an old primary as a standby is
 
 ## Way 3: several relays
 
-Planned. The idea: decouple state from the relays so that **any relay can serve any connection**, and let each
+Built on the branch `stateless-relays` (design B below, as FUTURE_ARCHITECTURE.md describes it; CLUSTER.md sets it
+up). The idea: decouple state from the relays so that **any relay can serve any connection**, and let each
 tier be kept available and scaled by the usual means for what it is.
 
 ```
@@ -123,7 +125,7 @@ may be connected to different relays, their live messages must reach each other 
   one relay's memory and nothing crosses between relays. A relay stopping moves its projects to the others and
   people reconnect. Plain DNS cannot do it: it needs a load balancer that hashes (nginx: `hash … consistent`).
   One very crowded project cannot outgrow its relay.
-- **B. Any relay, with a bus** (**planned**, the target). Each relay publishes a room's live messages to a
+- **B. Any relay, with a bus** (**built**: the design chosen). Each relay publishes a room's live messages to a
   publish/subscribe bus, such as **Redis** (or a compatible one, such as Valkey), and subscribes to the rooms
   it has connections in. Relays are interchangeable, so DNS can simply list them all. Costs: one more
   component, and a message crosses the bus once for each relay holding part of the room, so a room spread over
@@ -149,7 +151,7 @@ an app notices a gap in a stored project's changes during that is still to be ch
 
 A separate problem with known solutions, which is why it is kept apart.
 
-- **Kept available by a standard tool, not by `failover`.** `failover` fences a *relay* that has lost its
+- **Kept available by a standard tool, not by `failover`** (way 2's, now retired). `failover` fenced a *relay* that had lost its
   lease, which is enough when the relay is the only client of its own database. With relays connected to a
   database over a network, a partitioned old primary's database would go on accepting writes from the others,
   so the database itself must be fenced, and that is what Patroni, pg_auto_failover and hosted PostgreSQL
@@ -196,15 +198,11 @@ Built (`scripts/check_groundwork.py`, two servers on one PostgreSQL; each is saf
 - **Upkeep on one server at a time** (idle eviction, purges, the ledger's recount), under a PostgreSQL
   advisory lock; with one server, or SQLite, it always runs; a server with no database open does nothing.
 
-Left:
-
-- The bus: publishing and subscribing to rooms, the resync after a reconnect, and its availability.
-- Reading an owner's total from the database at the moment of a quota check, so that two relays writing at
-  once cannot together pass a limit.
-- Per-project and per-address limits across relays (each relay keeps its own today, so they add up), and the
-  same codes file on every relay.
-- Whether a project is open anywhere, not only on this relay (eviction asks today).
-- A rehearsal with several relays (`scripts/rehearse_relays.py`).
+Built since, on the branch `stateless-relays` (FUTURE_ARCHITECTURE.md, "Building it"): the bus (Valkey) and the
+resync after a break, owners' totals read from the database at each quota check, creation codes in the database (every
+relay the same), and whether a project is open anywhere (the bus's connection lists). Left: per-project and
+per-address limits counted across relays (each relay keeps its own, so they add up; the doors' nginx limits per
+address still hold).
 
 ### Keeping several servers possible
 
