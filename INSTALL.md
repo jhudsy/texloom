@@ -169,7 +169,6 @@ min_free = "2G"
 | `admin_token` or `admin_token_file` | none | the password for `/admin` (at least 16 characters) |
 | `no_project_lists`, `no_arxiv` | `false` | turn off storing project lists, or importing from arXiv |
 | `texlive`, `texlive_max`, `texlive_mirror` | none, `4G`, none | TeX Live packages on demand: the cache folder, its size (the packages used least recently make room), mirrors to try first (a list) |
-| `failover`, `failover_name`, `failover_ttl` | `false`, the host name, `15` | switch to a standby by itself ([Letting the two servers switch over by themselves](STANDBY.md#letting-the-two-servers-switch-over-by-themselves)) |
 
 Secrets (the database password, the S3 secret key, the admin token) belong in the settings file,
 readable only by the server's user (the install script makes it `root:texloom`, mode 640), or in

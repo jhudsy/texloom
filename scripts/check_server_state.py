@@ -68,7 +68,6 @@ STATE = {
     "Store.node": "per-server", "Store._refreshing": "per-server",  # its name in what it tells the others; looking again at what they changed
     "Store.meta_tokens": "per-server", "Store.meta_at": "per-server",  # the budget for rows that store nothing
     "ArxivFetcher.*": "per-server",  # arXiv's rate limits, per relay
-    "Failover.*": "per-server",  # which of the two servers this is, and its lease (one lease, in the bucket, for both)
     "TexLive.*": "per-server",  # a cache of public TeX Live files
     # per project
     "Store.usage": "project", "Store.owners": "project", "Store.seen": "project", "Store.evicted": "project", "Store.pending": "project",

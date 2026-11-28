@@ -984,8 +984,7 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 | `server/cli.py` | the server's command line (`texloom-server`): options, creation codes, backups |
 | `server/store.py` | what the relay stores: edit logs, projects, which files are stored |
 | `server/db.py` | the database under the store: SQLite or PostgreSQL, behind the same few calls; copying from one to the other |
-| `server/files.py` | where stored files' content goes: a folder or an S3-compatible bucket (and the conditional writes the failover lease needs) |
-| `server/failover.py` | automatic failover between two servers: the lease in the bucket, promoting the standby (off unless `failover` is set; [SCALING.md](SCALING.md)) |
+| `server/files.py` | where stored files' content goes: a folder or an S3-compatible bucket |
 | `server/lists.py`, `server/texlive.py` | encrypted project lists; TeX Live files on demand for the in-browser engine |
 | `server/config.py` | the server's settings: the settings file, `TEXLOOM_*` variables, the command line |
 | `texloom/crypto.py` | keys, links, AES-GCM, Ed25519 (mirrors `web/src/crypto.ts`) |
@@ -1002,7 +1001,7 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 | `texloom/comments.py`, `lsp.py` | the Review tab's comments for people who work in their own editor: the overview file, and a language server |
 | `texloom/app.py`, `app_list.py`, `app_detail.py`, `app_updates.py` | the desktop app's window: menus and actions; the list of projects; the chosen project; updates |
 | `texloom/dialogs.py`, `dialogs_share.py`, `dialogs_list.py`, `dialogs_tags.py`, `dialogs_tools.py` | its dialogs: settings and copying; sharing and joining; the project list; tags; AI tools and editors |
-| `server/arxiv.py`, `server/admin.py` | arXiv source import proxy; read-only admin page (with a Failover section when failover is on) |
+| `server/arxiv.py`, `server/admin.py` | arXiv source import proxy; read-only admin page |
 | `web/src/main.ts` | entry: the start page or a project, as the address asks |
 | `web/src/startpage.ts`, `projectview.ts`, `appinfo.ts` | the start page and its list; a project open in the editor; what both share |
 | `web/src/replica.ts` | browser replica: Yjs + IndexedDB, outbox, peer handshake, awareness, blobs |
@@ -1023,7 +1022,7 @@ install postgresql@17`, `apt install postgresql`; nothing is installed as a serv
 | `web/src/sharing.ts`, `crypto.ts` | links, personal links, revocation, moving to new keys |
 | `web/src/foldersync.ts` | folder sync from the browser (File System Access API) |
 | `web/sw-template.js` | service worker (offline app) |
-| `deploy/` | install script (SQLite or PostgreSQL, nginx, certbot, systemd, settings file), Caddy configs (one server; two, for failover), `rebuild-standby.py` |
+| `deploy/` | install script (SQLite or PostgreSQL, nginx, certbot, systemd, settings file), a Caddy config, `rebuild-standby.py`, the relays' Docker rehearsal (`rehearsal/`) |
 
 
 ### Checks
@@ -1086,11 +1085,15 @@ uv run python scripts/check_server_state.py                     # what each serv
 uv run --extra server python scripts/check_move_code.py         # moving a project to another creation code
 uv run --extra server python scripts/check_restore.py           # a server restored from a backup: an app that had seen later changes misses none
 uv run --extra server python scripts/check_standby.py           # a warm standby promoted (needs PostgreSQL): apps miss none of the changes it never got
-uv run --extra server python scripts/check_failover.py          # automatic failover with two real servers: a lost primary, one cut off from the bucket, the refusals (needs PostgreSQL)
 uv run python scripts/check_rebuild_standby.py                  # deploy/rebuild-standby.py: the old primary rebuilt as a standby; what it refuses (needs PostgreSQL)
 uv run --extra server python scripts/check_groundwork.py        # what several servers on one database need: the usage ledger, the lock, notifications, upkeep once (needs PostgreSQL)
-uv run python scripts/check_model.py                            # the failover design in TLA+ (needs Java): timers, the lease, the apps' hello check; some cases must fail
-uv run --extra server python scripts/rehearse_failover.py       # by hand, needs Docker: failover with real parts (relays, PostgreSQL primary and standby, an S3 store, Caddy)
+uv run --extra server python scripts/check_relays.py           # several relays on one database and a bus, apps on each (needs PostgreSQL)
+uv run --extra server python scripts/check_relays_failover.py  # several relays through a real database failover: a lost change sent again (needs PostgreSQL)
+uv run --extra server python scripts/check_bus.py --valkey      # the bus's contract, in-process and a real Valkey (needs Docker for --valkey)
+uv run --extra server python scripts/check_resync.py           # the apps' resync and recheck answers
+uv run --extra server python scripts/check_db_away.py          # the database away, slow or stalled: changes passed on live, apps asked to wait or try again
+uv run python scripts/check_model.py                            # the relays' design in TLA+ (needs Java): relays dying, bus breaks, a database failover; some cases must fail
+uv run --extra server python scripts/rehearse_relays.py        # by hand, needs Docker: several relays with real parts (Patroni, Valkey and Sentinels, an S3 store, nginx), each broken in turn
 ```
 
 Folders and comments, end to end:
@@ -1182,7 +1185,7 @@ What CI runs (`.github/workflows/`):
 | `sync-only.yml` | the desktop's sync or the server changes; nightly; on demand | sync-only projects end to end, on Linux, macOS and a real Windows (a few minutes). A server-only pull request runs on Ubuntu alone |
 | `web-app.yml` | the web app or the server changes; nightly; on demand | the web app in a real browser |
 | `desktop-app.yml` | the desktop app changes; weekly | the app's windows, and on macOS the menu-bar and Dock fixes |
-| `model.yml` | the model changes; weekly | the failover model (TLA+) |
+| `model.yml` | the model changes; weekly | the relays' model (TLA+) |
 | `workflows.yml` | a workflow file changes | every workflow file parses |
 | `app.yml`, `vscode-extension.yml` | a release tag | the downloadable app builds; the VS Code extension's publication |
 | `conncheck.yml` | by hand | connect to a server the way the app does, on three systems |

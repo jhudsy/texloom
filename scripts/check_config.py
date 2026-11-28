@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import sys
@@ -88,9 +89,11 @@ def main() -> None:
     ok(b.files.startswith("s3://") and b.s3_endpoint and b.min_version and b.texlive_mirror,
        "and with every setting uncommented")
     named = set(re.findall(r"(?m)^#? ?([a-z_0-9]+) = ", text)) | {f"s3_{k}" for k in re.findall(r"(?m)^#? ?(endpoint|region|key_id|secret) = ", text)}
-    options = {x.dest for x in parser()._actions if x.dest not in COMMANDS}
+    options = {x.dest for x in parser()._actions if x.dest not in COMMANDS and x.help != argparse.SUPPRESS}  # (not retired ones)
     missing = sorted(o for o in options - named if f"{o} = " not in text)  # (admin_token is in a comment)
     ok(not missing, f"every setting is in the example{f' (missing: {missing})' if missing else ''}")
+    old = load('database = "sqlite:x.db"\nfailover = true\nfailover_name = "server-a"\nfailover_ttl = 15\n')
+    ok(old.failover and old.database == "sqlite:x.db", "a settings file naming the retired lease failover still parses")
     c = load(text, {"TEXLOOM_MIN_FREE": "5G"})
     ok(c.min_free == 5 << 30, "TEXLOOM_<NAME> overrides the file")
     err = StringIO()

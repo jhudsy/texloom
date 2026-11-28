@@ -45,8 +45,7 @@ put in a database, and sharing it between relays is the one new problem several 
 place; the store makes the copies, so a second or replacement server attaches to the same bucket and has
 every file; only four S3 requests are used (PUT, GET, DELETE, HEAD), so any S3-compatible store works (Garage,
 RustFS, Cloudflare R2, Backblaze B2, AWS S3, …) and nobody is tied to a provider. A folder stays the default
-for one small relay: one setting (`files`), one small interface (`server/files.py`). The failover lease also
-lives in the bucket (way 2).
+for one small relay: one setting (`files`), one small interface (`server/files.py`).
 
 ## Three ways to run it
 
@@ -54,7 +53,7 @@ Each way adds to the one before and is chosen by settings; the code for a way is
 for, so a small server carries none of the rest.
 
 1. **One server** (the default, **built**).
-2. **Two servers, with failover** (`failover`, **built**): one serves, the other takes over when it stops.
+2. **Two servers, a standby switched by hand** (**built**; its automatic failover by a lease is **retired**, below).
 3. **Several relays** (**planned**): any number serve at once, sharing a database, a bucket and a message bus.
 
 ## Way 1: one server
@@ -78,7 +77,7 @@ isn't the one they last saw (they send the last change they have in their hello,
 doesn't match), and send everything again (`scripts/check_restore.py`). The nightly restore is also the proof
 that the backups work.
 
-## Way 2: two servers, with failover
+## Way 2: two servers, a standby
 
 **A warm standby, switched by hand** (**built**). With PostgreSQL, a second machine follows the primary by
 streaming replication and can take over in minutes: one you run, or a hosted PostgreSQL that keeps its own
@@ -89,44 +88,11 @@ missing on the standby; the apps send them again, as after a restore (`scripts/c
 
 ### Switching over
 
-**Automatic failover** (**built**, off unless `failover` is set: `server/failover.py`, [STANDBY.md](STANDBY.md#letting-the-two-servers-switch-over-by-themselves)). No third machine is needed, because the bucket is the tie-breaker:
-
-1. The primary renews a small lease object in the bucket every few seconds.
-2. The standby promotes itself only once the lease has not been renewed for long enough.
-3. A primary that is alive but cut off from the standby can still renew, so the standby stays put.
-4. A primary that cannot reach the bucket cannot renew, so it stops itself (it closes its connections and
-   exits). Then the standby can promote safely.
-5. A primary that comes back reads the lease first and, its database being a former primary's, waits to be
-   rebuilt as a standby (`deploy/rebuild-standby.py`).
-
-This needs a bucket that does conditional writes (not all do: STANDBY.md lists what is known, and a server
-asked to fail over tests its store at start and refuses one that fails) and clocks that run at roughly the same
-speed: nothing compares one machine's clock with another's. It is **modelled** (`models/failover`,
-`scripts/check_model.py`, issue [#8](https://github.com/jhudsy/texloom/issues/8)) and run end to end, first
-with two real servers (`scripts/check_failover.py`, in CI) and then with real parts in Docker (relays,
-PostgreSQL primary and standby, an S3 store, Caddy; `scripts/rehearse_failover.py`, by hand). They settled
-these points:
-
-- **The timers.** The standby waits at least *the most one clock may run faster than another* times the
-  primary's lease, on its own clock, after it last saw the lease change, and claims it with a conditional
-  write on the version it saw, so a renewal in between makes the claim fail. A standby that could not read the
-  lease counts its wait afresh once it can; otherwise a bucket that was away from both servers ends in a
-  needless switch.
-- **A suspended machine can overlap for a moment.** One whose clock stops while suspended can wake and write
-  after the standby has taken over; timers cannot prevent that. It is harmless to the data, because an app
-  that was told "stored" by it checks, when it connects to the new primary, that the log there has the last
-  change it knows of, and sends everything again if not. So **the apps' hello check is what failover depends
-  on**, and it must not be weakened (the model finds a way to lose a change if it can be fooled, and one if it
-  is removed). A clock that counts suspended time (`CLOCK_BOOTTIME` on Linux) shortens the window.
-- **The bucket becomes something everything waits on.** A primary that cannot reach it stops serving even
-  though it and its database are fine; when it is back, service resumes by itself.
-- **A server that hangs, rather than stops,** is noticed by the apps when their keep-alive goes unanswered:
-  a `ping` after 10 seconds of hearing nothing, given up 10 seconds later (DESIGN.md, the sync protocol), so
-  people connected through it wait up to about 20 seconds longer than for one that dies.
-
-**What it leaves to you:** how traffic reaches whichever server is primary (`/api/health` says which; [STANDBY.md](STANDBY.md#moving-traffic-to-the-primary)
-lists ways). Rebuilding the old primary as a standby is one command
-(`deploy/rebuild-standby.py`). It does not use both servers at once and does not scale.
+**Retired.** Automatic failover between two servers, by a lease in the bucket (`failover`), was built first and
+then retired in favour of way 3, where several relays serve at once and a standard tool (Patroni) promotes the
+database's standby: STANDBY.md, "Switching over without you". A settings file that still says `failover` gets
+a warning and is otherwise unaffected. Rebuilding an old primary as a standby is still one command
+(`deploy/rebuild-standby.py`).
 
 ## Way 3: several relays
 
@@ -238,7 +204,7 @@ Left:
 - Per-project and per-address limits across relays (each relay keeps its own today, so they add up), and the
   same codes file on every relay.
 - Whether a project is open anywhere, not only on this relay (eviction asks today).
-- A rehearsal with two relays, as for way 2 (`scripts/rehearse_failover.py`).
+- A rehearsal with several relays (`scripts/rehearse_relays.py`).
 
 ### Keeping several servers possible
 
@@ -287,7 +253,7 @@ the number of database connections (`SELECT count(*) FROM pg_stat_activity`), an
 | 4 | **Database connections.** Each server uses up to 10 for queries plus one that listens, against PostgreSQL's `max_connections` (100 by default): about 8 servers. | `pg_stat_activity` near the limit; connection errors | a connection pooler (see "The database tier") |
 | 5 | **Writes to the one primary database.** One small write per batch of edits for each active project (and the ledger's update, in the same transaction), and reads when someone connects and catches up. | the database's CPU or disk, queries waiting | in order: batch edits for a few hundred milliseconds so a burst of typing is one write; read replicas for catch-ups; and only then, projects split across databases by project id |
 | 6 | **Storage.** Stored files live in the bucket (a cost, not a limit). The database holds each project's edit log, replaced by a snapshot as it grows (over 12 MB the snapshot is stored as an upload, and above 50 MB snapshots stop and the log grows: [#18](https://github.com/jhudsy/texloom/issues/18)). | the database's disk, the bucket's bill | idle projects are dropped from the server (`--evict-idle-days`; their writers upload them again), a project may use `--project-max-bytes` (200 MB by default), and a creation code has an allowance |
-| 7 | **Availability** (not capacity): the relay, the database, the bucket, what sits in front. | people can't connect | way 2 for the relay (and, with `failover` on, everything waits on the bucket); a database tool for the database (way 3); the bucket's own redundancy; how traffic reaches the servers is yours to arrange |
+| 7 | **Availability** (not capacity): the relay, the database, the bucket, what sits in front. | people can't connect | several relays (way 3); a database tool for the database (way 3); the bucket's own redundancy; how traffic reaches the servers is yours to arrange |
 
 **A project's size** on the admin page is mostly its stored files (figures, PDFs and the like), counted as
 they are stored. Its edit log is small by comparison and is compacted, so a project of tens of megabytes is

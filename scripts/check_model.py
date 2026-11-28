@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-"""Model-checks two designs with TLA+:
-- models/failover (issue 8): the bucket lease, a standby that takes over, and an app that was told
-  "stored" by a server that was then replaced;
-- models/relays (FUTURE_ARCHITECTURE.md): several relays sharing a database and a bus, relays dying,
-  breaks in the bus and a database failover, and whether every change is kept and reaches everyone.
+"""Model-checks the design of several relays with TLA+ (models/relays): relays sharing a database and a bus,
+relays dying, breaks in the bus and a database failover, and whether every change is kept and reaches everyone.
 
 Each configuration (models/*/*.cfg) says what is expected: some hold, and some are expected to be
 violated, which shows the model notices when the design is wrong (a part of it taken away). A
@@ -14,7 +11,7 @@ once into ~/.cache/texloom-tools (or TLA2TOOLS names a jar) and checked against 
 before it is ever run. Needs Java; without it this skips.
 
     uv run python scripts/check_model.py                    # all of them (several minutes)
-    uv run python scripts/check_model.py failover/safe      # just those named (model/configuration)
+    uv run python scripts/check_model.py relays/crash       # just those named (model/configuration)
     uv run python scripts/check_model.py relays             # one model's
 """
 
@@ -57,13 +54,6 @@ RELAYS_CASES = {
 
 # model -> (its module, {configuration: the invariant expected to be violated, or None if everything should hold})
 CASES = {
-    "failover": ("Failover", {
-        "safe": None,
-        "freeze-heals": None,
-        "freeze-writers": "SingleWriter",
-        "short-wait": "SingleWriter",
-        "no-hello": "NoLostAck",
-    }),
     "relays": ("Relays", RELAYS_CASES),
 }
 

@@ -6,13 +6,13 @@ that are accepted rather than planned are in [DESIGN.md](DESIGN.md#known-limitat
 
 ## Next: the server, towards redundancy and scale
 
-How the pieces fit, and why (three ways to run it: one server; two with failover; several relays), is in
+How the pieces fit, and why (three ways to run it: one server; two with a standby; several relays), is in
 [SCALING.md](SCALING.md). In this order, each building on the one before:
 
-1. **[A warm standby and automatic failover](https://github.com/jhudsy/texloom/issues/12)**: built and checked
-   on one machine and in Docker (STANDBY.md; SCALING.md, "Way 2"). Left: trying it on a
-   real pair. A cold standby restored nightly from the backups still covers losing both (SCALING.md,
-   "Way 1: one server").
+1. **[A warm standby](https://github.com/jhudsy/texloom/issues/12)**: built and checked, switched by hand
+   (STANDBY.md; SCALING.md, "Way 2"). Automatic failover is item 4's: the lease between two servers that was
+   built first is retired. A cold standby restored nightly from the backups still covers losing both
+   (SCALING.md, "Way 1: one server").
 2. **[The TeX engine from a CDN](https://github.com/jhudsy/texloom/issues/15)**: most of the traffic, off the relay.
    Parked until monthly traffic nears what the server's hosting includes. The server must stay self-contained, so the
    first answer needs no TeXLoom change: the engine files already carry long cache headers, so a pull-through cache (one that
@@ -22,16 +22,15 @@ How the pieces fit, and why (three ways to run it: one server; two with failover
    each file against the server's list of hashes. The other half,
    compiled PDFs fetched only while someone is looking, is done (`scripts/check_web_pdf.py`).
 3. **[A model of how the relay orders each project's changes](https://github.com/jhudsy/texloom/issues/8)**
-   (TLA+) across several servers, and of the client-side GitHub lease. The failover model is done
-   (`models/failover`).
+   (TLA+) across several servers, and of the client-side GitHub lease. The relays' model is done
+   (`models/relays`).
 4. **[Several relays at once](https://github.com/jhudsy/texloom/issues/12)** (SCALING.md, "Way 3: several
    relays"): any relay serves any connection; live messages (cursors, presence, sync-only projects) pass
-   between relays through a bus (Redis); the database is kept available by a standard tool, not by
-   `failover`. Built so far, safe with one server: storage totals in a ledger in the database, upkeep on one
-   server at a time, and servers telling each other when a project changed (`scripts/check_groundwork.py`).
-   Left: the bus and its open questions (SCALING.md), reading quota totals from the database, limits across
-   relays, and a rehearsal with two relays. No estimate until the bus is designed. Until then, new code keeps
-   to "Keeping several servers possible" there.
+   between relays through a bus (Redis); the database is kept available by a standard tool,
+   Patroni. Built on the branch `stateless-relays` (FUTURE_ARCHITECTURE.md), merged once it is proven: the bus
+   (Valkey with Sentinels), quotas read from the database, creation codes shared through it, gaps and failovers
+   handled, a TLA+ model (`models/relays`) and a Docker rehearsal (`scripts/rehearse_relays.py`). Left: a load
+   test across relays, a deploy tool, and a rehearsal on real machines.
 
 ## Later
 

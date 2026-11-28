@@ -98,9 +98,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_restore import App, add_line, text  # noqa: E402
 from checklib import ROOT, check, summary, until  # noqa: E402
-from rehearse_failover import docker  # noqa: E402
 
 from texloom.crypto import Keys  # noqa: E402
+
+
+def docker(*args: str, check_: bool = True, timeout: float = 120) -> subprocess.CompletedProcess:
+    p = subprocess.run(["docker", *args], capture_output=True, text=True, timeout=timeout, check=False)
+    if check_ and p.returncode != 0:
+        raise RuntimeError(f"docker {' '.join(args[:4])}: {p.stderr.strip()[-400:]}")
+    return p
+
 
 # Images, all pinned. The Patroni image is built on postgres:16.6 and the relay's on python:3.12.16-slim
 # (their Dockerfiles, in deploy/rehearsal/).
@@ -1291,8 +1298,8 @@ async def scenario_collab(lab: Lab, how: str, target: str, old: tuple[str, ...] 
         stored_all = await timed(lambda: all(waiting(a) == 0 for a in writers), t0, 180, 0.2)
         w, s_ = await writers_have, await pair_have
         check(f"with {victim} {HOW[how]}, every writer ends with every change made during the break", w is not None)
-        check(f"... and every one of them is stored (acknowledged)", stored_all is not None)
-        check(f"... and the sync-only pair end with each other's", s_ is not None)
+        check("... and every one of them is stored (acknowledged)", stored_all is not None)
+        check("... and the sync-only pair end with each other's", s_ is not None)
         took("every writer has every change made during the break", w)
         took("every one of them is stored", stored_all)
         took("the sync-only pair have each other's", s_)
@@ -1306,7 +1313,7 @@ async def scenario_collab(lab: Lab, how: str, target: str, old: tuple[str, ...] 
             write(a, f"{n} after")
         after = [f"{n} after" for n in names]
         w2 = await timed(lambda: everyone_has(writers, after), t1, 120, 0.2)
-        check(f"mended: changes made after reach every writer", w2 is not None)
+        check("mended: changes made after reach every writer", w2 is not None)
         took("after mending, every writer has a change each made", w2, "from the mend")
         newcomer = App(lab.tmp / "newcomer", Keys(stored.project, stored.key, None), base)
         try:

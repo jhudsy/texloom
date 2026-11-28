@@ -48,7 +48,6 @@ class Settings:
     texlive: Path | None = None  # TeX Live files on demand, cached here
     texlive_max: float = 4 * GiB
     texlive_mirrors: list[str] = field(default_factory=list)
-    failover: object | None = None  # failover.FailoverSettings, when failing over to a standby (failover.py)
     bus: str = ""  # how several servers pass messages to each other (bus.py); "": one server alone
 
 
@@ -58,24 +57,23 @@ async def upkeep(policy: Policy, evict_days: float, purge_days: float | None) ->
     purge the projects of codes that expired more than `purge_days` ago; and, once a day, check the usage
     ledger against the stored data. With several servers sharing a database only one does this at a time
     (an advisory lock held while it does: the others find it taken and skip until the next round); with
-    one it is always held. A server with no database open yet (a standby) has nothing to do."""
+    one it is always held."""
     last_reconcile = time.monotonic()
     while True:
         try:
             store = policy.store
-            if store is not None:
-                async with store.db.lock(MAINTENANCE_LOCK) as holding:
-                    if holding:
-                        if evict_days > 0:
-                            await policy.evict_idle(evict_days)
-                        if purge_days is not None:
-                            await policy.purge_expired(purge_days)
-                        if evict_days > 0 and policy.lists:
-                            await policy.lists.drop_idle(time.time() - evict_days * 86400)
-                        if time.monotonic() - last_reconcile >= RECONCILE_EVERY:
-                            last_reconcile = time.monotonic()
-                            if wrong := await store.reconcile():
-                                log.warning("%d project(s) had the wrong usage counted, now put right", wrong)
+            async with store.db.lock(MAINTENANCE_LOCK) as holding:
+                if holding:
+                    if evict_days > 0:
+                        await policy.evict_idle(evict_days)
+                    if purge_days is not None:
+                        await policy.purge_expired(purge_days)
+                    if evict_days > 0 and policy.lists:
+                        await policy.lists.drop_idle(time.time() - evict_days * 86400)
+                    if time.monotonic() - last_reconcile >= RECONCILE_EVERY:
+                        last_reconcile = time.monotonic()
+                        if wrong := await store.reconcile():
+                            log.warning("%d project(s) had the wrong usage counted, now put right", wrong)
         except Exception:
             log.exception("maintenance")
         await asyncio.sleep(min(3600, max(60, evict_days * 8640)) if evict_days > 0 else 3600)
@@ -120,25 +118,12 @@ def make_app(s: Settings) -> web.Application:
         sharing.append(asyncio.get_running_loop().create_task(policy.keep_codes()))
         opened.append(store)
 
-    panels: list = []  # sections added to the admin page by parts that are on (failover)
-    if s.failover:  # only then is failover.py even imported
-        from .failover import Failover
-        fo = Failover(s.failover, s.files, relay, open_store)
-        app.middlewares.append(fo.gate)
-        app.router.add_get("/api/health", fo.health)
-        app.cleanup_ctx.append(fo.context(app))
-        panels.append(fo.admin_panel)
+    async def database(_app: web.Application):
+        await open_store()
+        yield
+        await opened[0].close()
+    app.cleanup_ctx.append(database)
 
-        async def close_stores(_app: web.Application):
-            for store in opened:
-                await store.close()
-        app.on_cleanup.append(close_stores)
-    else:
-        async def database(_app: web.Application):
-            await open_store()
-            yield
-            await opened[0].close()
-        app.cleanup_ctx.append(database)
     async def bus_open(_app: web.Application):
         await relay.join_bus(bus)
         log.info("bus: %s (this relay is number %d)", bus.name, relay.number)
@@ -149,11 +134,10 @@ def make_app(s: Settings) -> web.Application:
         await bus.close()
         await held.aclose()
     app.cleanup_ctx.insert(0, bus_open)
-    if not s.failover:  # (with failover, its own /api/health says which server is the primary)
-        app.router.add_get("/api/health", relay.health)
+    app.router.add_get("/api/health", relay.health)
     if s.admin_token:
         from .admin import Admin
-        app.router.add_get("/admin", Admin(relay, s.admin_token, s.evict_days, s.purge_days, panels).page)
+        app.router.add_get("/admin", Admin(relay, s.admin_token, s.evict_days, s.purge_days).page)
     async def maintenance(_app: web.Application):  # (always: it also keeps the usage ledger right)
         task = asyncio.create_task(upkeep(policy, s.evict_days, s.purge_days))
         yield

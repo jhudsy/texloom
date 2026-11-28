@@ -32,7 +32,6 @@ from check_restore import add_line, text
 
 import server.relay as relay_mod
 from checklib import until
-from texloom import __version__
 from texloom.crypto import Keys
 from texloom.replica import Replica
 

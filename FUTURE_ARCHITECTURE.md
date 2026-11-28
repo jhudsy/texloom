@@ -3,7 +3,7 @@
 A proposal, not built, and not yet tracked in git. It describes where the server should go so that one
 design runs on one machine with no high availability and grows, a machine at a time, to as many people as
 needed, with high availability once there are enough machines. It replaces the three designs for "Way 3" in
-[SCALING.md](SCALING.md), and in the end the lease-based failover of "Way 2" as well. Read SCALING.md first:
+[SCALING.md](SCALING.md), and the lease-based failover of "Way 2" (now retired) as well. Read SCALING.md first:
 the reasons there (everyone keeps a full copy, the server sees only encrypted data, projects are
 independent, compiling is not the server's job) are what make this design simple.
 
@@ -46,7 +46,7 @@ ones planned, not the only possible ones:
 |---|---|---|---|
 | Database | transactions; a per-project lock for the length of a transaction; numbering per project; durable once acknowledged | SQLite | PostgreSQL (`server/db.py` already has both); a distributed SQL database is possible if it passes |
 | Bus and soft state | publish/subscribe by channel, at most once, in order per publisher, with every loss shown as a broken connection; keys with an expiry; atomic add | In-process: delivery to the relay's own rooms, dictionaries | Redis or Valkey; NATS and others are possible if they pass |
-| Files | put, get, delete and exists, by key; a key's content never changes; conditional writes (only for Way 2's lease) | A folder | An S3-compatible bucket (`server/files.py` already has both) |
+| Files | put, get, delete and exists, by key; a key's content never changes | A folder | An S3-compatible bucket (`server/files.py` already has both) |
 
 The relay code is the same either way. It always publishes through the bus interface, keeps soft state
 through the soft-state interface and writes exact state in database transactions. On one machine the bus
@@ -76,9 +76,8 @@ files    = "s3://texloom"                                                 # defa
   database or a folder for files takes an exclusive lock on it at start-up; SQLite already refuses a second
   relay. **Built for the bus and PostgreSQL:** a relay with no `bus` holds an advisory lock on the database
   (`ALONE_LOCK`) and a second one refuses to start, saying why (`scripts/check_groundwork.py`). The `bus`
-  setting exists (`--bus`, `bus = …`) and the relay opens it at start, but doesn't pass messages through it yet. So a second relay started against one-machine settings stops, rather than splitting the project
-  into two rooms that never hear each other. It also checks the bus and database meet their contracts
-  (SCALING.md: `failover` already tests a bucket's conditional writes this way).
+  setting exists (`--bus`, `bus = …`) and the relay opens it at start. So a second relay started against one-machine settings stops, rather than splitting the project
+  into two rooms that never hear each other. It also checks the bus and database meet their contracts.
 
 That leaves the tiers' own settings (Patroni, Sentinel, the bucket) to those tools, and the relay with
 three lines at most.
@@ -348,10 +347,12 @@ doing whatever happens later.
    `models/relays` (`scripts/check_model.py relays`). It found two holes around a database failover, now
    rules in "Decided" below: store again before acknowledging, and the timeline on the bus.
 9. **A rehearsal in Docker:** three relays, PostgreSQL with Patroni and etcd, Redis with Sentinel, an S3
-   store, and a front door. Kill each part and measure the times in the table above (as
-   `scripts/rehearse_failover.py` does for Way 2). Add a load test that spreads one project's people over
+   store, and a front door. Kill each part and measure the times in the table above. Add a load test that spreads one project's people over
    several relays.
 10. **Retire Way 2's lease-based failover**, and update SCALING.md, STANDBY.md, INSTALL.md and the help page.
+    **Done:** `server/failover.py`, its settings' effect, `--failover-check`, the bucket's conditional writes, the
+    admin page's panel, `check_failover.py`, `rehearse_failover.py`, `models/failover` and `Caddyfile.failover` are
+    gone. Settings files that still say `failover` are accepted with a warning (a compat marker in `server/cli.py`).
 
 ## Decided
 

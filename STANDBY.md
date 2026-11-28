@@ -12,12 +12,13 @@ way.
 Contents: [your own PostgreSQL, primary and standby](#your-own-postgresql-primary-and-standby)
 ([when the primary is lost](#when-the-primary-is-lost), [rebuilding the old primary](#afterwards-rebuild-the-old-primary),
 [switching on purpose](#switching-on-purpose)),
-[switching over by themselves](#letting-the-two-servers-switch-over-by-themselves),
-[moving traffic to the primary](#moving-traffic-to-the-primary), and [a hosted PostgreSQL](#a-hosted-postgresql).
+[moving traffic to the primary](#moving-traffic-to-the-primary), [a hosted PostgreSQL](#a-hosted-postgresql), and
+[switching over without you](#switching-over-without-you).
 
 There are two ways to get the standby, [your own PostgreSQL](#your-own-postgresql-primary-and-standby) or
 [a hosted one](#a-hosted-postgresql); the server is told the same thing either way (`database`), and
-everything else in [INSTALL.md](INSTALL.md) stays as it is. Switching over by itself, and how traffic follows, come after.
+everything else in [INSTALL.md](INSTALL.md) stays as it is. How traffic follows comes after, and then what to
+use if the switch should happen without you.
 
 ## Your own PostgreSQL, primary and standby
 
@@ -93,10 +94,8 @@ sudo env PGPASSWORD='the replicator password' /var/www/texloom/deploy/rebuild-st
 It stops the TeXLoom server and PostgreSQL there, **keeps the old data directory aside** (as
 `….old-DATE`; delete it when you are sure: it holds the changes the new primary never got, which the
 apps send again), takes a streaming base backup of the new primary, starts PostgreSQL as its standby,
-and waits until it is streaming. If `failover` is on it then starts the server again, which waits as
-the standby; without failover a server can't run on a standby database, so it leaves the server stopped
-and says so. It refuses,
-changing nothing, if this machine's server is the primary (it answers 200 on `/api/health`), if the
+and waits until it is streaming. A server can't run on a standby database, so it leaves the server
+stopped and says so. It refuses, changing nothing, if this machine's server is the primary (it answers 200 on `/api/health`), if the
 address is another cluster, or if you don't confirm; if the backup fails it puts the old data back.
 `--cluster VERSION/NAME` picks one if there are several, and `--help` lists the rest. Until it has
 run, a failure of the new primary has no standby.
@@ -110,115 +109,20 @@ replace [Backups](INSTALL.md#backups). Try the switch once on your own pair befo
 `scripts/check_standby.py` does it on one machine with throwaway databases, which shows the steps
 and what the apps do, but not your network or your DNS.
 
-## Letting the two servers switch over by themselves
-
-Optional, and off by default: a server on its own, and a pair you switch by hand, need none of
-this, and with it off the server doesn't even load the code for it. When on, the two servers share
-a small "lease" in the bucket. The one that holds it is the primary and serves; it renews the lease
-every few seconds. The other waits, and when the lease hasn't been renewed for long enough it takes
-it, promotes its own PostgreSQL and serves. A primary that can't renew (the bucket is unreachable) stops
-itself, closing its connections, before the other can take over, so there are never two serving.
-The design and the checks behind it are in `models/failover/README.md`; `scripts/check_failover.py`
-runs two real servers through a lost primary, one cut off from the bucket and the bucket going away;
-`scripts/rehearse_failover.py` does it again with real parts in Docker (see its first lines).
-
-You need the pair from the section above (a primary and a streaming standby, each with its server
-installed) and a bucket for the stored files that does **conditional writes** properly, because the
-lease lives in that bucket and the store is what decides who gets it. Not every S3-compatible store
-does, so test yours first, from either server (it writes and removes test objects in the bucket,
-including eight writers at once, to see that exactly one wins):
-
-```bash
-sudo -u texloom /var/www/texloom/.venv/bin/texloom-server --config /etc/texloom/texloom.toml --failover-check
-```
-
-A server asked to fail over runs the same test when it starts, and refuses a store that fails it.
-What is known (the stores change, so the test is what counts):
-
-- **Passes the test:** RustFS.
-- **Documented as supported** (`If-Match`, `If-None-Match`), so run the test on yours: Cloudflare R2, AWS S3.
-- **Fail or unconfirmed:** Garage ignores the conditions (fine for stored files, not for the lease);
-  Backblaze B2 is reported by users of other tools to answer `If-None-Match` with 501, so it can't hold a
-  lease (not tried here).
-
-If the bucket you keep files in can't, the lease can't live there (it is in the same bucket as the
-stored files); failover then isn't available until one that can is used.
-
-Then, once, on the **primary**, let the server's PostgreSQL role promote a standby (the grant is
-copied to the standby with everything else):
-
-```bash
-sudo -u postgres psql texloom -c "GRANT EXECUTE ON FUNCTION pg_promote(boolean, integer) TO texloom"
-```
-
-Optionally, so that the admin page can show the standby's state and how far behind it is (otherwise it
-says the details are hidden), let that role read PostgreSQL's replication statistics:
-
-```bash
-sudo -u postgres psql -c "GRANT pg_monitor TO texloom"
-```
-
-And in `texloom.toml` on **each** server (each needs its own `failover_name`), then restart both,
-the primary first:
-
-```toml
-failover = true
-failover_name = "server-a"   # "server-b" on the other
-# failover_ttl = 15          # seconds
-```
-
-- **The admin page** (`/admin`, with the admin token) gets a Failover section: this server's role, who
-  holds the lease and how recently it was renewed (or, on the standby, how long it has been unchanged
-  against the wait), and PostgreSQL's side: whether it is a primary and its standbys' state and delay, or
-  a standby and how far its replay is behind. The standby serves the admin page too, with just that
-  section, since it has no database open.
-- **Time.** A primary stops itself after `failover_ttl` seconds without a successful renewal, and the
-  standby waits twice that, plus a margin, before it takes over: with the default 15 seconds, about
-  35, plus a few for PostgreSQL to promote, so people see "connecting…" for under a minute. A lower
-  value is quicker and more easily upset by a slow bucket. Servers' clocks need not agree, only run
-  at about the same speed: nothing compares one machine's clock with the other's.
-- **After a switch,** the server that stopped (or was lost) restarts as a standby, but its PostgreSQL is
-  still a primary with a history the new one doesn't have, so it **won't take over** (it says so in its
-  log) until you [rebuild it](#afterwards-rebuild-the-old-primary). Until then you have one server and no
-  standby.
-- **Starting a server again** (an update, a restart) while it holds the lease takes it back within a
-  couple of renewal intervals (about ten seconds by default). The other server sees renewals missing
-  for that long, which is well short of the wait before it takes over.
-- It runs under the install script's systemd unit as it is (`Restart=on-failure`: a server that stops
-  itself exits with status 75).
-- **The bucket becomes something everything waits on.** The lease lives in it, so a primary that can't
-  reach it for `failover_ttl` seconds stops serving, even though it and its database are fine. While the
-  bucket is away from both servers nothing is served; when it is back the service resumes by itself, in
-  about the time a restart takes, and the standby does not take over on the strength of the time it
-  couldn't look. (Without failover, editing and syncing do not depend on the bucket.)
-- **A server that hangs, rather than stopping, is noticed by the apps when their keep-alive goes unanswered**
-  (a ping after 10 seconds of hearing nothing, given up 10 seconds later), so people connected through it
-  wait up to about 20 seconds longer than for a server that dies, whose connections are reset. The standby still takes over after the wait.
-- **What it can't do** (see `models/failover/README.md`): a machine suspended and woken (a virtual
-  machine) after the other took over can accept changes for a moment until its first renewal fails.
-  Nobody loses anything, because an app that was told "stored" by it checks, when it reconnects, that
-  the new primary has its last change, and sends everything again if not.
-
 ## Moving traffic to the primary
 
-Failover makes one server the primary; it does not move traffic. Each server's `/api/health` answers
-**200 only on the primary**, and 503 on a standby and on a server that has stopped itself (the body
-says which it is and who holds the lease). Whatever people reach the servers through must send them to
-the one that answers 200. How the servers are reached at all (their addresses, DNS, ports,
-certificates) depends on your network and is yours to arrange; it isn't something TeXLoom does.
+After a switch the name people use has to reach the new primary's server. Only a server whose database is
+the primary runs at all (one pointed at a standby says so and stops), so its `/api/health` answering 200 is
+the sign. How the servers are reached (their addresses, DNS, ports, certificates) depends on your network
+and is yours to arrange; it isn't something TeXLoom does. Some ways:
 
-Some ways to follow the primary:
+- **DNS:** change the record to the standby's address. Lower its lifetime (TTL) to a minute or so
+  beforehand, so the change is seen quickly.
+- **A floating address** that you, or your provider's tools, move to the new primary.
+- **A proxy or load balancer in front of both**, with a health check on `/api/health`.
 
-- **A proxy on each machine that checks both servers.** `deploy/Caddyfile.failover` is an example for
-  two machines that the public can reach: both addresses are in DNS, and each machine's Caddy forwards
-  to whichever relay answers 200, so nothing changes at a switch. Its first lines say what the relays
-  need (to reach each other over a private network, and never port 8787 open to the internet).
-- **A load balancer, or a DNS service, with health checks** on `/api/health`.
-- **A floating address** that your own tooling moves to the primary.
-- **A command of your own** that looks at `/api/health` and updates whatever you use.
-
-Apps reconnect with backoff, so a switch looks like a short "connecting…": about the time the standby
-waits (see above), plus whatever your arrangement adds (a DNS record's lifetime, say).
+Apps reconnect with backoff, so a switch looks like a short "connecting…": the time you take, plus whatever
+your arrangement adds (a DNS record's lifetime, say).
 
 ## A hosted PostgreSQL
 
@@ -246,3 +150,13 @@ The only differences from a PostgreSQL of your own:
   Look for one in your region: the data is encrypted either way, so a provider needs no trust, but
   the server and its database should be close, since the server makes a few queries for every
   change.
+
+## Switching over without you
+
+For servers that take over from each other by themselves, run several relays: two or more machines, each
+with a relay, sharing one database whose standby is promoted by Patroni when the primary is lost, and a bus
+(Valkey, with Sentinels to replace its primary), behind a front door that sends people to the relays that
+are up. Every relay serves at once, so losing one costs its apps a reconnect, and losing the database's
+primary about half a minute of waiting (most of it Patroni's own wait before it promotes, which can be tuned). [FUTURE_ARCHITECTURE.md](FUTURE_ARCHITECTURE.md) describes it and how it
+was tested. (An earlier way, two servers sharing a lease in the bucket, is retired: a settings file that
+still says `failover` gets a warning in the log and is otherwise unaffected.)

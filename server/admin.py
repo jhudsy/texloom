@@ -11,7 +11,6 @@ import base64
 import hmac
 import html
 import time
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from aiohttp import web
@@ -46,10 +45,8 @@ details summary{cursor:pointer;list-style:none} details[open] summary{display:no
 
 
 class Admin:
-    def __init__(self, relay: Relay, token: str, evict_days: float, purge_days: float | None = None,
-                 panels: list[Callable[[], Awaitable[str]]] | None = None):
+    def __init__(self, relay: Relay, token: str, evict_days: float, purge_days: float | None = None):
         self.relay = relay
-        self.panels = panels or []  # sections other parts of the server add (failover): each returns HTML; none when there is nothing to show
         self.token = token.encode()
         self.evict_days = evict_days
         self.purge_days = purge_days
@@ -70,17 +67,6 @@ class Admin:
             return web.Response(status=401, text="admin token required",
                                 headers={"WWW-Authenticate": 'Basic realm="TeXLoom admin"'})
         r, st = self.relay.policy, self.relay.store
-        extra = ""
-        for panel in self.panels:
-            try:
-                extra += await panel()
-            except Exception as ex:  # (one section failing doesn't take the page down)
-                extra += f"<h2>{html.escape(type(ex).__name__)}</h2><p class=muted>{html.escape(str(ex)[:200])}</p>"
-        if st is None:  # no database open here (a standby): only what the panels say
-            return web.Response(text=f"""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width">
-<title>TeXLoom admin</title><style>{STYLE}</style></head><body><h1>TeXLoom admin</h1>
-<p class=muted>This server has no database open (it isn't the primary), so there is no storage to show.</p>{extra}</body></html>""",
-                                content_type="text/html", headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
         r.codes.load()
         e = html.escape
         modes, rows, apps, snaps = await st.admin_rows()
@@ -146,7 +132,6 @@ class Admin:
 <span>Idle eviction</span><span>{f"after {self.evict_days:g} days unopened" if self.evict_days else "off"}</span>
 <span>New projects</span><span>{"anyone" if r.codes.open_creation else "creation code needed"}</span>
 </div>
-{extra}
 <h2>Creation codes</h2>
 <table><tr><th>Label</th><th>Code</th><th>Valid until</th><th class=n>Allowance</th><th class=n>Used</th><th class=n>Projects</th></tr>{crow}</table>
 <p class=muted>Click a code to show it all. A code lets people store new projects here up to its allowance; it doesn't
