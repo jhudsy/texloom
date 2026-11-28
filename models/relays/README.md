@@ -1,6 +1,6 @@
 # Relays model
 
-A TLA+ model of stateless relays (FUTURE_ARCHITECTURE.md): two relays sharing one database and a bus,
+A TLA+ model of stateless relays ([DESIGN.md](../../DESIGN.md#several-relays)): two relays sharing one database and a bus,
 two apps connected to either, one stored project. Relays die between any two steps of storing a change,
 breaks in a relay's link to the bus lose what was on its way, and the database fails over to a standby
 that may lack its last changes, after which change numbers are used again.
@@ -38,7 +38,7 @@ configuration opens within seconds.
 
 ## What it says about the design
 
-The model found two holes in the plan as first written (FUTURE_ARCHITECTURE.md, "Decided"), both
+The model found two holes in the plan as first written ([DESIGN.md](../../DESIGN.md#messages-between-relays), "A database failover"), both
 around a database failover, where change numbers are used again:
 
 1. **A change stored before a failover is stored again before it is acknowledged.** The relay stores a

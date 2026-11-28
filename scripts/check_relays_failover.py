@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Several relays through a database failover (FUTURE_ARCHITECTURE.md, "Decided"; models/relays).
+"""Several relays through a database failover (DESIGN.md, "Messages between relays"; models/relays).
 
 Two relays in one process share a bus and reach PostgreSQL through a multi-host address (target_session_attrs=
 primary), so that after a failover they find the new primary by themselves. A real failover, with throwaway
@@ -21,6 +21,7 @@ change, which the app was told was stored. Then:
 from __future__ import annotations
 
 import asyncio
+import time
 import json
 import sys
 import tempfile
@@ -178,6 +179,37 @@ async def newer_on_bus(one: TestClient, two: TestClient) -> None:
     await b.close()
 
 
+async def silent_host(pport: int, sport: int) -> None:
+    """A database host that never answers (a machine gone: its packets go nowhere) listed first, then the standby, then
+    the primary: the relay still reaches the primary within seconds, its pool and the connections of its own (the
+    locks, the listener). asyncpg alone tried the hosts in turn within one timeout, which the silent one used up: in the
+    deploy rehearsal, every relay stayed off the database for minutes after the primary's machine was lost."""
+    import socket
+
+    from server.db import DatabaseError, connect
+    quiet = socket.socket()
+    quiet.bind(("127.0.0.1", 0))
+    quiet.listen(16)  # (connections are made by the system, and never answered: nothing accepts them)
+    url = (f"postgresql://texloom@127.0.0.1:{quiet.getsockname()[1]},127.0.0.1:{sport},127.0.0.1:{pport}/postgres"
+           "?target_session_attrs=primary")
+    try:
+        t0 = time.monotonic()
+        db = await asyncio.wait_for(connect(url), 30)
+        try:
+            primary = await db.fetchval("SELECT NOT pg_is_in_recovery()")
+            async with db.lock(4242) as got:
+                pass
+            took = time.monotonic() - t0
+        finally:
+            await db.close()
+        check(f"a database host that never answers, listed first, costs nothing: the primary reached in {took:.1f} s "
+              "(the pool, and a connection for a lock)", primary and got and took < 5, took)
+    except (TimeoutError, DatabaseError) as e:
+        check("a database host that never answers, listed first, costs nothing", False, f"not reached: {e}"[:300])
+    finally:
+        quiet.close()
+
+
 async def main() -> int:
     try:
         pg.bindir()
@@ -200,6 +232,7 @@ async def main() -> int:
             def server(name: str) -> TestServer:
                 return TestServer(make_app(Settings(database=both, bus="memory:check-relays-failover", data=tmp / name,
                                                     codes=CodeBook(codes))))
+            await silent_host(pport, sport)
             async with TestClient(server("one")) as one, TestClient(server("two")) as two:
                 await until(lambda: all(r.timeline for r in relays), 70)  # (read at their first head check)
                 await store_again(one)

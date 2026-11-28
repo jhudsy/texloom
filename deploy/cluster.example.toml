@@ -29,6 +29,7 @@ firewall = "ports"           # "ports": TeXLoom's own ports reachable only throu
 #   etcd        where Patroni keeps its leader key: an odd number of members (three keeps working with one lost)
 #   valkey      the relays' bus (one primary, the rest replicas)
 #   sentinel    finds and replaces Valkey's primary: three keep working with one lost
+#   monitoring  (optional, one machine) Prometheus and Grafana, watching every part: see [monitoring]
 #
 # Three machines with everything keep working when any one of them is lost. A machine's `address` is where the
 # others reach it (a provider's private network if they share one, else its public address); `ssh` is where SSH
@@ -62,4 +63,41 @@ secret_file = "secrets/s3-secret"   # the secret key, in a file beside this one
 # purge_expired_after = 90
 
 [tls]
-certbot = true   # a Let's Encrypt certificate for `name`, on the first door (several doors: see FUTURE_ARCHITECTURE.md)
+certbot = true      # each door gets its own Let's Encrypt certificate for `name` (and certbot renews it); `apply`
+                    # registers each door with Let's Encrypt, accepting its subscriber agreement. false: something in
+                    # front of the doors ends TLS (a provider's load balancer)
+# email = "you@example.org"   # (optional) Let's Encrypt's notices
+# server = "https://acme-staging-v02.api.letsencrypt.org/directory"   # (optional) another ACME server: its staging one
+
+# A server deploy/install.sh set up, moving into this (new) cluster with its projects, stored files and codes. Either
+# one of [machines] above (it runs `relay`, `door`: its server moves in and it becomes one of the relays):
+# move_in = "a"
+# or a server outside the cluster (one running other things too, say), stopped once its copy is in and left as it is:
+# [move_in]
+# ssh = "old.example.org"     # (host, or host:port)
+
+# Backups, every hour, from whichever relay begins first (CLUSTER.md, "Backups"), sent with restic to a repository at
+# another provider than the machines'. The tool makes their password (secrets/restic-password) the first time: keep a
+# copy somewhere else, with this file and secrets/.
+# [backup]
+# repository = "b2:my-bucket:texloom"
+# keys_file = "secrets/backup-keys"         # restic's keys for it, as lines: B2_ACCOUNT_ID=…, B2_ACCOUNT_KEY=…
+# healthcheck_url = "https://hc-ping.com/…"  # (optional) pinged after each backup, …/fail when one fails
+# keep_hourly = 48
+# keep_daily = 30
+# [backup.bucket_copy]                      # (optional) stored files copied to this bucket rather than with restic
+# url = "s3://texloom-copy"                 # (keep old versions there: its lifecycle rules)
+# endpoint = "https://s3.example.net"
+# key_id = "…"
+# secret_file = "secrets/copy-secret"
+
+# Optional, with a machine running `monitoring`: Prometheus and Grafana there, listening on that machine only (an SSH
+# tunnel reaches them: CLUSTER.md), and exporters on every machine, reached over WireGuard. About 0.5 GB of memory.
+# [monitoring]
+# grafana = true              # false: Prometheus only
+# retention = "30d"           # how long Prometheus keeps numbers (and at most 2 GB of them)
+# email_to = "you@example.org"   # alerts by email (Alertmanager), through this mail server:
+# smtp = "smtp.example.org:587"
+# email_from = "alerts@example.org"
+# smtp_user = "alerts@example.org"
+# smtp_password_file = "secrets/smtp-password"

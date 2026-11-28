@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What several servers sharing one database need of each (SCALING.md, "Three ways to run it", way 3), built
+"""What several servers sharing one database need of each (DESIGN.md, "Several relays"), built
 first because it is safe with one server and checked here with two sharing a PostgreSQL:
 
 - the usage ledger: a database with data and no ledger (before it existed) gets one at the first start; a
@@ -11,8 +11,8 @@ first because it is safe with one server and checked here with two sharing a Pos
   which remembered the old, takes the new (its totals too), ignores what it said itself, and ignores what isn't
   one of ours;
 - upkeep runs on one server at a time, on a standby (no database open) does nothing, and on SQLite runs;
-- checks made in one transaction holding the project (Store.locked; FUTURE_ARCHITECTURE.md, "Building it",
-  step 1), with writes racing through two servers: the same change is stored once; a creation code's
+- checks made in one transaction holding the project (Store.locked; DESIGN.md, "Where each piece of
+  state goes"), with writes racing through two servers: the same change is stored once; a creation code's
   allowance, and a project's limit, are never passed together; an upload under way through one server
   counts for the other, until it is stored or its reservation runs out; project lists count too; and a
   transaction that fails leaves the server's memory as it was;

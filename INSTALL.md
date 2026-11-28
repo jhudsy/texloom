@@ -4,8 +4,8 @@ A TeXLoom server is one Python process: it serves the web app and the in-browser
 relays and stores projects' encrypted changes. It can't read any project. It needs:
 
 - **a database** for the edit logs, project records and project lists: an SQLite file, which
-  needs nothing installed (the default), or PostgreSQL (14 or later) for a warm standby or several
-  servers ([The database](#the-database));
+  needs nothing installed (the default), or PostgreSQL (14 or later) for a standby or several
+  relays ([The database](#the-database));
 - **a place for stored files** (pictures, PDFs, uploads, all encrypted by the apps): a folder on
   the server, or an S3-compatible bucket;
 - **HTTPS** in front of it for anyone but yourself, because browsers only allow the encryption the
@@ -20,8 +20,9 @@ Settings live in one file, `/etc/texloom/texloom.toml` ([Settings](#settings)).
 - [The database](#the-database) · [Stored files](#stored-files)
 - [Creation codes](#creation-codes) · [Private servers](#private-servers) ·
   [Retiring old app versions](#retiring-old-app-versions) · [Idle projects, admin page, arXiv import](#idle-projects-admin-page-arxiv-import)
-- [Backups](#backups) · [Updating](#updating)
-- [A standby server](#a-standby-server), in [STANDBY.md](STANDBY.md); several machines, in [CLUSTER.md](CLUSTER.md)
+- [Backups](#backups) · [A standby, switched by hand](#a-standby-switched-by-hand) ·
+  [How far one server goes](#how-far-one-server-goes) · [Updating](#updating)
+- Several machines, taking over from each other by themselves: [CLUSTER.md](CLUSTER.md)
 
 ## On an Ubuntu or Debian server
 
@@ -153,6 +154,7 @@ min_free = "2G"
 | `database` | `texloom.db` in `data` | an SQLite file or a PostgreSQL database ([The database](#the-database)) |
 | `data` | `data` | this server's own folder: uploads are spooled here, `min_free` is kept free here, and stored files go in `data/files` unless `files` says otherwise |
 | `files`, `[s3]` | `data/files` | where stored files go ([Stored files](#stored-files)) |
+| `bus` | none (in-process) | for several relays sharing a database: the Redis-compatible server (Valkey) through which they pass messages to each other ([CLUSTER.md](CLUSTER.md) sets it). Leave it unset for one server: one with no bus refuses to start on a PostgreSQL database another such server uses |
 | `host`, `port` | `127.0.0.1`, `8787` | where it listens |
 | `static`, `tex_assets` | `web/dist`, `tex-assets` | the built web app, and the in-browser TeX files |
 | `default_allowance` | unlimited (`0` in the install script's settings) | what a project created without a creation code may store ([Creation codes](#creation-codes)) |
@@ -184,15 +186,19 @@ the environment. On the command line they'd show in `ps`.
   `texloom.db` in `data`. Nothing to install or look after, and the install script's choice. One
   server process uses it: a second one started on the same file refuses to run (one-off commands
   such as `--list-codes` can use it while the server runs).
-- **PostgreSQL** (14 or later), for a warm standby ([A standby server](#a-standby-server)):
+- **PostgreSQL** (14 or later), for a standby ([A standby, switched by hand](#a-standby-switched-by-hand)) or
+  several relays ([CLUSTER.md](CLUSTER.md)):
   - `postgresql:///texloom?host=/var/run/postgresql`: on this machine, over the local socket, as
     the user the server runs as (no password anywhere; the install script's choice with
     `DATABASE=postgresql`);
   - `postgresql://texloom:PASSWORD@db.example.org:5432/texloom?sslmode=require`: elsewhere.
 
   The server uses up to 10 connections for its queries (PostgreSQL allows 100 by default), plus one that
-  listens for what other servers tell it and, for a moment each hour, one for its upkeep.
-  [SCALING.md](SCALING.md) says when the number of connections matters.
+  listens for what other servers tell it, one holding a lock while it runs with no `bus` (so that no second
+  server uses the database meanwhile) and, for a moment each hour, one for its upkeep. So connections
+  follow the number of servers, not of people: about eight servers fill PostgreSQL's default. A connection
+  pooler (PgBouncer, or a hosted one) lets more share them, but the listening connection and the advisory
+  locks must bypass it, and the pool needs the pooler's settings for prepared statements (not tried here).
 
 The server creates its tables when it starts, either way. To move a server from one to the other
 (SQLite up to PostgreSQL, say), stop it, copy everything into the new, empty database, point the
@@ -208,6 +214,23 @@ systemctl start texloom
 ```
 
 The old database is left as it was.
+
+**A hosted PostgreSQL.** A provider's PostgreSQL service keeps its own standby, switches over by itself and takes
+its own backups. Use its address as `database`:
+
+```toml
+database = "postgresql://texloom:PASSWORD@HOST:5432/texloom?sslmode=require"
+```
+
+The password goes in the settings file or `TEXLOOM_DATABASE` in the environment, as for any secret
+([Settings](#settings)); `deploy/install.sh` leaves a PostgreSQL on another machine alone, and installs none
+here. Use the provider's direct address, not a connection pooler's in "transaction" mode (PgBouncer's usual
+one): the server relies on connections that last through a transaction, and on notifications. The provider
+moves its database to its standby and the server keeps using the same address; if the server's machine is
+lost, install it on another with the same settings and bucket, and move the name. Providers differ in price,
+regions, and what their standbys and backups are (some give a standby only on dearer plans). The data is
+encrypted either way, so a provider needs no trust, but choose one near the server, which makes a few queries
+for every change.
 
 ## Stored files
 
@@ -350,36 +373,189 @@ version can't show the request, and is counted as "unknown" on the admin page.
 
 ## Backups
 
-The install script keeps none. Back up, every night and somewhere else:
+The install script sets up a backup every hour, sent off-site with [restic](https://restic.net), which stays off until
+you say where to (`deploy/texloom-backup`, run by `texloom-backup.timer`):
 
-- **the database**: with SQLite, `sqlite3 /var/lib/texloom/texloom.db ".backup texloom-backup.db"`
-  (`apt install sqlite3`; consistent while the server runs: don't just copy the file, whose last
-  changes may still be in `texloom.db-wal`). With PostgreSQL, `sudo -u postgres pg_dump
-  --format=custom texloom > texloom.pgdump` (also consistent while it runs);
-- **stored files**: `texloom-server --files-for-backup DIR` prints the folder to back up: the files
-  folder (without its `.incoming`), or, with a bucket, DIR, which it first makes a copy of the
-  bucket (copying only what's new since last time). Files are written once and never changed, so a
-  copy taken while the server runs is consistent;
-- **settings**: `/etc/texloom` (creation codes are in the database, so its backup has them).
+```bash
+apt install restic
+head -c 32 /dev/urandom | base64 > /etc/texloom/restic-password && chmod 600 /etc/texloom/restic-password   # keep a copy elsewhere too
+cat > /etc/texloom/backup.env <<'EOF'
+RESTIC_REPOSITORY=b2:my-bucket:texloom
+RESTIC_PASSWORD_FILE=/etc/texloom/restic-password
+B2_ACCOUNT_ID=…
+B2_ACCOUNT_KEY=…
+EOF
+chmod 600 /etc/texloom/backup.env
+systemctl start texloom-backup && journalctl -u texloom-backup -n 5    # the first one now: it makes the repository
+```
 
-To restore: install the server, stop it, put back the database (SQLite: copy the backup over
-`texloom.db`, owned by `texloom`, and delete any `texloom.db-wal` and `texloom.db-shm` beside it;
-PostgreSQL: `sudo -u postgres pg_restore -d texloom --clean --if-exists texloom.pgdump`), put back the settings and the files (into the files folder; with a bucket,
-`texloom-server --files-restore <the restored copy>` puts back whatever the bucket lacks), and
-start it. Everyone's devices hold full copies
-of their projects, so edits made since the backup come back as people reconnect.
+Each backup holds:
 
-## A standby server
+- **the database**, as it was at one moment while the server ran, as an SQLite file whatever the database is
+  (`texloom-server --backup`);
+- **the stored files**: the files folder as it is (files are written once and never changed), or, with a bucket, a
+  copy of it kept in `/var/lib/texloom/backup/files` (only what's new is copied; it needs as much disk as the files).
+  Or copy the bucket to a bucket at another provider instead (`BUCKET_COPY`, with rclone: see the top of
+  `deploy/texloom-backup`), keeping old versions there;
+- **the settings**, `/etc/texloom` (creation codes are in the database, so its backup has them), and the certificates.
 
-A second machine holding a nearly current copy of the database, so that losing the server means minutes
-rather than a restore from last night's backup, switched over by hand. It is optional:
-a server with a nightly backup and a machine you could restore it on is a perfectly good setup. It needs
-PostgreSQL and stored files in a bucket. All of it is in [STANDBY.md](STANDBY.md): your own PostgreSQL or
-a hosted one, promoting, rebuilding the old primary, and moving traffic. For machines that take over from each
-other by themselves, see [CLUSTER.md](CLUSTER.md): several relays, set up by one command.
+It keeps every backup of the last 48 hours and one a day for 30 days (`KEEP_HOURLY`, `KEEP_DAILY`). Set
+`HEALTHCHECK_URL` to a [healthchecks.io](https://healthchecks.io) check (or any URL pinged after each backup, and at
+`…/fail` when one fails) so that you hear when backups stop. **Keep the restic password somewhere else as well**: the
+backups can't be read without it, and it isn't inside them. Try a restore now and then (below): it's the only proof
+that the backups work.
+
+To restore: `restic restore latest --target /root/restore`, then install the server and stop it, and put back
+
+- the database: with SQLite, copy `/root/restore/var/lib/texloom/backup/texloom.db` over `texloom.db` (owned by
+  `texloom`; delete any `texloom.db-wal` and `texloom.db-shm` beside it); with PostgreSQL, into an empty database:
+  `texloom-server --config /etc/texloom/texloom.toml --copy-database-from sqlite:/root/restore/var/lib/texloom/backup/texloom.db`;
+- the stored files: into the files folder; with a bucket, `texloom-server --config /etc/texloom/texloom.toml
+  --files-restore /root/restore/var/lib/texloom/backup/files` puts back whatever the bucket lacks;
+- the settings, from `/root/restore/etc/texloom`,
+
+and start it. Everyone's devices hold full copies of their projects, so edits made since the backup come back as
+people reconnect.
+
+### A cold standby
+
+Restoring takes as long as it takes you to find a machine and install it. A cold standby has it ready: a second
+machine restores the latest backup every night (the database, the settings, and the stored files or a copy of
+the bucket), checks it, and stays stopped. If the server is lost, start it there and move the name to it. Edits
+made since the backup aren't lost: each app sends the newest change it has from the server in its hello, finds
+that the server's log isn't the one it saw, and sends everything again (`scripts/check_restore.py`). The nightly
+restore is also the proof that the backups work.
+
+## A standby, switched by hand
+
+A second machine holding a nearly current copy of the database, so that losing the server means minutes rather
+than a restore from last night's backup. Nobody loses work either way: everyone's devices hold full copies and
+send what the server lacks when they reconnect (`scripts/check_standby.py` and `scripts/check_restore.py` run
+both cases), so a standby buys less waiting, not safety. It is optional: a server with a nightly backup and a
+machine you could restore it on is a perfectly good setup. It needs PostgreSQL (your own, below, or a
+[hosted one](#the-database), which keeps its own standby), and stored files in a bucket, so that the standby
+sees them too ([Stored files](#stored-files)). For machines that take over from each other without you, see
+[CLUSTER.md](CLUSTER.md).
+
+PostgreSQL (14 or later, the same major version on both machines) copies the primary's changes to the standby as
+they happen (streaming replication). The standby is read-only until promoted, and the server refuses to start on
+it, saying why.
+
+1. **Allow each machine in on the other.** Either may be the standby, and after a switch the old primary is
+   rebuilt from the new one, so both need to let the other replicate. Create the role once, on the primary (it
+   is copied to the standby), and on **each** machine let the other's address in over TLS (in `pg_hba.conf`,
+   which is not copied; PostgreSQL's `listen_addresses` must include an address the other can reach: keep it
+   off the public internet, with a firewall or a private network):
+
+   ```bash
+   sudo -u postgres psql -c "CREATE ROLE replicator REPLICATION LOGIN PASSWORD 'a long random password'"
+   sudo -u postgres psql -c "SELECT pg_create_physical_replication_slot('standby')"
+   # pg_hba.conf, on each machine, with the OTHER machine's address:
+   #   hostssl  replication  replicator  OTHER-ADDRESS/32  scram-sha-256
+   systemctl reload postgresql
+   ```
+
+   The slot makes the primary keep the changes the standby hasn't received yet, so a standby that is offline
+   for a while still catches up; but one that is gone for good makes the primary's disk fill with them, so drop
+   the slot (`SELECT pg_drop_replication_slot('standby')`) if you give the standby up.
+
+2. **On the standby**, install the server as for the primary, with the same settings (`/etc/texloom`, and the
+   bucket; the creation codes are in the database, so the standby has them), and stop it: `systemctl disable
+   --now texloom`. Then replace its PostgreSQL's data with a copy of the primary's (the paths are Debian's:
+   change `17` to your version):
+
+   ```bash
+   systemctl stop postgresql
+   sudo -u postgres rm -rf /var/lib/postgresql/17/main
+   sudo -u postgres pg_basebackup -h PRIMARY-ADDRESS -U replicator -D /var/lib/postgresql/17/main \
+     -R -X stream -S standby --checkpoint=fast       # asks for the role's password
+   systemctl start postgresql
+   ```
+
+   `-R` writes the settings that make it a standby. Settings the primary keeps in its `postgresql.conf`
+   (memory, `listen_addresses`) are not copied on Debian: set them here too.
+
+3. **Check it is following.** On the primary, `sudo -u postgres psql -c "SELECT client_addr, state, replay_lag
+   FROM pg_stat_replication"` shows the standby as `streaming`; on the standby, `sudo -u postgres psql -c
+   "SELECT pg_is_in_recovery(), now() - pg_last_xact_replay_timestamp()"` says `t` and how far behind it is (a
+   quiet server shows the time since its last change).
+
+4. **Plan how the name will move to the standby**, including a certificate for the name on the standby before
+   it is needed. Only a server whose database is the primary runs at all, so its `/api/health` answering 200 is
+   the sign. Change the DNS record (with its lifetime lowered to a minute or so beforehand), move a floating
+   address, or put a proxy with a health check on `/api/health` in front of both. Apps reconnect by themselves.
+
+**When the primary is lost**, on the standby:
+
+1. Make sure the old primary is really down, and will stay down. Two primaries would number changes
+   differently, and the apps would have to untangle it. If you can't be sure (it may only be cut off), power it
+   off or disconnect it.
+2. Promote the standby: `sudo -u postgres psql -c "SELECT pg_promote()"`. It is now a primary and takes writes.
+3. Start the server there: `systemctl enable --now texloom`.
+4. Move the name to the standby's address. Apps reconnect on their own, and send again whatever the standby
+   lacked, so nobody has to do anything.
+
+**Afterwards, rebuild the old primary.** You now have one server and no standby, and the old primary must not
+come back as a primary. Rebuild it as a standby of the new one, on the old primary's machine (as root):
+
+```bash
+sudo env PGPASSWORD='the replicator password' /var/www/texloom/deploy/rebuild-standby.py NEW-PRIMARY-ADDRESS
+```
+
+It stops the TeXLoom server and PostgreSQL there, **keeps the old data directory aside** (as `….old-DATE`;
+delete it when you are sure: it holds the changes the new primary never got, which the apps send again), takes a
+streaming base backup of the new primary, starts PostgreSQL as its standby, and waits until it is streaming. A
+server can't run on a standby database, so it leaves the server stopped and says so. It refuses, changing
+nothing, if this machine's server is the primary (it answers 200 on `/api/health`), if the address is another
+cluster, or if you don't confirm; if the backup fails it puts the old data back. `--cluster VERSION/NAME` picks
+one if there are several, and `--help` lists the rest. Until it has run, a failure of the new primary has no
+standby.
+
+**Switching on purpose**, for maintenance: stop the server on the primary first, wait until the standby has
+everything (`SELECT pg_current_wal_lsn()` on the primary, and `pg_last_wal_replay_lsn()` on the standby, are
+equal), then promote and move the name: nothing is missing, so there is no catch-up.
+
+A standby copies mistakes as well as data (a project deleted, a table dropped), so it doesn't replace
+[Backups](#backups). Try the switch once on your own pair before you need it: `scripts/check_standby.py` does it
+on one machine with throwaway databases, which shows the steps and what the apps do, but not your network or
+your DNS.
+
+## How far one server goes
+
+Nobody has taken a deployment to its limits, so the order below is reasoned, not measured.
+`scripts/loadtest.py` measures one relay on the machine it runs on (latency, CPU, memory per scenario): run it on
+a machine like yours before relying on a number. On a laptop, one relay carried about 800 edits a second (three
+people a project, two of them typing) before the slowest 5% took over 200 ms to arrive.
+
+| # | The limit | What you would notice | What to do |
+|---|---|---|---|
+| 1 | **Bandwidth for the in-browser TeX engine.** The web editor compiles in the browser, so a first-time visitor downloads the engine from the server (`busytex.wasm` is 32 MB; the full TeX Live bundles are 93, 201 and 342 MB, but with TeX Live files on demand a document pulls only the package files it needs) and the browser keeps them afterwards. This is most of the bytes the server sends, and none of it needs the relay's CPU. | the host's outbound traffic, or its provider's allowance; a slow first compile for new visitors | serve `/core` and `/texlive` from a CDN or a caching proxy in front (static files that change only with a release). Cheaper than more servers, so first |
+| 2 | **The relay's memory.** The systemd unit caps it (`MemoryMax=1G`), and `memory` (512M by default) is what big work at once may use: catch-ups, large messages, uploads, arXiv imports. | big operations are refused or slow; the process is killed at the cap | raise `memory` and `MemoryMax` together (the cap stays about 500 MB above it), or a bigger machine |
+| 3 | **One relay's CPU, and its connections.** It is one Python process, so one core, and the work grows with connections times edits a second. It takes at most 2,000 connections at once (`MAX_CONNECTIONS` in `server/relay.py`). | the process near 100% of one core; edits arriving late | a faster core helps more than more cores; then several relays ([CLUSTER.md](CLUSTER.md)) |
+| 4 | **Database connections**, with PostgreSQL ([The database](#the-database)) | `SELECT count(*) FROM pg_stat_activity` near `max_connections`; connection errors | a connection pooler |
+| 5 | **Writes to the one database.** One small write per batch of edits for each active project, and reads when someone connects and catches up. | the database's CPU or disk; queries waiting | a faster disk, or PostgreSQL on a machine of its own (batching edits, and catch-ups read from a replica, would be next: neither is built) |
+| 6 | **Storage.** The database holds each project's edit log, replaced by a snapshot as it grows (over 12 MB the snapshot is stored as an upload; above 50 MB snapshots stop and the log grows: [#18](https://github.com/jhudsy/texloom/issues/18)). Stored files are most of it. | the disk, or the bucket's bill | `evict_idle_days` (writers upload an evicted project again), `project_max_bytes` (200M by default), and creation codes' allowances |
+| 7 | **Availability**, not capacity: the relay, the database, the disk, the network in front. | people can't connect | backups and a [cold standby](#a-cold-standby); a [standby switched by hand](#a-standby-switched-by-hand); several relays ([CLUSTER.md](CLUSTER.md)) |
+
+A project's size on the admin page is mostly its stored files, counted as they are stored. Its edit log is small
+by comparison and is compacted, so a project of tens of megabytes is ordinary; the Snapshot column (the
+compressed editing history alone) is what the 12 MB and 50 MB thresholds are about.
+
+**What to watch**: the admin page (stored bytes, who is connected now, each project's size), the relay's CPU
+(`top`) and memory (`systemctl show texloom -p MemoryCurrent`), database connections, the disk and the host's
+outbound traffic. For history and graphs, the relay also serves `/metrics` in Prometheus's format (connections,
+messages, stores and how long they take, catch-up bytes, app versions; no project ids or codes). nginx doesn't
+pass it on: it is reached on the relay's own address (`http://127.0.0.1:8787/metrics` on one machine).
+Prometheus and its `node_exporter` (the machine's CPU, memory, disk and network) can run beside the server from
+Debian's packages (`apt install prometheus prometheus-node-exporter`), scraping both. It is optional, and none
+of it is installed by default. [`deploy/monitoring/`](deploy/monitoring/) holds a Grafana dashboard and alert rules
+([CLUSTER.md](CLUSTER.md)).
 
 ## Updating
 
 Re-run `deploy/install.sh` with the same arguments: it copies the new version, keeps the data and
 settings, and restarts the service, which creates any new tables itself. By
 hand: `git pull`, `uv sync --extra server`, rebuild the web app, restart.
+
+A settings file that still says `failover` (two servers sharing a lease in the bucket, retired in favour of
+[several relays](CLUSTER.md)) gets a warning in the log and is otherwise unaffected.

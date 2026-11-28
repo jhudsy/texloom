@@ -14,6 +14,15 @@ No accounts: a project is shared by sending a link.
   in-editor assistant backed by any LLM provider, local or remote.
 - Version history without git.
 
+What makes the server easy to keep running, and to grow: everyone keeps a full copy, so the server is a way to
+meet and a backup, not the only copy (if it's down nobody loses anything, and edits made meanwhile sync when it
+returns), so availability is about convenience, not about losing data; it sees only encrypted data, so a second
+server needs no more trust than the first; projects are independent (each one's changes are one ordered stream),
+so a project can live on any server and a database could be split by project; and compiling is the user's
+machine's job, so the server hands out engine files, which is disk and bandwidth, not CPU. Deliberately not
+goals: several regions (TeXLoom is local-first, so latency matters little), a distributed database, and a compile
+service.
+
 ## Components
 
 ```
@@ -23,7 +32,7 @@ No accounts: a project is shared by sending a link.
  local helper    ─┘       ┌────────┐        └─ local helper (collaborator)
  (Python, folder  ───────▶│ server │
   sync + latexmk)         │ relay +│  SQLite or PostgreSQL: opaque ciphertext log; files: a folder or S3 bucket
-                          │ store  │
+                          │ store  │  (one process, or several relays sharing a database, a bucket and a bus)
                           └────────┘
 ```
 
@@ -31,7 +40,8 @@ No accounts: a project is shared by sending a link.
    peers, appends them to a per-project log (`server/store.py`), stores encrypted blobs (in a
    folder or an S3-compatible bucket, `server/files.py`; the database only records which exist),
    serves the web app. It never sees keys or plaintext. It verifies write signatures so that holders
-   of a read-only link cannot write.
+   of a read-only link cannot write. It is one process, or several relays on several machines
+   ([Several relays](#several-relays)).
 2. **Web editor** (`web/`, TypeScript + Vite + CodeMirror 6 + Yjs). Full replica in
    IndexedDB, works offline, live cursors, file tree, PDF view, in-browser compile.
 3. **Helper** (`texloom/`, Python + pycrdt; the class is `Daemon`, the desktop app and `texloom run` host it). Mirrors a project to a real directory,
@@ -295,19 +305,24 @@ only; a line without an allowance is skipped, with a warning in the log.)
   SQLite allows one server process per file (a second is refused), PostgreSQL several. A project's
   edits are numbered in the database: `head` is incremented and read back (`UPDATE … RETURNING`)
   in the same transaction as the log row, so numbers stay right however many servers write.
-- **Locking:** within one server, `Store.lock(project)` keeps a project's check-then-write steps (is this
-  a replay? may it be stored? store it; a snapshot's range check and the snapshot; mode changes,
-  deletion, an upload's quota check and reservation) from interleaving with another message for it;
-  different projects go on at once.
+- **Locking:** a project's check-then-write steps (is this a replay? may it be stored? store it; a
+  snapshot's range check and the snapshot; mode changes, deletion, an upload's quota check and
+  reservation) run in one transaction holding the project (`Store.locked`): with PostgreSQL a lock for
+  the length of the transaction (`pg_advisory_xact_lock`), so servers sharing the database take turns;
+  SQLite has one writer anyway. An owner's allowance is checked in the same transaction, holding the
+  owner too (always after the project, never before, so two can't wait for each other). Within one
+  server, the tasks for a project first queue in memory (`Store.lock`, which `locked` holds), so
+  they don't each hold a database connection while they wait. Different projects go on at once.
 - **Kept in memory, for speed:** each project's usage (read at the start from the `usage` table, a ledger
   kept in step with every change and recounted daily against the stored data: `Store.reconcile`), owners and
   each owner's total, last-seen times, the deletion and storage mode of the 20,000 projects used most
-  recently (the rest are read when needed), and the revocations of the 10,000 most recently used. That's
-  right for one server. Servers sharing a PostgreSQL tell each other when a project changes (LISTEN/NOTIFY,
-  `Store._told`) and the others read it again, and idle eviction, purges and the recount run on one server at
-  a time, under an advisory lock (`upkeep` in `server/app.py`). Several at once would also pass live messages
-  between them through a bus and read totals from the database at a quota check (SCALING.md, "Way 3: several
-  relays"); new state follows the rules there, and `scripts/check_server_state.py` lists it all.
+  recently (the rest are read when needed), and the revocations of the 10,000 most recently used. These are
+  what's shown (the admin page, "used"); the limits that must hold are checked against the database. Servers
+  sharing a PostgreSQL tell each other when a project changes (LISTEN/NOTIFY, `Store._told`) and the others
+  read it again, and idle eviction, purges and the recount run on one server at a time, under an advisory lock
+  (`upkeep` in `server/app.py`). What a relay keeps in memory, and where each piece goes with several relays,
+  is under [Several relays](#where-each-piece-of-state-goes); new state follows the
+  [rules for server state](#rules-for-server-state), and `scripts/check_server_state.py` lists it all.
 - **Erasing:** when a project is evicted, purged, made relay-only or deleted for everyone, or a
   file is deleted, its stored files stop counting and can no longer be fetched at once: their
   rows move to the table `trash`, and their content is erased in the background
@@ -423,6 +438,201 @@ the server, so NAT needs no traversal. Only the server must be reachable (a publ
 host, a port forward, or a tunnel). Browsers also require HTTPS for WebCrypto. If
 direct browser-to-browser WebRTC is added later, it will need STUN, and TURN (or this
 relay) as the fallback for symmetric NATs.
+
+## Several relays
+
+A server runs as one process on one machine (the default, and enough for most: [INSTALL.md](INSTALL.md)), or as
+several **relays** on several machines, any of which serves any connection ([CLUSTER.md](CLUSTER.md) sets them up).
+The code is the same either way; settings choose.
+
+Everything the server remembers is one of three kinds, and where each lives decides how it can grow:
+
+- **Durable records**: each project's edit log (numbered by the database), its registration (its owner, a
+  creation code, and its storage mode), revocations, usage totals, creation codes and project lists. They live
+  in the **database**, the source of truth for stored projects.
+- **Stored files**: pictures, PDFs and other uploads, in a folder or an **S3-compatible bucket**. They are most
+  of the bytes, and an object store suits them: a file's key is `<project>/<id>` and the id names the content,
+  so a key holds one content for ever and nothing is updated in place; the store makes the copies, so another
+  relay attaches to the same bucket and has every file; and only four S3 requests are used (PUT, GET, DELETE,
+  HEAD), so any S3-compatible store works and nobody is tied to a provider.
+- **Live state**: what passes between the people connected to a project right now. A relay's connections to
+  one project are its **room**, which carries cursors and presence, every change of a sync-only project, and a
+  stored project's new changes as they arrive. It lives only in memory and is rebuilt when people reconnect:
+  apps send each other what they lack (peer catch-up, above) and catch up from the database.
+
+Durable records and files go to systems built to keep them available and to grow. Live state can't go in a
+database, and passing it between relays is the one new problem several relays bring. So the relays pass their
+rooms' messages to each other through a **bus**, a publish/subscribe server (Valkey, or anything speaking the
+Redis protocol), and keep nothing of their own that another relay would need:
+
+```
+  apps ──► doors ──► relays (any number, interchangeable)
+                        │                │                │
+           live messages│  exact records │           files│
+           + soft state │  (the truth)   │                │
+                        ▼                ▼                ▼
+                   bus (Valkey)     database          bucket
+                                   (PostgreSQL)
+```
+
+- **Relays** hold WebSocket connections, check signatures and pass messages on. One can stop at any time: its
+  apps reconnect to another and lose nothing.
+- **The bus** carries live messages between relays, one channel per project. It also holds *soft state*: what
+  may be lost or go stale without harm, and must vanish when the relay that wrote it dies (who is connected to
+  a project, which relays are alive).
+- A room is also its relay's subscription to the project's channel, made when its first connection to the
+  project arrives and dropped when the last one leaves. No room has an owner, and nothing routes a project to a
+  particular relay.
+
+Sending every connection of a project to one relay (a load balancer hashing the project id in the address)
+would need no bus, but a crowded project couldn't outgrow its relay and the front would have to hash. A relay
+can't read a document, so its rooms are light and passing them over a bus is cheap; keeping a project's people
+on one relay stays possible as an efficiency ([CLUSTER.md](CLUSTER.md)).
+
+### One machine to many
+
+Each tier sits behind a small interface: a written contract, and a check that any implementation must pass
+(`scripts/check_store.py`, `scripts/check_bus.py`, `scripts/check_files.py`).
+
+| tier | the contract, in short | one machine (the default) | several machines |
+|---|---|---|---|
+| database (`server/db.py`) | transactions; a per-project lock for the length of a transaction; numbering per project; durable once acknowledged | SQLite | PostgreSQL, kept available by Patroni |
+| bus and soft state (`server/bus.py`) | publish/subscribe by channel, at most once, in order per publisher, with every loss shown as a broken connection; keys with an expiry; atomic counters; hashes | in-process (`MemoryBus`) | Valkey or Redis, with Sentinels (`RespBus`, the relay's own client, so that every break is seen) |
+| files (`server/files.py`) | put, get, delete and exists, by key; a key's content never changes | a folder | an S3-compatible bucket |
+
+The relay always publishes through the bus, keeps soft state there and writes exact state in database
+transactions. On one machine the bus never drops anything, so the code that fills gaps never runs, but it is
+there.
+
+Each tier is one setting, an address, and **the address's scheme picks the implementation**: `database`
+(`sqlite:` or `postgresql:`; a PostgreSQL address may list several hosts, and with
+`target_session_attrs=primary` the driver finds the writable one, after a promotion too), `bus` (unset or
+`memory:` for in-process; `redis://`, `rediss://` or `redis+sentinel://`) and `files` (a folder or `s3://`). None
+set is one machine. Every relay has the same settings: nothing identifies a relay, whose number comes from the
+bus at start-up. A relay refuses a combination that can't work: SQLite allows one server per file, and a server
+with no bus holds an advisory lock on a PostgreSQL database for as long as it runs (`ALONE_LOCK` in
+`server/db.py`, taken in `server/app.py`), so a second one, which would split each project's people into rooms
+that never hear each other, refuses to start and says why.
+
+### Where each piece of state goes
+
+`scripts/check_server_state.py` lists everything a relay keeps in memory and what each piece means for several
+relays.
+
+| state | goes to | how |
+|---|---|---|
+| "is this change already stored?", and the append | database | in one transaction holding the project (`Store.locked`, above) |
+| an owner's storage total and its limit | database | added up in the same transaction, holding the owner: its projects' `usage` rows, its project lists, and uploads under way (`reserved`; they stop counting after 15 minutes, so a relay that dies mid-upload counts too much for a while, never too little). Only owners with a limit are added up or held |
+| the server's total (`max_bytes`) | each relay, read again from the database every minute | several relays together can pass it by what they accept in that minute: it guards the machine against filling, and an exact one would put every write on one row |
+| usage per project, storage modes, revocations, registrations, creation codes | database | relays keep copies; a change is announced through PostgreSQL's LISTEN/NOTIFY (`Store._told`; codes on `texloom_codes`, and read again every 5 s), and a relay whose listening connection broke reads them again |
+| connection ids (`you`, `from`, `to`) | nowhere shared | the relay's number (from a counter on the bus) × 2³², plus a count of its own: still an integer below 2⁵³, so JavaScript and old apps take it as it is |
+| who is connected to a project, and on which relay | bus, soft | a hash per project (`c:<project>`), connection id → relay. It gives `peers`, the limit of 256 connections per project, and whether a project is open anywhere (for idle eviction) |
+| which relays are alive | bus, soft | each says so every 3 s; one not heard from for 10 s is gone, and the others tell their own apps its connections have left |
+| a project's pace, limits per address, the memory budget, caches of public files | each relay | a project spread over k relays may get up to k times the pace (k is at most its connections), and limits per address add up across relays; sharing them would cost a round trip per message |
+| upkeep (eviction, purges, the ledger's recount) | one relay at a time | a PostgreSQL advisory lock (`MAINTENANCE_LOCK`) |
+
+Everything exact is in the database. Anything on the bus may be lost (a Valkey failover can drop recent
+writes), so nothing whose loss matters goes there; after a break, relays write their soft state again.
+
+### Messages between relays
+
+Two kinds of channel: `p:<project>` carries everything sent to a whole project (changes, presence, `left`,
+peer-to-peer messages to everyone); `r:<relay>` carries peer-to-peer messages to one connection on that relay
+(found in the project's connection hash), so that a large piece (4 MiB; files up to 50 MiB in sync-only
+projects) crosses the bus once rather than reaching every relay in the project. A large one goes over the bus
+only when someone in the project is connected elsewhere. A relay delivers a message to its own connections
+first, then publishes it, and ignores its own when they come back.
+
+**A change to a stored project.** The relay checks its signature, then stores it in one transaction (lock the
+project, check for a duplicate, check the owner's limit, append, add to the ledger), which numbers it `q`. It
+delivers it here, publishes it with `q` and the database's timeline (below), and only **then** acknowledges it:
+a relay that dies before publishing hasn't acknowledged, so the sender sends the change again. A change already
+stored is acknowledged **and published again**, so a resend after a relay died between storing and publishing
+reaches everyone; apps ignore copies they have. (Only if it is among the project's last 1,000 changes,
+`REPUBLISH_RECENT`, and against its sender's pace: anyone who hears a project's signed changes could replay old
+ones to make the relay repeat them to everyone.)
+
+A receiving relay keeps, for each stored project open there, the number up to which its connections have had
+every change (`upto`), starting from the database's head. A later number than the next is passed on at once
+(apps take changes in any order), and if what's missing hasn't come within 0.5 s it is read from the database.
+Every minute (every second while the bus is away), the heads of every stored project open there are read in one
+query: that catches the last change of a burst whose publishing was lost, which nothing after it would show. A
+gap compacted away meanwhile can't be passed on as changes, so its apps are asked to `recheck`.
+
+**A change to a sync-only project.** Nothing is stored, so nothing can be read back, and the order does the
+work: the relay delivers and publishes the change, then acknowledges it (`q` 0), and the app keeps it until
+then. Pub/sub loses messages only around a break in a subscriber's connection, never silently on a live one, so
+a relay whose connection to the bus broke (a failover, being disconnected for falling behind, the network) asks
+every connection it holds in a sync-only project to catch up from its peers (`resync`) once it is back, and
+checks its stored projects' heads. That covers every loss: the sender's relay died (no acknowledgement, so it
+resends), a receiver's relay died (its apps reconnect and catch up), or the bus broke (`resync`).
+
+**Presence, leaving, catching up.** Presence may be lost: the next update replaces it. `left` is sent by the
+relay that held the connection, or, when a relay dies, by every relay sharing a project with it once it is gone.
+A catch-up reads the log from the database on whichever relay; the relay subscribes to the project's channel
+first, so nothing arriving meanwhile is missed.
+
+**The bus or the database away.** While the bus is away, stored projects keep syncing through the database
+(the head check every second); presence, sync-only projects and peer-to-peer messages pause. While the database
+is away, changes are passed on live (`q` 0, as for a refusal) and not acknowledged, so their writers keep them
+and retry; an app whose message waits on the database is told to `wait`, so that it doesn't take its relay for
+gone. A relay whose bus has been away for 5 s, or whose database is unavailable, refuses new connections
+(`/api/health` answers 503) so that the doors send them elsewhere; the connections it has stay, since every
+relay sees a bus or database failover at once, and closing them all would be a storm of reconnects.
+
+**A database failover.** PostgreSQL's standbys copy the primary asynchronously, so one promoted after the
+primary is lost may lack changes the old primary acknowledged, and their numbers are then given to other
+changes. Every promotion raises the database's **timeline**, which a relay reads in every store transaction, at
+every head check and as soon as its listening connection is back. It reads it from the name of the WAL file
+being written (`Database.timeline` in `server/db.py`), which any user may read and which follows a promotion
+at once; `pg_control_checkpoint()` lags it until the next checkpoint (2 s in the lab, with writes already going
+to the new primary). When the timeline goes up, the relay asks every connection here to `recheck` (their
+hello's `last` finds what the database lost, and they send it again, as after a restore), starts `upto` afresh
+from the new heads, and **stores again** any change it stored before the failover and hadn't yet acknowledged,
+acknowledging it with its new number (else the acknowledgement could arrive after the app's recheck, and the app
+would forget a change the database lost; by then its number may belong to another change, so a second recheck
+wouldn't catch it). **Changes on the bus carry the timeline that numbered them**: one from an older timeline
+doesn't move `upto` (its number now belongs to another change), and a relay that hears of a newer timeline this
+way deals with the failover before it passes anything on. The TLA+ model (`models/relays`) found the need for
+these two rules. Apps that don't say `rs` in their hello don't know `resync` or `recheck`: their connection is
+closed instead, and they reconnect and catch up.
+
+### The database, kept available
+
+One PostgreSQL primary with standbys, kept available by Patroni (with etcd) or a hosted service. It is the
+database that must be fenced, not the relays: an old primary cut off from its standbys would go on taking writes
+from relays that still reach it, so Patroni demotes it (in the lab a cut-off primary demoted itself within 14 s,
+before a standby was promoted). Relays find the primary from the hosts listed in their `database` address, asking
+every one at once (`db.connect_any`): asyncpg alone tries them in turn within one timeout, so a host whose machine is
+gone, its packets going nowhere, kept every relay off the database for minutes in the deploy rehearsal. The bus's
+Sentinels are asked at once for the same reason. Past
+what one primary can write, projects could be split across databases by project id, since projects never talk to
+each other. A distributed SQL database isn't planned: CockroachDB, for one, lacks the session advisory locks and
+LISTEN/NOTIFY the server uses (they are in `server/db.py`'s PostgreSQL class, so another class could replace
+them).
+
+### Rules for server state
+
+So that several relays stay possible however the server changes, new code keeps to these rules:
+
+- **Anything about a project is reached through its address.** A new address that reads or writes a project's
+  data has `{project}` in its path (which also keeps routing by project possible). One that doesn't (project
+  lists, `/api/info`) keeps its state in the database, with changes that check what they replace (as project
+  lists do).
+- **State in a relay's memory is one of:** a setting; about its own connections; deliberately its own (the
+  memory budget, caches of public files, rate limits); about one project (a copy another relay could be told to
+  drop); a total across projects (read from the database where it must hold); or background work (run on one
+  relay at a time). `scripts/check_server_state.py` lists every piece and fails on a new one until it is put in
+  one of these, which makes it a decision rather than an accident.
+- **Totals across projects are worked out from what is stored** (the `usage` ledger is a kept copy, checked by
+  recounting), so where they are kept can change without what they mean changing.
+- **Background work is safe on one relay only, and safe to repeat** (a purge or eviction that stops half-way is
+  finished next time).
+- **Nothing a relay must know is only in its own files:** stored files go through the file store and the
+  database holds the rest. A relay's own folder is for spooling uploads and caches.
+- **Edits are numbered by the database,** never in a relay's memory.
+- **SQL works on both databases** (`scripts/check_store.py`); what only PostgreSQL can do for several relays
+  (LISTEN/NOTIFY, advisory locks, the timeline) stays in its class in `server/db.py`.
 
 ## Folder sync (the helper)
 
@@ -1088,7 +1298,7 @@ browser's token.
 ## One person, projects on different servers
 
 A project lives on one server; a person's projects needn't. (This is about where a project lives, not
-how a server scales: see [SCALING.md](SCALING.md).) The web app belongs to the server it's
+how a server grows: see [Several relays](#several-relays).) The web app belongs to the server it's
 loaded from (its "home": the list, settings, creation code and new projects are there), and a
 project from elsewhere syncs with its own server straight from the page (`web/src/servers.ts`):
 
@@ -1246,6 +1456,15 @@ before it can go (issue 27):
   version doesn't make it go away, so it is **converted when it is read**, where that's possible,
   and the marker says how, or why it can't be.
 
+**Several relays and older apps.** Every app version a server allows must keep working when its relays are
+several, with no change to the protocol it speaks: connection ids grow but stay JSON integers below 2⁵³, which
+apps treat as opaque; `resync` and `recheck` are never sent to an app that doesn't say `rs` in its hello (0.4.67
+and older): its connection is closed instead, and it connects again and catches up, as after any drop; storing,
+publishing and then acknowledging, and a change passed on again, are invisible to apps; and a "try again" (a 1013
+close, or 503 before connecting) is a drop to them, though older apps then retry every second or two rather than
+less and less often, which is more load but nothing wrong. `scripts/rehearse_relays.py old` runs the desktop sync
+engine of the oldest allowed version beside current apps, on different relays, through the same failures.
+
 `scripts/check_compat.py` lists them (`--min-version` and `--servers` say which app and server
 ones could go), and CI checks every marker is well formed and that each data marker says
 whether it is converted. When a server's minimum version moves up, remove a batch.
@@ -1307,5 +1526,22 @@ isn't built yet.
   and forgotten (`GONE_KEEP` changes later), nor for apps from before 0.4.52, which don't send it.
 - Browser storage can be evicted: request persistent storage; the server copy and
   the helpers' copies are the backup.
+- With several relays, limits per address (connections, rates) and a project's pace are counted per relay, so
+  together they allow up to that many times more; the doors' nginx limits per address still hold. Counters on
+  the bus could share them if it matters. The admin page shows one relay's view; the summary across relays is
+  the dashboards' (the relay's `/metrics`).
+- With several relays, a relay's number comes from a counter on the bus, and a Valkey failover can lose its
+  last additions: after a break every relay puts the counter back past its own number, but a relay starting in
+  the seconds before that can be given a number in use (rare, and harmless but for its connections sharing ids
+  with another relay's).
+- Not measured yet with several relays: whether Valkey keeps its contract under heavy load (a subscriber that
+  falls behind is disconnected, `client-output-buffer-limit pubsub`: a loss shown as a broken connection, so
+  handled, but the limit must be well above what a busy relay takes in), and how many projects one relay can
+  subscribe to before rooms coming and going costs more than it should.
+- Owners' totals assume one database. If projects were ever split across databases, an owner's projects could
+  sit on several, and its total would live in a small shared database, **reserved first**: the change's size
+  added to the owner's total there (atomically), then the change appended in the project's database, and the
+  reservation given back if that fails. A relay that dies in between leaves the total too high, never too low,
+  and the daily recount corrects it. (A transaction can't span two databases without a two-phase commit.)
 
 [texlyre-busytex]: https://github.com/TeXlyre/texlyre-busytex

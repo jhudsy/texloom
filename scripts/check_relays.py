@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Several relays at once (FUTURE_ARCHITECTURE.md): two servers in one process, sharing a PostgreSQL and a bus
+"""Several relays at once (DESIGN.md, "Several relays"): two servers in one process, sharing a PostgreSQL and a bus
 (the in-process one, named: memory:NAME), with apps on each. What one relay's apps send reaches the other's:
 
 - stored changes, presence, peer-to-peer messages to everyone and to one connection on the other relay (signed

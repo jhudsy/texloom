@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What each relay keeps in its own memory, and which addresses it serves: every piece is listed
 here with what it would mean for several relays at once (issue 12), so that a new one is a
-decision, not an accident. See "Keeping several servers possible" in SCALING.md.
+decision, not an accident. See "Rules for server state" in DESIGN.md.
 
 It reads server/*.py and fails on:
 - an attribute set on `self` in a server class (or a mutable value at module level, other than a
@@ -56,6 +56,9 @@ STATE = {
     # callback to the relay when its connection to the database is back
     "Relay.timeline": "per-server", "Relay._db_trouble": "per-server", "Store.on_back": "setting",
     "Relay._bus_away_since": "per-server", "Relay._pinging": "per-server",  # (its health; pinging its connections)
+    "CodeTable.db": "setting",  # (a handle to the database's codes table)
+    "Metrics.counts": "per-server", "Metrics.store_buckets": "per-server", "Metrics.store_sum": "per-server",
+    "Metrics.store_count": "per-server",  # (this relay's numbers for /metrics: Prometheus adds relays together)
     # connections on this relay
     "Relay.rooms": "connection", "Relay.conns": "connection", "Relay._next_id": "connection",
     "Conn.*": "connection", "Metered.*": "connection",
@@ -88,7 +91,7 @@ STATE = {
 ROUTES = {
     "GET /ws/{project}": "project", "PUT /blob/{project}/{id}": "project", "GET /blob/{project}/{id}": "project",
     "DELETE /blob/{project}/{id}": "project",
-    "GET /api/info": "any", "GET /api/health": "any", "POST /api/code": "any", "GET /api/arxiv/{id}": "any", "GET /admin": "any",
+    "GET /api/info": "any", "GET /api/health": "any", "GET /metrics": "any", "POST /api/code": "any", "GET /api/arxiv/{id}": "any", "GET /admin": "any",
     "GET /api/list/{id}": "any", "PUT /api/list/{id}": "any", "DELETE /api/list/{id}": "any",  # compare-and-swap in the database
     "GET /texlive/{year}/{fmt}/{name}": "any", "STATIC /core": "any", "GET /": "any", "STATIC /": "any",
 }
@@ -145,7 +148,7 @@ def main() -> int:
             covered.add(f"{cls}.*")
         else:
             problems.append(f"{name}: new state kept in a relay's memory. Add it to STATE in this script with its kind "
-                            "(see SCALING.md, \"Keeping several servers possible\")")
+                            "(see DESIGN.md, \"Rules for server state\")")
     problems += [f"{k}: listed in STATE but not in the code any more" for k in STATE if k not in covered]
     routes = found_routes()
     problems += [f"{r}: a new address. Add it to ROUTES in this script: \"project\" (with {{project}} in its path) or \"any\""

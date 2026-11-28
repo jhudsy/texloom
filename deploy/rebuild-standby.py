@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Turn this machine's PostgreSQL into a standby of another: for the old primary after a failover
-(STANDBY.md, "Afterwards: rebuild the old primary"). Run as root on the machine to be rebuilt:
+(INSTALL.md, "A standby, switched by hand"). Run as root on the machine to be rebuilt:
 
     sudo /var/www/texloom/deploy/rebuild-standby.py NEW-PRIMARY-HOST          # Debian/Ubuntu's one cluster
     sudo /var/www/texloom/deploy/rebuild-standby.py NEW-PRIMARY-HOST --cluster 17/main
@@ -248,7 +248,7 @@ def main() -> None:
             subprocess.run(["systemctl", "start", "texloom"], check=False)
         else:
             say("the texloom server is left stopped: a server can't run on a standby database. Promote this PostgreSQL "
-                "when you need it (STANDBY.md), then start it.")
+                "when you need it (INSTALL.md, \"A standby, switched by hand\"), then start it.")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 """The front door's health watcher: keeps nginx sending to the relays that are well.
 
 Open-source nginx notices a relay is down only when a request to it fails, and then tries it again soon after: an app
-reconnecting may be sent straight back to a frozen relay (FUTURE_ARCHITECTURE.md, "The front door"). This asks every
+reconnecting may be sent straight back to a frozen relay (CLUSTER.md). This asks every
 relay's /api/health every EVERY seconds; one that fails twice in a row is marked `down` in nginx's upstream
 (/etc/nginx/conf.d/texloom-relays.conf) and nginx reloaded (gracefully: open connections stay); one that answers
 twice in a row is put back. If every relay fails, none is marked down (nginx then tries them all, which is the best

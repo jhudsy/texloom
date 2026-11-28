@@ -52,9 +52,50 @@ START_LOCK = 7316  # PostgreSQL advisory lock taken while creating the tables (s
 MAINTENANCE_LOCK = 7317  # held while a server does the upkeep that must run on one server at a time
 ALONE_LOCK = 7318  # held for as long as a server with no bus (one server alone) uses the database
 NOTIFY_MAX = 7000  # bytes: PostgreSQL's limit on a notification is 8000
+# Seconds to reach one of the database's hosts. With several (a Patroni cluster: `host1,host2`), every one is tried at
+# once, each given this long (connect_any)
+CONNECT_TIMEOUT = 10
 
 
 log = logging.getLogger("texloom.db")
+
+
+def hosts_of(url: str) -> list[str]:
+    """A PostgreSQL URL for each of `url`'s hosts (postgresql://user:pw@a:5432,b:5432/db?… gives one for a, one for b)."""
+    scheme, sep, rest = url.partition("://")
+    netloc, slash, path = rest.partition("/")
+    userinfo, at, hosts = netloc.rpartition("@")
+    return [f"{scheme}{sep}{userinfo}{at}{h}{slash}{path}" for h in hosts.split(",")] if "," in hosts else [url]
+
+
+async def connect_any(url: str, *args, timeout: float = CONNECT_TIMEOUT, **kwargs):
+    """A connection to the database at `url`: with several hosts, to the first that answers and is what the URL asks
+    for (`target_session_attrs=primary`: the one taking writes), every host tried at once. asyncpg tries them in turn
+    within one timeout, so a host that doesn't answer at all (a machine gone: its packets go nowhere) used it all, and
+    the primary after a failover was never reached (the deploy rehearsal: every relay off the database for minutes)."""
+    import asyncpg
+    urls = hosts_of(url)
+    if len(urls) == 1:
+        return await asyncpg.connect(url, *args, timeout=timeout, **kwargs)
+    tries = [asyncio.ensure_future(asyncpg.connect(u, *args, timeout=timeout, **kwargs)) for u in urls]
+    chosen, last = None, None
+    try:
+        for done in asyncio.as_completed(tries):
+            try:
+                chosen = await done
+                return chosen
+            except (OSError, TimeoutError, asyncpg.PostgresError, asyncpg.InterfaceError,
+                    asyncpg.exceptions.TargetServerAttributeNotMatched) as e:  # (a standby, when the primary is asked for)
+                last = e
+        raise last or OSError(f"none of the {len(urls)} hosts answered")
+    finally:
+        async def tidy() -> None:  # the other tries: stopped, or closed if they connected too
+            for t in tries:
+                t.cancel()
+            for r in await asyncio.gather(*tries, return_exceptions=True):
+                if isinstance(r, asyncpg.Connection) and r is not chosen:
+                    await r.close()
+        asyncio.ensure_future(tidy())
 
 
 def unavailable(e: BaseException) -> bool:
@@ -136,6 +177,11 @@ class Database(abc.ABC):
     @abc.abstractmethod
     def tx(self) -> contextlib.AbstractAsyncContextManager[Any]:
         """A transaction, yielding its connection (execute, executemany, fetch, fetchrow, fetchval)."""
+
+    @abc.abstractmethod
+    def snapshot(self) -> contextlib.AbstractAsyncContextManager[Any]:
+        """A read-only transaction seeing the database as it was when it began, whatever is written meanwhile (a
+        backup of a database in use), yielding its connection (fetch, fetchrow, fetchval)."""
 
     @abc.abstractmethod
     async def create(self, schema: str) -> None:
@@ -221,7 +267,8 @@ class PostgreSQL(_PgCalls, Database):
     async def open(cls, url: str) -> PostgreSQL:
         import asyncpg
         try:
-            pool = await asyncpg.create_pool(url, min_size=1, max_size=POOL_MAX, command_timeout=COMMAND_TIMEOUT)
+            pool = await asyncpg.create_pool(url, min_size=1, max_size=POOL_MAX, command_timeout=COMMAND_TIMEOUT,
+                                             connect=connect_any)
         except (OSError, asyncpg.PostgresError) as e:
             raise DatabaseError(f"can't reach the database {redact(url)}: {e}") from None
         try:
@@ -232,12 +279,17 @@ class PostgreSQL(_PgCalls, Database):
         if standby:
             await pool.close()
             raise DatabaseError(f"{redact(url)} is a standby, which can't be written to. Promote it first "
-                                "(STANDBY.md), or point `database` at the primary")
+                                "(INSTALL.md, \"A standby, switched by hand\"), or point `database` at the primary")
         return cls(url, pool)
 
     @contextlib.asynccontextmanager
     async def tx(self):
         async with self.pool.acquire() as c, c.transaction():
+            yield _PgCalls(c)
+
+    @contextlib.asynccontextmanager
+    async def snapshot(self):
+        async with self.pool.acquire() as c, c.transaction(isolation="repeatable_read", readonly=True):
             yield _PgCalls(c)
 
     async def create(self, schema: str) -> None:
@@ -250,7 +302,7 @@ class PostgreSQL(_PgCalls, Database):
         # a session lock on a connection of its own, for as long as the block runs (and gone if it dies)
         import asyncpg
         try:
-            c = await asyncpg.connect(self.url, timeout=10)
+            c = await connect_any(self.url)
         except (OSError, asyncpg.PostgresError, TimeoutError) as e:
             raise DatabaseError(f"can't reach the database {redact(self.url)}: {e}") from None
         got = False
@@ -291,7 +343,7 @@ class PostgreSQL(_PgCalls, Database):
         while True:
             conn = None
             try:
-                conn = await asyncpg.connect(self.url, timeout=10)
+                conn = await connect_any(self.url)
                 for channel, callbacks in list(self._listeners.items()):
                     for cb in callbacks:
                         await conn.add_listener(channel, lambda _c, _pid, _ch, payload, cb=cb: self._call(cb, payload))
@@ -440,13 +492,20 @@ class SQLite(Database):
     async def timeline(self) -> int:
         return 1  # (no standby to fail over to)
 
+    def tx(self):
+        return self._transaction("BEGIN IMMEDIATE")
+
+    def snapshot(self):
+        # (a read transaction sees the database as it was at its first read, in WAL mode, while others write)
+        return self._transaction("BEGIN DEFERRED")
+
     @contextlib.asynccontextmanager
-    async def tx(self):
+    async def _transaction(self, begin: str):
         self._check()
         async with self._busy:
             self._in_tx = asyncio.current_task()
             try:
-                await self._calls.execute("BEGIN IMMEDIATE")
+                await self._calls.execute(begin)
                 try:
                     yield self._calls
                 except BaseException:
@@ -492,10 +551,10 @@ def _hold(path: Path):
 COPY_BATCH = 500
 
 
-async def copy_tables(src: Database, dst: Database, tables: dict[str, tuple[str, ...]],
+async def copy_tables(src, dst: Database, tables: dict[str, tuple[str, ...]],
                       booleans: frozenset[str] = frozenset(), progress=None) -> dict[str, int]:
-    """Copy every row of `tables` (name -> primary key columns) from `src` into `dst`, whose tables
-    must be empty. A batch at a time, in key order. Returns the rows copied per table."""
+    """Copy every row of `tables` (name -> primary key columns) from `src` (a database, or a snapshot of one) into
+    `dst`, whose tables must be empty. A batch at a time, in key order. Returns the rows copied per table."""
     for t in tables:
         if await dst.fetchval(f"SELECT 1 FROM {t} LIMIT 1") is not None:
             raise DatabaseError(f"{redact(dst.url)} isn't empty (its table {t} has rows): copy into a new database")

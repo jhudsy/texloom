@@ -213,6 +213,38 @@ ReadWritePaths=/var/lib/texloom
 [Install]
 WantedBy=multi-user.target
 UNIT
+# Backups (deploy/texloom-backup): every hour once /etc/texloom/backup.env says where to (INSTALL.md, "Backups").
+# A texloom-backup of another kind (a server's own, from before) is left as it is, with its units.
+if [ -f /usr/local/sbin/texloom-backup ] && ! grep -qF "texloom-server --backup:" /usr/local/sbin/texloom-backup; then
+  echo "    backups: /usr/local/sbin/texloom-backup is one of your own: left as it is (see INSTALL.md, \"Backups\")"
+else
+install -m 755 "$APP_DIR/deploy/texloom-backup" /usr/local/sbin/texloom-backup
+cat > /etc/systemd/system/texloom-backup.service <<'UNIT'
+[Unit]
+Description=TeXLoom's backup, sent off-site with restic (deploy/texloom-backup)
+ConditionPathExists=/etc/texloom/backup.env
+After=network-online.target texloom.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/texloom-backup
+Nice=10
+IOSchedulingClass=idle
+UNIT
+cat > /etc/systemd/system/texloom-backup.timer <<'UNIT'
+[Unit]
+Description=TeXLoom's backup, every hour (off until /etc/texloom/backup.env exists)
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable -q --now texloom-backup.timer
+fi
 systemctl daemon-reload
 systemctl enable -q texloom
 systemctl restart texloom
@@ -251,6 +283,8 @@ server {
     listen 80;
     listen [::]:80;
     server_name $DOMAIN;
+    # several doors (deploy/cluster.py): each one's certificate, and Let's Encrypt's checks passed between them
+    include /etc/texloom/door/*.conf;
 
     root $APP_DIR/web/dist;
     expires \$texloom_html_expires;
@@ -453,6 +487,12 @@ if "$texloom_html_expires" not in site:  # pages always rechecked (else a stale 
         site = site.replace(root, root + "    expires $texloom_html_expires;\n")
         open(path, "w").write(site)
         print("    nginx: pages are always rechecked")
+if "include /etc/texloom/door/" not in site and f"    root {app_dir}/web/dist;\n" in site:  # (several doors: CLUSTER.md)
+    root = f"    root {app_dir}/web/dist;\n"
+    site = site.replace(root, "    # several doors (deploy/cluster.py): each one's certificate, and Let's Encrypt's checks passed between them\n"
+                        "    include /etc/texloom/door/*.conf;\n" + root, 1)
+    open(path, "w").write(site)
+    print("    nginx: the site includes /etc/texloom/door/ (several doors' certificates; nothing there on one server)")
 anchor = "    location /api/ {"
 missing = "".join(b for k, b in blocks.items() if k not in site)
 if missing and anchor in site:

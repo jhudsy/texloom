@@ -2,7 +2,7 @@
 # What differs between the nodes comes from the environment, set by the script:
 #   PATRONI_NAME, PATRONI_RESTAPI_CONNECT_ADDRESS, PATRONI_POSTGRESQL_CONNECT_ADDRESS,
 #   PATRONI_ETCD3_HOSTS, and the passwords (PATRONI_SUPERUSER_PASSWORD, PATRONI_REPLICATION_PASSWORD).
-# The timings are Patroni's own defaults, which FUTURE_ARCHITECTURE.md's table quotes: the leader key
+# The timings are Patroni's own defaults, which CLUSTER.md's measured times assume: the leader key
 # lives 30 s, so a primary that dies without a word is replaced within about 30-40 s. The script can
 # shorten them for a quicker run (REHEARSE_PATRONI_TTL).
 scope: texloom

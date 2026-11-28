@@ -71,6 +71,10 @@ jobs:
         run: uv run --extra server python scripts/check_bus.py --valkey
       - name: "The database away for a while: changes passed on live and sent again, apps asked to try again; a server that never answers given up on"
         run: uv run --extra server python scripts/check_db_away.py
+      - name: "Backups: the database copied at one moment while it is written to, one server of several making it, restored (SQLite and a throwaway PostgreSQL)"
+        run: uv run --extra server python scripts/check_backup.py
+      - name: "The relay's /metrics for Prometheus: its format, what it counts, and no project ids or codes in it"
+        run: uv run --extra server python scripts/check_metrics.py
       - name: What an outsider could do to the server (revocations off the budget, TeX Live paths; security review)
         run: uv run --extra server python scripts/check_server_abuse.py
       - name: Moving a project to another creation code (a real server)

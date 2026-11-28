@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# texloom-backup: this server's backup (texloom-server --backup: the database as it was at one moment, and the stored
+# files), sent off-site with restic. Run every hour by texloom-backup.timer, which install.sh installs; off until
+# /etc/texloom/backup.env exists. The same on one server and on several: each relay of a cluster runs it, and the first
+# to begin makes the hour's backup (the others leave it). INSTALL.md, "Backups"; CLUSTER.md, "Backups".
+#
+# /etc/texloom/backup.env (root only: it holds keys), every line exported:
+#   RESTIC_REPOSITORY      where backups go (e.g. b2:bucket:texloom, s3:https://…/bucket), and its keys for restic
+#                          (B2_ACCOUNT_ID and B2_ACCOUNT_KEY, AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, …)
+#   RESTIC_PASSWORD_FILE   the password backups are encrypted with: keep a copy somewhere else (without it they can't
+#                          be read, and it isn't inside them)
+#   KEEP_HOURLY, KEEP_DAILY  snapshots kept: every one of the last 48 hours, one a day for 30 days (the defaults)
+#   HEALTHCHECK_URL        (optional) pinged after each backup, and at …/fail when one fails: so that backups that
+#                          stop are noticed
+#   BUCKET_COPY            (optional) with stored files in a bucket: copy them to this rclone remote:path (in
+#                          /etc/texloom/rclone.conf, whose remote `source` is the server's bucket, BUCKET_SOURCE the
+#                          bucket and folder there) rather than into a folder sent with restic. Keep old versions
+#                          there (its lifecycle rules), or a file deleted by mistake is deleted from the copy too
+set -euo pipefail
+ENV_FILE=${TEXLOOM_BACKUP_ENV:-/etc/texloom/backup.env}
+set -a
+# shellcheck source=/dev/null
+. "$ENV_FILE"
+set +a
+DIR=${BACKUP_DIR:-/var/lib/texloom/backup}
+SERVER=${TEXLOOM_SERVER:-/var/www/texloom/.venv/bin/texloom-server}
+
+ping() { [ -z "${HEALTHCHECK_URL:-}" ] || curl -fsS -m 10 --retry 3 -o /dev/null "$HEALTHCHECK_URL$1" || true; }
+trap 'echo "the backup failed" >&2; ping /fail' ERR
+command -v restic >/dev/null || { echo "restic isn't installed (apt install restic)" >&2; false; }
+
+# the database and the stored files, as they are now (status 75: another relay made this hour's backup)
+status=0
+paths=$(cd / && runuser -u texloom -- "$SERVER" --config /etc/texloom/texloom.toml --backup "$DIR" \
+          --backup-every "${EVERY_MINUTES:-50}" ${BUCKET_COPY:+--backup-no-files}) || status=$?
+if [ "$status" = 75 ]; then
+  exit 0
+elif [ "$status" != 0 ]; then
+  false
+fi
+if [ -n "${BUCKET_COPY:-}" ]; then
+  rclone --config /etc/texloom/rclone.conf sync --fast-list "source:$BUCKET_SOURCE" "$BUCKET_COPY"
+fi
+
+# (a new repository is made the first time; restic's status 10: there is none yet)
+restic cat config >/dev/null 2>&1 || { [ $? = 10 ] && restic init; }
+extra=(/etc/texloom)
+[ ! -d /etc/letsencrypt ] || extra+=(/etc/letsencrypt)  # (asking Let's Encrypt again after losing every door may wait days)
+# shellcheck disable=SC2086
+restic backup --retry-lock 30m --quiet --tag texloom --exclude '*/.incoming' $paths "${extra[@]}"
+restic forget --retry-lock 30m --quiet --tag texloom --group-by tags \
+  --keep-hourly "${KEEP_HOURLY:-48}" --keep-daily "${KEEP_DAILY:-30}"
+if [ "$(date +%H)" = "${PRUNE_HOUR:-03}" ]; then  # (removing forgotten snapshots' data is the heavy part: once a day)
+  restic prune --retry-lock 30m --quiet
+fi
+ping ""
+echo "backed up: $(echo $paths) ${extra[*]}"

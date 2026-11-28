@@ -97,8 +97,8 @@ def stop(folder: Path, mode: str = "fast") -> None:
 
 
 def standby_of(folder: Path, primary_port: int) -> None:
-    """Make `folder` a standby of the (running) database on `primary_port`, as STANDBY.md's "A
-    standby server" does: a base backup streamed from it, with the connection settings written
+    """Make `folder` a standby of the (running) database on `primary_port`, as INSTALL.md's "A
+    standby, switched by hand" does: a base backup streamed from it, with the connection settings written
     (-R) and standby.signal. Start it with start(folder) afterwards."""
     folder = folder.resolve()
     folder.parent.mkdir(parents=True, exist_ok=True)

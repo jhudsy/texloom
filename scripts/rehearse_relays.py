@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A test lab for the stateless relays, in Docker (FUTURE_ARCHITECTURE.md, "Building it", step 9). Needs
+"""A test lab for the stateless relays, in Docker (DESIGN.md, "Several relays"; its timings: CLUSTER.md). Needs
 Docker; run by hand, not in CI. It builds several "machines" of containers, keeps each tier available with
 the tools the design names, breaks any part of it and times how long things take to come back.
 
@@ -1228,7 +1228,7 @@ async def scenario_old(lab: Lab, how: str, target: str) -> None:
 
 
 async def scenario_collab(lab: Lab, how: str, target: str, old: tuple[str, ...] = ()) -> None:
-    """Several relays at once (FUTURE_ARCHITECTURE.md): three apps editing one stored project, each on a relay of its
+    """Several relays at once (DESIGN.md, "Several relays"): three apps editing one stored project, each on a relay of its
     own, and two on a sync-only project, through the front door. A part is broken (`target`: a relay, the default
     relay-a; valkey or pg, whichever is the primary; or a whole machine) while every app goes on editing. Timed: how
     long until every app has every change, and every stored change is acknowledged; then the same after mending, and

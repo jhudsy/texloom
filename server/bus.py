@@ -1,4 +1,4 @@
-"""The bus: live messages between relays, and soft state they share (FUTURE_ARCHITECTURE.md).
+"""The bus: live messages between relays, and soft state they share (DESIGN.md, "Several relays").
 
 One relay alone needs none of this: the in-process bus (MemoryBus) passes messages to its own
 subscribers. Several relays share a Redis-compatible server (Valkey, Redis, or a managed one),
@@ -34,7 +34,7 @@ The contract. Anything used as the bus must keep it; scripts/check_bus.py checks
    (a Redis failover can drop recent writes): nothing whose loss matters is kept here.
 6. Channels and keys are names of TeXLoom's own: the implementation puts them under a prefix
    ("texloom:" unless the address says otherwise), so that a Redis access list can confine the
-   relays to it (see INSTALL.md: a user allowed only the commands in COMMANDS, on the prefix).
+   relays to it (see CLUSTER.md: a user allowed only the commands in COMMANDS, on the prefix).
 
 on_message(channel, data) and on_break() are plain functions called in the event loop: they must
 not block (hand anything slow to a task).
@@ -386,23 +386,34 @@ class RespBus(Bus):
         if not self.sentinel:
             return self.hosts[0]
         problems = []
-        for host, port in self.hosts:
+
+        async def ask(host: str, port: int) -> tuple[str, int]:
             try:
                 c, _ = await _Conn.open(host, port, None, None, None)
             except BusError as e:
-                problems.append(str(e))
-                continue
+                raise BusError(str(e)) from None
             try:
                 c.w.write(_encode(("SENTINEL", "get-master-addr-by-name", self.primary)))
                 reply = await asyncio.wait_for(_read(c.r), TIMEOUT)
             except (OSError, TimeoutError, asyncio.IncompleteReadError, ConnectionError) as e:
-                problems.append(f"{host}:{port}: {e}")
-                continue
+                raise BusError(f"{host}:{port}: {e}") from None
             finally:
                 c.close()
             if isinstance(reply, list) and len(reply) == 2:
                 return reply[0].decode(), int(reply[1])
-            problems.append(f"{host}:{port} doesn't know {self.primary!r}")
+            raise BusError(f"{host}:{port} doesn't know {self.primary!r}")
+        # every Sentinel asked at once, the first answer taken: one on a machine that is gone (its packets going
+        # nowhere) would otherwise hold up every reconnection by its timeout
+        asks = [asyncio.ensure_future(ask(h, p)) for h, p in self.hosts]
+        try:
+            for done in asyncio.as_completed(asks):
+                try:
+                    return await done
+                except BusError as e:
+                    problems.append(str(e))
+        finally:
+            for a in asks:
+                a.cancel()
         raise BusError("no Sentinel said where the primary is: " + "; ".join(problems))
 
     async def _open(self) -> _Conn:

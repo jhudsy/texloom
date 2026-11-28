@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""deploy/rebuild-standby.py (STANDBY.md, "Afterwards: rebuild the old primary"): turning the old primary
+"""deploy/rebuild-standby.py (INSTALL.md, "A standby, switched by hand"): turning the old primary
 into a standby of the new one, with throwaway PostgreSQL clusters (scripts/pg.py).
 
 The case: a primary P with a streaming standby S; the link is cut, P takes a change S never gets

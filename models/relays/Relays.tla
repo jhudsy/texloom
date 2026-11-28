@@ -1,5 +1,5 @@
 ---------------------------- MODULE Relays ----------------------------
-(* Stateless relays (FUTURE_ARCHITECTURE.md): several relays sharing one database and a bus, one stored
+(* Stateless relays (DESIGN.md, "Several relays"): several relays sharing one database and a bus, one stored
    project, and apps connected to any relay. The questions:
 
    - NoLostAck: when an app is connected, has heard everything its relay sent it, and has nothing left

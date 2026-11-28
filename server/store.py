@@ -12,7 +12,7 @@ check-then-write steps (is it a replay? may it be stored? store it) run in one t
 holds the project (`locked`: a PostgreSQL advisory lock, so servers sharing the database take
 turns; SQLite has one writer anyway). An owner's allowance is checked in that transaction too,
 against what the database says the owner stores, holding the owner, so writes through several
-servers can't together pass it (FUTURE_ARCHITECTURE.md, "Where each piece of state goes").
+servers can't together pass it (DESIGN.md, "Where each piece of state goes").
 
 Some things are also kept in memory, because they're consulted often: how much each project and
 owner stores, owners, deletions, last-seen times, storage modes and revocations. They follow the
@@ -136,6 +136,9 @@ CREATE INDEX IF NOT EXISTS projects_owner ON projects (owner);
 -- its allowance as written ("2G", "unlimited"), a label, and the last day it is valid ("": no expiry)
 CREATE TABLE IF NOT EXISTS codes (
   code text PRIMARY KEY, size text NOT NULL, label text NOT NULL, until text NOT NULL);
+-- When the last backup was begun (one row; texloom-server --backup): of several servers sharing the database, each
+-- trying every hour, the first makes it
+CREATE TABLE IF NOT EXISTS backups (id integer PRIMARY KEY, at double precision NOT NULL);
 """
 SCHEMA_POSTGRESQL = """
 -- ciphertext doesn't compress: store it as it is, out of line, without trying
@@ -145,7 +148,7 @@ ALTER TABLE log ALTER COLUMN data SET STORAGE EXTERNAL;
 TABLES = {"log": ("project", "seq"), "head": ("project",), "mode": ("project",), "stored": ("project", "id"),
           "trash": ("project", "id"), "revoked": ("project", "pub"), "projects": ("project",), "gone": ("project", "h"),
           "kept": ("project", "h"), "floor": ("project",), "deleted": ("project",), "clients": ("app", "version"), "lists": ("id",),
-          "usage": ("project",), "reserved": ("id",), "codes": ("code",)}
+          "usage": ("project",), "reserved": ("id",), "codes": ("code",), "backups": ("id",)}
 BOOLEANS = frozenset({"snap", "relay"})
 
 
@@ -972,6 +975,13 @@ class Store:
         return self.files.get(f"{project}/{bid}")
 
     # --- copies of the stored files, for backups and restores ------------------------
+    async def claim_backup(self, every: float) -> bool:
+        """Whether to make a backup now: none was begun in the last `every` seconds, by this server or another sharing
+        the database. Claimed at once, so that of several trying together, one does."""
+        now = time.time()
+        await self.db.execute("INSERT INTO backups (id, at) VALUES (1, 0) ON CONFLICT (id) DO NOTHING")
+        return await self.db.execute("UPDATE backups SET at = $1 WHERE id = 1 AND at <= $2", now, now - every) == 1
+
     async def files_to_folder(self, dest: Path) -> tuple[int, int]:
         """Make `dest` hold exactly the stored files (<project>/<id>), copying only those it lacks
         (a file never changes, so one already there is the same). Returns (copied, removed)."""
@@ -1039,16 +1049,18 @@ class Store:
         return modes, projects, apps, snaps
 
 
-async def copy_database(src_url: str, dst_url: str, progress=None) -> dict[str, int]:
-    """Copy everything in one server's database into a new one (SQLite to PostgreSQL, say). Neither
-    may be in use: a server on either SQLite file is refused; for PostgreSQL, stop it first."""
+async def copy_database(src_url: str, dst_url: str, progress=None, live: bool = False) -> dict[str, int]:
+    """Copy everything in one server's database into a new one (SQLite to PostgreSQL, say), as it was at one moment.
+    The new one may not be in use. The old one may be only if `live` (a backup): otherwise a server on its SQLite file
+    is refused, and a server on PostgreSQL should be stopped (changes it makes meanwhile would be missed)."""
     if src_url == dst_url:
         raise DatabaseError("that's the same database: copy into a new one")
-    src = await connect(src_url, SCHEMA, SCHEMA_POSTGRESQL, serving=True)
+    src = await connect(src_url, SCHEMA, SCHEMA_POSTGRESQL, serving=not live)
     try:
         dst = await connect(dst_url, SCHEMA, SCHEMA_POSTGRESQL, serving=True)
         try:
-            return await copy_tables(src, dst, TABLES, BOOLEANS, progress)
+            async with src.snapshot() as seen:
+                return await copy_tables(seen, dst, TABLES, BOOLEANS, progress)
         finally:
             await dst.close()
     finally:

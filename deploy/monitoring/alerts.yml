@@ -1,0 +1,91 @@
+# Prometheus's alert rules for a TeXLoom cluster (deploy/cluster.py installs them where a machine runs `monitoring`).
+# Each says what stays wrong for a few minutes: recovery by itself (a relay restarted, a failover) is not an alert,
+# but a standby no longer copying, a Sentinel down (so the next failover would fail), a disk filling, is.
+groups:
+  - name: texloom
+    rules:
+      - alert: MachineDown
+        expr: up{job="node"} == 0
+        for: 2m
+        annotations:
+          summary: "{{ $labels.machine }} can't be reached (or its node exporter is down)"
+      - alert: ServiceDown
+        expr: node_systemd_unit_state{state="active"} == 0
+        for: 3m
+        annotations:
+          summary: "{{ $labels.name }} is stopped on {{ $labels.machine }}"
+      - alert: ServiceFailed
+        expr: node_systemd_unit_state{state="failed"} == 1
+        for: 1m
+        annotations:
+          summary: "{{ $labels.name }} failed on {{ $labels.machine }}"
+      - alert: RelayDown
+        expr: up{job="relay"} == 0
+        for: 2m
+        annotations:
+          summary: "the relay on {{ $labels.machine }} doesn't answer"
+      - alert: RelayUnwell
+        expr: texloom_healthy == 0
+        for: 2m
+        annotations:
+          summary: "the relay on {{ $labels.machine }} refuses new connections (the bus or the database is away)"
+      - alert: BusAway
+        expr: texloom_bus_away == 1
+        for: 2m
+        annotations:
+          summary: "the relay on {{ $labels.machine }} has lost the bus (Valkey)"
+      - alert: DatabaseUnavailable
+        expr: texloom_database_unavailable == 1
+        for: 2m
+        annotations:
+          summary: "the relay on {{ $labels.machine }} can't use the database"
+      - alert: StoresSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(texloom_store_seconds_bucket[5m]))) > 1
+        for: 10m
+        annotations:
+          summary: "storing a change takes over a second for one in twenty"
+      - alert: NoDatabasePrimary
+        expr: sum(patroni_primary) != 1
+        for: 1m
+        annotations:
+          summary: "PostgreSQL has {{ $value }} primaries (Patroni): one is expected"
+      - alert: StandbyNotCopying
+        expr: patroni_replica == 1 and on(instance) patroni_postgres_streaming == 0
+        for: 5m
+        annotations:
+          summary: "the PostgreSQL standby on {{ $labels.machine }} isn't copying the primary"
+      - alert: DatabaseConnectionsHigh
+        expr: sum by (instance, machine) (pg_stat_activity_count) / on(instance) group_left() pg_settings_max_connections > 0.8
+        for: 10m
+        annotations:
+          summary: "PostgreSQL on {{ $labels.machine }} uses over 80% of its connections"
+      - alert: EtcdNoLeader
+        expr: etcd_server_has_leader == 0
+        for: 1m
+        annotations:
+          summary: "etcd on {{ $labels.machine }} has no leader (Patroni can't fail over)"
+      - alert: ValkeyDown
+        expr: redis_up == 0
+        for: 2m
+        annotations:
+          summary: "Valkey on {{ $labels.machine }} doesn't answer"
+      - alert: ValkeyReplicaMissing
+        expr: max(redis_connected_slaves) < count(redis_up == 1) - 1
+        for: 5m
+        annotations:
+          summary: "a Valkey replica isn't following the primary"
+      - alert: DiskFilling
+        expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes) > 0.8
+        for: 10m
+        annotations:
+          summary: "{{ $labels.mountpoint }} on {{ $labels.machine }} is {{ $value | humanizePercentage }} full"
+      - alert: MemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
+        for: 10m
+        annotations:
+          summary: "{{ $labels.machine }} has under 10% of its memory free"
+      - alert: CertificateExpiring
+        expr: texloom_certificate_expiry_seconds - time() < 14 * 86400
+        for: 1h
+        annotations:
+          summary: "the certificate on {{ $labels.machine }}'s door expires in {{ $value | humanizeDuration }} (certbot renews it at 30 days)"

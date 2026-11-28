@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import time
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ from .bus import MemoryBus, open_bus
 from .db import ALONE_LOCK, MAINTENANCE_LOCK, redact
 from .endpoints import MAX_BODY, Endpoints, headers
 from .files import Files
+from .metrics import METRICS
 from .policy import GiB, CodeBook, Limits, Policy
 from .relay import Relay
 from .store import RECONCILE_EVERY, Store
@@ -138,6 +140,7 @@ def make_app(s: Settings) -> web.Application:
         await held.aclose()
     app.cleanup_ctx.insert(0, bus_open)
     app.router.add_get("/api/health", relay.health)
+    app.router.add_get("/metrics", functools.partial(METRICS.page, relay))  # (Prometheus's: nginx doesn't pass it on)
     if s.admin_token:
         from .admin import Admin
         app.router.add_get("/admin", Admin(relay, s.admin_token, s.evict_days, s.purge_days).page)

@@ -145,6 +145,16 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--files-for-backup", type=Path, metavar="DIR",
                    help="print the folder that holds the stored files, for a backup to include, then exit. With "
                         "a bucket, first make DIR a copy of it (copying only what's new), and print DIR")
+    p.add_argument("--backup", type=Path, metavar="DIR",
+                   help="make a backup in DIR, then exit: the database as it is now, as an SQLite file (DIR/texloom.db, "
+                        "whatever the database is: restore it with --copy-database-from), and, with files in a bucket, a "
+                        "copy of them (DIR/files: only what's new is copied; --files-restore puts them back). Prints the "
+                        "folders to send off-site (deploy/texloom-backup sends them with restic)")
+    p.add_argument("--backup-every", type=float, default=0, metavar="MINUTES",
+                   help="for --backup: none if one was begun less than this long ago, here or by another server sharing "
+                        "the database (exit status 75), so that several servers can each try every hour and one makes it")
+    p.add_argument("--backup-no-files", action="store_true",
+                   help="for --backup: no copy of the bucket (it is copied elsewhere: to a bucket at another provider, say)")
     p.add_argument("--files-restore", type=Path, metavar="DIR",
                    help="put back into the file store every stored file it lacks, from DIR (a restored backup, "
                         "or the folder when moving to a bucket), then exit")
@@ -158,7 +168,7 @@ def parser() -> argparse.ArgumentParser:
                         "ago (checked hourly; default: never). Their files stay on people's devices")
     p.add_argument("--private", action="store_true",
                    help="only projects created with a valid creation code may use this server, even without "
-                        "storage; people with such a project's link need nothing else (needs --codes-file)")
+                        "storage; people with such a project's link need nothing else (give codes with --add-code)")
     p.add_argument("--min-version", default="", metavar="X.Y.Z",
                    help="the oldest TeXLoom app allowed to connect: older ones, and those too old to say, are asked "
                         "to update. The admin page shows which versions connect")
@@ -330,6 +340,39 @@ async def _codes_command(a: argparse.Namespace, codes: CodeBook, files: Files) -
         await store.close()
 
 
+async def _backup_command(a: argparse.Namespace, files: Files) -> int:
+    """--backup: the database (as an SQLite file, whatever it is) and the stored files, as they are now."""
+    from .files import FolderFiles
+    from .store import copy_database
+    store = await Store.open(a.database, files, a.data)
+    try:
+        if not await store.claim_backup(a.backup_every * 60):
+            print(f"no backup: one was begun less than {a.backup_every:g} minutes ago (by this server, or another sharing "
+                  "its database)", file=sys.stderr)
+            return 75
+        dest = a.backup.resolve()
+        dest.mkdir(parents=True, exist_ok=True)
+        dest.chmod(0o700)
+        new = dest / "texloom.db.new"
+        for suffix in ("", "-wal", "-shm"):
+            Path(f"{new}{suffix}").unlink(missing_ok=True)
+        counts = await copy_database(a.database, f"sqlite:{new}", live=True)
+        os.replace(new, dest / "texloom.db")
+        print(f"the database: {sum(counts.values())} row(s), as it was at one moment", file=sys.stderr)
+        paths = [dest / "texloom.db"]
+        if isinstance(files, FolderFiles):
+            paths.append(files.root)  # (backed up as it is: its files never change; leave out its .incoming)
+        elif not a.backup_no_files:
+            copied, removed = await store.files_to_folder(dest / "files")
+            print(f"stored files: {copied} copied from {files.name}, {removed} removed", file=sys.stderr)
+            paths.append(dest / "files")
+        for path in paths:
+            print(path)
+        return 0
+    finally:
+        await store.close()
+
+
 async def _copy_command(a: argparse.Namespace) -> None:
     """--copy-database-from."""
     from .db import redact
@@ -392,6 +435,12 @@ def main() -> None:
         tl = TexLive(a.texlive, extra_mirrors=a.texlive_mirror)
         asyncio.run(tl.build_index(tl.index_sources() if tl.ready or tl.extra_mirrors else None))
         return
+    if a.backup is not None:
+        from .db import DatabaseError
+        try:
+            sys.exit(asyncio.run(_backup_command(a, files)))
+        except DatabaseError as e:
+            sys.exit(str(e))
     if a.files_for_backup is not None or a.files_restore is not None:
         asyncio.run(_files_command(a, files))
         return
@@ -436,7 +485,7 @@ def main() -> None:
         p.error(str(e))
     if a.failover:
         log.warning("`failover` is no longer a setting (the lease between two servers was retired): this server runs as "
-                    "any other. Several servers sharing a database and a bus take over from each other (STANDBY.md)")
+                    "any other. Several servers sharing a database and a bus take over from each other (CLUSTER.md)")
     settings = Settings(
         a.database, bus=a.bus, static=a.static, data=a.data, files=files, tex=a.tex_assets, limits=limits, codes=codes,
         private=a.private, min_version=a.min_version, codes_url=a.codes_url, dropbox_app_key=a.dropbox_app_key,

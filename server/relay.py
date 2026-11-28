@@ -24,6 +24,7 @@ from .bus import Bus, BusError, MemoryBus
 from .policy import KiB, MiB, Policy
 from .db import unavailable
 from .store import Store
+from .metrics import METRICS, app_label, version_label
 from .wire import b64d, canonical_id, client_address, verify, version_tuple
 
 log = logging.getLogger("texloom.relay")
@@ -161,6 +162,7 @@ class Conn:
         self.aware = False  # has sent awareness, so others must hear when it goes
         self.ka = False  # its app keeps the connection alive (hello "ka"): sent "wait" while left unread
         self.rs = False  # its app understands "resync" and "recheck" (hello "rs"); others are closed instead (see ask)
+        self.app, self.version = "other", "other"  # (for /metrics: see metrics.app_label and version_label)
         self.pace = Pace(UNSIGNED_RATE, UNSIGNED_BURST)  # unsigned messages relayed (see UNSIGNED_RATE)
         self.aw_pace = Pace(AW_RATE, AW_BURST)
         self.pause = 0.0  # seconds to leave it unread before its next message (its pace)
@@ -405,6 +407,7 @@ class Relay:
         reading, holding its buffers and its connection slot for as long as it likes."""
         conn = self.conns.get(ws)
         log.info("disconnecting a peer that %s", why)
+        METRICS.inc("texloom_cut_off_total")
         if conn and conn.transport is not None:
             conn.transport.abort()
         else:
@@ -836,6 +839,7 @@ class Relay:
         if not before:
             return  # (the first reading)
         log.warning("the database failed over (timeline %d -> %d): asking every connection here to recheck", before, tl)
+        METRICS.inc("texloom_database_failovers_total")
         # recheck first, at once, before this relay passes anything else on (models/relays: no-timeline-on-bus)
         await self.ask("recheck", spread=0)
         heads = await self.store.heads(list(self.tracks))
@@ -854,8 +858,9 @@ class Relay:
           projects, after this relay may have missed messages from the others (a break in the bus).
         - "recheck": check that the server's log is still the one they saw (they send their hello again, whose
           "last" finds out). After the database failed over, which can lose changes it had acknowledged.
-        FUTURE_ARCHITECTURE.md, "Messages"."""
+        DESIGN.md, "Messages between relays"."""
         sockets = list(self.conns) if sockets is None else sockets
+        METRICS.inc("texloom_asked_total", len(sockets), kind=t)
         gap = spread / max(len(sockets), 1)
         for ws in sockets:
             conn = self.conns.get(ws)
@@ -905,25 +910,29 @@ class Relay:
                                   **({"why": why} if why else {})}, status=200 if why is None else 503)
 
     async def ws_handler(self, request: web.Request) -> web.WebSocketResponse:
+        def refuse(why: str, error=web.HTTPServiceUnavailable, text: str = ""):
+            METRICS.inc("texloom_connections_refused_total", why=why)
+            return error(text=text or why)
         if self.stopping:
-            raise web.HTTPServiceUnavailable(text="server restarting")
+            raise refuse("stopping", text="server restarting")
         if why := self.unhealthy():
-            raise web.HTTPServiceUnavailable(text=why)
+            raise refuse("unwell", text=why)
         project = request.match_info["project"]
         if not canonical_id(project):
             raise web.HTTPBadRequest(text="bad project id")
         if len(self.conns) >= MAX_CONNECTIONS:
-            raise web.HTTPServiceUnavailable(text="too many connections")
+            raise refuse("full", text="too many connections")
         address = client_address(request)
         if address is not None and self.per_address[address] >= MAX_PER_ADDRESS:
-            raise web.HTTPTooManyRequests(text="too many connections from this address")
+            raise refuse("address", web.HTTPTooManyRequests, "too many connections from this address")
         if self.per_project[project] >= MAX_PER_PROJECT or await self.connected(project) >= MAX_PER_PROJECT:
-            raise web.HTTPServiceUnavailable(text="too many connections to this project")
+            raise refuse("project", text="too many connections to this project")
         # no compression: what's sent is ciphertext, and compressed frames would let a client make
         # the server hold far more than it sent (Metered counts bytes as they arrive)
         ws = web.WebSocketResponse(heartbeat=30, max_msg_size=MAX_FRAME, compress=False)
         conn = Conn(self.number << ID_BITS | self._next_id, address)
         self._next_id = self._next_id % ((1 << ID_BITS) - 1) + 1
+        METRICS.inc("texloom_connections_total")
         if address is not None:
             self.per_address[address] += 1
         self.per_project[project] += 1
@@ -1089,6 +1098,7 @@ class Relay:
         handler = self.HANDLERS.get(t)
         if handler is None:
             raise BadMessage(f"unknown type {t!r}")
+        METRICS.inc("texloom_messages_total", type=t)
         await handler(self, project, ws, conn, msg, relay_only)
 
     @staticmethod
@@ -1110,6 +1120,7 @@ class Relay:
             return
         if not conn.counted:  # (once per connection: hellos repeat)
             conn.counted = True
+            conn.app, conn.version = app_label(msg.get("app")), version_label(msg.get("v"))
             await self.policy.note_client(msg.get("app"), msg.get("v"))
         conn.ka = msg.get("ka") == 1
         conn.rs = msg.get("rs") == 1
@@ -1131,6 +1142,7 @@ class Relay:
             since = 0
         start = await self.store.catch_up_start(project, since)
         size = await self.store.since_size(project, start)
+        METRICS.inc("texloom_catchup_bytes_total", size)
         # A long log goes a page at a time ("more", then `logmore`), so a catch-up needs a page's
         # memory whatever the log's size (a page is one entry at least, and a snapshot can be
         # bigger than a page). Every app takes pages ("pages" in its hello, since 0.4.33).
@@ -1164,7 +1176,7 @@ class Relay:
         if not ok:
             await ws.send_json({"t": "err", "m": "rejected update (bad signature, or this personal link was revoked)"})
             return
-        # A change is passed on to the others first and acknowledged after (FUTURE_ARCHITECTURE.md, "Messages"):
+        # A change is passed on to the others first and acknowledged after (DESIGN.md, "Messages between relays"):
         # a relay that stops in between hasn't acknowledged it, so its app sends it again, and then it is
         # passed on (again: receivers ignore a copy they have).
         if relay_only:  # pass it on, but keep nothing
@@ -1175,6 +1187,7 @@ class Relay:
         # between storing it and acknowledging it (this relay noticed meanwhile), the new primary may not have it: it
         # is stored again, and acknowledged with the number it has there (models/relays: no-store-again).
         for _ in range(3):
+            t0 = time.perf_counter()
             try:
                 async with self.store.locked(project) as c:
                     dup = await self.store.duplicate(project, data, c)
@@ -1188,8 +1201,12 @@ class Relay:
                 if unavailable(e):  # not stored: collaborators online still get it, and the app is told to try again
                     await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
                 raise
+            if seq is not None:
+                METRICS.stored(time.perf_counter() - t0)
+                METRICS.inc("texloom_stores_total")
             await self._failover(tl)  # (a later timeline than this relay knew: it failed over before this was stored)
             if refused:
+                METRICS.inc("texloom_stores_refused_total")
                 # Collaborators online still get it; the sender keeps it (no ack) and retries later.
                 await self.broadcast(project, {"t": "up", "q": 0, "d": d, "s": s}, ws)
                 await ws.send_json({"t": "err", "code": refused, "m": f"not stored: {refused}", "id": msg.get("id")})

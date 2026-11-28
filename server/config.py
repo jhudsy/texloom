@@ -25,7 +25,8 @@ from pathlib import Path
 DEFAULT_FILES = (Path("texloom.toml"), Path("/etc/texloom/texloom.toml"))
 # One-off commands, and options that only make sense typed: not read from the file or environment.
 COMMANDS = {"config", "add_code", "renew_code", "remove_code", "purge_code", "list_codes", "import_codes_file", "export_codes", "allowance", "until", "months",
-            "texlive_init", "files_for_backup", "files_restore", "copy_database_from", "help"}
+            "texlive_init", "files_for_backup", "files_restore", "copy_database_from", "backup", "backup_every",
+            "backup_no_files", "help"}
 ADDED = {"codes_file": "TEXLOOM_CODES_FILES"}  # environment lists added to, rather than replacing, the rest
 
 

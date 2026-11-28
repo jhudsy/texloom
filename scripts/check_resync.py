@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Asked to catch up again: "resync" and "recheck" (FUTURE_ARCHITECTURE.md, "Messages").
+"""Asked to catch up again: "resync" and "recheck" (DESIGN.md, "Messages between relays").
 
 With several relays, a relay can miss what the others passed on (a break in its link to the bus), and a
 database that fails over can lose changes it had acknowledged. The relay then asks its connections to catch up
